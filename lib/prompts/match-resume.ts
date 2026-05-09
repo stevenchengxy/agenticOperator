@@ -25,10 +25,10 @@ export type MatchResumeRulesResponse = {
   action_steps: MatchResumeStep[];
 };
 
-export const ONTOLOGY_RULES_URL =
+const ONTOLOGY_RULES_URL =
   "http://localhost:3500/api/v1/ontology/actions/matchResume/rules";
 
-export const TEMPLATE_PATH =
+const TEMPLATE_PATH =
   "docs/action_object_prompt/action_object_prompt_template.md";
 
 export async function generateMatchResumeRuleCheckPrompt(
