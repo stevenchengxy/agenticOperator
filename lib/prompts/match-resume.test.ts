@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   isRuleApplicable,
   filterRules,
   formatRulesByStep,
   substituteTemplate,
+  fetchRules,
   type MatchResumeRule,
   type MatchResumeStep,
 } from "./match-resume";
@@ -292,5 +293,51 @@ describe("substituteTemplate", () => {
       CURRENT_DATE: "2026-05-09",
     });
     expect(out).toBe("jd {{UNKNOWN}}");
+  });
+});
+
+describe("fetchRules", () => {
+  beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns parsed response on 200", async () => {
+    (fetch as unknown as { mockResolvedValueOnce: Function }).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ action_steps: [] }),
+    });
+    const out = await fetchRules();
+    expect(out.action_steps).toEqual([]);
+  });
+
+  it("calls the configured ontology URL", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ action_steps: [] }),
+    });
+    await fetchRules();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3500/api/v1/ontology/actions/matchResume/rules",
+    );
+  });
+
+  it("throws with status code in message on non-2xx", async () => {
+    (fetch as unknown as { mockResolvedValueOnce: Function }).mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => "boom",
+    });
+    await expect(fetchRules()).rejects.toThrow(/500/);
+  });
+
+  it("throws when response is missing action_steps", async () => {
+    (fetch as unknown as { mockResolvedValueOnce: Function }).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ wrong: "shape" }),
+    });
+    await expect(fetchRules()).rejects.toThrow(/action_steps/);
   });
 });

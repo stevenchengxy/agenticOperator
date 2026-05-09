@@ -107,6 +107,30 @@ export function substituteTemplate(
     .replaceAll("{{CURRENT_DATE}}", values.CURRENT_DATE);
 }
 
+export async function fetchRules(): Promise<MatchResumeRulesResponse> {
+  const res = await fetch(ONTOLOGY_RULES_URL);
+  if (!res.ok) {
+    let bodySnippet = "";
+    try {
+      bodySnippet = (await res.text()).slice(0, 200);
+    } catch {
+      // ignore body read failures
+    }
+    throw new Error(
+      `Failed to fetch matchResume rules: GET ${ONTOLOGY_RULES_URL} -> ${res.status}. Body: ${bodySnippet}`,
+    );
+  }
+  const json = (await res.json()) as unknown;
+  if (
+    !json ||
+    typeof json !== "object" ||
+    !Array.isArray((json as { action_steps?: unknown }).action_steps)
+  ) {
+    throw new Error("Unexpected ontology API shape: missing action_steps array.");
+  }
+  return json as MatchResumeRulesResponse;
+}
+
 export async function generateMatchResumeRuleCheckPrompt(
   _client_name: string,
   _department: string,
