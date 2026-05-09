@@ -31,6 +31,38 @@ const ONTOLOGY_RULES_URL =
 const TEMPLATE_PATH =
   "docs/action_object_prompt/action_object_prompt_template.md";
 
+export function isRuleApplicable(
+  rule: MatchResumeRule,
+  client_name: string,
+  department: string,
+): boolean {
+  if (rule.executor !== "Agent") return false;
+  if (rule.applicableClient === "通用") return true;
+  if (rule.applicableClient !== client_name) return false;
+  if (
+    rule.applicableDepartment === "N/A" ||
+    rule.applicableDepartment === "通用"
+  ) {
+    return true;
+  }
+  return rule.applicableDepartment === department;
+}
+
+export function filterRules(
+  steps: MatchResumeStep[],
+  client_name: string,
+  department: string,
+): MatchResumeStep[] {
+  return steps
+    .map((step) => ({
+      ...step,
+      rules: step.rules.filter((r) =>
+        isRuleApplicable(r, client_name, department),
+      ),
+    }))
+    .filter((step) => step.rules.length > 0);
+}
+
 export async function generateMatchResumeRuleCheckPrompt(
   _client_name: string,
   _department: string,
