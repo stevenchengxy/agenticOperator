@@ -111,7 +111,9 @@ export function substituteTemplate(
 }
 
 export async function fetchRules(): Promise<MatchResumeRulesResponse> {
-  const res = await fetch(ONTOLOGY_RULES_URL);
+  const res = await fetch(ONTOLOGY_RULES_URL, {
+    headers: { Authorization: "Bearer abc12345def" },
+  });
   if (!res.ok) {
     let bodySnippet = "";
     try {

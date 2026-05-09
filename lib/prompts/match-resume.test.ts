@@ -333,7 +333,7 @@ describe("fetchRules", () => {
     expect(out.action_steps).toEqual([]);
   });
 
-  it("calls the configured ontology URL", async () => {
+  it("calls the configured ontology URL with bearer auth header", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -342,6 +342,7 @@ describe("fetchRules", () => {
     await fetchRules();
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:3500/api/v1/ontology/actions/matchResume/rules",
+      { headers: { Authorization: "Bearer abc12345def" } },
     );
   });
 
