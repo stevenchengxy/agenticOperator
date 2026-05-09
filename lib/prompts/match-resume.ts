@@ -91,6 +91,22 @@ export function formatRulesByStep(steps: MatchResumeStep[]): string {
     .join("\n\n");
 }
 
+export function substituteTemplate(
+  template: string,
+  values: {
+    JOB_DESCRIPTION: string;
+    RESUME: string;
+    RULES_BY_STEP: string;
+    CURRENT_DATE: string;
+  },
+): string {
+  return template
+    .replaceAll("{{JOB_DESCRIPTION}}", values.JOB_DESCRIPTION)
+    .replaceAll("{{RESUME}}", values.RESUME)
+    .replaceAll("{{RULES_BY_STEP}}", values.RULES_BY_STEP)
+    .replaceAll("{{CURRENT_DATE}}", values.CURRENT_DATE);
+}
+
 export async function generateMatchResumeRuleCheckPrompt(
   _client_name: string,
   _department: string,

@@ -3,6 +3,7 @@ import {
   isRuleApplicable,
   filterRules,
   formatRulesByStep,
+  substituteTemplate,
   type MatchResumeRule,
   type MatchResumeStep,
 } from "./match-resume";
@@ -265,5 +266,31 @@ describe("formatRulesByStep", () => {
       "- logic: logic2",
     ].join("\n");
     expect(formatRulesByStep(steps)).toBe(expected);
+  });
+});
+
+describe("substituteTemplate", () => {
+  it("replaces all four placeholders, including multiple occurrences", () => {
+    const tmpl =
+      "JD={{JOB_DESCRIPTION}} RES={{RESUME}} RBS={{RULES_BY_STEP}} " +
+      "D1={{CURRENT_DATE}} D2={{CURRENT_DATE}}";
+    const out = substituteTemplate(tmpl, {
+      JOB_DESCRIPTION: "jd",
+      RESUME: "re",
+      RULES_BY_STEP: "rbs",
+      CURRENT_DATE: "2026-05-09",
+    });
+    expect(out).toBe("JD=jd RES=re RBS=rbs D1=2026-05-09 D2=2026-05-09");
+  });
+
+  it("does not replace placeholders that aren't in the values map", () => {
+    const tmpl = "{{JOB_DESCRIPTION}} {{UNKNOWN}}";
+    const out = substituteTemplate(tmpl, {
+      JOB_DESCRIPTION: "jd",
+      RESUME: "re",
+      RULES_BY_STEP: "rbs",
+      CURRENT_DATE: "2026-05-09",
+    });
+    expect(out).toBe("jd {{UNKNOWN}}");
   });
 });
