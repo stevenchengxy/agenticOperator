@@ -297,11 +297,16 @@ describe("substituteTemplate", () => {
 });
 
 describe("fetchRules", () => {
-  beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("returns parsed response on 200", async () => {
-    (fetch as unknown as { mockResolvedValueOnce: Function }).mockResolvedValueOnce({
+    fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({ action_steps: [] }),
@@ -311,7 +316,6 @@ describe("fetchRules", () => {
   });
 
   it("calls the configured ontology URL", async () => {
-    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -323,17 +327,20 @@ describe("fetchRules", () => {
     );
   });
 
-  it("throws with status code in message on non-2xx", async () => {
-    (fetch as unknown as { mockResolvedValueOnce: Function }).mockResolvedValueOnce({
+  it("throws with status code and URL in message on non-2xx", async () => {
+    fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 500,
       text: async () => "boom",
     });
-    await expect(fetchRules()).rejects.toThrow(/500/);
+    const err = await fetchRules().catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/500/);
+    expect((err as Error).message).toMatch(/localhost:3500/);
   });
 
   it("throws when response is missing action_steps", async () => {
-    (fetch as unknown as { mockResolvedValueOnce: Function }).mockResolvedValueOnce({
+    fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({ wrong: "shape" }),
