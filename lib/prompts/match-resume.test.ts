@@ -5,6 +5,7 @@ import {
   formatRulesByStep,
   substituteTemplate,
   fetchRules,
+  generateMatchResumeRuleCheckPrompt,
   type MatchResumeRule,
   type MatchResumeStep,
 } from "./match-resume";
@@ -346,5 +347,84 @@ describe("fetchRules", () => {
       json: async () => ({ wrong: "shape" }),
     });
     await expect(fetchRules()).rejects.toThrow(/action_steps/);
+  });
+});
+
+describe("generateMatchResumeRuleCheckPrompt (end-to-end)", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("produces a fully substituted prompt for 腾讯", async () => {
+    const fixtureModule = await import(
+      "./__fixtures__/match-resume-rules.json"
+    );
+    const fixture = fixtureModule.default;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => fixture,
+    });
+
+    const out = await generateMatchResumeRuleCheckPrompt(
+      "腾讯",
+      "互动娱乐事业群",
+      { title: "Senior Engineer" },
+      { name: "Alice" },
+    );
+
+    // Step header rendered
+    expect(out).toMatch(/### Step 1: validateRedlineAndBlacklist/);
+    // 腾讯+通用 rule kept under the equivalence rule
+    expect(out).toContain("Rule 10-38");
+    // Human-executor rule dropped
+    expect(out).not.toContain("Rule 10-19");
+    // CURRENT_DATE substituted with today's UTC date
+    const today = new Date().toISOString().slice(0, 10);
+    expect(out).toContain(today);
+    // No unreplaced placeholders remain
+    expect(out).not.toContain("{{JOB_DESCRIPTION}}");
+    expect(out).not.toContain("{{RESUME}}");
+    expect(out).not.toContain("{{RULES_BY_STEP}}");
+    expect(out).not.toContain("{{CURRENT_DATE}}");
+    // Object inputs serialized as pretty JSON
+    expect(out).toContain('"title": "Senior Engineer"');
+    expect(out).toContain('"name": "Alice"');
+  });
+
+  it("passes string inputs through unchanged", async () => {
+    const fixtureModule = await import(
+      "./__fixtures__/match-resume-rules.json"
+    );
+    const fixture = fixtureModule.default;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => fixture,
+    });
+
+    const out = await generateMatchResumeRuleCheckPrompt(
+      "腾讯",
+      "互动娱乐事业群",
+      "raw JD text",
+      "raw resume text",
+    );
+    expect(out).toContain("raw JD text");
+    expect(out).toContain("raw resume text");
+  });
+
+  it("throws when no rules survive filtering", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ action_steps: [] }),
+    });
+    await expect(
+      generateMatchResumeRuleCheckPrompt("nope", "nope", "jd", "resume"),
+    ).rejects.toThrow(/No applicable rules/);
   });
 });

@@ -131,14 +131,40 @@ export async function fetchRules(): Promise<MatchResumeRulesResponse> {
   return json as MatchResumeRulesResponse;
 }
 
+function stringifyInput(value: string | Record<string, unknown>): string {
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function todayISODate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export async function generateMatchResumeRuleCheckPrompt(
-  _client_name: string,
-  _department: string,
-  _job_description: string | Record<string, unknown>,
-  _resume: string | Record<string, unknown>,
+  client_name: string,
+  department: string,
+  job_description: string | Record<string, unknown>,
+  resume: string | Record<string, unknown>,
 ): Promise<string> {
-  // Tasks 2–6 will replace this stub with real logic.
-  void readFile;
-  void resolve;
-  throw new Error("not implemented");
+  const response = await fetchRules();
+  const filteredSteps = filterRules(
+    response.action_steps,
+    client_name,
+    department,
+  );
+  if (filteredSteps.length === 0) {
+    throw new Error(
+      `No applicable rules for client_name=${client_name} department=${department}`,
+    );
+  }
+  const rulesByStep = formatRulesByStep(filteredSteps);
+  const template = await readFile(
+    resolve(process.cwd(), TEMPLATE_PATH),
+    "utf8",
+  );
+  return substituteTemplate(template, {
+    JOB_DESCRIPTION: stringifyInput(job_description),
+    RESUME: stringifyInput(resume),
+    RULES_BY_STEP: rulesByStep,
+    CURRENT_DATE: todayISODate(),
+  });
 }
