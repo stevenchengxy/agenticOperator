@@ -26,7 +26,7 @@ export type MatchResumeRulesResponse = {
 };
 
 const ONTOLOGY_RULES_URL =
-  "http://localhost:3500/api/v1/ontology/actions/matchResume/rules";
+  "http://localhost:3500/api/v1/ontology/actions/matchResume/rules?domain=RAAS-v1";
 
 const TEMPLATE_PATH =
   "docs/action_object_prompt/action_object_prompt_template.md";

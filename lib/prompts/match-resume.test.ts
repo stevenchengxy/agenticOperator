@@ -341,7 +341,7 @@ describe("fetchRules", () => {
     });
     await fetchRules();
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:3500/api/v1/ontology/actions/matchResume/rules",
+      "http://localhost:3500/api/v1/ontology/actions/matchResume/rules?domain=RAAS-v1",
       { headers: { Authorization: "Bearer abc12345def" } },
     );
   });
