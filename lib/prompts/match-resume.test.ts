@@ -215,6 +215,23 @@ describe("formatRulesByStep", () => {
     expect(out).toContain("- logic: step a\nstep b");
   });
 
+  it("orders multi-digit rule ids numerically within a step (10-9 before 10-10)", () => {
+    const steps: MatchResumeStep[] = [
+      {
+        id: "s1", name: "S1", order: "1",
+        description: "d", condition: "c",
+        rules: [
+          baseRule({ id: "10-10", businessLogicRuleName: "ten" }),
+          baseRule({ id: "10-2", businessLogicRuleName: "two" }),
+          baseRule({ id: "10-9", businessLogicRuleName: "nine" }),
+        ],
+      },
+    ];
+    const out = formatRulesByStep(steps);
+    expect(out.indexOf("Rule 10-2:")).toBeLessThan(out.indexOf("Rule 10-9:"));
+    expect(out.indexOf("Rule 10-9:")).toBeLessThan(out.indexOf("Rule 10-10:"));
+  });
+
   it("separates consecutive step blocks with exactly one blank line", () => {
     const steps: MatchResumeStep[] = [
       {
@@ -425,6 +442,6 @@ describe("generateMatchResumeRuleCheckPrompt (end-to-end)", () => {
     });
     await expect(
       generateMatchResumeRuleCheckPrompt("nope", "nope", "jd", "resume"),
-    ).rejects.toThrow(/No applicable rules/);
+    ).rejects.toThrow(/No applicable rules.*client_name=nope.*department=nope/);
   });
 });

@@ -69,9 +69,12 @@ export function formatRulesByStep(steps: MatchResumeStep[]): string {
   );
   return sortedSteps
     .map((step) => {
-      const sortedRules = [...step.rules].sort((a, b) =>
-        a.id.localeCompare(b.id),
-      );
+      const sortedRules = [...step.rules].sort((a, b) => {
+        const [aGroup, aNumStr = ""] = a.id.split("-");
+        const [bGroup, bNumStr = ""] = b.id.split("-");
+        if (aGroup !== bGroup) return aGroup.localeCompare(bGroup);
+        return Number(aNumStr) - Number(bNumStr);
+      });
       const ruleBlocks = sortedRules
         .map(
           (r) =>
