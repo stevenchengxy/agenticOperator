@@ -63,6 +63,34 @@ export function filterRules(
     .filter((step) => step.rules.length > 0);
 }
 
+export function formatRulesByStep(steps: MatchResumeStep[]): string {
+  const sortedSteps = [...steps].sort(
+    (a, b) => Number(a.order) - Number(b.order),
+  );
+  return sortedSteps
+    .map((step) => {
+      const sortedRules = [...step.rules].sort((a, b) =>
+        a.id.localeCompare(b.id),
+      );
+      const ruleBlocks = sortedRules
+        .map(
+          (r) =>
+            `#### Rule ${r.id}: ${r.businessLogicRuleName}\n` +
+            `- submissionCriteria: ${r.submissionCriteria}\n` +
+            `- logic: ${r.standardizedLogicRule}`,
+        )
+        .join("\n\n");
+      return (
+        `### Step ${step.order}: ${step.name}\n` +
+        `- step_id: ${step.id}\n` +
+        `- enter_condition: ${step.condition}\n` +
+        `- description: ${step.description}\n\n` +
+        ruleBlocks
+      );
+    })
+    .join("\n\n");
+}
+
 export async function generateMatchResumeRuleCheckPrompt(
   _client_name: string,
   _department: string,

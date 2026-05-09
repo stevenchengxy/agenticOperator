@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isRuleApplicable,
   filterRules,
+  formatRulesByStep,
   type MatchResumeRule,
   type MatchResumeStep,
 } from "./match-resume";
@@ -114,5 +115,100 @@ describe("filterRules", () => {
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe("10::s1");
     expect(out[0].rules.map((r) => r.id)).toEqual(["10-1"]);
+  });
+});
+
+describe("formatRulesByStep", () => {
+  it("renders Markdown matching rule_structure.md §二 byte-for-byte", () => {
+    const steps: MatchResumeStep[] = [
+      {
+        id: "10::validateRedlineAndBlacklist",
+        name: "validateRedlineAndBlacklist",
+        order: "1",
+        description: "the description",
+        condition: "the condition",
+        rules: [
+          baseRule({
+            id: "10-25",
+            businessLogicRuleName: "rule one",
+            submissionCriteria: "sc one",
+            standardizedLogicRule: "logic one",
+          }),
+          baseRule({
+            id: "10-26",
+            businessLogicRuleName: "rule two",
+            submissionCriteria: "sc two",
+            standardizedLogicRule: "logic two",
+          }),
+        ],
+      },
+    ];
+    const expected = [
+      "### Step 1: validateRedlineAndBlacklist",
+      "- step_id: 10::validateRedlineAndBlacklist",
+      "- enter_condition: the condition",
+      "- description: the description",
+      "",
+      "#### Rule 10-25: rule one",
+      "- submissionCriteria: sc one",
+      "- logic: logic one",
+      "",
+      "#### Rule 10-26: rule two",
+      "- submissionCriteria: sc two",
+      "- logic: logic two",
+    ].join("\n");
+    expect(formatRulesByStep(steps)).toBe(expected);
+  });
+
+  it("orders steps by numeric `order` ascending", () => {
+    const steps: MatchResumeStep[] = [
+      {
+        id: "s2", name: "S2", order: "2",
+        description: "d2", condition: "c2",
+        rules: [baseRule({ id: "10-2" })],
+      },
+      {
+        id: "s1", name: "S1", order: "1",
+        description: "d1", condition: "c1",
+        rules: [baseRule({ id: "10-1" })],
+      },
+    ];
+    const out = formatRulesByStep(steps);
+    expect(out.indexOf("Step 1:")).toBeLessThan(out.indexOf("Step 2:"));
+  });
+
+  it("orders rules within a step by id ascending", () => {
+    const steps: MatchResumeStep[] = [
+      {
+        id: "s1", name: "S1", order: "1",
+        description: "d", condition: "c",
+        rules: [
+          baseRule({ id: "10-2", businessLogicRuleName: "two" }),
+          baseRule({ id: "10-1", businessLogicRuleName: "one" }),
+        ],
+      },
+    ];
+    const out = formatRulesByStep(steps);
+    expect(out.indexOf("Rule 10-1:")).toBeLessThan(out.indexOf("Rule 10-2:"));
+  });
+
+  it("preserves verbatim newlines and quotes inside submissionCriteria/logic", () => {
+    const steps: MatchResumeStep[] = [
+      {
+        id: "s1", name: "S1", order: "1",
+        description: "d", condition: "c",
+        rules: [
+          baseRule({
+            id: "10-1",
+            businessLogicRuleName: "n",
+            submissionCriteria: 'line "1"\nline 2',
+            standardizedLogicRule: "step a\nstep b",
+          }),
+        ],
+      },
+    ];
+    const out = formatRulesByStep(steps);
+    expect(out).toContain('- submissionCriteria: line "1"\nline 2');
+    expect(out).toContain("- logic: step a\nstep b");
   });
 });
