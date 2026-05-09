@@ -211,4 +211,59 @@ describe("formatRulesByStep", () => {
     expect(out).toContain('- submissionCriteria: line "1"\nline 2');
     expect(out).toContain("- logic: step a\nstep b");
   });
+
+  it("separates consecutive step blocks with exactly one blank line", () => {
+    const steps: MatchResumeStep[] = [
+      {
+        id: "10::s1",
+        name: "S1",
+        order: "1",
+        description: "d1",
+        condition: "c1",
+        rules: [
+          baseRule({
+            id: "10-1",
+            businessLogicRuleName: "first",
+            submissionCriteria: "sc1",
+            standardizedLogicRule: "logic1",
+          }),
+        ],
+      },
+      {
+        id: "10::s2",
+        name: "S2",
+        order: "2",
+        description: "d2",
+        condition: "c2",
+        rules: [
+          baseRule({
+            id: "10-2",
+            businessLogicRuleName: "second",
+            submissionCriteria: "sc2",
+            standardizedLogicRule: "logic2",
+          }),
+        ],
+      },
+    ];
+    const expected = [
+      "### Step 1: S1",
+      "- step_id: 10::s1",
+      "- enter_condition: c1",
+      "- description: d1",
+      "",
+      "#### Rule 10-1: first",
+      "- submissionCriteria: sc1",
+      "- logic: logic1",
+      "",
+      "### Step 2: S2",
+      "- step_id: 10::s2",
+      "- enter_condition: c2",
+      "- description: d2",
+      "",
+      "#### Rule 10-2: second",
+      "- submissionCriteria: sc2",
+      "- logic: logic2",
+    ].join("\n");
+    expect(formatRulesByStep(steps)).toBe(expected);
+  });
 });
