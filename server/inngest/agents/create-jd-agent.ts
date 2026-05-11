@@ -26,8 +26,8 @@ import {
   type RaasRequirement,
   type RaasRequirementSpecification,
   type SyncJdInput,
-} from '../../raas-api-client';
-import { inngest, type JdGeneratedEnvelope } from '../client';
+} from '@/lib/raas-api-client';
+import { inngest, type JdGeneratedEnvelope } from '@/server/inngest/client';
 
 const AGENT_ID = 'create-jd-agent';
 const AGENT_NAME = 'createJD';
@@ -89,12 +89,12 @@ export const createJdAgent = inngest.createFunction(
     id: AGENT_ID,
     name: 'Create JD Agent (workflow node 4)',
     retries: 1,
+    triggers: [
+      { event: 'REQUIREMENT_LOGGED' },
+      { event: 'CLARIFICATION_READY' },
+      { event: 'JD_REJECTED' },
+    ],
   },
-  [
-    { event: 'REQUIREMENT_LOGGED' },
-    { event: 'CLARIFICATION_READY' },
-    { event: 'JD_REJECTED' },
-  ],
   async ({ event, step, logger }) => {
     if (!isRaasApiConfigured()) {
       throw new NonRetriableError(

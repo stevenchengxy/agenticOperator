@@ -5,7 +5,7 @@
 
 import { Client as MinioClient } from 'minio';
 import { inferJdFromFilename } from '../lib/inference/jd-from-filename';
-import { inngest } from '../lib/inngest/client';
+import { inngest } from '../server/inngest/client';
 
 const BUCKET = process.env.MINIO_DEFAULT_BUCKET ?? 'recruit-resume-raw';
 const explicitKey = process.argv[2];

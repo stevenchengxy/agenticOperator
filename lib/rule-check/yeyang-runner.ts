@@ -6,9 +6,18 @@
 //
 // 用静态 snapshot,不调主仓 Ontology API:
 //   - 优点:无 HTTP / 无 Neo4j 依赖,跑得最快
-//   - 缺点:ontology 改了要主仓 `npm run gen:v4-snapshot` 重生成 + cp 过来
+//   - 缺点:ontology 改了要 `npm run gen:v4-snapshot` 重生成 snapshot
 //
 // 这条路径在 matchResumeAgent 通过 RULE_CHECK_PROMPT_SOURCE=yeyang 启用。
+//
+// p4 合并后:直接 import 主仓 lib/ontology-gen 和 generated/v4 — 不再需要
+// vendor copy(原 resume-parser-agent/lib/rule-check/yeyang/ 已删除)。
+
+import { matchResumeActionObject } from '@/generated/v4/match-resume.action-object';
+import {
+  fillRuntimeInput,
+  type MatchResumeRuntimeInput,
+} from '@/lib/ontology-gen/v4';
 
 import { runLlm } from './llm';
 import { extractDims, filterRules } from './ontology';
@@ -18,11 +27,6 @@ import type {
   RuleCheckVerdict,
   RuleFlag,
 } from './types';
-import {
-  fillRuntimeInput,
-  matchResumeActionObject,
-  type MatchResumeRuntimeInput,
-} from './yeyang';
 
 const YEYANG_SYSTEM_PROMPT = `你是 matchResume action 的执行智能体。严格按照 user 消息中描述的步骤、规则原文和输出格式产出 JSON。
 

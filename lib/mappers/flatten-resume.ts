@@ -1,6 +1,6 @@
 // 把 4 对象嵌套压成 plain text，喂给 RoboHire /match-resume 的 resume 字段
 
-import type { ResumeProcessedData } from '../inngest/client';
+import type { ResumeProcessedData } from '@/server/inngest/client';
 
 export function flattenResumeForMatch(data: ResumeProcessedData): string {
   const { candidate, candidate_expectation, resume, runtime } = data;

@@ -21,7 +21,10 @@
     "db:reset": "rm -f data/ao.db data/ao.db-journal data/ao.db-wal data/ao.db-shm && prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed-from-sidecars.ts",
-    "register": "npx tsx scripts/register-with-inngest.ts",
+    "register": "tsx --env-file=.env.local scripts/register-with-inngest.ts",
+    "publish:test": "tsx --env-file=.env.local scripts/publish-test-event.ts",
+    "minio:list": "tsx --env-file=.env.local scripts/list-minio-resumes.ts",
+    "minio:pick": "tsx --env-file=.env.local scripts/pick-test-resume.ts",
     "gen:v4-snapshot": "node --env-file=.env.local --import tsx scripts/gen-v4-snapshot.ts"
   },
   "dependencies": {

@@ -6,7 +6,7 @@ import type {
   CandidateNested,
   ResumeNested,
   RuntimeNested,
-} from '../inngest/client';
+} from '@/server/inngest/client';
 import type { RoboHireParsedData, RoboHireParsedExperience } from '../robohire';
 
 const DEGREE_RANK: Record<string, number> = {

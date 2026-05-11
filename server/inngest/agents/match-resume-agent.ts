@@ -25,8 +25,8 @@ import {
   saveMatchResults,
   type RaasMatchResumeData,
   type RequirementsAgentViewItem,
-} from '../../raas-api-client';
-import { buildRuleCheckInput, runRuleCheck } from '../../rule-check';
+} from '@/lib/raas-api-client';
+import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
 import {
   inngest,
   type MatchPassedNeedInterviewData,
@@ -34,7 +34,7 @@ import {
   type RuleCheckAuditMeta,
   type RuleCheckFailedData,
   type RuleCheckPassedData,
-} from '../client';
+} from '@/server/inngest/client';
 
 const AGENT_ID = 'match-resume-agent';
 const AGENT_NAME = 'matchResume';
@@ -55,8 +55,8 @@ export const matchResumeAgent = inngest.createFunction(
     id: AGENT_ID,
     name: 'Match Resume Agent (workflow node 10)',
     retries: 2,
+    triggers: [{ event: 'RESUME_PROCESSED' }],
   },
-  { event: 'RESUME_PROCESSED' },
   async ({ event, step, logger }) => {
     const data = unwrapResumeProcessedEvent(event.data);
     const traceId = getTraceId(event.data);

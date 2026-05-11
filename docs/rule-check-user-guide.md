@@ -1,8 +1,8 @@
 # Rule Check 用户指南
 
-> 范围:`resume-parser-agent` 的 `matchResumeAgent` 在调 RAAS `/match-resume` 之前的 **LLM 预筛 gate**
+> 范围:AO main 的 `matchResumeAgent` 在调 RAAS `/match-resume` 之前的 **LLM 预筛 gate**
 > 状态:**默认关闭**(`RULE_CHECK_ENABLED=false`)。需要时通过环境变量开
-> 最后更新:2026-05-11
+> 最后更新:2026-05-11(p4 合并 — `resume-parser-agent` 子项目已并入主仓)
 
 ---
 
@@ -78,7 +78,7 @@ matchResumeAgent (Inngest)
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│ resume-parser-agent / lib/inngest/agents/match-resume-agent.ts        │
+│ AO main / server/inngest/agents/match-resume-agent.ts                 │
 │                                                                       │
 │ Step 1: buildResumeText      ← parsed.data → string (给 RAAS 用)      │
 │ Step 2: list-requirements    ← RAAS getRequirementDetail / agent-view │
@@ -98,7 +98,7 @@ matchResumeAgent (Inngest)
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-代码入口:[`resume-parser-agent/lib/inngest/agents/match-resume-agent.ts`](../resume-parser-agent/lib/inngest/agents/match-resume-agent.ts:212)。
+代码入口:[`server/inngest/agents/match-resume-agent.ts`](../server/inngest/agents/match-resume-agent.ts:212)。
 gate 的 `if (isRuleCheckEnabled())` 是 line ~217 那块。
 
 ---
@@ -127,7 +127,7 @@ RULE_CHECK_PROMPT_SOURCE=yeyang
 | 选项 | prompt 怎么来 | LLM 输出 schema | 状态 |
 |---|---|---|---|
 | `poc` | 读 `lib/rule-check/rules.json`(51 条规则)→ 按 (client_id × business_group) 过滤 → 渲染成 INPUT + RULES + OUTPUT 三段 | `{ overall_decision: KEEP\|DROP\|PAUSE, drop_reasons, pause_reasons, rule_flags, ... }` | ✓ POC 阶段已用 6 个真实场景跑通 |
-| `yeyang` | 用叶洋 v4 静态 snapshot(`lib/rule-check/yeyang/match-resume-snapshot.ts`,从主仓 `generated/v4/` 拷贝)→ `fillRuntimeInput()` 替换 `{{CLIENT}} / {{JOB}} / {{RESUME}}` 三个 placeholder | `{ match_results, overall_status, terminal, step_results: { step_1..4: { status, fired_rule_ids, blocking_rule_ids, ... } }, notifications }` | ⚠ adapter 集成已完成,**生产用前还需要交叉验证** |
+| `yeyang` | 用叶洋 v4 静态 snapshot([`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts)) + [`fillRuntimeInput`](../lib/ontology-gen/v4/fill-runtime-input.ts) 替换 `{{CLIENT}} / {{JOB}} / {{RESUME}}` 三个 placeholder | `{ match_results, overall_status, terminal, step_results: { step_1..4: { status, fired_rule_ids, blocking_rule_ids, ... } }, notifications }` | ⚠ adapter 集成已完成,**生产用前还需要交叉验证** |
 
 **怎么选**:
 - 默认 `poc`:5 月 11 日前 POC 阶段已用 6 个真实场景(腾讯 IEG、字节、CSI 黑名单、华为冷冻、外籍婚育、字节友商)交叉验过,4/6 准确率
@@ -146,7 +146,7 @@ OPENAI_API_KEY=sk-...
 # 此时 baseURL = https://api.openai.com/v1,model = gpt-4o-mini
 ```
 
-逻辑在 [`lib/rule-check/llm.ts`](../resume-parser-agent/lib/rule-check/llm.ts):优先 New-API,fallback OpenAI。两个都没配 → 抛错。
+逻辑在 [`lib/rule-check/llm.ts`](../lib/rule-check/llm.ts):优先 New-API,fallback OpenAI。两个都没配 → 抛错。
 
 ---
 
@@ -218,7 +218,7 @@ LLM 输出 overall_decision === "PAUSE" → FAIL  (需 HSM 复核;我们的 gate
 LLM 解析失败                          → FAIL-safe
 ```
 
-代码:[`lib/rule-check/runner.ts`](../resume-parser-agent/lib/rule-check/runner.ts)。
+代码:[`lib/rule-check/runner.ts`](../lib/rule-check/runner.ts)。
 
 ---
 
@@ -226,25 +226,13 @@ LLM 解析失败                          → FAIL-safe
 
 ### Prompt 静态 snapshot
 
-主仓 [`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts) 是叶洋 v4 `assembleActionObjectV4_4` 离线生成的(npm script `gen:v4-snapshot`)。
+[`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts) 是叶洋 v4 `assembleActionObjectV4_4` 离线生成的(npm script `gen:v4-snapshot`)。
 
-为了避免跨 Next.js 项目 import bundler 麻烦,resume-parser-agent 里 **vendor** 了 4 个文件:
+p4 合并后 `lib/rule-check/yeyang-runner.ts` 直接 import:
+- `matchResumeActionObject` from `@/generated/v4/match-resume.action-object`
+- `fillRuntimeInput`, `MatchResumeRuntimeInput` from `@/lib/ontology-gen/v4`
 
-```
-resume-parser-agent/lib/rule-check/yeyang/
-  ├── match-resume-snapshot.ts      ← 主仓 generated/v4/match-resume.action-object.ts 的拷贝
-  ├── action-object-v4.types.ts     ← 主仓同名文件的拷贝
-  ├── runtime-input.types.ts        ← 主仓 lib/ontology-gen/v4/runtime-input.types.ts 的拷贝
-  └── fill-runtime-input.ts         ← 主仓 lib/ontology-gen/v4/fill-runtime-input.ts 的 slim 拷贝
-                                       (只支持 matchResume kind)
-```
-
-主仓 snapshot 重新生成后(`npm run gen:v4-snapshot`),手动 cp 到这里:
-
-```bash
-cp generated/v4/match-resume.action-object.ts \
-   resume-parser-agent/lib/rule-check/yeyang/match-resume-snapshot.ts
-```
+不再有 vendor 拷贝步骤。主仓 snapshot 重新生成后(`npm run gen:v4-snapshot`),rule-check 自动用到最新版本。
 
 ### Prompt 形状
 
@@ -296,7 +284,7 @@ Step 4: generateMatchResult
 
 ### Runtime input 怎么拼
 
-[`yeyang-runner.ts:buildRuntimeInput()`](../resume-parser-agent/lib/rule-check/yeyang-runner.ts) 把我们的 `RuleCheckInput` 转成叶洋的 `MatchResumeRuntimeInput`:
+[`yeyang-runner.ts:buildRuntimeInput()`](../lib/rule-check/yeyang-runner.ts) 把我们的 `RuleCheckInput` 转成叶洋的 `MatchResumeRuntimeInput`:
 
 ```ts
 {
@@ -328,7 +316,7 @@ LLM 解析失败                                     → FAIL-safe
 
 ## 6. 输出事件 schema
 
-定义在 [`resume-parser-agent/lib/inngest/client.ts`](../resume-parser-agent/lib/inngest/client.ts):
+定义在 [`server/inngest/client.ts`](../server/inngest/client.ts):
 
 ### `RULE_CHECK_PASSED`
 
@@ -385,12 +373,12 @@ npm run dev
 # Terminal 2 — Inngest dev server (如果 Docker 不可用)
 npm run inngest:dev
 # 用本地 node_modules/.bin/inngest-cli(devDep),无 @latest fetch
-
-# Terminal 3 — resume-parser-agent(端口 3020)
-cd resume-parser-agent
-npm install
-npm run dev
+# 没起 inngest-cli 用本地、又没开 Docker 的话,跑一次 `npm run register`
+# 把 3 个 function 推到 dev server
 ```
+
+p4 合并后只有一个 Next.js app(AO main / 端口 3002),3 个 agent 一起注册。
+**之前** `resume-parser-agent / 端口 3020` 的那个 terminal 不再需要。
 
 ### 触发一次 rule-check
 
@@ -468,7 +456,7 @@ Inngest worker 不需要 restart — 下一次 invocation 立刻生效。
 ## 9. 已知 limitation
 
 1. **POC 路径的 severity 推断不严谨** — 51 条规则里 ontology 没显式 `gating_severity` 字段,severity 是从 `standardizedLogicRule` 文本里关键词推断的(`lib/rule-check/ontology.ts:inferSeverity`)。**P0 修复路径**:让叶洋/陈洋在 Neo4j Rule 节点上加 `gating_severity` 字段,我们改成读字段而非推断。
-2. **叶洋路径的 snapshot 静态化** — 主仓重新生成 snapshot 后要手动 cp 到 `resume-parser-agent/lib/rule-check/yeyang/`。后续路径(更优):resume-parser-agent 改用 HTTP 调主仓 `/api/rule-check` endpoint(主仓即用 `generatePrompt()` live 调 Ontology API)
+2. **叶洋路径的 snapshot 静态化** — 跑 `npm run gen:v4-snapshot` 重新生成 `generated/v4/match-resume.action-object.ts` 后,rule-check 自动用到最新版本(p4 合并后已直接 import,无 vendor 拷贝)。如果 ontology 在 Neo4j 改了但忘了重新生成 snapshot,LLM 看到的还是旧 rule。更优解:rule-check 改用 `generatePrompt()` live 调 Ontology API(`:3500`),但有 HTTP 延迟代价
 3. **3-state 简并为 binary** — POC 的 PAUSE / 叶洋的 pending_human 都被折叠成 FAIL。后续如果需要"暂停而非拒绝",要扩 `RuleCheckVerdict.decision` 为三态 + 加 `RULE_CHECK_PAUSED` 事件
 4. **没有 Neo4j 实例存储** — 现在 rule-check 决策只 emit Inngest 事件,**不落到 Neo4j 做长期审计**。落实例数据的计划见 [neo4j-instance-storage-plan.md](./neo4j-instance-storage-plan.md)(走 Ontology API,不直连 Neo4j)
 5. **不做 Robohire 边界外打分** — 严格遵守:rule-check 只判 PASS/FAIL,不出匹配分。打分仍然是 Robohire 的活,PASS 后才进 `/match-resume`
@@ -479,19 +467,20 @@ Inngest worker 不需要 restart — 下一次 invocation 立刻生效。
 
 | 路径 | 作用 |
 |---|---|
-| [`resume-parser-agent/lib/rule-check/index.ts`](../resume-parser-agent/lib/rule-check/index.ts) | 公开 API:`buildRuleCheckInput`、`runRuleCheck`、types |
-| [`resume-parser-agent/lib/rule-check/runner.ts`](../resume-parser-agent/lib/rule-check/runner.ts) | 主入口 + POC 路径(`composePrompt` + KEEP/DROP/PAUSE 折叠) |
-| [`resume-parser-agent/lib/rule-check/yeyang-runner.ts`](../resume-parser-agent/lib/rule-check/yeyang-runner.ts) | 叶洋路径(`fillRuntimeInput` + terminal 折叠) |
-| [`resume-parser-agent/lib/rule-check/yeyang/`](../resume-parser-agent/lib/rule-check/yeyang/) | 叶洋 v4 snapshot + fill 函数 vendor 拷贝 |
-| [`resume-parser-agent/lib/rule-check/ontology.ts`](../resume-parser-agent/lib/rule-check/ontology.ts) | rules.json 加载 + 过滤 + classify + severity 推断 + dims 提取 |
-| [`resume-parser-agent/lib/rule-check/prompt.ts`](../resume-parser-agent/lib/rule-check/prompt.ts) | POC composer:INPUT + RULES + OUTPUT 三段 |
-| [`resume-parser-agent/lib/rule-check/llm.ts`](../resume-parser-agent/lib/rule-check/llm.ts) | LLM gateway picker(新 API / OpenAI) |
-| [`resume-parser-agent/lib/rule-check/rules.json`](../resume-parser-agent/lib/rule-check/rules.json) | 51 条 matchResume 规则(来自 ontology-lab) |
-| [`resume-parser-agent/lib/rule-check/types.ts`](../resume-parser-agent/lib/rule-check/types.ts) | RuleCheckInput / Verdict / 审计 |
-| [`resume-parser-agent/lib/inngest/agents/match-resume-agent.ts`](../resume-parser-agent/lib/inngest/agents/match-resume-agent.ts) | gate 接入点(`isRuleCheckEnabled()`) |
-| [`resume-parser-agent/lib/inngest/client.ts`](../resume-parser-agent/lib/inngest/client.ts) | `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 事件 schema |
+| [`lib/rule-check/index.ts`](../lib/rule-check/index.ts) | 公开 API:`buildRuleCheckInput`、`runRuleCheck`、types |
+| [`lib/rule-check/runner.ts`](../lib/rule-check/runner.ts) | 主入口 + POC 路径(`composePrompt` + KEEP/DROP/PAUSE 折叠) |
+| [`lib/rule-check/yeyang-runner.ts`](../lib/rule-check/yeyang-runner.ts) | 叶洋路径(`fillRuntimeInput` + terminal 折叠) |
+| [`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts) | 叶洋 v4 静态 snapshot(yeyang-runner 直接 import) |
+| [`lib/ontology-gen/v4/`](../lib/ontology-gen/v4/) | 叶洋 v4 adapter:`generatePrompt` / `fillRuntimeInput` / `MatchResumeRuntimeInput` 类型 |
+| [`lib/rule-check/ontology.ts`](../lib/rule-check/ontology.ts) | rules.json 加载 + 过滤 + classify + severity 推断 + dims 提取 |
+| [`lib/rule-check/prompt.ts`](../lib/rule-check/prompt.ts) | POC composer:INPUT + RULES + OUTPUT 三段 |
+| [`lib/rule-check/llm.ts`](../lib/rule-check/llm.ts) | LLM gateway picker(新 API / OpenAI) |
+| [`lib/rule-check/rules.json`](../lib/rule-check/rules.json) | 51 条 matchResume 规则(来自 ontology-lab) |
+| [`lib/rule-check/types.ts`](../lib/rule-check/types.ts) | RuleCheckInput / Verdict / 审计 |
+| [`server/inngest/agents/match-resume-agent.ts`](../server/inngest/agents/match-resume-agent.ts) | gate 接入点(`isRuleCheckEnabled()`) |
+| [`server/inngest/client.ts`](../server/inngest/client.ts) | `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 事件 schema |
 | [`lib/ontology-gen/v4/generate-prompt.ts`](../lib/ontology-gen/v4/generate-prompt.ts) | 主仓:叶洋 v4 canonical `generatePrompt` async entry |
-| [`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts) | 主仓:matchResume 静态 snapshot(被 cp 到 resume-parser-agent 用) |
+| [`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts) | matchResume 静态 snapshot(p4 合并后 yeyang-runner 直接 import) |
 | [`scripts/rule-check-poc/`](../scripts/rule-check-poc/) | POC 历史:6 个场景 + 主仓真实 Neo4j 跑通的脚本 |
 | [`docs/yeyang-prompt-adapter-onboarding.md`](./yeyang-prompt-adapter-onboarding.md) | 给叶洋写的 adapter onboarding(他基于此交付了 v4) |
 

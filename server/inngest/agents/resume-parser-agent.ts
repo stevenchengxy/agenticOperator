@@ -27,16 +27,16 @@ import {
   RaasApiError,
   type RaasParseResumeData,
   type SaveCandidateInput,
-} from '../../raas-api-client';
-import { inngest, type ResumeProcessedData } from '../client';
+} from '@/lib/raas-api-client';
+import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
 
 export const resumeParserAgent = inngest.createFunction(
   {
     id: 'resume-parser-agent',
     name: 'Resume Parser Agent',
     retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
+    triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
-  { event: 'RESUME_DOWNLOADED' },
   async ({ event, step, logger }) => {
     // RESUME_DOWNLOADED 兼容两种 shape:
     //   A) RAAS canonical envelope —
