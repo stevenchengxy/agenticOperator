@@ -359,7 +359,9 @@ Robohire 看到的 resume 形如:
 
 ## 4. 分阶段实施
 
-### Phase 1(2-3 天,纯本仓改动)— 当前 POC 路径上加 augmentation 注入
+> **进度(2026-05-12)**:Phase 1 + Phase 2 已落地推到 Steven 分支。Phase 3 的 spec PR 已写给叶洋([yeyang-v5-ask-rule-flags-schema.md](./yeyang-v5-ask-rule-flags-schema.md))和陈洋([chenyang-ontology-ask-rule-fields.md](./chenyang-ontology-ask-rule-fields.md))。
+
+### Phase 1 ✅ DONE(commit 128f7e1)— 当前 POC 路径上加 augmentation 注入
 
 **改动**:
 1. [`lib/rule-check/runner.ts`](../lib/rule-check/runner.ts):在返回 `RuleCheckVerdict` 时把 `resume_augmentation` 字段透传出来(目前 POC 输出有这字段,但 `RuleCheckVerdict` 没接出来)
@@ -374,7 +376,7 @@ Robohire 看到的 resume 形如:
 - Robohire `/match-resume` 调用的 `body.resume` 包含 augmentation header
 - partial resume(15 条规则覆盖)的 prompt token 比当前少 ≥ 50%
 
-### Phase 2(1-2 周)— ontology codegen 接入
+### Phase 2 ✅ DONE(commit 94814c2)— ontology codegen 接入
 
 **前置(给陈洋 / 叶洋的 ask)**:
 - Ontology API 暴露 `GET /api/v1/ontology/actions/matchResume/rules?domain=RAAS-v1&client=<id>` 返回按 client 过滤的 rule 列表
@@ -391,11 +393,11 @@ Robohire 看到的 resume 形如:
 - `RULE_CHECK_PROMPT_SOURCE=poc` 模式下,prompt 中的规则数 = ontology 实时返回的数(不是 rules.json 老快照)
 - Ontology API 给的规则被更新 → 下次 rule check 立刻用到
 
-### Phase 3(1 月+)— Severity 字段 + 叶洋 v5 输出 schema 同步
+### Phase 3 🚧 BLOCKED on partners(spec PR 已交付 2026-05-12)— Severity 字段 + 叶洋 v5 输出 schema 同步
 
 **前置(给陈洋 + 叶洋的 ask)**:
-1. **陈洋**:Ontology Rule 节点加 `gating_severity` enum 字段(terminal / needs_human / flag_only)。手工把 51 条 matchResume rule 都标注一遍(用 POC `inferSeverity` 跑出来再人工 review 一道,~半天工作量)
-2. **叶洋**:v5 `assembleActionObjectV4_5`:每个 step 的输出 schema 改成 POC 风格(`rule_flags[]` + evidence + applicable + result),不再用 `fired_rule_ids` ID 数组
+1. **陈洋**:Ontology Rule 节点加 `gating_severity` enum 字段(terminal / needs_human / flag_only)+ `required_resume_fields[]` 字段。spec → [chenyang-ontology-ask-rule-fields.md](./chenyang-ontology-ask-rule-fields.md)。预计陈洋侧 3-5 天
+2. **叶洋**:v5 `assembleActionObjectV4_5`:每个 step 的输出 schema 改成 `rule_flags[]` + evidence + applicable + result + next_action 风格,顶层加 `resume_augmentation`。spec → [yeyang-v5-ask-rule-flags-schema.md](./yeyang-v5-ask-rule-flags-schema.md)。预计叶洋侧 1-2 周
 
 **改动**(本仓):
 1. [`lib/rule-check/ontology.ts`](../lib/rule-check/ontology.ts):`inferSeverity` 完全去掉,从 ontology 字段读
