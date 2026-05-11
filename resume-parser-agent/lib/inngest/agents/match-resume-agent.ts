@@ -39,6 +39,11 @@ import {
 const AGENT_ID = 'match-resume-agent';
 const AGENT_NAME = 'matchResume';
 
+// Rule-check LLM 预筛 gate 开关。默认关闭(env 不设或非 "true")— RAAS partner
+// 走原来的 RESUME_PROCESSED → matchResume 链路,不被 LLM 预筛干扰。
+// 把环境变量设成 RULE_CHECK_ENABLED=true 即重新启用 gate。
+const RULE_CHECK_ENABLED = process.env.RULE_CHECK_ENABLED === 'true';
+
 export const matchResumeAgent = inngest.createFunction(
   {
     id: AGENT_ID,
@@ -202,12 +207,15 @@ export const matchResumeAgent = inngest.createFunction(
 
       // ── 4.0 NEW: rule-check LLM 预筛 (PASS/FAIL gate) ───────────────
       //
-      // 跑一次 LLM 评判,决定本条 JD 是否值得推进到 RAAS /match-resume:
+      // 默认关闭(RULE_CHECK_ENABLED env 不设或非 "true")— RAAS partner 走
+      // 原来的 RESUME_PROCESSED → matchResume 链路。set RULE_CHECK_ENABLED=true
+      // 即启用 gate:跑一次 LLM 评判,决定本条 JD 是否值得推进到 RAAS /match-resume:
       //   - LLM overall_decision="KEEP"   → PASS,继续 4a
       //   - LLM overall_decision="DROP"   → FAIL,emit RULE_CHECK_FAILED 并跳过
       //   - LLM overall_decision="PAUSE"  → FAIL,emit RULE_CHECK_FAILED 并跳过
       //   - LLM 调用 / 解析失败            → FAIL-safe(不偷溜进 matchResume)
       // (rule-check 实现见 resume-parser-agent/lib/rule-check/)
+      if (RULE_CHECK_ENABLED) {
       const ruleCheck = await step.run(`rule-check-${stepKey}`, async () => {
         const dataResumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
         const dataFilename = typeof data.filename === 'string' ? data.filename : undefined;
@@ -306,6 +314,7 @@ export const matchResumeAgent = inngest.createFunction(
       logger.info(
         `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
       );
+      } // end if (RULE_CHECK_ENABLED)
 
       // 4a. 调 RAAS /api/v1/match-resume (透传 RoboHire)
       const matchResult = await step.run(
