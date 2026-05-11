@@ -101,6 +101,17 @@ export interface RuleCheckVerdict {
   failure_reasons: string[];
   /** 命中(applicable=true 且 result∈{FAIL,REVIEW})的规则 flag。 */
   hit_flags: RuleFlag[];
+  /**
+   * LLM 输出的 markdown 段(`resume_augmentation` 字段),Kenny §3 关键:
+   * 这段在 matchResumeAgent KEEP 路径会被注入到 Robohire `/match-resume`
+   * 的 resume 字段顶部,让 Robohire 看到我们 ontology 规则的预判结果。
+   * 例:
+   *   "## Rule Check Annotations\n\n
+   *    - [10-25 ✓] 华为冷冻期已过(work_history[2]: 华为, 离职 ...)\n
+   *    - [10-43 ⚠] IEG 工作室回流标记 ..."
+   * 字段语义:LLM 输出且非空 → 注入;为空或缺 → 不注入,resume 原样发。
+   */
+  resume_augmentation?: string;
   /** 全量 LLM raw output(JSON 解析后)。null = 解析失败。 */
   llm_output: LlmRuleCheckOutput | null;
   /** 观测/审计字段。 */
@@ -114,5 +125,15 @@ export interface RuleCheckVerdict {
     llm_completion_tokens?: number;
     raw_text_preview: string;
     parse_error?: string;
+    /**
+     * Phase 1:partial resume projection 实际用的字段名列表。
+     * null = projection 关闭(整段发);[] = 没字段(理论上不可能,name 兜底)。
+     */
+    partial_resume_fields?: string[] | null;
+    /**
+     * Phase 2:rule 列表来源。"ontology-api" = 实时调主仓 Ontology API,
+     * "json-fallback" = 走 rules.json 静态 fallback,"unknown" = 未走 phase 2 路径。
+     */
+    rule_source?: 'ontology-api' | 'json-fallback' | 'unknown';
   };
 }

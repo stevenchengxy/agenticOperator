@@ -211,6 +211,11 @@ export const matchResumeAgent = inngest.createFunction(
 
       const stepKey = sanitizeStepKey(jrid);
 
+      // Kenny §3 augmentation:rule-check 输出的 markdown 段会注入到
+      // Robohire `/match-resume` 的 resume 字段顶部。值在 gate-enabled +
+      // PASS 路径填入,gate 关时永远 undefined。
+      let pendingAugmentation: string | undefined;
+
       // ── 4.0 NEW: rule-check LLM 预筛 (PASS/FAIL gate) ───────────────
       //
       // 默认关闭(RULE_CHECK_ENABLED env 不设或非 "true")— RAAS partner 走
@@ -320,6 +325,20 @@ export const matchResumeAgent = inngest.createFunction(
       logger.info(
         `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
       );
+
+      // Kenny §3:把 LLM 输出的 resume_augmentation markdown 段记下来,
+      // 4a step 调 Robohire 时拼到 resume 顶部。env kill switch:
+      // RULE_CHECK_AUGMENT_RESUME=false → 不注入(走原 resume,gate 仍生效)
+      if (
+        ruleCheck.resume_augmentation &&
+        process.env.RULE_CHECK_AUGMENT_RESUME !== 'false'
+      ) {
+        pendingAugmentation = ruleCheck.resume_augmentation;
+        logger.info(
+          `[${AGENT_NAME}] augmentation ready · job_req=${jrid} ` +
+            `chars=${pendingAugmentation.length}`,
+        );
+      }
       } // end if (isRuleCheckEnabled())
 
       // 4a. 调 RAAS /api/v1/match-resume (透传 RoboHire)
@@ -330,12 +349,20 @@ export const matchResumeAgent = inngest.createFunction(
           | { ok: false; error: string }
         > => {
           const jdText = flattenRequirementForMatch(req);
+          // Kenny §3:augmentation 注入。pendingAugmentation 在 rule-check
+          // PASS 路径填入,gate 关 / kill switch 触发 / 没 augmentation 字段
+          // 时为 undefined,行为退化成原 resumeText。
+          const augmentedResumeText = pendingAugmentation
+            ? `${pendingAugmentation}\n\n---\n\n${resumeText}`
+            : resumeText;
           logger.info(
-            `[${AGENT_NAME}] calling RAAS /match-resume · job_req=${jrid} jd_chars=${jdText.length}`,
+            `[${AGENT_NAME}] calling RAAS /match-resume · job_req=${jrid} ` +
+              `jd_chars=${jdText.length} resume_chars=${augmentedResumeText.length}` +
+              `${pendingAugmentation ? ' (augmented)' : ''}`,
           );
           try {
             const r = await matchResume(
-              { resume: resumeText, jd: jdText },
+              { resume: augmentedResumeText, jd: jdText },
               { traceId },
             );
             logger.info(

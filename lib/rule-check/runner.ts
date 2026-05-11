@@ -2,8 +2,10 @@
 //
 //   buildRuleCheckInput()    -- 组装 5-block input(从 RaasRequirement +
 //                               parsed resume + runtime context)
-//   runRuleCheck()           -- 跑完整 pipeline:dims → 过滤规则 → 渲染 prompt
+//   runRuleCheck()           -- 跑完整 pipeline:dims → 过滤规则 → 投影
+//                               parsed resume(per Kenny §2)→ 渲染 prompt
 //                               → 调 LLM → 折叠成 binary PASS/FAIL verdict
+//                               + 透传 resume_augmentation(per Kenny §3)
 //
 // Binary 折叠规则:
 //   LLM overall_decision="KEEP"  → PASS    (推进 matchResume)
@@ -14,6 +16,7 @@
 import { classifyRules, extractDims, filterRules } from './ontology';
 import { runLlm } from './llm';
 import { RULE_CHECK_SYSTEM_PROMPT, composePrompt } from './prompt';
+import { fieldsProjected, projectResume } from './resume-projection';
 import type {
   LlmRuleCheckOutput,
   RuleCheckInput,
@@ -68,6 +71,14 @@ function collectFailureReasons(out: LlmRuleCheckOutput | null): string[] {
 }
 
 /**
+ * Resume projection 总开关。默认 true(用 partial)。
+ * RULE_CHECK_PARTIAL_RESUME=false → 整段 parsed resume 发给 LLM(diagnostic 用)
+ */
+function isPartialResumeEnabled(): boolean {
+  return process.env.RULE_CHECK_PARTIAL_RESUME !== 'false';
+}
+
+/**
  * Pick prompt builder based on env:
  *   RULE_CHECK_PROMPT_SOURCE=yeyang → 叶洋 v4 snapshot (lib/rule-check/yeyang/)
  *   RULE_CHECK_PROMPT_SOURCE=poc (or anything else) → POC composer (default)
@@ -87,7 +98,18 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
   const { rules: filtered, total } = filterRules(dims);
   const classified = classifyRules(filtered);
 
-  const userPrompt = composePrompt({ input, classified, dims });
+  // Kenny §2 — partial resume projection。默认开,RULE_CHECK_PARTIAL_RESUME=false
+  // 时退回整段发给 LLM(诊断用,生产不应该用)。
+  //
+  // projectedInput 沿用 input 其他字段(runtime_context / job_requisition /
+  // spec / hsm_feedback),只把 resume 投影成 partial。
+  const projectedResume = isPartialResumeEnabled()
+    ? projectResume(input.resume, filtered)
+    : input.resume;
+  const projectedInput: RuleCheckInput = { ...input, resume: projectedResume };
+  const fieldsUsed = isPartialResumeEnabled() ? fieldsProjected(filtered) : null;
+
+  const userPrompt = composePrompt({ input: projectedInput, classified, dims });
 
   let llmResult;
   try {
@@ -112,6 +134,7 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
         llm_duration_ms: 0,
         raw_text_preview: '',
         parse_error: (err as Error).message,
+        partial_resume_fields: fieldsUsed,
       },
     };
   }
@@ -140,6 +163,10 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
     llm_decision,
     failure_reasons,
     hit_flags: collectHitFlags(parsed),
+    resume_augmentation:
+      typeof parsed?.resume_augmentation === 'string' && parsed.resume_augmentation.trim()
+        ? parsed.resume_augmentation
+        : undefined,
     llm_output: parsed,
     audit: {
       rules_evaluated: filtered.length,
@@ -151,6 +178,7 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
       llm_completion_tokens: llmResult.completion_tokens,
       raw_text_preview: llmResult.raw_text.slice(0, 500),
       parse_error: llmResult.parse_error,
+      partial_resume_fields: fieldsUsed,
     },
   };
 }
