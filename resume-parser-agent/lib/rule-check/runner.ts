@@ -21,6 +21,7 @@ import type {
   RuleCheckVerdict,
   RuleFlag,
 } from './types';
+import { runRuleCheckYeyang } from './yeyang-runner';
 
 export interface BuildInputArgs {
   runtime_context: RuleCheckRuntimeContext;
@@ -66,7 +67,22 @@ function collectFailureReasons(out: LlmRuleCheckOutput | null): string[] {
   return reasons;
 }
 
+/**
+ * Pick prompt builder based on env:
+ *   RULE_CHECK_PROMPT_SOURCE=yeyang → 叶洋 v4 snapshot (lib/rule-check/yeyang/)
+ *   RULE_CHECK_PROMPT_SOURCE=poc (or anything else) → POC composer (default)
+ *
+ * Read per-invocation (not module-level const) so Inngest cloud toggle 立即生效。
+ */
+function getPromptSource(): 'yeyang' | 'poc' {
+  return process.env.RULE_CHECK_PROMPT_SOURCE === 'yeyang' ? 'yeyang' : 'poc';
+}
+
 export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerdict> {
+  if (getPromptSource() === 'yeyang') {
+    return runRuleCheckYeyang(input);
+  }
+
   const dims = extractDims(input.job_requisition);
   const { rules: filtered, total } = filterRules(dims);
   const classified = classifyRules(filtered);
