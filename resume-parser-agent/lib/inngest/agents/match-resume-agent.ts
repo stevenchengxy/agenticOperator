@@ -42,7 +42,13 @@ const AGENT_NAME = 'matchResume';
 // Rule-check LLM 预筛 gate 开关。默认关闭(env 不设或非 "true")— RAAS partner
 // 走原来的 RESUME_PROCESSED → matchResume 链路,不被 LLM 预筛干扰。
 // 把环境变量设成 RULE_CHECK_ENABLED=true 即重新启用 gate。
-const RULE_CHECK_ENABLED = process.env.RULE_CHECK_ENABLED === 'true';
+//
+// 必须用 function 而不是模块顶层 const,否则 Inngest worker 启动时读一次就
+// cache 住,后面改 Inngest cloud 的 env 不会生效(直到 worker restart)。
+// 函数形式 → 每次 invocation 实时读 process.env,toggle 立即生效。
+function isRuleCheckEnabled(): boolean {
+  return process.env.RULE_CHECK_ENABLED === 'true';
+}
 
 export const matchResumeAgent = inngest.createFunction(
   {
@@ -215,7 +221,7 @@ export const matchResumeAgent = inngest.createFunction(
       //   - LLM overall_decision="PAUSE"  → FAIL,emit RULE_CHECK_FAILED 并跳过
       //   - LLM 调用 / 解析失败            → FAIL-safe(不偷溜进 matchResume)
       // (rule-check 实现见 resume-parser-agent/lib/rule-check/)
-      if (RULE_CHECK_ENABLED) {
+      if (isRuleCheckEnabled()) {
       const ruleCheck = await step.run(`rule-check-${stepKey}`, async () => {
         const dataResumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
         const dataFilename = typeof data.filename === 'string' ? data.filename : undefined;
@@ -314,7 +320,7 @@ export const matchResumeAgent = inngest.createFunction(
       logger.info(
         `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
       );
-      } // end if (RULE_CHECK_ENABLED)
+      } // end if (isRuleCheckEnabled())
 
       // 4a. 调 RAAS /api/v1/match-resume (透传 RoboHire)
       const matchResult = await step.run(
