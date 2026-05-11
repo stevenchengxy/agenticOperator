@@ -33,15 +33,17 @@ test publisher are type-safe.
 
 ```bash
 # 1. Inngest Dev Server — the event bus shared by all services
-npx inngest-cli@latest dev
+#    Uses local inngest-cli (in devDependencies) — no @latest fetch.
+npm install        # only the first time
+npm run inngest:dev
 #   UI: http://localhost:8288
 
 # 2. This agent (Next.js)
 cd resume-parser-agent
-npm install
+npm install        # only the first time
 npm run dev
-#   Next.js: http://localhost:3010
-#   Inngest serve endpoint: http://localhost:3010/api/inngest
+#   Next.js: http://localhost:3020
+#   Inngest serve endpoint: http://localhost:3020/api/inngest
 #   The dev server auto-discovers it.
 
 # 3. Publish a test resume.uploaded (simulates the partner / RAAS)
