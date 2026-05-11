@@ -13,8 +13,9 @@
 //   LLM overall_decision="PAUSE" → FAIL    (需 HSM 复核,暂不推进 matchResume)
 //   LLM 解析失败                 → FAIL    (安全侧,加 parse_error 标记)
 
-import { classifyRules, extractDims, filterRules } from './ontology';
+import { applyClientFilter, classifyRules, extractDims } from './ontology';
 import { runLlm } from './llm';
+import { fetchRulesForMatchResume } from './ontology-source';
 import { RULE_CHECK_SYSTEM_PROMPT, composePrompt } from './prompt';
 import { fieldsProjected, projectResume } from './resume-projection';
 import type {
@@ -95,7 +96,12 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
   }
 
   const dims = extractDims(input.job_requisition);
-  const { rules: filtered, total } = filterRules(dims);
+  // Phase 2:rule 列表 source — primary 调 Ontology API,失败 fallback 到 JSON。
+  const sourceResult = await fetchRulesForMatchResume();
+  // (client × business_group) 过滤还是在这边做 — Ontology API 当前不支持
+  // server-side client filter,等 Phase 3 叶洋 v5 + 陈洋 ontology 改动后切换
+  const filtered = applyClientFilter(sourceResult.rules, dims);
+  const total = sourceResult.rules.length;
   const classified = classifyRules(filtered);
 
   // Kenny §2 — partial resume projection。默认开,RULE_CHECK_PARTIAL_RESUME=false
@@ -135,6 +141,7 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
         raw_text_preview: '',
         parse_error: (err as Error).message,
         partial_resume_fields: fieldsUsed,
+        rule_source: sourceResult.source,
       },
     };
   }
@@ -179,6 +186,7 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
       raw_text_preview: llmResult.raw_text.slice(0, 500),
       parse_error: llmResult.parse_error,
       partial_resume_fields: fieldsUsed,
+      rule_source: sourceResult.source,
     },
   };
 }

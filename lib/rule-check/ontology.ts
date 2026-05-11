@@ -136,6 +136,16 @@ export function filterRules(dims: OntologyDims): { rules: Rule[]; total: number 
   return { rules: filtered, total: all.length };
 }
 
+/**
+ * Same filter logic as `filterRules`, but takes an externally-loaded rule set
+ * (例如从 Ontology API 拿到的 rule_id whitelist + JSON metadata 拼合后的结果)。
+ * Phase 2 引入 — `runner.ts` 调 `ontology-source.fetchRulesForMatchResume()`
+ * 拿到 rules 后用这个做 dim 过滤。
+ */
+export function applyClientFilter(rules: Rule[], dims: OntologyDims): Rule[] {
+  return rules.filter((r) => matches(r, dims));
+}
+
 function hasDepartmentCondition(r: Rule): boolean {
   const d = r.applicableDepartment.trim();
   return d !== '' && d !== 'N/A' && d !== '通用';
