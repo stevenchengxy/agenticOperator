@@ -25,7 +25,7 @@ test publisher are type-safe.
 
 ## Stack
 
-- Next.js 15 (App Router) on port **3010**
+- Next.js 15 (App Router) on port **3020**
 - Inngest 3.52 (serve handler at `app/api/inngest/route.ts`)
 - TypeScript 5.9, Node.js 22+
 
@@ -44,12 +44,27 @@ npm install        # only the first time
 npm run dev
 #   Next.js: http://localhost:3020
 #   Inngest serve endpoint: http://localhost:3020/api/inngest
-#   The dev server auto-discovers it.
 
-# 3. Publish a test resume.uploaded (simulates the partner / RAAS)
+# 3. Register this agent's 3 functions with Inngest dev server
+#    (resumeParserAgent / createJdAgent / matchResumeAgent)
+#    必要,因为 inngest-cli 默认 autodiscovery 扫不到 3020 端口
+cd resume-parser-agent
+npm run register
+#   ⇢ POST http://localhost:8288/fn/register { url: http://localhost:3020/api/inngest }
+#   注册成功后 Inngest UI (http://localhost:8288 → Functions) 能看到 3 个 functions
+
+# 4. Publish a test event (simulates the partner / RAAS)
 npm run publish:test
 #   or: npm run publish:test -- <resume_id> "Candidate Name"
 ```
+
+### 用 Docker 启 Inngest 时(主仓 npm run inngest:up)
+
+主仓 [`docker-compose.inngest.yml`](../docker-compose.inngest.yml) 已经
+`-u http://host.docker.internal:3020/api/inngest` 自动同步本 SDK,
+**不需要单独跑 `npm run register`**。
+但如果你改了 docker-compose 的 -u 列表后想生效,要 `docker compose down && docker compose up -d` 重建容器
+(`up -d` 检测到配置变化自动 recreate)。
 
 In the Inngest Dev Server UI (http://localhost:8288 → **Stream**) you'll see:
 1. `resume.uploaded` arrive
