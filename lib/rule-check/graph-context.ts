@@ -14,6 +14,8 @@ export interface GraphContext {
   applications: Array<Record<string, unknown>>;
   blacklist_hits: Array<Record<string, unknown>>;
   employment_links: Array<Record<string, unknown>>;
+  /** Total HTTP calls made — accumulates across both the initial pre-fetch
+   *  (5 calls) and any subsequent dispatcher calls. */
   fetch_count: number;
   /** Internal cache; do not depend on its shape. */
   _cache: Map<string, unknown>;
@@ -44,7 +46,7 @@ export async function buildGraphContext(args: {
   const tryGet = async (label: string, value: string) => {
     counters.n += 1;
     const v = await getInstance(label, value);
-    if (v) cache.set(instKey(label, value), v);
+    cache.set(instKey(label, value), v); // cache null too so dispatcher doesn't re-fetch
     return v;
   };
   const tryList = async (label: string, filters: Record<string, string>) => {
@@ -88,7 +90,7 @@ export function createDispatcher(ctx: GraphContext): ToolDispatcher {
         const key = instKey(label, value);
         if (ctx._cache.has(key)) return ctx._cache.get(key);
         const v = await getInstance(label, value);
-        if (v) ctx._cache.set(key, v);
+        ctx._cache.set(key, v); // cache null too
         ctx.fetch_count += 1;
         return v;
       }
