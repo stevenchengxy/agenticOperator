@@ -91,6 +91,38 @@ function mockRulesFourRules(): void {
   });
 }
 
+function mockRulesFiveRules(): void {
+  const ruleShape = (id: string) => ({
+    id,
+    specificScenarioStage: '',
+    businessLogicRuleName: `name-${id}`,
+    applicableClient: '通用',
+    applicableDepartment: 'N/A',
+    submissionCriteria: 'sc',
+    standardizedLogicRule: 'logic',
+    relatedEntities: [],
+    businessBackgroundReason: '',
+    ruleSource: '',
+    executor: 'Agent' as const,
+    severity: 'terminal' as const,
+  });
+  const rules = ['10-1', '10-2', '10-3', '10-4', '10-5'].map(ruleShape);
+  mFetchRules.mockResolvedValue({
+    rules,
+    source: 'ontology-api',
+    steps: [
+      {
+        step_id: '10::s1',
+        order: 1,
+        name: 'validateRedlineAndBlacklist',
+        description: 'd',
+        condition: 'c',
+        rules,
+      },
+    ],
+  });
+}
+
 function mockRulesOneStepOneRule(): void {
   mFetchRules.mockResolvedValue({
     rules: [
@@ -322,6 +354,31 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.audit.fail_reason).toBe('parse-error');
+  });
+
+  it('treats not_executed as requiring a reason; includes it in explanations', async () => {
+    mockRulesFiveRules();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        rule_results: [
+          { rule_id: '10-1', rule_name: 'name-10-1', step_id: '10::s1', status: 'fail', reason: 'hit' },
+          { rule_id: '10-2', rule_name: 'name-10-2', step_id: '10::s1', status: 'not_executed', reason: '前序规则 10-1 已 FAIL' },
+          { rule_id: '10-3', rule_name: 'name-10-3', step_id: '10::s1', status: 'not_executed', reason: '前序规则 10-1 已 FAIL' },
+          { rule_id: '10-4', rule_name: 'name-10-4', step_id: '10::s1', status: 'not_executed', reason: '前序规则 10-1 已 FAIL' },
+          { rule_id: '10-5', rule_name: 'name-10-5', step_id: '10::s1', status: 'not_executed', reason: '前序规则 10-1 已 FAIL' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 1,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.decision).toBe('FAIL');
+    expect(out.rule_results).toHaveLength(5);
+    expect(out.explanations).toHaveLength(5); // fail + 4 not_executed all appear in explanations
+    expect(out.stats.fail).toBe(1);
+    expect(out.stats.not_executed).toBe(4);
   });
 });
 

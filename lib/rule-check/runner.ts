@@ -232,6 +232,10 @@ export async function runRuleCheck(
   const filteredSteps: MatchResumeStepGroup[] = (sourceResult.steps ?? [])
     .map((s) => ({ ...s, rules: s.rules.filter((r) => filteredIds.has(r.id)) }))
     .filter((s) => s.rules.length > 0);
+  const expectedRuleCount = filteredSteps.reduce(
+    (sum, s) => sum + s.rules.length,
+    0,
+  );
 
   // Pre-fetch graph context. Surface 401/502 as ontology-graph-unavailable.
   let graph;
@@ -243,7 +247,7 @@ export async function runRuleCheck(
     });
   } catch (err) {
     return failSafe('ontology-graph-unavailable', {
-      rules_evaluated: filtered.length,
+      rules_evaluated: expectedRuleCount,
       rule_source: sourceResult.source,
     });
   }
@@ -274,19 +278,15 @@ export async function runRuleCheck(
       ? 'tool-use-loop-exceeded'
       : 'llm-call-error';
     return failSafe(reason, {
-      rules_evaluated: filtered.length,
+      rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
       rule_source: sourceResult.source,
     });
   }
 
   const parsed = parseLlmJson(llmResult.text);
-  const expectedRuleCount = filteredSteps.reduce(
-    (sum, s) => sum + s.rules.length,
-    0,
-  );
   const auditOnError = {
-    rules_evaluated: filtered.length,
+    rules_evaluated: expectedRuleCount,
     graph_calls: graph.fetch_count,
     llm_model: llmResult.modelUsed,
     llm_duration_ms: llmResult.durationMs,
@@ -314,7 +314,7 @@ export async function runRuleCheck(
     rule_results: ruleResults,
     explanations,
     audit: {
-      rules_evaluated: filtered.length,
+      rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
       llm_model: llmResult.modelUsed,
       llm_duration_ms: llmResult.durationMs,
