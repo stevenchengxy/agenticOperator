@@ -12,7 +12,7 @@ function buildStrictOrderBlock(stepCount: number): string {
 > 2. 每个 Set 内的 rules 按列出顺序逐条评估，**不得调换、不得合并**。
 > 3. 一旦任一 rule 的 status="fail"，**立即停止后续所有 rule 的评估**；后续 rule 全部标 status="not_executed"，reason="前序规则 <rule_id> 已 FAIL，本规则未执行"。
 > 4. status="pending" / "insufficient_info" / "pass" 均**不**短路；后续规则继续。
-> 5. 你必须在内部完成全部评估后，再统一输出 explanations[]。`;
+> 5. 你必须在内部完成全部评估后，再统一输出 rule_results[]。`;
 }
 
 const OUTPUT_SCHEMA_MATCH_RESUME = `## 6. Output schema
@@ -31,20 +31,22 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 6. Output schema
     "not_triggered": <int>,
     "not_executed": <int>
   },
-  "explanations": [
+  "rule_results": [
     {
       "rule_id": "<id>",
       "rule_name": "<name>",
       "step_id": "<step_id>",
-      "status": "fail" | "pending" | "insufficient_info" | "not_executed",
-      "reason": "<reasoning, 引用 graph context 或 input 原文>"
+      "status": "pass" | "fail" | "pending" | "insufficient_info" | "not_triggered" | "not_executed",
+      "reason": "<reason — required when status ≠ pass and ≠ not_triggered>"
     }
   ]
 }
 \`\`\`
 
-stats 各字段必须与你内部评估的 status 数量一致；总和等于 stats.total。
-explanations[] **仅**包含 status ∈ {fail, pending, insufficient_info, not_executed} 的规则；pass / not_triggered 的规则只计入 stats、不出现在 explanations。`;
+**关键规则：**
+- 每条规则都必须有一条对应的 \`rule_results\` 条目，按 Set 顺序、Set 内列出顺序输出。
+- \`reason\` 字段在 status ∈ {fail, pending, insufficient_info, not_executed} 时必填；status='pass' 或 'not_triggered' 时可填短说明也可省略。
+- stats 各字段必须与 rule_results 中相应 status 的计数一致；任何不一致以 rule_results 为准（runner 会按 rule_results 重新计算 stats 和 decision）。`;
 
 const DECISION_FOLD_BLOCK = `## 5. 决策结算
 
@@ -57,8 +59,8 @@ const DECISION_FOLD_BLOCK = `## 5. 决策结算
 
 const SELF_CHECK_MATCH_RESUME = `## 7. 自检
 - [ ] 是否按 Set 顺序、Set 内列出顺序评估？
+- [ ] 是否在 rule_results 中**为每一条规则**输出了一条条目？（数量必须与本提示中的规则总数完全一致）
 - [ ] 是否在出现首个 fail 后将后续全部标 not_executed？
-- [ ] stats 的各类计数是否与 explanations[] 一致？
 - [ ] 仅输出 JSON 对象本身，无 markdown 包裹？`;
 
 function renderGraphSlot(name: string, value: unknown): string {
@@ -73,10 +75,11 @@ function renderGraphSection(graph: GraphContext): string {
     '所有数据已经按 candidate_id / job_requisition_id 预拉取；缺的 slot 显示为 null 或 []，对应规则按 "信息不全" 处理。',
     '',
     renderGraphSlot('3.1 candidate', graph.candidate),
-    renderGraphSlot('3.2 job_requisition', graph.job_requisition),
-    renderGraphSlot('3.3 applications (历史投递, 全量)', graph.applications),
-    renderGraphSlot('3.4 blacklist_hits (全量)', graph.blacklist_hits),
-    renderGraphSlot('3.5 employment_links (含 Employer 节点解析)', graph.employment_links),
+    renderGraphSlot('3.2 resume (候选人当前简历, 来自 neo4j Resume 节点)', graph.resume),
+    renderGraphSlot('3.3 job_requisition', graph.job_requisition),
+    renderGraphSlot('3.4 applications (历史投递, 全量)', graph.applications),
+    renderGraphSlot('3.5 blacklist_hits (全量)', graph.blacklist_hits),
+    renderGraphSlot('3.6 employment_links (含 Employer 节点解析)', graph.employment_links),
     '',
     '如需上面未列出的实体（亲属关系、合规文档等），通过 tool 调用 `get_instance` / `list_instances` / `list_links`。',
   ].join('\n');
@@ -120,25 +123,22 @@ function renderInputsSectionV2(input: RuleCheckInput): string {
     JSON.stringify(input.runtime_context, null, 2),
     '```',
     '',
-    '### 2.2 resume',
-    '```json',
-    JSON.stringify(input.resume, null, 2),
-    '```',
-    '',
-    '### 2.3 job_requisition',
+    '### 2.2 job_requisition',
     '```json',
     JSON.stringify(input.job_requisition, null, 2),
     '```',
     '',
-    '### 2.4 job_requisition_specification',
+    '### 2.3 job_requisition_specification',
     '```json',
     JSON.stringify(input.job_requisition_specification ?? null, null, 2),
     '```',
     '',
-    '### 2.5 hsm_feedback',
+    '### 2.4 hsm_feedback',
     '```json',
     JSON.stringify(input.hsm_feedback ?? null, null, 2),
     '```',
+    '',
+    '（候选人简历 resume 已移入 §3.2 Graph context，由 neo4j Resume 节点提供。）',
   ].join('\n');
 }
 

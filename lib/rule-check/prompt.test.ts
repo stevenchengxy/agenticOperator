@@ -18,11 +18,12 @@ const baseInput: RuleCheckInput = {
 
 const baseCtx: GraphContext = {
   candidate: { candidate_id: 'C-1', name: '张三' },
+  resume: { resume_id: 'R-1', candidate_id: 'C-1', skills: ['java'] },
   job_requisition: { job_requisition_id: 'JR-1' },
   applications: [],
   blacklist_hits: [],
   employment_links: [],
-  fetch_count: 5,
+  fetch_count: 6,
   _cache: new Map(),
 };
 
@@ -146,16 +147,18 @@ describe('composeMatchResumePrompt', () => {
     });
     expect(out).toContain('## 3. Graph context');
     expect(out).toContain('### 3.1 candidate');
-    expect(out).toContain('### 3.2 job_requisition');
-    expect(out).toContain('### 3.3 applications');
-    expect(out).toContain('### 3.4 blacklist_hits');
-    expect(out).toContain('### 3.5 employment_links');
+    expect(out).toContain('### 3.2 resume');
+    expect(out).toContain('### 3.3 job_requisition');
+    expect(out).toContain('### 3.4 applications');
+    expect(out).toContain('### 3.5 blacklist_hits');
+    expect(out).toContain('### 3.6 employment_links');
   });
 
   it('emits null/[] for missing graph slots', () => {
     const empty: GraphContext = {
       ...baseCtx,
       candidate: null,
+      resume: null,
       applications: [],
     };
     const out = composeMatchResumePrompt({
@@ -163,20 +166,35 @@ describe('composeMatchResumePrompt', () => {
       graph: empty,
       steps: baseSteps,
     });
-    // candidate is null
     expect(out).toMatch(/### 3\.1 candidate[\s\S]+?null/);
+    expect(out).toMatch(/### 3\.2 resume[\s\S]+?null/);
   });
 
-  it('includes the new output schema with stats fields', () => {
+  it('includes the new output schema with stats + rule_results fields', () => {
     const out = composeMatchResumePrompt({
       input: baseInput,
       graph: baseCtx,
       steps: baseSteps,
     });
     expect(out).toContain('"stats"');
+    expect(out).toContain('"rule_results"');
     expect(out).toContain('insufficient_info');
     expect(out).toContain('not_triggered');
     expect(out).toContain('not_executed');
+    // The LLM no longer emits explanations directly — it's derived in the runner.
+    expect(out).not.toContain('"explanations"');
+  });
+
+  it('instructs the LLM to emit one rule_results entry per rule, in Set order', () => {
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    // Verbatim instruction text — verify both halves are present.
+    expect(out).toContain('每条规则都必须有一条对应的');
+    expect(out).toContain('rule_results');
+    expect(out).toContain('按 Set 顺序、Set 内列出顺序输出');
   });
 });
 
