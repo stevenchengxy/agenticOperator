@@ -6,6 +6,7 @@ export type {
   RuleCheckInput,
   RuleCheckRuntimeContext,
   RuleExplanation,
+  RuleResult,
   RuleStatus,
   Severity,
 } from './types';

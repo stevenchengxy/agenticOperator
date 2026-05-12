@@ -117,6 +117,7 @@ function failSafe(
   return {
     decision: 'FAIL',
     stats: emptyStats(),
+    rule_results: [],
     explanations: [],
     audit: {
       rules_evaluated: base.rules_evaluated ?? 0,
@@ -280,6 +281,7 @@ export async function runRuleCheck(
   return {
     decision,
     stats,
+    rule_results: [],
     explanations,
     audit: {
       rules_evaluated: filtered.length,

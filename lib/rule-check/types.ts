@@ -54,7 +54,8 @@ export interface RuleCheckRuntimeContext {
 
 export interface RuleCheckInput {
   runtime_context: RuleCheckRuntimeContext;
-  resume: Record<string, unknown>;
+  /** @deprecated Library now fetches resume from neo4j via candidate_id; this field is ignored. */
+  resume?: Record<string, unknown>;
   job_requisition: Record<string, unknown> & { job_requisition_id: string };
   job_requisition_specification?: Record<string, unknown> | null;
   hsm_feedback?: Record<string, unknown> | null;
@@ -69,6 +70,15 @@ export type RuleStatus =
   | 'insufficient_info'
   | 'not_triggered'
   | 'not_executed';
+
+export type RuleResult = {
+  rule_id: string;
+  rule_name: string;
+  step_id: string;
+  status: RuleStatus;
+  /** Required when status ≠ 'pass' and ≠ 'not_triggered'. */
+  reason?: string;
+};
 
 export type RuleExplanation = {
   rule_id: string;
@@ -91,6 +101,8 @@ export type MatchResumeCheckStats = {
 export type MatchResumeCheckResult = {
   decision: 'PASS' | 'FAIL' | 'REVIEW';
   stats: MatchResumeCheckStats;
+  /** Every evaluated rule's status, in Set + within-Set order. Use for debug; the runner derives `explanations` from this. */
+  rule_results: RuleResult[];
   explanations: RuleExplanation[];
   audit: {
     rules_evaluated: number;
