@@ -6,4 +6,10 @@ export type {
   RuleCheckVerdict,
   RuleFlag,
   Severity,
+  // new — Phase 3
+  MatchResumeCheckResult,
+  MatchResumeCheckStats,
+  MatchResumeStepGroup,
+  RuleExplanation,
+  RuleStatus,
 } from './types';

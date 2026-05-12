@@ -137,3 +137,63 @@ export interface RuleCheckVerdict {
     rule_source?: 'ontology-api' | 'json-fallback' | 'unknown';
   };
 }
+
+// ─── Phase 3: neo4j-aware matchResume check ──────────────────────────────
+
+export type RuleStatus =
+  | 'pass'
+  | 'fail'
+  | 'pending'
+  | 'insufficient_info'
+  | 'not_triggered'
+  | 'not_executed';
+
+export type RuleExplanation = {
+  rule_id: string;
+  rule_name: string;
+  step_id: string;
+  status: Exclude<RuleStatus, 'pass' | 'not_triggered'>;
+  reason: string;
+};
+
+export type MatchResumeCheckStats = {
+  total: number;
+  pass: number;
+  fail: number;
+  pending: number;
+  insufficient_info: number;
+  not_triggered: number;
+  not_executed: number;
+};
+
+export type MatchResumeCheckResult = {
+  decision: 'PASS' | 'FAIL' | 'REVIEW';
+  stats: MatchResumeCheckStats;
+  explanations: RuleExplanation[];
+  audit: {
+    rules_evaluated: number;
+    graph_calls: number;
+    llm_model: string;
+    llm_duration_ms: number;
+    llm_round_trips: number;
+    llm_prompt_tokens?: number;
+    llm_completion_tokens?: number;
+    rule_source: 'ontology-api' | 'json-fallback';
+    fail_reason?:
+      | 'llm-call-error'
+      | 'ontology-graph-unavailable'
+      | 'tool-use-loop-exceeded'
+      | 'parse-error'
+      | string;
+  };
+};
+
+/** Action_step group used by prompt rendering (Set ordering). */
+export interface MatchResumeStepGroup {
+  step_id: string;
+  order: number;
+  name: string;
+  description: string;
+  condition: string;
+  rules: Rule[];
+}
