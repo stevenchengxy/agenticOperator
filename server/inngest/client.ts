@@ -129,19 +129,20 @@ export type MatchPassedNeedInterviewData = {
 };
 
 // ─── §3.5 Rule check 事件(matchResumeAgent 在调 RAAS /match-resume 之前
-// 跑一次 LLM 预筛,决定是否推进。binary PASS/FAIL,见 lib/rule-check/) ───
+// 跑一次 LLM 预筛,决定是否推进。PASS/FAIL/REVIEW,见 lib/rule-check/) ───
 export type RuleCheckAuditMeta = {
   rules_evaluated: number;
-  rules_total_in_ontology: number;
+  graph_calls: number;
   client_id: string;
   business_group: string | null;
   studio: string | null;
-  llm_decision: "KEEP" | "DROP" | "PAUSE" | "UNKNOWN";
   llm_model: string;
   llm_duration_ms: number;
+  llm_round_trips: number;
   llm_prompt_tokens?: number;
   llm_completion_tokens?: number;
-  parse_error?: string;
+  rule_source: 'ontology-api' | 'json-fallback';
+  fail_reason?: string;
 };
 
 export type RuleCheckPassedData = {
@@ -149,7 +150,7 @@ export type RuleCheckPassedData = {
   candidate_id?: string;
   resume_id?: string;
   job_requisition_id: string;
-  client_id?: string;
+  client_id: string;
   audit: RuleCheckAuditMeta;
 };
 
@@ -158,14 +159,14 @@ export type RuleCheckFailedData = {
   candidate_id?: string;
   resume_id?: string;
   job_requisition_id: string;
-  client_id?: string;
-  failure_reasons: string[];
-  hit_rules: Array<{
+  client_id: string;
+  decision: 'FAIL' | 'REVIEW';
+  failed_rules: Array<{
     rule_id: string;
     rule_name: string;
-    severity: "terminal" | "needs_human" | "flag_only";
-    result: "PASS" | "FAIL" | "REVIEW" | "NOT_APPLICABLE";
-    evidence?: string;
+    step_id: string;
+    status: 'fail' | 'pending' | 'insufficient_info' | 'not_executed';
+    reason: string;
   }>;
   audit: RuleCheckAuditMeta;
 };

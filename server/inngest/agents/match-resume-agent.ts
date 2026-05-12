@@ -27,6 +27,7 @@ import {
   type RequirementsAgentViewItem,
 } from '@/lib/raas-api-client';
 import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
+import { extractDims as extractDimsForAudit } from '@/lib/rule-check/ontology';
 import {
   inngest,
   type MatchPassedNeedInterviewData,
@@ -211,21 +212,15 @@ export const matchResumeAgent = inngest.createFunction(
 
       const stepKey = sanitizeStepKey(jrid);
 
-      // Kenny §3 augmentation:rule-check 输出的 markdown 段会注入到
-      // Robohire `/match-resume` 的 resume 字段顶部。值在 gate-enabled +
-      // PASS 路径填入,gate 关时永远 undefined。
-      let pendingAugmentation: string | undefined;
-
-      // ── 4.0 NEW: rule-check LLM 预筛 (PASS/FAIL gate) ───────────────
+      // ── 4.0 NEW: rule-check LLM 预筛 (PASS/FAIL/REVIEW gate) ───────────
       //
       // 默认关闭(RULE_CHECK_ENABLED env 不设或非 "true")— RAAS partner 走
       // 原来的 RESUME_PROCESSED → matchResume 链路。set RULE_CHECK_ENABLED=true
       // 即启用 gate:跑一次 LLM 评判,决定本条 JD 是否值得推进到 RAAS /match-resume:
-      //   - LLM overall_decision="KEEP"   → PASS,继续 4a
-      //   - LLM overall_decision="DROP"   → FAIL,emit RULE_CHECK_FAILED 并跳过
-      //   - LLM overall_decision="PAUSE"  → FAIL,emit RULE_CHECK_FAILED 并跳过
+      //   - decision="PASS"              → 继续 4a
+      //   - decision="FAIL" / "REVIEW"   → emit RULE_CHECK_FAILED 并跳过
       //   - LLM 调用 / 解析失败            → FAIL-safe(不偷溜进 matchResume)
-      // (rule-check 实现见 resume-parser-agent/lib/rule-check/)
+      // (rule-check 实现见 lib/rule-check/)
       if (isRuleCheckEnabled()) {
       const ruleCheck = await step.run(`rule-check-${stepKey}`, async () => {
         const dataResumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
@@ -251,46 +246,50 @@ export const matchResumeAgent = inngest.createFunction(
           parsed_resume: parsedData ?? null,
           job_requisition: req as unknown as Record<string, unknown>,
         });
-        const verdict = await runRuleCheck(ruleCheckInput);
+        const ruleCheck = await runRuleCheck(ruleCheckInput);
         logger.info(
-          `[${AGENT_NAME}] rule-check · job_req=${jrid} decision=${verdict.decision} ` +
-            `llm_decision=${verdict.llm_decision} hit_flags=${verdict.hit_flags.length} ` +
-            `rules_evaluated=${verdict.audit.rules_evaluated}/${verdict.audit.rules_total_in_ontology} ` +
-            `model=${verdict.audit.llm_model} latency_ms=${verdict.audit.llm_duration_ms}`,
+          `[${AGENT_NAME}] rule-check · job_req=${jrid} decision=${ruleCheck.decision} ` +
+            `stats=pass:${ruleCheck.stats.pass}/fail:${ruleCheck.stats.fail}/pending:${ruleCheck.stats.pending}/info:${ruleCheck.stats.insufficient_info} ` +
+            `rules=${ruleCheck.audit.rules_evaluated} graph_calls=${ruleCheck.audit.graph_calls} ` +
+            `model=${ruleCheck.audit.llm_model} latency_ms=${ruleCheck.audit.llm_duration_ms} ` +
+            `tool_rounds=${ruleCheck.audit.llm_round_trips}` +
+            (ruleCheck.audit.fail_reason ? ` fail_reason=${ruleCheck.audit.fail_reason}` : ''),
         );
-        return verdict;
+        return ruleCheck;
       });
 
+      const dims = extractDimsForAudit(req as unknown as Record<string, unknown>);
       const ruleCheckAuditMeta: RuleCheckAuditMeta = {
         rules_evaluated: ruleCheck.audit.rules_evaluated,
-        rules_total_in_ontology: ruleCheck.audit.rules_total_in_ontology,
-        client_id: ruleCheck.audit.dims.client_id,
-        business_group: ruleCheck.audit.dims.business_group,
-        studio: ruleCheck.audit.dims.studio,
-        llm_decision: ruleCheck.llm_decision,
+        graph_calls: ruleCheck.audit.graph_calls,
+        client_id: dims.client_id,
+        business_group: dims.business_group,
+        studio: dims.studio,
         llm_model: ruleCheck.audit.llm_model,
         llm_duration_ms: ruleCheck.audit.llm_duration_ms,
+        llm_round_trips: ruleCheck.audit.llm_round_trips,
         llm_prompt_tokens: ruleCheck.audit.llm_prompt_tokens,
         llm_completion_tokens: ruleCheck.audit.llm_completion_tokens,
-        parse_error: ruleCheck.audit.parse_error,
+        rule_source: ruleCheck.audit.rule_source,
+        fail_reason: ruleCheck.audit.fail_reason,
       };
 
       const resumeIdForEvents = typeof data.resume_id === 'string' ? data.resume_id : undefined;
 
-      if (ruleCheck.decision === 'FAIL') {
+      if (ruleCheck.decision !== 'PASS') {
         const failedPayload: RuleCheckFailedData = {
           upload_id: uploadId ?? '',
           candidate_id: candidateId ?? undefined,
           resume_id: resumeIdForEvents,
           job_requisition_id: jrid,
-          client_id: pickClientId(req),
-          failure_reasons: ruleCheck.failure_reasons,
-          hit_rules: ruleCheck.hit_flags.map((f) => ({
-            rule_id: f.rule_id,
-            rule_name: f.rule_name,
-            severity: f.severity,
-            result: f.result,
-            evidence: f.evidence,
+          client_id: pickClientId(req) ?? '',
+          decision: ruleCheck.decision,
+          failed_rules: ruleCheck.explanations.map((e) => ({
+            rule_id: e.rule_id,
+            rule_name: e.rule_name,
+            step_id: e.step_id,
+            status: e.status,
+            reason: e.reason,
           })),
           audit: ruleCheckAuditMeta,
         };
@@ -298,14 +297,18 @@ export const matchResumeAgent = inngest.createFunction(
           name: 'RULE_CHECK_FAILED',
           data: failedPayload,
         });
+        const reasonSummary = ruleCheck.explanations
+          .filter((e) => e.status === 'fail' || e.status === 'pending')
+          .map((e) => `${e.rule_id}:${e.status}`)
+          .join(',');
         logger.info(
           `[${AGENT_NAME}] ⛔ RULE_CHECK_FAILED · job_req=${jrid} ` +
-            `reasons=${ruleCheck.failure_reasons.join(',') || '(none)'} — skip matchResume`,
+            `decision=${ruleCheck.decision} reasons=${reasonSummary || '(none)'} — skip matchResume`,
         );
         summaries.push({
           job_requisition_id: jrid,
           ok: false,
-          error: `rule-check-failed: ${ruleCheck.failure_reasons.join(',') || ruleCheck.llm_decision}`,
+          error: `rule-check-${ruleCheck.decision.toLowerCase()}: ${reasonSummary || ruleCheck.audit.fail_reason || ''}`,
         });
         continue;
       }
@@ -315,7 +318,7 @@ export const matchResumeAgent = inngest.createFunction(
         candidate_id: candidateId ?? undefined,
         resume_id: resumeIdForEvents,
         job_requisition_id: jrid,
-        client_id: pickClientId(req),
+        client_id: pickClientId(req) ?? '',
         audit: ruleCheckAuditMeta,
       };
       await step.sendEvent(`emit-rule-check-passed-${stepKey}`, {
@@ -326,19 +329,6 @@ export const matchResumeAgent = inngest.createFunction(
         `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
       );
 
-      // Kenny §3:把 LLM 输出的 resume_augmentation markdown 段记下来,
-      // 4a step 调 Robohire 时拼到 resume 顶部。env kill switch:
-      // RULE_CHECK_AUGMENT_RESUME=false → 不注入(走原 resume,gate 仍生效)
-      if (
-        ruleCheck.resume_augmentation &&
-        process.env.RULE_CHECK_AUGMENT_RESUME !== 'false'
-      ) {
-        pendingAugmentation = ruleCheck.resume_augmentation;
-        logger.info(
-          `[${AGENT_NAME}] augmentation ready · job_req=${jrid} ` +
-            `chars=${pendingAugmentation.length}`,
-        );
-      }
       } // end if (isRuleCheckEnabled())
 
       // 4a. 调 RAAS /api/v1/match-resume (透传 RoboHire)
@@ -349,20 +339,13 @@ export const matchResumeAgent = inngest.createFunction(
           | { ok: false; error: string }
         > => {
           const jdText = flattenRequirementForMatch(req);
-          // Kenny §3:augmentation 注入。pendingAugmentation 在 rule-check
-          // PASS 路径填入,gate 关 / kill switch 触发 / 没 augmentation 字段
-          // 时为 undefined,行为退化成原 resumeText。
-          const augmentedResumeText = pendingAugmentation
-            ? `${pendingAugmentation}\n\n---\n\n${resumeText}`
-            : resumeText;
           logger.info(
             `[${AGENT_NAME}] calling RAAS /match-resume · job_req=${jrid} ` +
-              `jd_chars=${jdText.length} resume_chars=${augmentedResumeText.length}` +
-              `${pendingAugmentation ? ' (augmented)' : ''}`,
+              `jd_chars=${jdText.length} resume_chars=${resumeText.length}`,
           );
           try {
             const r = await matchResume(
-              { resume: augmentedResumeText, jd: jdText },
+              { resume: resumeText, jd: jdText },
               { traceId },
             );
             logger.info(
