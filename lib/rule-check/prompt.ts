@@ -231,12 +231,15 @@ export const RULE_CHECK_SYSTEM_PROMPT = `你是一名简历预筛查员。
 
 // ─── Phase 3: matchResume prompt composer (Set-ordered + graph context) ───
 
-const STRICT_ORDER_BLOCK = `> **执行约束（必须遵守，违反即视为输出无效）：**
-> 1. Set 之间按 §4.1 → §4.2 → §4.3 → §4.4 顺序，**不得跳过 Set、不得乱序**。
+function buildStrictOrderBlock(stepCount: number): string {
+  const refs = Array.from({ length: stepCount }, (_, i) => `§4.${i + 1}`).join(' → ');
+  return `> **执行约束（必须遵守，违反即视为输出无效）：**
+> 1. Set 之间按 ${refs} 顺序，**不得跳过 Set、不得乱序**。
 > 2. 每个 Set 内的 rules 按列出顺序逐条评估，**不得调换、不得合并**。
 > 3. 一旦任一 rule 的 status="fail"，**立即停止后续所有 rule 的评估**；后续 rule 全部标 status="not_executed"，reason="前序规则 <rule_id> 已 FAIL，本规则未执行"。
 > 4. status="pending" / "insufficient_info" / "pass" 均**不**短路；后续规则继续。
 > 5. 你必须在内部完成全部评估后，再统一输出 explanations[]。`;
+}
 
 const OUTPUT_SCHEMA_MATCH_RESUME = `## 6. Output schema
 
@@ -328,7 +331,7 @@ function renderRulesSectionV2(steps: MatchResumeStepGroup[]): string {
   return [
     '## 4. Rules to check — 严格按 Set 顺序、Set 内严格按列出顺序评估',
     '',
-    STRICT_ORDER_BLOCK,
+    buildStrictOrderBlock(sorted.length),
     '',
     ...sorted.map((s, i) => renderStepBlock(s, i)),
   ].join('\n\n');

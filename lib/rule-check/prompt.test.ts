@@ -125,6 +125,19 @@ describe('composeMatchResumePrompt', () => {
     expect(out).toContain('not_executed');
   });
 
+  it('renders Set references dynamically — N=2 yields §4.1 → §4.2 not §4.1 → §4.4', () => {
+    // baseSteps has 2 steps. With a fixed 4-Set reference, the LLM would be
+    // pointed at §4.3 and §4.4 that do not exist. Verify dynamic refs.
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('§4.1 → §4.2');
+    expect(out).not.toContain('§4.3');
+    expect(out).not.toContain('§4.4');
+  });
+
   it('renders the GraphContext section with named slots', () => {
     const out = composeMatchResumePrompt({
       input: baseInput,
