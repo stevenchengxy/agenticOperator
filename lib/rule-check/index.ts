@@ -1,15 +1,11 @@
 export { buildRuleCheckInput, runRuleCheck } from './runner';
 export type {
-  LlmRuleCheckOutput,
-  RuleCheckInput,
-  RuleCheckRuntimeContext,
-  RuleCheckVerdict,
-  RuleFlag,
-  Severity,
-  // new — Phase 3
   MatchResumeCheckResult,
   MatchResumeCheckStats,
   MatchResumeStepGroup,
+  RuleCheckInput,
+  RuleCheckRuntimeContext,
   RuleExplanation,
   RuleStatus,
+  Severity,
 } from './types';
