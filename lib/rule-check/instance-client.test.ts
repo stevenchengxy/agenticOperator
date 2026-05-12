@@ -98,6 +98,16 @@ describe('instance-client', () => {
       );
       expect(out).toHaveLength(1);
     });
+
+    it('returns [] on 404', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'not-found' });
+      expect(await listLinks({ from: 'C-1' })).toEqual([]);
+    });
+
+    it('throws on 401', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'unauthorized' });
+      await expect(listLinks({ from: 'C-1' })).rejects.toThrow(/401/);
+    });
   });
 
   describe('config errors', () => {

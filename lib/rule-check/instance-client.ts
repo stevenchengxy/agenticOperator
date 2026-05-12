@@ -18,7 +18,7 @@ function getConfig(): { base: string; token: string } {
   if (!token) {
     throw new Error('ONTOLOGY_API_TOKEN is not configured');
   }
-  return { base, token };
+  return { base: base.replace(/\/+$/, ''), token };
 }
 
 function authHeaders(token: string): { Authorization: string } {
