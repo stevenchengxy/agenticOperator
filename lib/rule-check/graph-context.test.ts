@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 describe('buildGraphContext', () => {
-  it('fetches all five slots in parallel', async () => {
+  it('fetches all six slots in parallel', async () => {
     mGet.mockImplementation(async (label, _value) => {
       if (label === 'Candidate') return { candidate_id: 'C-1', name: '张三' };
       if (label === 'Job_Requisition') return { job_requisition_id: 'JR-1', title: 'BE' };
@@ -29,6 +29,7 @@ describe('buildGraphContext', () => {
     mListInst.mockImplementation(async (label) => {
       if (label === 'Application') return [{ id: 'A-1' }];
       if (label === 'Blacklist') return [];
+      if (label === 'Resume') return [{ resume_id: 'R-1', candidate_id: 'C-1', skills: ['java'] }];
       return [];
     });
     mListLinks.mockResolvedValueOnce([{ linkId: 'L-1', type: 'EMPLOYED_BY', toId: 'E-1' }]);
@@ -39,11 +40,12 @@ describe('buildGraphContext', () => {
     });
 
     expect(ctx.candidate).toEqual({ candidate_id: 'C-1', name: '张三' });
+    expect(ctx.resume).toEqual({ resume_id: 'R-1', candidate_id: 'C-1', skills: ['java'] });
     expect(ctx.job_requisition).toEqual({ job_requisition_id: 'JR-1', title: 'BE' });
     expect(ctx.applications).toEqual([{ id: 'A-1' }]);
     expect(ctx.blacklist_hits).toEqual([]);
     expect(ctx.employment_links).toHaveLength(1);
-    expect(ctx.fetch_count).toBe(5);
+    expect(ctx.fetch_count).toBe(6);
   });
 
   it('records null slot when candidate is 404', async () => {
@@ -69,6 +71,22 @@ describe('buildGraphContext', () => {
     await expect(
       buildGraphContext({ candidate_id: 'C-1', job_requisition_id: 'JR-1' }),
     ).rejects.toThrow(/401/);
+  });
+
+  it('resume slot is null when listInstances("Resume", ...) returns []', async () => {
+    mGet.mockResolvedValue({ candidate_id: 'C-1' });
+    mListInst.mockImplementation(async (label) => {
+      if (label === 'Resume') return []; // no resume row for this candidate
+      return [];
+    });
+    mListLinks.mockResolvedValue([]);
+
+    const ctx = await buildGraphContext({
+      candidate_id: 'C-1',
+      job_requisition_id: 'JR-1',
+    });
+    expect(ctx.resume).toBeNull();
+    expect(ctx.fetch_count).toBe(6); // still 6 fetches even when one returns null
   });
 });
 

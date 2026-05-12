@@ -10,12 +10,14 @@ import { getInstance, listInstances, listLinks } from './instance-client';
 
 export interface GraphContext {
   candidate: Record<string, unknown> | null;
+  /** First Resume row matched by listInstances('Resume', { candidate_id }); null when none. */
+  resume: Record<string, unknown> | null;
   job_requisition: Record<string, unknown> | null;
   applications: Array<Record<string, unknown>>;
   blacklist_hits: Array<Record<string, unknown>>;
   employment_links: Array<Record<string, unknown>>;
   /** Total HTTP calls made — accumulates across both the initial pre-fetch
-   *  (5 calls) and any subsequent dispatcher calls. */
+   *  (6 calls) and any subsequent dispatcher calls. */
   fetch_count: number;
   /** Internal cache; do not depend on its shape. */
   _cache: Map<string, unknown>;
@@ -55,6 +57,12 @@ export async function buildGraphContext(args: {
     cache.set(listInstKey(label, filters), v);
     return v;
   };
+  const tryListFirst = async (label: string, filters: Record<string, string>) => {
+    counters.n += 1;
+    const rows = await listInstances(label, filters);
+    cache.set(listInstKey(label, filters), rows);
+    return rows[0] ?? null;
+  };
   const tryLinks = async (filters: { from?: string; to?: string; type?: string }) => {
     counters.n += 1;
     const v = await listLinks(filters);
@@ -62,17 +70,25 @@ export async function buildGraphContext(args: {
     return v;
   };
 
-  const [candidate, job_requisition, applications, blacklist_hits, employment_links] =
-    await Promise.all([
-      tryGet('Candidate', args.candidate_id),
-      tryGet('Job_Requisition', args.job_requisition_id),
-      tryList('Application', { candidate_id: args.candidate_id }),
-      tryList('Blacklist', { candidate_id: args.candidate_id }),
-      tryLinks({ from: args.candidate_id, type: 'EMPLOYED_BY' }),
-    ]);
+  const [
+    candidate,
+    resume,
+    job_requisition,
+    applications,
+    blacklist_hits,
+    employment_links,
+  ] = await Promise.all([
+    tryGet('Candidate', args.candidate_id),
+    tryListFirst('Resume', { candidate_id: args.candidate_id }),
+    tryGet('Job_Requisition', args.job_requisition_id),
+    tryList('Application', { candidate_id: args.candidate_id }),
+    tryList('Blacklist', { candidate_id: args.candidate_id }),
+    tryLinks({ from: args.candidate_id, type: 'EMPLOYED_BY' }),
+  ]);
 
   return {
     candidate,
+    resume,
     job_requisition,
     applications,
     blacklist_hits,
