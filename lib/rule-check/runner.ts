@@ -12,7 +12,6 @@ import {
   composeMatchResumePrompt,
   MATCH_RESUME_SYSTEM_PROMPT,
 } from './prompt';
-import { projectResume } from './resume-projection';
 import type {
   MatchResumeCheckResult,
   MatchResumeCheckStats,
@@ -20,6 +19,8 @@ import type {
   RuleCheckInput,
   RuleCheckRuntimeContext,
   RuleExplanation,
+  RuleResult,
+  RuleStatus,
 } from './types';
 import { chatComplete } from '@/server/llm/gateway';
 
@@ -94,9 +95,6 @@ export function buildRuleCheckInput(args: BuildInputArgs): RuleCheckInput {
   };
 }
 
-function isPartialResumeEnabled(): boolean {
-  return process.env.RULE_CHECK_PARTIAL_RESUME !== 'false';
-}
 
 function emptyStats(): MatchResumeCheckStats {
   return {
@@ -135,52 +133,78 @@ function failSafe(
 
 function parseLlmJson(
   text: string,
-): { decision: string; stats?: unknown; explanations?: unknown } | null {
+): { decision?: unknown; stats?: unknown; rule_results?: unknown } | null {
   try {
     const parsed = JSON.parse(text);
     if (typeof parsed !== 'object' || parsed === null) return null;
-    return parsed as { decision: string; stats?: unknown; explanations?: unknown };
+    return parsed as { decision?: unknown; stats?: unknown; rule_results?: unknown };
   } catch {
     return null;
   }
 }
 
-function coerceStats(raw: unknown): MatchResumeCheckStats {
-  const s = emptyStats();
-  if (typeof raw !== 'object' || raw === null) return s;
-  const r = raw as Record<string, unknown>;
-  for (const k of Object.keys(s) as (keyof MatchResumeCheckStats)[]) {
-    const v = r[k];
-    if (typeof v === 'number' && Number.isFinite(v)) s[k] = v;
-  }
-  return s;
-}
-
-function coerceExplanations(raw: unknown): RuleExplanation[] {
+function coerceRuleResults(raw: unknown): RuleResult[] {
   if (!Array.isArray(raw)) return [];
-  const out: RuleExplanation[] = [];
-  const allowed = new Set(['fail', 'pending', 'insufficient_info', 'not_executed']);
+  const allowed = new Set<RuleStatus>([
+    'pass',
+    'fail',
+    'pending',
+    'insufficient_info',
+    'not_triggered',
+    'not_executed',
+  ]);
+  const out: RuleResult[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const r = item as Record<string, unknown>;
     if (
-      typeof r.rule_id === 'string' &&
-      typeof r.rule_name === 'string' &&
-      typeof r.step_id === 'string' &&
-      typeof r.status === 'string' &&
-      allowed.has(r.status) &&
-      typeof r.reason === 'string'
+      typeof r.rule_id !== 'string' ||
+      typeof r.rule_name !== 'string' ||
+      typeof r.step_id !== 'string' ||
+      typeof r.status !== 'string' ||
+      !allowed.has(r.status as RuleStatus)
     ) {
-      out.push({
-        rule_id: r.rule_id,
-        rule_name: r.rule_name,
-        step_id: r.step_id,
-        status: r.status as RuleExplanation['status'],
-        reason: r.reason,
-      });
+      continue;
     }
+    const status = r.status as RuleStatus;
+    const reason = typeof r.reason === 'string' ? r.reason : undefined;
+    const reasonRequired = status !== 'pass' && status !== 'not_triggered';
+    if (reasonRequired && !reason) continue;
+    out.push({
+      rule_id: r.rule_id,
+      rule_name: r.rule_name,
+      step_id: r.step_id,
+      status,
+      reason,
+    });
   }
   return out;
+}
+
+function deriveExplanations(rule_results: RuleResult[]): RuleExplanation[] {
+  return rule_results
+    .filter((r) => r.status !== 'pass' && r.status !== 'not_triggered')
+    .map((r) => ({
+      rule_id: r.rule_id,
+      rule_name: r.rule_name,
+      step_id: r.step_id,
+      status: r.status as RuleExplanation['status'],
+      reason: r.reason ?? '',
+    }));
+}
+
+function statsFromResults(results: RuleResult[]): MatchResumeCheckStats {
+  const s = emptyStats();
+  s.total = results.length;
+  for (const r of results) {
+    if (r.status === 'pass') s.pass++;
+    else if (r.status === 'fail') s.fail++;
+    else if (r.status === 'pending') s.pending++;
+    else if (r.status === 'insufficient_info') s.insufficient_info++;
+    else if (r.status === 'not_triggered') s.not_triggered++;
+    else if (r.status === 'not_executed') s.not_executed++;
+  }
+  return s;
 }
 
 function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['decision'] {
@@ -224,13 +248,9 @@ export async function runRuleCheck(
     });
   }
 
-  // Project resume (existing partial-projection logic).
-  const projectedResume = isPartialResumeEnabled()
-    ? projectResume(input.resume, filtered)
-    : input.resume;
-
+  // resume now lives in graph.resume; the prompt no longer reads input.resume.
   const userPrompt = composeMatchResumePrompt({
-    input: { ...input, resume: projectedResume },
+    input,
     graph,
     steps: filteredSteps,
   });
@@ -261,27 +281,37 @@ export async function runRuleCheck(
   }
 
   const parsed = parseLlmJson(llmResult.text);
+  const expectedRuleCount = filteredSteps.reduce(
+    (sum, s) => sum + s.rules.length,
+    0,
+  );
+  const auditOnError = {
+    rules_evaluated: filtered.length,
+    graph_calls: graph.fetch_count,
+    llm_model: llmResult.modelUsed,
+    llm_duration_ms: llmResult.durationMs,
+    llm_round_trips: llmResult.toolUseIterations,
+    llm_prompt_tokens: llmResult.usage?.promptTokens,
+    llm_completion_tokens: llmResult.usage?.completionTokens,
+    rule_source: sourceResult.source,
+  };
   if (!parsed) {
-    return failSafe('parse-error', {
-      rules_evaluated: filtered.length,
-      graph_calls: graph.fetch_count,
-      llm_model: llmResult.modelUsed,
-      llm_duration_ms: llmResult.durationMs,
-      llm_round_trips: llmResult.toolUseIterations,
-      llm_prompt_tokens: llmResult.usage?.promptTokens,
-      llm_completion_tokens: llmResult.usage?.completionTokens,
-      rule_source: sourceResult.source,
-    });
+    return failSafe('parse-error', auditOnError);
   }
 
-  const stats = coerceStats(parsed.stats);
-  const explanations = coerceExplanations(parsed.explanations);
+  const ruleResults = coerceRuleResults(parsed.rule_results);
+  if (ruleResults.length !== expectedRuleCount) {
+    return failSafe('parse-error', auditOnError);
+  }
+
+  const stats = statsFromResults(ruleResults);
+  const explanations = deriveExplanations(ruleResults);
   const decision = foldDecision(stats);
 
   return {
     decision,
     stats,
-    rule_results: [],
+    rule_results: ruleResults,
     explanations,
     audit: {
       rules_evaluated: filtered.length,

@@ -59,6 +59,38 @@ function mockGraphEmpty(): void {
   mListLinks.mockResolvedValue([]);
 }
 
+function mockRulesFourRules(): void {
+  const ruleShape = (id: string) => ({
+    id,
+    specificScenarioStage: '',
+    businessLogicRuleName: `name-${id}`,
+    applicableClient: '通用',
+    applicableDepartment: 'N/A',
+    submissionCriteria: 'sc',
+    standardizedLogicRule: 'logic',
+    relatedEntities: [],
+    businessBackgroundReason: '',
+    ruleSource: '',
+    executor: 'Agent' as const,
+    severity: 'terminal' as const,
+  });
+  const rules = ['10-1', '10-2', '10-3', '10-4'].map(ruleShape);
+  mFetchRules.mockResolvedValue({
+    rules,
+    source: 'ontology-api',
+    steps: [
+      {
+        step_id: '10::s1',
+        order: 1,
+        name: 'validateRedlineAndBlacklist',
+        description: 'd',
+        condition: 'c',
+        rules,
+      },
+    ],
+  });
+}
+
 function mockRulesOneStepOneRule(): void {
   mFetchRules.mockResolvedValue({
     rules: [
@@ -113,8 +145,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     mChat.mockResolvedValueOnce({
       text: JSON.stringify({
         decision: 'FAIL',
-        stats: { total: 1, pass: 0, fail: 1, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
-        explanations: [
+        rule_results: [
           { rule_id: '10-25', rule_name: '华为荣耀', step_id: '10::s1', status: 'fail', reason: 'hit' },
         ],
       }),
@@ -126,6 +157,8 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.stats.fail).toBe(1);
+    expect(out.stats.total).toBe(1);
+    expect(out.rule_results).toHaveLength(1);
     expect(out.explanations).toHaveLength(1);
     expect(out.audit.rule_source).toBe('ontology-api');
     expect(out.audit.fail_reason).toBeUndefined();
@@ -136,9 +169,9 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     mockGraphEmpty();
     mChat.mockResolvedValueOnce({
       text: JSON.stringify({
-        decision: 'PASS',
-        stats: { total: 1, pass: 1, fail: 0, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
-        explanations: [],
+        rule_results: [
+          { rule_id: '10-25', rule_name: '华为荣耀', step_id: '10::s1', status: 'pass' },
+        ],
       }),
       modelUsed: 'm',
       durationMs: 50,
@@ -146,6 +179,9 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     });
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('PASS');
+    expect(out.stats.pass).toBe(1);
+    expect(out.rule_results).toHaveLength(1);
+    expect(out.explanations).toHaveLength(0);
   });
 
   it('REVIEW: folds to REVIEW on pending', async () => {
@@ -153,9 +189,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     mockGraphEmpty();
     mChat.mockResolvedValueOnce({
       text: JSON.stringify({
-        decision: 'REVIEW',
-        stats: { total: 1, pass: 0, fail: 0, pending: 1, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
-        explanations: [
+        rule_results: [
           { rule_id: '10-25', rule_name: '华为荣耀', step_id: '10::s1', status: 'pending', reason: 'needs HSM' },
         ],
       }),
@@ -165,6 +199,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     });
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('REVIEW');
+    expect(out.stats.pending).toBe(1);
   });
 
   it('fail-safe FAIL when LLM returns invalid JSON', async () => {
@@ -179,6 +214,8 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.audit.fail_reason).toBe('parse-error');
+    expect(out.rule_results).toEqual([]);
+    expect(out.explanations).toEqual([]);
   });
 
   it('fail-safe FAIL when chatComplete rejects (gateway/network)', async () => {
@@ -188,6 +225,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.audit.fail_reason).toBe('llm-call-error');
+    expect(out.rule_results).toEqual([]);
   });
 
   it('fail-safe FAIL with ontology-graph-unavailable when getInstance throws 401', async () => {
@@ -200,6 +238,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.audit.fail_reason).toBe('ontology-graph-unavailable');
+    expect(out.rule_results).toEqual([]);
   });
 
   it('threads tools to chatComplete', async () => {
@@ -207,9 +246,9 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     mockGraphEmpty();
     mChat.mockResolvedValueOnce({
       text: JSON.stringify({
-        decision: 'PASS',
-        stats: { total: 1, pass: 1, fail: 0, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
-        explanations: [],
+        rule_results: [
+          { rule_id: '10-25', rule_name: '华为荣耀', step_id: '10::s1', status: 'pass' },
+        ],
       }),
       modelUsed: 'm',
       durationMs: 1,
@@ -222,6 +261,67 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(opts.tools?.schema.map((t) => t.function.name).sort()).toEqual(
       ['get_instance', 'list_instances', 'list_links'].sort(),
     );
+  });
+  it('derives explanations from rule_results — filters out pass + not_triggered', async () => {
+    mockRulesFourRules();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        rule_results: [
+          { rule_id: '10-1', rule_name: 'name-10-1', step_id: '10::s1', status: 'pass' },
+          { rule_id: '10-2', rule_name: 'name-10-2', step_id: '10::s1', status: 'fail', reason: 'hit' },
+          { rule_id: '10-3', rule_name: 'name-10-3', step_id: '10::s1', status: 'not_triggered' },
+          { rule_id: '10-4', rule_name: 'name-10-4', step_id: '10::s1', status: 'pending', reason: 'review' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 1,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.rule_results).toHaveLength(4);
+    expect(out.explanations).toHaveLength(2);
+    expect(out.explanations.map((e) => e.status).sort()).toEqual(['fail', 'pending']);
+    expect(out.decision).toBe('FAIL');
+  });
+
+  it('recomputes stats from rule_results; ignores LLM-emitted stats', async () => {
+    mockRulesFourRules();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        decision: 'PASS',
+        stats: { total: 999, pass: 999, fail: 0, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
+        rule_results: [
+          { rule_id: '10-1', rule_name: 'name-10-1', step_id: '10::s1', status: 'pass' },
+          { rule_id: '10-2', rule_name: 'name-10-2', step_id: '10::s1', status: 'fail', reason: 'hit' },
+          { rule_id: '10-3', rule_name: 'name-10-3', step_id: '10::s1', status: 'pass' },
+          { rule_id: '10-4', rule_name: 'name-10-4', step_id: '10::s1', status: 'pass' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 1,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.stats.total).toBe(4);
+    expect(out.stats.pass).toBe(3);
+    expect(out.stats.fail).toBe(1);
+    expect(out.decision).toBe('FAIL');
+  });
+
+  it('parse-error fail-safe when rule_results count != filtered rule count', async () => {
+    mockRulesOneStepOneRule();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({ rule_results: [] }),
+      modelUsed: 'm',
+      durationMs: 1,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.decision).toBe('FAIL');
+    expect(out.audit.fail_reason).toBe('parse-error');
   });
 });
 
