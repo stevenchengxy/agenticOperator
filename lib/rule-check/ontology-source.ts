@@ -113,7 +113,10 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
       }
       if (stepRules.length === 0) continue;
       stepsGrouped.push({
-        step_id: typeof step.id === 'string' ? step.id : '',
+        step_id:
+          typeof (step as { id?: unknown }).id === 'string'
+            ? ((step as unknown as { id: string }).id)
+            : step.name,
         order: Number(step.order ?? '0'),
         name: typeof step.name === 'string' ? step.name : '',
         description: typeof step.description === 'string' ? step.description : '',
