@@ -31,6 +31,8 @@ export interface FetchRulesResult {
   };
   /** 如果 API 出错,记录错误简述(类型 + message)。 */
   api_error?: string;
+  /** Step-grouped view, only emitted on the ontology-api success path. */
+  steps?: import('./types').MatchResumeStepGroup[];
 }
 
 export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
@@ -102,7 +104,26 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
       );
     }
 
-    return { rules, source: 'ontology-api', drift };
+    const stepsGrouped: import('./types').MatchResumeStepGroup[] = [];
+    for (const step of action.actionSteps ?? []) {
+      const stepRules: Rule[] = [];
+      for (const r of step.rules ?? []) {
+        const meta = typeof r.id === 'string' ? jsonIndex.get(r.id) : undefined;
+        if (meta) stepRules.push(meta);
+      }
+      if (stepRules.length === 0) continue;
+      stepsGrouped.push({
+        step_id: typeof step.id === 'string' ? step.id : '',
+        order: Number(step.order ?? '0'),
+        name: typeof step.name === 'string' ? step.name : '',
+        description: typeof step.description === 'string' ? step.description : '',
+        condition: typeof step.condition === 'string' ? step.condition : '',
+        rules: stepRules,
+      });
+    }
+    stepsGrouped.sort((a, b) => a.order - b.order);
+
+    return { rules, source: 'ontology-api', drift, steps: stepsGrouped };
   } catch (err) {
     // 4. 任意错误 → fallback。区分 OntologyGenError(契约/权限/服务侧)和其他
     const errType =
