@@ -138,6 +138,7 @@ describe('chatComplete with tools', () => {
         },
       }),
     ).rejects.toThrow(/tool-use loop exceeded/);
+    expect(dispatcher).toHaveBeenCalledTimes(2);
   });
 
   it('returns text without tool_calls if model emits content first', async () => {

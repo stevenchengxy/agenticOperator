@@ -189,15 +189,21 @@ export async function chatComplete(opts: {
         tool_calls: toolCalls,
       });
 
-      // Dispatch each tool call, append the tool result message.
-      for (const call of toolCalls) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(call.function.arguments);
-        } catch {
-          parsed = {};
-        }
-        const result = await opts.tools.onToolCall(call.function.name, parsed);
+      // Dispatch tool calls in parallel; preserve tool_call ordering when
+      // appending tool result messages.
+      const results = await Promise.all(
+        toolCalls.map(async (call) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(call.function.arguments);
+          } catch {
+            parsed = {};
+          }
+          const result = await opts.tools!.onToolCall(call.function.name, parsed);
+          return { call, result };
+        }),
+      );
+      for (const { call, result } of results) {
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
