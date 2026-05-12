@@ -12,7 +12,7 @@ import {
   composeMatchResumePrompt,
   MATCH_RESUME_SYSTEM_PROMPT,
 } from './prompt';
-import { projectResume, fieldsProjected } from './resume-projection';
+import { projectResume } from './resume-projection';
 import type {
   MatchResumeCheckResult,
   MatchResumeCheckStats,
@@ -192,7 +192,14 @@ export async function runRuleCheck(
   input: RuleCheckInput,
 ): Promise<MatchResumeCheckResult> {
   const dims = extractDims(input.job_requisition);
-  const sourceResult = await fetchRulesForMatchResume();
+  let sourceResult;
+  try {
+    sourceResult = await fetchRulesForMatchResume();
+  } catch (err) {
+    // Defensive: ontology-source today absorbs all errors internally and falls
+    // back to JSON, but the contract isn't enforced. Surface as a fail-safe.
+    return failSafe('llm-call-error', {});
+  }
   const filtered = applyClientFilter(sourceResult.rules, dims);
 
   // Build the filtered Set groups by intersecting fetched steps with `filtered`.
@@ -220,8 +227,6 @@ export async function runRuleCheck(
   const projectedResume = isPartialResumeEnabled()
     ? projectResume(input.resume, filtered)
     : input.resume;
-  // (we still call this to keep the audit field populated)
-  void fieldsProjected(filtered);
 
   const userPrompt = composeMatchResumePrompt({
     input: { ...input, resume: projectedResume },

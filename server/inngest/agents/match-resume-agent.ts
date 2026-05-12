@@ -222,112 +222,112 @@ export const matchResumeAgent = inngest.createFunction(
       //   - LLM 调用 / 解析失败            → FAIL-safe(不偷溜进 matchResume)
       // (rule-check 实现见 lib/rule-check/)
       if (isRuleCheckEnabled()) {
-      const ruleCheck = await step.run(`rule-check-${stepKey}`, async () => {
-        const dataResumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
-        const dataFilename = typeof data.filename === 'string' ? data.filename : undefined;
-        const dataReceivedAt = typeof data.receivedAt === 'string' ? data.receivedAt : undefined;
-        const parsedData =
-          data.parsed && typeof data.parsed === 'object'
-            ? ((data.parsed as Record<string, unknown>).data as
-                | Record<string, unknown>
-                | undefined)
-            : undefined;
+        const ruleCheck = await step.run(`rule-check-${stepKey}`, async () => {
+          const dataResumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
+          const dataFilename = typeof data.filename === 'string' ? data.filename : undefined;
+          const dataReceivedAt = typeof data.receivedAt === 'string' ? data.receivedAt : undefined;
+          const parsedData =
+            data.parsed && typeof data.parsed === 'object'
+              ? ((data.parsed as Record<string, unknown>).data as
+                  | Record<string, unknown>
+                  | undefined)
+              : undefined;
 
-        const ruleCheckInput = buildRuleCheckInput({
-          runtime_context: {
-            upload_id: uploadId ?? '',
-            candidate_id: candidateId ?? '',
-            resume_id: dataResumeId,
-            employee_id: employeeId,
-            filename: dataFilename,
-            received_at: dataReceivedAt,
-            trace_id: traceId ?? null,
-          },
-          parsed_resume: parsedData ?? null,
-          job_requisition: req as unknown as Record<string, unknown>,
+          const ruleCheckInput = buildRuleCheckInput({
+            runtime_context: {
+              upload_id: uploadId ?? '',
+              candidate_id: candidateId ?? '',
+              resume_id: dataResumeId,
+              employee_id: employeeId,
+              filename: dataFilename,
+              received_at: dataReceivedAt,
+              trace_id: traceId ?? null,
+            },
+            parsed_resume: parsedData ?? null,
+            job_requisition: req as unknown as Record<string, unknown>,
+          });
+          const ruleCheck = await runRuleCheck(ruleCheckInput);
+          logger.info(
+            `[${AGENT_NAME}] rule-check · job_req=${jrid} decision=${ruleCheck.decision} ` +
+              `stats=pass:${ruleCheck.stats.pass}/fail:${ruleCheck.stats.fail}/pending:${ruleCheck.stats.pending}/info:${ruleCheck.stats.insufficient_info} ` +
+              `rules=${ruleCheck.audit.rules_evaluated} graph_calls=${ruleCheck.audit.graph_calls} ` +
+              `model=${ruleCheck.audit.llm_model} latency_ms=${ruleCheck.audit.llm_duration_ms} ` +
+              `tool_rounds=${ruleCheck.audit.llm_round_trips}` +
+              (ruleCheck.audit.fail_reason ? ` fail_reason=${ruleCheck.audit.fail_reason}` : ''),
+          );
+          return ruleCheck;
         });
-        const ruleCheck = await runRuleCheck(ruleCheckInput);
-        logger.info(
-          `[${AGENT_NAME}] rule-check · job_req=${jrid} decision=${ruleCheck.decision} ` +
-            `stats=pass:${ruleCheck.stats.pass}/fail:${ruleCheck.stats.fail}/pending:${ruleCheck.stats.pending}/info:${ruleCheck.stats.insufficient_info} ` +
-            `rules=${ruleCheck.audit.rules_evaluated} graph_calls=${ruleCheck.audit.graph_calls} ` +
-            `model=${ruleCheck.audit.llm_model} latency_ms=${ruleCheck.audit.llm_duration_ms} ` +
-            `tool_rounds=${ruleCheck.audit.llm_round_trips}` +
-            (ruleCheck.audit.fail_reason ? ` fail_reason=${ruleCheck.audit.fail_reason}` : ''),
-        );
-        return ruleCheck;
-      });
 
-      const dims = extractDimsForAudit(req as unknown as Record<string, unknown>);
-      const ruleCheckAuditMeta: RuleCheckAuditMeta = {
-        rules_evaluated: ruleCheck.audit.rules_evaluated,
-        graph_calls: ruleCheck.audit.graph_calls,
-        client_id: dims.client_id,
-        business_group: dims.business_group,
-        studio: dims.studio,
-        llm_model: ruleCheck.audit.llm_model,
-        llm_duration_ms: ruleCheck.audit.llm_duration_ms,
-        llm_round_trips: ruleCheck.audit.llm_round_trips,
-        llm_prompt_tokens: ruleCheck.audit.llm_prompt_tokens,
-        llm_completion_tokens: ruleCheck.audit.llm_completion_tokens,
-        rule_source: ruleCheck.audit.rule_source,
-        fail_reason: ruleCheck.audit.fail_reason,
-      };
+        const dims = extractDimsForAudit(req as unknown as Record<string, unknown>);
+        const ruleCheckAuditMeta: RuleCheckAuditMeta = {
+          rules_evaluated: ruleCheck.audit.rules_evaluated,
+          graph_calls: ruleCheck.audit.graph_calls,
+          client_id: dims.client_id,
+          business_group: dims.business_group,
+          studio: dims.studio,
+          llm_model: ruleCheck.audit.llm_model,
+          llm_duration_ms: ruleCheck.audit.llm_duration_ms,
+          llm_round_trips: ruleCheck.audit.llm_round_trips,
+          llm_prompt_tokens: ruleCheck.audit.llm_prompt_tokens,
+          llm_completion_tokens: ruleCheck.audit.llm_completion_tokens,
+          rule_source: ruleCheck.audit.rule_source,
+          fail_reason: ruleCheck.audit.fail_reason,
+        };
 
-      const resumeIdForEvents = typeof data.resume_id === 'string' ? data.resume_id : undefined;
+        const resumeIdForEvents = typeof data.resume_id === 'string' ? data.resume_id : undefined;
 
-      if (ruleCheck.decision !== 'PASS') {
-        const failedPayload: RuleCheckFailedData = {
+        if (ruleCheck.decision !== 'PASS') {
+          const failedPayload: RuleCheckFailedData = {
+            upload_id: uploadId ?? '',
+            candidate_id: candidateId ?? undefined,
+            resume_id: resumeIdForEvents,
+            job_requisition_id: jrid,
+            client_id: pickClientId(req) ?? '',
+            decision: ruleCheck.decision,
+            failed_rules: ruleCheck.explanations.map((e) => ({
+              rule_id: e.rule_id,
+              rule_name: e.rule_name,
+              step_id: e.step_id,
+              status: e.status,
+              reason: e.reason,
+            })),
+            audit: ruleCheckAuditMeta,
+          };
+          await step.sendEvent(`emit-rule-check-failed-${stepKey}`, {
+            name: 'RULE_CHECK_FAILED',
+            data: failedPayload,
+          });
+          const reasonSummary = ruleCheck.explanations
+            .filter((e) => e.status === 'fail' || e.status === 'pending')
+            .map((e) => `${e.rule_id}:${e.status}`)
+            .join(',');
+          logger.info(
+            `[${AGENT_NAME}] ⛔ RULE_CHECK_FAILED · job_req=${jrid} ` +
+              `decision=${ruleCheck.decision} reasons=${reasonSummary || '(none)'} — skip matchResume`,
+          );
+          summaries.push({
+            job_requisition_id: jrid,
+            ok: false,
+            error: `rule-check-${ruleCheck.decision.toLowerCase()}: ${reasonSummary || ruleCheck.audit.fail_reason || ''}`,
+          });
+          continue;
+        }
+
+        const passedPayload: RuleCheckPassedData = {
           upload_id: uploadId ?? '',
           candidate_id: candidateId ?? undefined,
           resume_id: resumeIdForEvents,
           job_requisition_id: jrid,
           client_id: pickClientId(req) ?? '',
-          decision: ruleCheck.decision,
-          failed_rules: ruleCheck.explanations.map((e) => ({
-            rule_id: e.rule_id,
-            rule_name: e.rule_name,
-            step_id: e.step_id,
-            status: e.status,
-            reason: e.reason,
-          })),
           audit: ruleCheckAuditMeta,
         };
-        await step.sendEvent(`emit-rule-check-failed-${stepKey}`, {
-          name: 'RULE_CHECK_FAILED',
-          data: failedPayload,
+        await step.sendEvent(`emit-rule-check-passed-${stepKey}`, {
+          name: 'RULE_CHECK_PASSED',
+          data: passedPayload,
         });
-        const reasonSummary = ruleCheck.explanations
-          .filter((e) => e.status === 'fail' || e.status === 'pending')
-          .map((e) => `${e.rule_id}:${e.status}`)
-          .join(',');
         logger.info(
-          `[${AGENT_NAME}] ⛔ RULE_CHECK_FAILED · job_req=${jrid} ` +
-            `decision=${ruleCheck.decision} reasons=${reasonSummary || '(none)'} — skip matchResume`,
+          `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
         );
-        summaries.push({
-          job_requisition_id: jrid,
-          ok: false,
-          error: `rule-check-${ruleCheck.decision.toLowerCase()}: ${reasonSummary || ruleCheck.audit.fail_reason || ''}`,
-        });
-        continue;
-      }
-
-      const passedPayload: RuleCheckPassedData = {
-        upload_id: uploadId ?? '',
-        candidate_id: candidateId ?? undefined,
-        resume_id: resumeIdForEvents,
-        job_requisition_id: jrid,
-        client_id: pickClientId(req) ?? '',
-        audit: ruleCheckAuditMeta,
-      };
-      await step.sendEvent(`emit-rule-check-passed-${stepKey}`, {
-        name: 'RULE_CHECK_PASSED',
-        data: passedPayload,
-      });
-      logger.info(
-        `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
-      );
 
       } // end if (isRuleCheckEnabled())
 
