@@ -1,0 +1,176 @@
+import { describe, expect, it } from 'vitest';
+import { composeMatchResumePrompt, MATCH_RESUME_SYSTEM_PROMPT } from './prompt';
+import type { GraphContext } from './graph-context';
+import type { MatchResumeStepGroup, RuleCheckInput } from './types';
+
+const baseInput: RuleCheckInput = {
+  runtime_context: {
+    upload_id: 'u',
+    candidate_id: 'C-1',
+    resume_id: 'r',
+    employee_id: 'EMP',
+  },
+  resume: { name: '张三' },
+  job_requisition: { job_requisition_id: 'JR-1' },
+  job_requisition_specification: null,
+  hsm_feedback: null,
+};
+
+const baseCtx: GraphContext = {
+  candidate: { candidate_id: 'C-1', name: '张三' },
+  job_requisition: { job_requisition_id: 'JR-1' },
+  applications: [],
+  blacklist_hits: [],
+  employment_links: [],
+  fetch_count: 5,
+  _cache: new Map(),
+};
+
+const baseSteps: MatchResumeStepGroup[] = [
+  {
+    step_id: '10::s1',
+    order: 1,
+    name: 'validateRedlineAndBlacklist',
+    description: 'desc 1',
+    condition: 'cond 1',
+    rules: [
+      {
+        id: '10-25',
+        specificScenarioStage: '',
+        businessLogicRuleName: '华为荣耀竞对',
+        applicableClient: '通用',
+        applicableDepartment: 'N/A',
+        submissionCriteria: 'sc',
+        standardizedLogicRule: 'logic',
+        relatedEntities: [],
+        businessBackgroundReason: '',
+        ruleSource: '',
+        executor: 'Agent',
+        severity: 'terminal',
+      },
+    ],
+  },
+  {
+    step_id: '10::s2',
+    order: 2,
+    name: 'matchHardRequirements',
+    description: 'desc 2',
+    condition: 'cond 2',
+    rules: [
+      {
+        id: '10-5',
+        specificScenarioStage: '',
+        businessLogicRuleName: '硬性要求一票否决',
+        applicableClient: '通用',
+        applicableDepartment: 'N/A',
+        submissionCriteria: 'N/A',
+        standardizedLogicRule: 'logic',
+        relatedEntities: [],
+        businessBackgroundReason: '',
+        ruleSource: '',
+        executor: 'Agent',
+        severity: 'terminal',
+      },
+    ],
+  },
+];
+
+describe('composeMatchResumePrompt', () => {
+  it('renders Set headers in order with explicit Set N markers', () => {
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('### 4.1 Set 1 — validateRedlineAndBlacklist');
+    expect(out).toContain('### 4.2 Set 2 — matchHardRequirements');
+    expect(out.indexOf('Set 1')).toBeLessThan(out.indexOf('Set 2'));
+  });
+
+  it('renders rules in input order, not re-sorted by id', () => {
+    const reorderedSteps: MatchResumeStepGroup[] = [
+      {
+        ...baseSteps[0],
+        rules: [
+          {
+            ...baseSteps[0].rules[0],
+            id: '10-99',
+            businessLogicRuleName: 'second',
+          },
+          {
+            ...baseSteps[0].rules[0],
+            id: '10-2',
+            businessLogicRuleName: 'first by id',
+          },
+        ],
+      },
+    ];
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: reorderedSteps,
+    });
+    expect(out.indexOf('Rule 10-99')).toBeLessThan(out.indexOf('Rule 10-2'));
+  });
+
+  it('contains the strict-order + short-circuit constraint block', () => {
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('执行约束');
+    expect(out).toContain('不得跳过 Set、不得乱序');
+    expect(out).toContain('立即停止后续所有 rule 的评估');
+    expect(out).toContain('not_executed');
+  });
+
+  it('renders the GraphContext section with named slots', () => {
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('## 3. Graph context');
+    expect(out).toContain('### 3.1 candidate');
+    expect(out).toContain('### 3.2 job_requisition');
+    expect(out).toContain('### 3.3 applications');
+    expect(out).toContain('### 3.4 blacklist_hits');
+    expect(out).toContain('### 3.5 employment_links');
+  });
+
+  it('emits null/[] for missing graph slots', () => {
+    const empty: GraphContext = {
+      ...baseCtx,
+      candidate: null,
+      applications: [],
+    };
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: empty,
+      steps: baseSteps,
+    });
+    // candidate is null
+    expect(out).toMatch(/### 3\.1 candidate[\s\S]+?null/);
+  });
+
+  it('includes the new output schema with stats fields', () => {
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('"stats"');
+    expect(out).toContain('insufficient_info');
+    expect(out).toContain('not_triggered');
+    expect(out).toContain('not_executed');
+  });
+});
+
+describe('MATCH_RESUME_SYSTEM_PROMPT', () => {
+  it('is a non-empty string with role guidance', () => {
+    expect(typeof MATCH_RESUME_SYSTEM_PROMPT).toBe('string');
+    expect(MATCH_RESUME_SYSTEM_PROMPT.length).toBeGreaterThan(50);
+    expect(MATCH_RESUME_SYSTEM_PROMPT).toContain('matchResume');
+  });
+});

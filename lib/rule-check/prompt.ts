@@ -4,8 +4,10 @@
 // 仍是 POC 的 3-state(KEEP/DROP/PAUSE),wrapper 层在 runner.ts 做 binary
 // PASS/FAIL 折叠。
 
+import type { GraphContext } from './graph-context';
 import type {
   ClassifiedRules,
+  MatchResumeStepGroup,
   OntologyDims,
   Rule,
   RuleCheckInput,
@@ -226,3 +228,175 @@ export const RULE_CHECK_SYSTEM_PROMPT = `你是一名简历预筛查员。
 - 不要超出 user 消息中规定的规则范围进行评估
 - 不要在 evidence 里编造简历未提供的信息;缺字段一律标 NOT_APPLICABLE
 - 输出必须是合法 JSON,不要在 JSON 外加任何文本`;
+
+// ─── Phase 3: matchResume prompt composer (Set-ordered + graph context) ───
+
+const STRICT_ORDER_BLOCK = `> **执行约束（必须遵守，违反即视为输出无效）：**
+> 1. Set 之间按 §4.1 → §4.2 → §4.3 → §4.4 顺序，**不得跳过 Set、不得乱序**。
+> 2. 每个 Set 内的 rules 按列出顺序逐条评估，**不得调换、不得合并**。
+> 3. 一旦任一 rule 的 status="fail"，**立即停止后续所有 rule 的评估**；后续 rule 全部标 status="not_executed"，reason="前序规则 <rule_id> 已 FAIL，本规则未执行"。
+> 4. status="pending" / "insufficient_info" / "pass" 均**不**短路；后续规则继续。
+> 5. 你必须在内部完成全部评估后，再统一输出 explanations[]。`;
+
+const OUTPUT_SCHEMA_MATCH_RESUME = `## 6. Output schema
+
+仅输出严格符合下列结构的 JSON，**不允许 markdown 代码块、不允许多余字段**：
+
+\`\`\`json
+{
+  "decision": "PASS" | "FAIL" | "REVIEW",
+  "stats": {
+    "total": <int>,
+    "pass": <int>,
+    "fail": <int>,
+    "pending": <int>,
+    "insufficient_info": <int>,
+    "not_triggered": <int>,
+    "not_executed": <int>
+  },
+  "explanations": [
+    {
+      "rule_id": "<id>",
+      "rule_name": "<name>",
+      "step_id": "<step_id>",
+      "status": "fail" | "pending" | "insufficient_info" | "not_executed",
+      "reason": "<reasoning, 引用 graph context 或 input 原文>"
+    }
+  ]
+}
+\`\`\`
+
+stats 各字段必须与你内部评估的 status 数量一致；总和等于 stats.total。
+explanations[] **仅**包含 status ∈ {fail, pending, insufficient_info, not_executed} 的规则；pass / not_triggered 的规则只计入 stats、不出现在 explanations。`;
+
+const DECISION_FOLD_BLOCK = `## 5. 决策结算
+
+逐 rule 评估完后按下列规则汇总：
+- 任一 rule status="fail" → \`decision="FAIL"\`
+- 否则任一 rule status="pending" 或 "insufficient_info" → \`decision="REVIEW"\`
+- 否则 → \`decision="PASS"\`
+
+不要根据自己的判断重新归类 rule status，必须沿用上面的语义。`;
+
+const SELF_CHECK_MATCH_RESUME = `## 7. 自检
+- [ ] 是否按 Set 顺序、Set 内列出顺序评估？
+- [ ] 是否在出现首个 fail 后将后续全部标 not_executed？
+- [ ] stats 的各类计数是否与 explanations[] 一致？
+- [ ] 仅输出 JSON 对象本身，无 markdown 包裹？`;
+
+function renderGraphSlot(name: string, value: unknown): string {
+  return [`### ${name}`, '```json', JSON.stringify(value, null, 2), '```'].join('\n');
+}
+
+function renderGraphSection(graph: GraphContext): string {
+  return [
+    '## 3. Graph context',
+    '',
+    '你可以通过下列对象引用 ontology 实例数据。**先用这些字段，不够再调 tool**。',
+    '所有数据已经按 candidate_id / job_requisition_id 预拉取；缺的 slot 显示为 null 或 []，对应规则按 "信息不全" 处理。',
+    '',
+    renderGraphSlot('3.1 candidate', graph.candidate),
+    renderGraphSlot('3.2 job_requisition', graph.job_requisition),
+    renderGraphSlot('3.3 applications (历史投递, 全量)', graph.applications),
+    renderGraphSlot('3.4 blacklist_hits (全量)', graph.blacklist_hits),
+    renderGraphSlot('3.5 employment_links (含 Employer 节点解析)', graph.employment_links),
+    '',
+    '如需上面未列出的实体（亲属关系、合规文档等），通过 tool 调用 `get_instance` / `list_instances` / `list_links`。',
+  ].join('\n');
+}
+
+function renderRuleBlock(r: Rule): string {
+  return [
+    `#### Rule ${r.id}: ${r.businessLogicRuleName}  [applicableClient=${r.applicableClient}, severity=${r.severity}]`,
+    `- submissionCriteria: ${r.submissionCriteria || 'N/A'}`,
+    `- logic: ${r.standardizedLogicRule}`,
+  ].join('\n');
+}
+
+function renderStepBlock(s: MatchResumeStepGroup, index: number): string {
+  const header = `### 4.${index + 1} Set ${s.order} — ${s.name}  [order=${s.order}]`;
+  const meta = [
+    `**进入条件**：${s.condition || '(无)'}`,
+    `**Set 说明**：${s.description || '(无)'}`,
+  ].join('\n');
+  const ruleBlocks = s.rules.map(renderRuleBlock).join('\n\n');
+  return [header, meta, ruleBlocks].join('\n\n');
+}
+
+function renderRulesSectionV2(steps: MatchResumeStepGroup[]): string {
+  const sorted = [...steps].sort((a, b) => a.order - b.order);
+  return [
+    '## 4. Rules to check — 严格按 Set 顺序、Set 内严格按列出顺序评估',
+    '',
+    STRICT_ORDER_BLOCK,
+    '',
+    ...sorted.map((s, i) => renderStepBlock(s, i)),
+  ].join('\n\n');
+}
+
+function renderInputsSectionV2(input: RuleCheckInput): string {
+  return [
+    '## 2. Inputs',
+    '',
+    '### 2.1 runtime_context',
+    '```json',
+    JSON.stringify(input.runtime_context, null, 2),
+    '```',
+    '',
+    '### 2.2 resume',
+    '```json',
+    JSON.stringify(input.resume, null, 2),
+    '```',
+    '',
+    '### 2.3 job_requisition',
+    '```json',
+    JSON.stringify(input.job_requisition, null, 2),
+    '```',
+    '',
+    '### 2.4 job_requisition_specification',
+    '```json',
+    JSON.stringify(input.job_requisition_specification ?? null, null, 2),
+    '```',
+    '',
+    '### 2.5 hsm_feedback',
+    '```json',
+    JSON.stringify(input.hsm_feedback ?? null, null, 2),
+    '```',
+  ].join('\n');
+}
+
+export function composeMatchResumePrompt(args: {
+  input: RuleCheckInput;
+  graph: GraphContext;
+  steps: MatchResumeStepGroup[];
+}): string {
+  const ROLE = `# matchResume Rule Check
+
+## 1. 你的角色
+
+你是一名 matchResume action 的规则评估员。基于给定的 INPUT、GRAPH_CONTEXT 和 RULES，按 Set 顺序逐条评估每条 rule 的 status，并按规则结算出最终 decision。
+
+- **必须**严格按 Set 顺序、Set 内列出顺序评估。
+- **不要**给候选人打匹配分数（评分由下游算法负责）。
+- **不要**在 reason 中编造 INPUT 或 GRAPH_CONTEXT 中未提供的信息；缺字段一律标 \`insufficient_info\`。`;
+
+  return [
+    ROLE,
+    renderInputsSectionV2(args.input),
+    renderGraphSection(args.graph),
+    renderRulesSectionV2(args.steps),
+    DECISION_FOLD_BLOCK,
+    OUTPUT_SCHEMA_MATCH_RESUME,
+    SELF_CHECK_MATCH_RESUME,
+  ].join('\n\n');
+}
+
+export const MATCH_RESUME_SYSTEM_PROMPT = `你是一名 matchResume 规则评估员。
+
+严格按照 user 消息中的 INPUT / GRAPH_CONTEXT / RULES 评估，输出严格符合 schema 的 JSON。
+
+边界约束：
+- 必须按 Set 顺序、Set 内列出顺序评估
+- 一旦任一 rule status="fail"，后续全部标 not_executed
+- 不要在 reason 里编造 INPUT/GRAPH_CONTEXT 未提供的信息；缺字段标 insufficient_info
+- 必须输出合法 JSON，不要在 JSON 外加任何文本（包括 markdown code fence）`;
