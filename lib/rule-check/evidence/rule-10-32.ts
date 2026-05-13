@@ -1,11 +1,12 @@
 import type { ExtractorFn, InferenceStep, NodeKind } from './types';
+import { asArray } from './_date-utils';
 
 export const extract10_32: ExtractorFn = (graph, runtime, rule, ruleResult) => {
   const steps: InferenceStep[] = [];
   const highlight: NodeKind[] = [];
 
   const jrId = (graph.job_requisition as Record<string, unknown> | null)?.job_requisition_id as string | undefined;
-  const apps = (graph.applications ?? []) as Array<{ application_id: string; job_requisition_id: string; push_timestamp: string; status: string }>;
+  const apps = asArray<{ application_id: string; job_requisition_id: string; push_timestamp: string; status: string }>(graph.applications);
   const today = (runtime.received_at ?? '').slice(0, 10);
 
   const sameJobApps = jrId ? apps.filter((a) => a.job_requisition_id === jrId) : [];

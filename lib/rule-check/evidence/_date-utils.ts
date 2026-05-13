@@ -1,3 +1,17 @@
+/** Coerce a possibly JSON-stringified array back into a real array. Neo4j stores
+ *  many fields as String (e.g. Resume.work_experience), so the runner gets back
+ *  a string at read time even though the type system says T[]. */
+export function asArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed as T[];
+    } catch { /* fall through */ }
+  }
+  return [];
+}
+
 /** Month difference between two YYYY-MM strings (b - a). Returns null if either is malformed. */
 export function monthsDiffYM(a: string, b: string): number | null {
   if (!a || !b) return null;

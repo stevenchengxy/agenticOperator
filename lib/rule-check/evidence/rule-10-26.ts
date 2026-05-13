@@ -1,5 +1,5 @@
 import type { ExtractorFn, InferenceStep, NodeKind } from './types';
-import { monthsDiffYM } from './_date-utils';
+import { monthsDiffYM, asArray } from './_date-utils';
 
 const COMPETITOR_NAMES = ['OPPO', '小米'];
 
@@ -7,8 +7,9 @@ export const extract10_26: ExtractorFn = (graph, runtime, rule, ruleResult) => {
   const steps: InferenceStep[] = [];
   const highlight: NodeKind[] = [];
 
-  const workExp = ((graph.resume as Record<string, unknown> | null)?.work_experience as
-    Array<{ company: string; start_date: string; end_date: string; title?: string }> | undefined) ?? [];
+  const workExp = asArray<{ company: string; start_date: string; end_date: string; title?: string }>(
+    (graph.resume as Record<string, unknown> | null)?.work_experience,
+  );
   const hit = workExp.find((w) => COMPETITOR_NAMES.some((c) => w.company.includes(c)));
 
   if (hit) {

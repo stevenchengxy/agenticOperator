@@ -1,5 +1,5 @@
 import type { ExtractorFn, InferenceStep, NodeKind } from './types';
-import { monthsDiffYM } from './_date-utils';
+import { monthsDiffYM, asArray } from './_date-utils';
 
 const GAP_THRESHOLD_MONTHS = 3;
 
@@ -7,8 +7,9 @@ export const extract10_9: ExtractorFn = (graph, _runtime, rule, ruleResult) => {
   const steps: InferenceStep[] = [];
   const highlight: NodeKind[] = [];
 
-  const workExp = ((graph.resume as Record<string, unknown> | null)?.work_experience as
-    Array<{ company: string; start_date: string; end_date: string }> | undefined) ?? [];
+  const workExp = asArray<{ company: string; start_date: string; end_date: string }>(
+    (graph.resume as Record<string, unknown> | null)?.work_experience,
+  );
   const sorted = [...workExp].sort((a, b) => a.start_date.localeCompare(b.start_date));
   for (let i = 0; i < sorted.length - 1; i++) {
     const months = monthsDiffYM(sorted[i].end_date, sorted[i + 1].start_date);

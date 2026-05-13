@@ -1,10 +1,11 @@
 import type { ExtractorFn, InferenceStep, NodeKind } from './types';
+import { asArray } from './_date-utils';
 
 export const extract10_17: ExtractorFn = (graph, _runtime, rule, ruleResult) => {
   const steps: InferenceStep[] = [];
   const highlight: NodeKind[] = [];
 
-  const hits = (graph.blacklist_hits ?? []) as Array<Record<string, unknown>>;
+  const hits = asArray<Record<string, unknown>>(graph.blacklist_hits);
   if (hits.length > 0) {
     for (const h of hits) {
       steps.push({
