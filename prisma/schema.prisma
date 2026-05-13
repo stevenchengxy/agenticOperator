@@ -548,3 +548,62 @@ model JobDescription {
 //   - Copilot: CopilotConversation, CopilotMessage
 //   - Studio/test: StudioReport, CardReport, SimulationSnapshot, test_*
 // =====================================================================
+
+// =====================================================================
+// Rule Check — eval surface for matchResume rule evaluation
+// =====================================================================
+
+model RuleCheckRun {
+  id                    String    @id @default(cuid())
+  startedAt             DateTime  @default(now())
+  finishedAt            DateTime?
+  status                String    @default("running") // running | done | error
+  model                 String
+  clientIdOverride      String?
+  totalScenarios        Int       @default(0)
+  passCount             Int       @default(0)
+  failCount             Int       @default(0)
+  totalLlmMs            Int       @default(0)
+  totalPromptTokens     Int       @default(0)
+  totalCompletionTokens Int       @default(0)
+  capHits               Int       @default(0)
+  errorMessage          String?
+  results               RuleCheckScenarioResult[]
+
+  @@index([startedAt])
+}
+
+model RuleCheckScenarioResult {
+  id                String   @id @default(cuid())
+  runId             String
+  run               RuleCheckRun @relation(fields: [runId], references: [id])
+
+  scenarioId        String
+  scenarioName      String
+
+  expectedDecision  String
+  expectedRules     String   // JSON: Record<rule_id, status>
+
+  actualDecision    String
+  actualStats       String   // JSON: MatchResumeCheckStats
+  ruleResults       String   // JSON: RuleResult[]
+
+  matchKind         String   // pass | fail-decision | fail-rule | fail-missing-rule | fail-parse | fail-runtime
+  failures          String?  // JSON: string[]
+
+  inferenceChain    String   // JSON: InferenceChain[]
+  graphContext      String   // JSON: GraphContext
+
+  llmMs             Int
+  llmModel          String
+  promptTokens      Int?
+  completionTokens  Int?
+  finishReason      String?
+  graphCalls        Int      @default(0)
+  rawLlmText        String?
+
+  ranAt             DateTime @default(now())
+
+  @@unique([runId, scenarioId])
+  @@index([runId])
+}
