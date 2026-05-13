@@ -6,6 +6,7 @@ import type { MatchResumeCheckResult, RuleResult } from '@/lib/rule-check/types'
 import type { InferenceChain } from '@/lib/rule-check/evidence/types';
 import { classifyMatch, type ExpectedOutcome, type ClassifyResult } from './match-classifier';
 import { loadScenarios, type ScenarioFixture } from './scenarios-loader';
+import { ruleCheckLog } from '@/lib/rule-check/log';
 
 export type StreamEvent =
   | { type: 'started'; run_id: string }
@@ -55,6 +56,10 @@ export async function* streamRuleCheckRun(args: {
     },
   });
   yield { type: 'started', run_id: run.id };
+  ruleCheckLog.info('run.started', {
+    run_id: run.id, model: run.model, client_id_override: run.clientIdOverride,
+    scenarios: args.scenario_ids ?? 'all',
+  });
 
   const scenarios = loadScenarios(args.scenario_ids);
   let pass = 0, fail = 0, capHits = 0, totalLlmMs = 0, totalP = 0, totalC = 0;
@@ -62,6 +67,11 @@ export async function* streamRuleCheckRun(args: {
   try {
     for (const scenario of scenarios) {
       if (args.signal?.aborted) throw new Error('client-aborted');
+
+      ruleCheckLog.info('scenario.start', {
+        run_id: run.id, scenario_id: scenario.id, scenario_name: scenario.name,
+        candidate_id: scenario.candidate_id,
+      });
 
       const result = await runOneScenario(scenario, args.model);
       const expected: ExpectedOutcome = {
@@ -82,6 +92,16 @@ export async function* streamRuleCheckRun(args: {
       totalLlmMs += result.audit.llm_duration_ms;
       totalP += result.audit.llm_prompt_tokens ?? 0;
       totalC += result.audit.llm_completion_tokens ?? 0;
+
+      ruleCheckLog.info('scenario.done', {
+        run_id: run.id, scenario_id: scenario.id,
+        match_kind: classified.kind,
+        decision: result.decision, expected_decision: scenario.expected.decision,
+        failures: classified.failures,
+        llm_ms: result.audit.llm_duration_ms,
+        finish_reason: result.audit.llm_finish_reason,
+        completion_tokens: result.audit.llm_completion_tokens,
+      });
 
       yield {
         type: 'result',
@@ -119,12 +139,17 @@ export async function* streamRuleCheckRun(args: {
         capHits,
       },
     });
+    ruleCheckLog.info('run.done', {
+      run_id: run.id, total: scenarios.length, pass, fail,
+      total_llm_ms: totalLlmMs, cap_hits: capHits,
+    });
     yield {
       type: 'done', run_id: run.id,
       summary: { total: scenarios.length, pass, fail, total_llm_ms: totalLlmMs },
     };
   } catch (err) {
     const message = (err as Error).message ?? 'unknown error';
+    ruleCheckLog.error('run.failed', { run_id: run.id, message });
     await prisma.ruleCheckRun.update({
       where: { id: run.id },
       data: { status: 'error', finishedAt: new Date(), errorMessage: message },

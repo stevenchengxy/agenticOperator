@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { bucketCell, type CellMarker } from "./bucketing";
 import type { ScenarioResultPayload } from "./use-run-stream";
 import type { RuleStatus } from "@/lib/rule-check/types";
 
@@ -15,12 +14,20 @@ export type ScenarioMatrixProps = {
   modelLabel?: string;
 };
 
-const CELL_BG: Record<CellMarker, string> = {
-  match: 'bg-[color:var(--c-ok-bg)] text-[color:var(--c-ok)]',
-  partial: 'bg-[color:var(--c-warn-bg)] text-[color:var(--c-warn)]',
-  mismatch: 'bg-[color:var(--c-err-bg)] text-[color:var(--c-err)]',
-  missing: 'bg-[color:var(--c-warn-bg)] text-[color:var(--c-warn)]',
-  excluded: 'bg-panel text-ink-4',
+// Color cells by ACTUAL status — every evaluated rule shows its judgment,
+// not just the few that have a fixture pin. Pinned-but-mismatched cells get
+// a red outline overlay so reviewers can still see the disagreement.
+type ActualKind = RuleStatus | 'missing-from-actual' | 'no-result';
+
+const STATUS_STYLE: Record<ActualKind, { bg: string; symbol: string }> = {
+  pass:              { bg: 'bg-[color:var(--c-ok-bg)] text-[color:var(--c-ok)]',     symbol: '✓' },
+  not_triggered:     { bg: 'bg-surface text-ink-3',                                  symbol: '–' },
+  fail:              { bg: 'bg-[color:var(--c-err-bg)] text-[color:var(--c-err)]',   symbol: '✗' },
+  pending:           { bg: 'bg-[color:var(--c-warn-bg)] text-[color:var(--c-warn)]', symbol: '⏸' },
+  insufficient_info: { bg: 'bg-[color:var(--c-warn-bg)] text-[color:var(--c-warn)]', symbol: '?' },
+  not_executed:      { bg: 'bg-panel text-ink-4',                                    symbol: '⊘' },
+  'missing-from-actual': { bg: 'bg-[color:var(--c-warn-bg)] text-[color:var(--c-warn)]', symbol: '⚠' },
+  'no-result':       { bg: 'bg-surface text-ink-4',                                  symbol: '·' },
 };
 
 export function ScenarioMatrix({
@@ -70,25 +77,44 @@ export function ScenarioMatrix({
                   <td className="px-2 py-1 text-ink-1 whitespace-nowrap border-r border-line">{s.id} {s.name}</td>
                   <td className="px-2 py-1 text-ink-2 whitespace-nowrap border-r border-line">
                     {s.expected.decision} → {sr ? sr.actual.decision : (isRunning ? '…' : '—')}
-                    {sr && sr.match_kind === 'pass' && <span className="text-[color:var(--c-ok)] ml-1">✓</span>}
-                    {sr && sr.match_kind !== 'pass' && <span className="text-[color:var(--c-err)] ml-1">✗</span>}
+                    {sr && s.expected.decision === sr.actual.decision && <span className="text-[color:var(--c-ok)] ml-1">✓</span>}
+                    {sr && s.expected.decision !== sr.actual.decision && <span className="text-[color:var(--c-err)] ml-1">✗</span>}
                   </td>
                   {cols.map((rid) => {
                     const expected = (s.expected.rule_status[rid] as RuleStatus | undefined) ?? 'missing-from-expected';
-                    const actual = (sr?.rule_results.find((r) => r.rule_id === rid)?.status as RuleStatus | undefined)
-                      ?? (sr ? 'missing-from-actual' : 'missing-from-expected');
-                    const outcome = bucketCell(expected as never, actual as never);
+                    const actualRaw = sr?.rule_results.find((r) => r.rule_id === rid)?.status as RuleStatus | undefined;
+                    let kind: ActualKind;
+                    if (!sr) kind = 'no-result';
+                    else if (actualRaw !== undefined) kind = actualRaw;
+                    else if (expected !== 'missing-from-expected') kind = 'missing-from-actual';
+                    else kind = 'no-result';
+                    const style = STATUS_STYLE[kind];
+
+                    // Fixture-pin mismatch: red outline so it stands out among
+                    // the colored cells (cell color is now derived from actual,
+                    // so we need a separate channel for "expected ≠ actual").
+                    const pinnedMismatch =
+                      expected !== 'missing-from-expected' &&
+                      actualRaw !== undefined &&
+                      expected !== actualRaw;
+                    const outlinePinned = pinnedMismatch
+                      ? 'outline outline-2 outline-[color:var(--c-err)] outline-offset-[-2px]'
+                      : '';
+
+                    // Compare-mode: dotted warn outline when this run disagrees with the compare run.
                     const compareStatus = cr?.rule_results.find((r) => r.rule_id === rid)?.status as RuleStatus | undefined;
-                    const diffsFromCompare = !!sr && !!cr && compareStatus !== undefined && actual !== compareStatus;
+                    const diffsFromCompare = !!sr && !!cr && compareStatus !== undefined && actualRaw !== compareStatus;
+                    const outlineCompare = diffsFromCompare && !pinnedMismatch
+                      ? 'outline outline-1 outline-[color:var(--c-warn)]'
+                      : '';
+
                     return (
                       <td key={rid}
                           onClick={() => sr && onCellClick(s.id, rid)}
-                          className={`text-center px-1 py-1 ${sr ? 'cursor-pointer' : ''} ${sr ? CELL_BG[outcome.marker] : 'bg-surface text-ink-4'} ${diffsFromCompare ? 'outline outline-1 outline-[color:var(--c-warn)]' : ''}`}
-                          title={`${rid}: expected=${expected} actual=${actual} (${outcome.bucket})`}
+                          className={`text-center px-1 py-1 ${sr ? 'cursor-pointer' : ''} ${style.bg} ${outlinePinned} ${outlineCompare}`}
+                          title={`${rid}: expected=${expected} actual=${actualRaw ?? '(missing)'} ${pinnedMismatch ? '— PIN MISMATCH' : ''}`}
                       >
-                        {sr
-                          ? (outcome.marker === 'match' ? '✓' : outcome.marker === 'partial' ? '~' : outcome.marker === 'mismatch' ? '✗' : outcome.marker === 'missing' ? '⚠' : '·')
-                          : (isRunning ? '⏳' : '·')}
+                        {!sr ? (isRunning ? '⏳' : '·') : style.symbol}
                       </td>
                     );
                   })}

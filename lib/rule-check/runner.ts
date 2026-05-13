@@ -23,6 +23,7 @@ import type {
   RuleStatus,
 } from './types';
 import { chatComplete } from '@/server/llm/gateway';
+import { ruleCheckLog } from './log';
 
 const TOOL_SCHEMA = [
   {
@@ -275,6 +276,15 @@ export async function runRuleCheck(
     0,
   );
 
+  ruleCheckLog.info('runRuleCheck.start', {
+    candidate_id: input.runtime_context.candidate_id,
+    resume_id: input.runtime_context.resume_id,
+    job_requisition_id: input.job_requisition.job_requisition_id,
+    model_override: opts.model,
+    expected_rule_count: expectedRuleCount,
+    rule_source: sourceResult.source,
+  });
+
   // Pre-fetch graph context. Surface 401/502 as ontology-graph-unavailable.
   let graph;
   try {
@@ -283,7 +293,23 @@ export async function runRuleCheck(
       job_requisition_id:
         (input.job_requisition.job_requisition_id as string | undefined) ?? '',
     });
+    ruleCheckLog.data('neo4j.graph.fetched', {
+      candidate_id: input.runtime_context.candidate_id,
+      fetch_count: graph.fetch_count,
+      slots: {
+        candidate: graph.candidate,
+        resume: graph.resume,
+        job_requisition: graph.job_requisition,
+        applications: graph.applications,
+        blacklist_hits: graph.blacklist_hits,
+        employment_links: graph.employment_links,
+      },
+    });
   } catch (err) {
+    ruleCheckLog.error('neo4j.graph.failed', {
+      candidate_id: input.runtime_context.candidate_id,
+      message: (err as Error).message,
+    });
     return failSafe('ontology-graph-unavailable', {
       rules_evaluated: expectedRuleCount,
       rule_source: sourceResult.source,
@@ -298,6 +324,14 @@ export async function runRuleCheck(
   });
 
   const dispatcher = createDispatcher(graph);
+
+  ruleCheckLog.data('llm.request', {
+    model: opts.model ?? null,
+    system_chars: MATCH_RESUME_SYSTEM_PROMPT.length,
+    user_chars: userPrompt.length,
+    user_prompt: userPrompt,
+    rules_in_prompt: expectedRuleCount,
+  });
 
   let llmResult;
   try {
@@ -325,12 +359,23 @@ export async function runRuleCheck(
     const reason: MatchResumeCheckResult['audit']['fail_reason'] = /tool-use loop/.test(msg)
       ? 'tool-use-loop-exceeded'
       : 'llm-call-error';
+    ruleCheckLog.error('llm.failed', { reason, message: msg });
     return failSafe(reason, {
       rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
       rule_source: sourceResult.source,
     });
   }
+
+  ruleCheckLog.data('llm.response', {
+    model: llmResult.modelUsed,
+    duration_ms: llmResult.durationMs,
+    tool_rounds: llmResult.toolUseIterations,
+    finish_reason: llmResult.finishReason,
+    prompt_tokens: llmResult.usage?.promptTokens,
+    completion_tokens: llmResult.usage?.completionTokens,
+    text: llmResult.text,
+  });
 
   const parsed = parseLlmJson(llmResult.text);
   const auditOnError = {
@@ -347,17 +392,25 @@ export async function runRuleCheck(
     llm_finish_reason: llmResult.finishReason,
   };
   if (!parsed) {
+    ruleCheckLog.error('parse.failed', { reason: 'not-json' });
     return failSafe('parse-error', auditOnError, graph);
   }
 
   const ruleResults = coerceRuleResults(parsed.rule_results, filteredSteps);
   if (ruleResults.length !== expectedRuleCount) {
+    ruleCheckLog.error('parse.count-mismatch', {
+      expected: expectedRuleCount, got: ruleResults.length,
+    });
     return failSafe('parse-error', auditOnError, graph);
   }
 
   const stats = statsFromResults(ruleResults);
   const explanations = deriveExplanations(ruleResults);
   const decision = foldDecision(stats);
+  ruleCheckLog.info('runRuleCheck.done', {
+    candidate_id: input.runtime_context.candidate_id,
+    decision, stats, expected_rule_count: expectedRuleCount,
+  });
 
   return {
     decision,
