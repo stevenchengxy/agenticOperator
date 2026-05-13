@@ -21,32 +21,18 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 6. Output schema
 
 \`\`\`json
 {
-  "decision": "PASS" | "FAIL" | "REVIEW",
-  "stats": {
-    "total": <int>,
-    "pass": <int>,
-    "fail": <int>,
-    "pending": <int>,
-    "insufficient_info": <int>,
-    "not_triggered": <int>,
-    "not_executed": <int>
-  },
   "rule_results": [
-    {
-      "rule_id": "<id>",
-      "rule_name": "<name>",
-      "step_id": "<step_id>",
-      "status": "pass" | "fail" | "pending" | "insufficient_info" | "not_triggered" | "not_executed",
-      "reason": "<reason — required when status ≠ pass and ≠ not_triggered>"
-    }
+    { "rule_id": "<id>", "status": "<status>", "reason": "<≤40 字>" }
   ]
 }
 \`\`\`
 
-**关键规则：**
+**关键规则（违反即视为无效输出）：**
+- status ∈ {pass, fail, pending, insufficient_info, not_triggered, not_executed}。
 - 每条规则都必须有一条对应的 \`rule_results\` 条目，按 Set 顺序、Set 内列出顺序输出。
-- \`reason\` 字段在 status ∈ {fail, pending, insufficient_info, not_executed} 时必填；status='pass' 或 'not_triggered' 时可填短说明也可省略。
-- stats 各字段必须与 rule_results 中相应 status 的计数一致；任何不一致以 rule_results 为准（runner 会按 rule_results 重新计算 stats 和 decision）。`;
+- \`reason\` 字段 **仅在** status ∈ {fail, pending, insufficient_info, not_executed} 时输出；status='pass' 或 'not_triggered' 时**必须省略 \`reason\` 字段**（不要写空字符串，直接不输出该 key）。
+- 输出 \`reason\` 时控制在 40 个中文字符内，只写最关键的判断依据，**不要复述规则名或重复信息**。
+- 不要输出 \`rule_name\`、\`step_id\`、\`decision\`、\`stats\`、\`explanations\` 等任何额外字段——runner 会基于 \`rule_results\` 重新计算。`;
 
 const DECISION_FOLD_BLOCK = `## 5. 决策结算
 

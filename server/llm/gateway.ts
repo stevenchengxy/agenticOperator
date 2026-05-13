@@ -66,6 +66,10 @@ export type ChatCompleteResult = {
   /** Number of tool-call rounds before final text. 0 when no tools, or model
    *  emitted content on the first response. */
   toolUseIterations: number;
+  /** OpenAI-protocol finish_reason from the LAST response in the loop.
+   *  Common values: "stop" (model decided), "length" (max_tokens cap hit),
+   *  "tool_calls" (mid-conversation tool call), "content_filter", undefined. */
+  finishReason?: string;
 };
 
 export type ChatTool = {
@@ -114,12 +118,39 @@ export async function chatComplete(opts: {
   toolName?: string;
   /** Optional tools — when set, drives a multi-turn tool-use loop. */
   tools?: ChatToolsOptions;
+  /** Provider-specific extra fields merged into the request body. Use for
+   *  Kimi's `extra_body: { thinking: { type: "disabled" } }`, OpenRouter's
+   *  `provider:` routing, etc. The OpenAI Node SDK forwards unknown
+   *  top-level fields through, so anything here lands on the API request. */
+  extraBody?: Record<string, unknown>;
 }): Promise<ChatCompleteResult> {
   const cfg = pickGateway();
   const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
   const modelUsed = opts.model || cfg.model;
   const toolLabel = opts.toolName ?? `LLM.${modelUsed}`;
   const started = Date.now();
+
+  // ── Model-aware defaults ──
+  // Different models have different quirks. We pick sensible defaults here so
+  // most callers can just set AI_MODEL and not worry. Callers that want to
+  // override (e.g. higher temperature on Gemini) can still pass temperature
+  // and extraBody explicitly — those win.
+  const modelLower = modelUsed.toLowerCase();
+  const isKimi = modelLower.includes('kimi');
+  // OpenAI reasoning models (o1, o3, o4) require temperature=1.
+  const isOpenAIReasoning =
+    /^o[1-9](-|$)/.test(modelLower) || /^gpt-5/.test(modelLower);
+  // Models that REQUIRE temperature=1 and reject any other value.
+  const requiresTemperatureOne = isKimi || isOpenAIReasoning;
+  const effectiveTemperature =
+    opts.temperature ?? (requiresTemperatureOne ? 1 : 0.2);
+  // Kimi K2 emits `reasoning_content` when thinking is on. Disabling thinking
+  // by default makes responses 5-10× faster; callers that want thinking-on
+  // for Kimi can pass `extraBody: { extra_body: { thinking: { type: 'enabled' } } }`.
+  // (reasoning_content is always preserved on replay below — works regardless.)
+  const effectiveExtraBody =
+    opts.extraBody ??
+    (isKimi ? { extra_body: { thinking: { type: 'disabled' } } } : undefined);
 
   const messages: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool';
@@ -130,6 +161,11 @@ export async function chatComplete(opts: {
       type: 'function';
       function: { name: string; arguments: string };
     }>;
+    /** Kimi K2 + other thinking-style models: when thinking is enabled and
+     *  the assistant emits tool_calls, the assistant message MUST carry
+     *  reasoning_content. Replaying it on the next round without this field
+     *  triggers "thinking is enabled but reasoning_content is missing". */
+    reasoning_content?: string;
   }> = [
     { role: 'system', content: opts.system },
     { role: 'user', content: opts.user },
@@ -141,12 +177,13 @@ export async function chatComplete(opts: {
   let lastUsage:
     | { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
     | undefined;
+  let lastFinishReason: string | undefined;
 
   try {
     while (true) {
       const createArgs: Record<string, unknown> = {
         model: modelUsed,
-        temperature: opts.temperature ?? 0.2,
+        temperature: effectiveTemperature,
         max_tokens: opts.maxTokens ?? 800,
         messages,
       };
@@ -154,9 +191,15 @@ export async function chatComplete(opts: {
         createArgs.tools = opts.tools.schema;
         createArgs.tool_choice = 'auto';
       }
+      // Merge provider-specific fields LAST so they can override defaults if
+      // the caller needs to (e.g. `extra_body` for Kimi's thinking control).
+      if (effectiveExtraBody) {
+        Object.assign(createArgs, effectiveExtraBody);
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const completion = (await client.chat.completions.create(createArgs as any)) as {
         choices: Array<{
+          finish_reason?: string;
           message: {
             content: string | null;
             tool_calls?: Array<{
@@ -164,6 +207,10 @@ export async function chatComplete(opts: {
               type: 'function';
               function: { name: string; arguments: string };
             }>;
+            /** Present on Kimi K2 + other thinking-style models when
+             *  reasoning is enabled. Must be carried back on the next
+             *  request when this assistant message is replayed. */
+            reasoning_content?: string;
           };
         }>;
         usage?: {
@@ -175,6 +222,7 @@ export async function chatComplete(opts: {
 
       lastUsage = completion.usage;
       const msg = completion.choices[0]?.message;
+      lastFinishReason = completion.choices[0]?.finish_reason;
       const toolCalls = msg?.tool_calls ?? [];
 
       if (!opts.tools || toolCalls.length === 0) {
@@ -183,10 +231,13 @@ export async function chatComplete(opts: {
       }
 
       // Append the assistant message (with its tool_calls) to history.
+      // Preserve reasoning_content for thinking-style models (Kimi K2 etc.) —
+      // omitting it on replay causes the API to reject the next request.
       messages.push({
         role: 'assistant',
         content: msg?.content ?? null,
         tool_calls: toolCalls,
+        reasoning_content: msg?.reasoning_content,
       });
 
       // Dispatch tool calls in parallel; preserve tool_call ordering when
@@ -242,7 +293,14 @@ export async function chatComplete(opts: {
         },
       );
     }
-    return { text, modelUsed, durationMs, usage, toolUseIterations: iterations };
+    return {
+      text,
+      modelUsed,
+      durationMs,
+      usage,
+      toolUseIterations: iterations,
+      finishReason: lastFinishReason,
+    };
   } catch (e) {
     const durationMs = Date.now() - started;
     if (opts.logger) {

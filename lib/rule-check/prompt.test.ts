@@ -170,19 +170,25 @@ describe('composeMatchResumePrompt', () => {
     expect(out).toMatch(/### 3\.2 resume[\s\S]+?null/);
   });
 
-  it('includes the new output schema with stats + rule_results fields', () => {
+  it('includes a compact output schema (only rule_results; runner recomputes stats/decision)', () => {
     const out = composeMatchResumePrompt({
       input: baseInput,
       graph: baseCtx,
       steps: baseSteps,
     });
-    expect(out).toContain('"stats"');
     expect(out).toContain('"rule_results"');
     expect(out).toContain('insufficient_info');
     expect(out).toContain('not_triggered');
     expect(out).toContain('not_executed');
-    // The LLM no longer emits explanations directly — it's derived in the runner.
+    // rule_name/step_id/stats/decision/explanations are recomputed by the
+    // runner from rule_results — the LLM must NOT emit them (token budget).
     expect(out).not.toContain('"explanations"');
+    expect(out).not.toContain('"rule_name"');
+    expect(out).not.toContain('"step_id"');
+    // The schema block forbids these — they should be listed as fields the LLM
+    // must skip, not as schema keys.
+    expect(out).not.toMatch(/"stats":\s*\{/);
+    expect(out).not.toMatch(/"decision":\s*"PASS"/);
   });
 
   it('instructs the LLM to emit one rule_results entry per rule, in Set order', () => {
