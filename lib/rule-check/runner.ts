@@ -111,12 +111,14 @@ function emptyStats(): MatchResumeCheckStats {
 function failSafe(
   reason: MatchResumeCheckResult['audit']['fail_reason'],
   base: Partial<MatchResumeCheckResult['audit']> = {},
+  graph_context?: import('./graph-context').GraphContext,
 ): MatchResumeCheckResult {
   return {
     decision: 'FAIL',
     stats: emptyStats(),
     rule_results: [],
     explanations: [],
+    graph_context,
     audit: {
       rules_evaluated: base.rules_evaluated ?? 0,
       graph_calls: base.graph_calls ?? 0,
@@ -127,15 +129,31 @@ function failSafe(
       llm_completion_tokens: base.llm_completion_tokens,
       rule_source: base.rule_source ?? 'json-fallback',
       fail_reason: reason,
+      raw_llm_text: base.raw_llm_text,
+      llm_finish_reason: base.llm_finish_reason,
     },
   };
+}
+
+/**
+ * Strip a leading ```json (or ```) fence and a trailing ``` if present. LLMs
+ * (Gemini especially) often wrap JSON in a markdown code fence even when the
+ * prompt forbids it. This is a single-line tolerance layer.
+ */
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  // ```json\n ... \n``` or ```\n ... \n```
+  const m = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (m) return m[1].trim();
+  return trimmed;
 }
 
 function parseLlmJson(
   text: string,
 ): { decision?: unknown; stats?: unknown; rule_results?: unknown } | null {
+  const cleaned = stripCodeFence(text);
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(cleaned);
     if (typeof parsed !== 'object' || parsed === null) return null;
     return parsed as { decision?: unknown; stats?: unknown; rule_results?: unknown };
   } catch {
@@ -143,7 +161,21 @@ function parseLlmJson(
   }
 }
 
-function coerceRuleResults(raw: unknown): RuleResult[] {
+function coerceRuleResults(
+  raw: unknown,
+  steps: MatchResumeStepGroup[],
+): RuleResult[] {
+  // rule_name and step_id are derived server-side from the steps catalog rather
+  // than emitted by the LLM. This saves ~30 tokens per rule entry — critical
+  // when the gateway clamps max_tokens aggressively and we're emitting one
+  // entry per evaluated rule.
+  const lookup = new Map<string, { rule_name: string; step_id: string }>();
+  for (const s of steps) {
+    for (const r of s.rules) {
+      lookup.set(r.id, { rule_name: r.businessLogicRuleName, step_id: s.step_id });
+    }
+  }
+
   if (!Array.isArray(raw)) return [];
   const allowed = new Set<RuleStatus>([
     'pass',
@@ -159,21 +191,21 @@ function coerceRuleResults(raw: unknown): RuleResult[] {
     const r = item as Record<string, unknown>;
     if (
       typeof r.rule_id !== 'string' ||
-      typeof r.rule_name !== 'string' ||
-      typeof r.step_id !== 'string' ||
       typeof r.status !== 'string' ||
       !allowed.has(r.status as RuleStatus)
     ) {
       continue;
     }
+    const meta = lookup.get(r.rule_id);
+    if (!meta) continue;
     const status = r.status as RuleStatus;
     const reason = typeof r.reason === 'string' ? r.reason : undefined;
     const reasonRequired = status !== 'pass' && status !== 'not_triggered';
     if (reasonRequired && !reason) continue;
     out.push({
       rule_id: r.rule_id,
-      rule_name: r.rule_name,
-      step_id: r.step_id,
+      rule_name: meta.rule_name,
+      step_id: meta.step_id,
       status,
       reason,
     });
@@ -213,8 +245,14 @@ function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['dec
   return 'PASS';
 }
 
+export type RunRuleCheckOptions = {
+  /** Override the gateway's default model for this call only. */
+  model?: string;
+};
+
 export async function runRuleCheck(
   input: RuleCheckInput,
+  opts: RunRuleCheckOptions = {},
 ): Promise<MatchResumeCheckResult> {
   const dims = extractDims(input.job_requisition);
   let sourceResult;
@@ -266,6 +304,16 @@ export async function runRuleCheck(
     llmResult = await chatComplete({
       system: MATCH_RESUME_SYSTEM_PROMPT,
       user: userPrompt,
+      // Rule check emits one rule_results entry per evaluated rule. With
+      // 20-40 rules surviving the client filter (and each entry carrying a
+      // Chinese-language reason — more bytes per token than English), the
+      // output regularly exceeds 8000 tokens. 16k handles ~40 rules with
+      // headroom; bump to 32k+ if deployments routinely have >60 rules.
+      maxTokens: 16000,
+      model: opts.model,
+      // temperature + extra_body (Kimi thinking-disable) are model-aware in
+      // the gateway; we let chatComplete pick the right defaults so the same
+      // code works for Kimi K2.6 AND Gemini-3-flash-preview without changes.
       tools: {
         schema: TOOL_SCHEMA,
         onToolCall: dispatcher,
@@ -294,14 +342,17 @@ export async function runRuleCheck(
     llm_prompt_tokens: llmResult.usage?.promptTokens,
     llm_completion_tokens: llmResult.usage?.completionTokens,
     rule_source: sourceResult.source,
+    // Keep up to 50k so the test-suite report can show the full response.
+    raw_llm_text: llmResult.text?.slice(0, 50000),
+    llm_finish_reason: llmResult.finishReason,
   };
   if (!parsed) {
-    return failSafe('parse-error', auditOnError);
+    return failSafe('parse-error', auditOnError, graph);
   }
 
-  const ruleResults = coerceRuleResults(parsed.rule_results);
+  const ruleResults = coerceRuleResults(parsed.rule_results, filteredSteps);
   if (ruleResults.length !== expectedRuleCount) {
-    return failSafe('parse-error', auditOnError);
+    return failSafe('parse-error', auditOnError, graph);
   }
 
   const stats = statsFromResults(ruleResults);
@@ -313,6 +364,7 @@ export async function runRuleCheck(
     stats,
     rule_results: ruleResults,
     explanations,
+    graph_context: graph,
     audit: {
       rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
@@ -322,6 +374,7 @@ export async function runRuleCheck(
       llm_prompt_tokens: llmResult.usage?.promptTokens,
       llm_completion_tokens: llmResult.usage?.completionTokens,
       rule_source: sourceResult.source,
+      llm_finish_reason: llmResult.finishReason,
     },
   };
 }

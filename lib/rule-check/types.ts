@@ -104,6 +104,10 @@ export type MatchResumeCheckResult = {
   /** Every evaluated rule's status, in Set + within-Set order. Use for debug; the runner derives `explanations` from this. */
   rule_results: RuleResult[];
   explanations: RuleExplanation[];
+  /** Pre-fetched graph slots used to evaluate this run. UI consumers (the
+   *  /rule-check page) read this to build the drawer's graph view and
+   *  inference chain without re-fetching from neo4j. */
+  graph_context?: import('./graph-context').GraphContext;
   audit: {
     rules_evaluated: number;
     graph_calls: number;
@@ -119,6 +123,12 @@ export type MatchResumeCheckResult = {
       | 'tool-use-loop-exceeded'
       | 'parse-error'
       | string;
+    /** Truncated raw LLM output. Populated when fail_reason='parse-error'
+     *  so callers can diagnose what the model actually emitted. */
+    raw_llm_text?: string;
+    /** OpenAI-protocol finish_reason on the last LLM response. "length" =
+     *  max_tokens cap hit (truncation); "stop" = model finished cleanly. */
+    llm_finish_reason?: string;
   };
 };
 
