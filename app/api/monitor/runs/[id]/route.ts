@@ -50,12 +50,12 @@ export async function GET(
 
     // ── Build trail ──────────────────────────────────────────────
     // For each NODES entry, find activities matching this run's agent
-    // (match by node.title which equals agentName in the DB).
-    // The "ResumeParser+DupeCheck" node title is what the Task 3 fix
-    // uses for lookup, so this is consistent.
+    // (match by node.agentName if present, else fall back to node.title).
+    // The "ResumeParser+DupeCheck" node has agentName "ResumeParser",
+    // matching the DB agentName exactly.
     const trail: RunTrailStep[] = [];
     for (const n of NODES) {
-      const ofThis = activities.filter(a => a.agentName === n.title);
+      const ofThis = activities.filter(a => a.agentName === (n.agentName ?? n.title));
       if (ofThis.length === 0) continue;
 
       const start = ofThis.find(a => a.type === 'agent_start');

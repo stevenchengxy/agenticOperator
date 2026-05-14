@@ -52,4 +52,30 @@ describe('GET /api/monitor/runs/[id]', () => {
     expect(j.trail).toBeInstanceOf(Array);
     expect(j.activity).toHaveLength(1);
   });
+
+  it('correctly maps parse node activity (ResumeParser agentName) to the parse node id', async () => {
+    (prisma.workflowRun.findUnique as any).mockResolvedValue({
+      id: 'r-parse',
+      triggerEvent: 'RESUME_DOWNLOADED',
+      triggerData: '{}',
+      status: 'completed',
+      startedAt: new Date('2026-05-14T00:00:00Z'),
+      completedAt: new Date('2026-05-14T00:01:00Z'),
+      lastActivityAt: new Date('2026-05-14T00:01:00Z'),
+    });
+    (prisma.agentActivity.findMany as any).mockResolvedValue([
+      { agentName: 'ResumeParser', type: 'agent_start',    metadata: null, createdAt: new Date('2026-05-14T00:00:30Z'), narrative: 'start',    runId: 'r-parse' },
+      { agentName: 'ResumeParser', type: 'agent_complete', metadata: null, createdAt: new Date('2026-05-14T00:00:55Z'), narrative: 'complete', runId: 'r-parse' },
+    ]);
+    (prisma.humanTask.findMany as any).mockResolvedValue([]);
+    (prisma.eventInstance.findMany as any).mockResolvedValue([]);
+
+    const res = await GET(new Request('http://x/api/monitor/runs/r-parse'), ctx('r-parse'));
+    const j = await res.json();
+    expect(res.status).toBe(200);
+    const parseStep = j.trail.find((t: any) => t.nodeId === 'parse');
+    expect(parseStep).toBeDefined();
+    expect(parseStep.result).toBe('success');
+    expect(parseStep.stepCount).toBe(2);
+  });
 });
