@@ -39,6 +39,7 @@ import { RuleClassifierAgent } from './agents/rule-classifier-agent';
 import { PromptComposerAgent } from './agents/prompt-composer-agent';
 import { SeverityInferenceAgent } from './agents/severity-inference-agent';
 import { LLMRunnerAgent } from './agents/llm-runner-agent';
+import { RuleScopeClassifierAgent } from './agents/rule-scope-classifier-agent';
 
 export class RuleCheckPromptPipeline {
   constructor(
@@ -46,6 +47,8 @@ export class RuleCheckPromptPipeline {
     private readonly classifier: RuleClassifierAgent,
     private readonly composer: PromptComposerAgent,
     private readonly llmRunner: LLMRunnerAgent,
+    /** 可选 — 不传时跳过 scope 分类(行为退化成老 pipeline)。 */
+    private readonly scopeClassifier?: RuleScopeClassifierAgent,
   ) {}
 
   async run(
@@ -55,11 +58,30 @@ export class RuleCheckPromptPipeline {
       candidateLabel: string;
       jdLabel: string;
     },
-    opts: { runLLM?: boolean } = {},
+    opts: {
+      runLLM?: boolean;
+      /** 是否过滤掉 scope='candidate_matching' 的规则 — 默认 true,把候选人-JR 比对类规则
+       * 交给 Robohire,rule-check LLM 只跑 truly_universal + customer_specific。 */
+      filterCandidateMatching?: boolean;
+    } = {},
   ): Promise<PipelineResult> {
     const dims = this.extractDimensions(args.input.job_requisition);
     const queryResult = await this.query.query(dims);
-    const classified = this.classifier.classify(queryResult.rules);
+
+    // ★ Scope 分类:让 LLM 区分"真通用 / 候选人-JR 匹配 / 客户专属"
+    // 默认开启过滤(candidate_matching 给 Robohire 接管,不进 rule-check LLM)
+    let rulesForLLM = queryResult.rules;
+    let scopeStats: ReturnType<typeof RuleScopeClassifierAgent.summarize> | null = null;
+    if (this.scopeClassifier) {
+      const annotated = await this.scopeClassifier.classifyAll(queryResult.rules);
+      scopeStats = RuleScopeClassifierAgent.summarize(annotated);
+      const shouldFilter = opts.filterCandidateMatching !== false;
+      rulesForLLM = shouldFilter
+        ? annotated.filter((r) => r.scope !== 'candidate_matching')
+        : annotated;
+    }
+
+    const classified = this.classifier.classify(rulesForLLM);
 
     const promptSections = this.composer.composeSections({
       inputs: args.input,
@@ -106,6 +128,8 @@ export class RuleCheckPromptPipeline {
       dims,
       rules_total_in_db: queryResult.total_in_source,
       rules_after_filter: queryResult.rules.length,
+      rules_after_scope_filter: rulesForLLM.length,
+      scope_stats: scopeStats,
       classified,
       prompt_sections: promptSections,
       expected_llm_output: expectedOutput,

@@ -39,16 +39,37 @@ const ROLE_SECTION = `## 1. 你的角色
 请特别注意:
 - **不要给候选人打匹配分数。** 打分是下游 Robohire 的工作。
 - 你的输出会驱动三种处理:DROP / PAUSE / KEEP。
-- 简历缺少某个字段时,该字段相关的规则应标 \`result="NOT_APPLICABLE"\`,不要编造证据。`;
+
+### ★ result 分类铁律(必读)
+
+**只有当现有数据足够推断出"真的违反规则"时,才标 \`result="FAIL"\`。**
+
+具体三种情况:
+
+1. **真违反**(数据足够 + 明确违反规则) → \`result="FAIL"\` + \`fail_reason_type="rule_violation"\`
+   例:候选人 \`education[0].degree="大专"\`,JR 要求 \`degree_requirement="本科"\` → 学历真不符,FAIL
+
+2. **数据缺失,推不出来**(简历字段为 null/缺/未提供,无法判定是否违反) → \`result="NOT_APPLICABLE"\` + \`evidence="字段 X 缺,无法判定,跳过(不阻塞流程)"\`
+   例:规则要求看 \`marital_status\`,但简历这字段是 null → **不要标 FAIL**,标 NOT_APPLICABLE,流程继续
+   ★ **重点**:就算这条规则原本是 terminal(终止级),只要 FAIL 原因是缺数据,**就标 NOT_APPLICABLE 不是 FAIL**,系统不阻塞流程
+
+3. **真通过**(数据足够 + 没违反规则) → \`result="PASS"\`
+
+**判断 fail_reason_type 的依据**:写 evidence 时反查 — 引用到的关键字段如果都有值(非 null/非 ""/非 "未提供"),才算"数据足够"。任何一个关键字段缺失就算"缺数据" → NOT_APPLICABLE 而非 FAIL。`;
 
 const DECISION_LOGIC_SECTION = `## 4. 决策结算逻辑
 
-跑完全部 applicable 规则后:
-1. 任一 \`rule_flags[i].result == "FAIL"\` → \`overall_decision = "DROP"\`
+跑完全部 applicable 规则后,**只看真违反**(fail_reason_type="rule_violation"):
+1. 任一 \`rule_flags[i].result == "FAIL" && fail_reason_type == "rule_violation"\` → \`overall_decision = "DROP"\`
 2. 否则任一 \`result == "REVIEW"\` → \`overall_decision = "PAUSE"\`
-3. 否则 → \`overall_decision = "KEEP"\`
+3. 否则 → \`overall_decision = "KEEP"\`(包括所有 NOT_APPLICABLE — 哪怕是 terminal 规则缺数据也不阻塞)
 
-无论决策哪个,\`rule_flags\` 必须覆盖 §3 中**每一条**规则(不适用的写 NOT_APPLICABLE)。`;
+**关键变化(★)**:
+- \`result="NOT_APPLICABLE"\` **永远不阻塞**,无论 severity(terminal / needs_human / flag_only)
+- "缺数据导致无法判定"必须用 NOT_APPLICABLE,**不能借口"严格按底线"标 FAIL**
+- AO 把"缺数据"事件单独 emit RESUME_INFO_MISSING(系统层补,流程继续)
+
+\`rule_flags\` 必须覆盖 §3 中**每一条**规则。`;
 
 const OUTPUT_SCHEMA_SECTION = `## 5. 输出格式
 
@@ -70,6 +91,7 @@ const OUTPUT_SCHEMA_SECTION = `## 5. 输出格式
       "severity": "terminal" | "needs_human" | "flag_only",
       "applicable": true | false,
       "result": "PASS" | "FAIL" | "REVIEW" | "NOT_APPLICABLE",
+      "fail_reason_type": "rule_violation" | "missing_data" | null,   // ★ 仅 result=FAIL 时填:rule_violation = 真违反 / missing_data = 数据缺(此情况应改 NOT_APPLICABLE);其他 result 此字段为 null
       "evidence": "<引用简历原文>",
       "next_action": "continue" | "block" | "pause" | "notify_recruiter" | "notify_hsm"
     }
@@ -91,6 +113,8 @@ const SELF_CHECK_SECTION = `## 6. 提交前自检
 - [ ] rule_flags 覆盖 §3 所有规则(不适用写 NOT_APPLICABLE)
 - [ ] overall_decision 跟 drop_reasons / pause_reasons 一致
 - [ ] 每条 evidence 引用了简历原文,简历未提供时写"简历未提供 <字段>,标 NOT_APPLICABLE"
+- [ ] **缺数据自检(★)**:每条 \`result="FAIL"\` 都要看 evidence。如果 evidence 里含 "未提供/未填写/未知/缺失/无法判定/字段为空" 措辞 → 这是**缺数据**而不是真违反 → 把 result **改成 NOT_APPLICABLE**,fail_reason_type 不填
+- [ ] **真违反自检(★)**:剩下的 \`result="FAIL"\` 必须填 \`fail_reason_type="rule_violation"\`,evidence 必须引用所有关键字段的**实际非空值**证明确实违反阈值
 - [ ] resume_augmentation 是给 Robohire 看的可读 markdown
 - [ ] 不要给候选人打匹配分数`;
 

@@ -11,10 +11,26 @@
 export type Severity = 'terminal' | 'needs_human' | 'flag_only';
 
 /**
+ * 规则实际作用域(由 RuleScopeClassifierAgent LLM 判定,不是 ontology 的字段)。
+ *
+ * 业务背景:`applicableClient` 现状只分"通用 / <客户名>"两类。但一些标着"通用"
+ * 的规则**实际上**是候选人-JR 匹配类规则(比较候选人技能跟 JR `must_have_skills`、
+ * 比较期望薪资跟 JR 框架等)— 这些应该由 Robohire 打分时处理,不应该进 rule-check
+ * LLM 预筛。LLM 看 `standardizedLogicRule` 文本可以分辨:
+ *
+ * - `truly_universal`  规则只读候选人属性(空窗期、教育周期、年龄、婚育、利益冲突),
+ *                       跟具体 JR 无关 → ✅ 留在 rule-check
+ * - `candidate_matching` 规则读 JR 字段做候选人-JR 比对(must_have_skills 是否齐、
+ *                       expected_salary 是否超岗位框架、学历是否达 JR 要求)→
+ *                       ❌ 排除,由 Robohire 接管
+ * - `customer_specific` 规则跟具体客户绑定(applicableClient ≠ '通用')→ ✅ 留
+ */
+export type RuleScope = 'truly_universal' | 'candidate_matching' | 'customer_specific';
+
+/**
  * Ontology Rule — 字段跟 ontology JSON / Neo4j 节点 1:1 对齐。
  *
- * severity 不是 ontology 的字段(目前 ontology 没有 gating_severity),
- * 而是由 SeverityInferenceAgent 从 standardizedLogicRule 文本里推断出来的。
+ * severity / scope 不是 ontology 字段,而是 inference agent 注入的派生字段。
  */
 export interface Rule {
   id: string;
@@ -31,6 +47,10 @@ export interface Rule {
 
   // ─── 派生字段(由 SeverityInferenceAgent 注入) ───
   severity: Severity;
+
+  // ─── 派生字段(由 RuleScopeClassifierAgent LLM 注入) ───
+  scope?: RuleScope;
+  scope_reason?: string;          // LLM 给出的判定理由(给前端 drawer 显示)
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -277,7 +297,14 @@ export interface PipelineResult {
   jd_label: string;
   dims: OntologyQuery;
   rules_total_in_db: number;
-  rules_after_filter: number;
+  rules_after_filter: number;        // 经 (client × department × executor) filter 后剩余
+  rules_after_scope_filter?: number; // 再经 scope filter(去掉 candidate_matching)后剩余
+  scope_stats?: {                    // RuleScopeClassifierAgent 打的统计
+    truly_universal: number;
+    candidate_matching: number;
+    customer_specific: number;
+    unclassified: number;
+  } | null;
   classified: ClassifiedRules;
   prompt_sections: PromptSections;
   expected_llm_output: string;

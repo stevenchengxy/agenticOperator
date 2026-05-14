@@ -16,11 +16,24 @@ export function LeftNav() {
   const { t } = useApp();
   const pathname = usePathname();
   const [inboxCount, setInboxCount] = React.useState<string>("—");
+  const [monitorCount, setMonitorCount] = React.useState<string>("—");
 
   React.useEffect(() => {
     const tick = () => {
       fetchJson<HumanTasksResponse>("/api/human-tasks")
         .then((r) => setInboxCount(r.total > 0 ? String(r.total) : ""))
+        .catch(() => {/* keep "—" */});
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  React.useEffect(() => {
+    const tick = () => {
+      fetchJson<{ kpi: { activeRuns: number } }>("/api/monitor/overview", { cache: "no-store" })
+        .then((j) =>
+          setMonitorCount(j.kpi.activeRuns > 0 ? String(j.kpi.activeRuns) : ""))
         .catch(() => {/* keep "—" */});
     };
     tick();
@@ -40,7 +53,7 @@ export function LeftNav() {
     { type: "group", title: t("nav_group_operate") },
     { type: "item", id: "overview",   icon: "grid",     label: t("nav_overview"), href: "/overview" },
     { type: "item", id: "fleet",      icon: "cpu",      label: t("nav_fleet"), count: "22", href: "/fleet" },
-    { type: "item", id: "runs",       icon: "play",     label: t("nav_runs"),  count: "—", href: "/live" },
+    { type: "item", id: "monitor",    icon: "gauge",    label: t("nav_monitor"), count: monitorCount, href: "/monitor" },
     { type: "item", id: "inbox",      icon: "user",     label: t("nav_inbox"), count: inboxCount, href: "/inbox" },
     { type: "item", id: "events",     icon: "bolt",     label: t("nav_events"), href: "/events" },
     { type: "item", id: "triggers",   icon: "clock",    label: t("nav_triggers"), href: "/triggers" },
