@@ -1,0 +1,394 @@
+# s03-csi-blacklist-drop ❌
+
+> scenario: candidate=`c03-wangwu-csi-blacklist` × jd=`jr-tencent-pcg-frontend`
+> rationale: 王五在中软国际离职原因 A15(劳动纠纷),命中 10-17 通用黑名单高风险类型,系统自动判定不予录用,立即终止匹配流程。
+
+## 1. Verdict — 期望 vs 实际
+
+| | 期望 | 实际 |
+|---|---|---|
+| binary decision | FAIL | FAIL ✓ |
+| llm_decision | DROP | DROP |
+| must-fail rules | 10-17 | 10-5:SKILL_MISMATCH, 10-14:LANGUAGE_MISMATCH, 10-17:HIGH_RISK_LEAVE_CODE, 10-12:AGE_LOGIC_EXCEPTION |
+| augmentation injected | no | no |
+
+## 2. Assertions
+
+- ✅ **decision == expected (FAIL)**
+- ✅ **llm_decision compatible (DROP)**
+- ✅ **must-fail rule fired: 10-17**
+- ✅ **matchResume NOT called (FAIL skips Robohire)**
+- ✅ **Neo4j audit node written**
+- ✅ **Neo4j flags count == applicable count (18)** — wrote=18 expected=18
+- ❌ **evidence verifiable rate ≥ 0.8 (got 50%)** — verified=9 / total=18
+
+## 3. Evidence 真实性核查
+
+LLM 输出的每条 `rule_flags[i].evidence` 是否能在原始 parsed_resume 里 grep 到原文片段。
+**Verifiable rate: 50%** (≥ 80% required)
+
+| Rule | Evidence(LLM 输出) | 提取片段 | 命中 | 未命中 | ✓/✗ |
+|---|---|---|---|---|---|
+| 10-5 | 岗位要求必备技能 [React, TypeScript, Webpack]，候选人技能为 [Java, Spring Boot, MySQL, Redis, Kafka]，完全不匹配前端技术栈。 | 岗位要求必备技能, 候选人技能为, 完全不匹配前端技术栈 | Java, Spring | 岗位要求必备技能, 候选人技能为 | ✓ |
+| 10-6 | 候选人未通过硬性要求校验，不执行加分项识别。 | 候选人未通过硬性要求校验, 不执行加分项识别 | — | 候选人未通过硬性要求校验, 不执行加分项识别 | ✗ |
+| 10-7 | 候选人期望薪资 35k-45k，在岗位薪资范围 30k-50k 内。 | 候选人期望薪资, 在岗位薪资范围, 35k-45k | 35k-45k | 候选人期望薪资, 在岗位薪资范围 | ✓ |
+| 10-8 | outsourcing_acceptance: "接受" | 接受 | 接受 | — | ✓ |
+| 10-9 | 2014年毕业，2020-03至2023-05在华腾，2023-06至2026-04在某公司，无超过3个月空窗期。 | 年毕业, 在华腾, 在某公司 | 2020-03, 2023-05 | 年毕业, 在华腾 | ✓ |
+| 10-10 | 平均每段工作时长超过1年（3年及2.8年）。 | 平均每段工作时长超过, 年及 | — | 平均每段工作时长超过, 年及 | ✗ |
+| 10-12 | 出生1988年，本科毕业2014年，毕业年龄26岁，超出常规本科毕业年龄（22-23岁）3岁。 | 出生, 本科毕业, 毕业年龄 | — | 出生, 本科毕业 | ✗ |
+| 10-14 | 岗位要求 CET-6 480以上，候选人仅提供 CET-4。 | 岗位要求, 以上, 候选人仅提供 | CET-4, CET | 岗位要求, 以上 | ✓ |
+| 10-16 | 离职原因包含YCH但属于高风险编码B8，由10-17规则处理。 | 离职原因包含, 但属于高风险编码, 规则处理 | YCH | 离职原因包含, 但属于高风险编码 | ✓ |
+| 10-17 | 候选人曾任职于华腾，离职编码为 B8 (有犯罪记录 YCH)，属于高风险类型。 | 候选人曾任职于华腾, 离职编码为, 有犯罪记录 | 有犯罪记录, YCH | 候选人曾任职于华腾, 离职编码为 | ✓ |
+| 10-18 | 离职编码为B8，非A13(1)。 | 离职编码为, A13 | — | 离职编码为, A13 | ✗ |
+| 10-24 | 关联至原始需求 jr_x99。 | 关联至原始需求 | — | 关联至原始需求 | ✗ |
+| 10-25 | 工作经历中不包含华为、荣耀。 | 工作经历中不包含华为, 荣耀 | — | 工作经历中不包含华为, 荣耀 | ✗ |
+| 10-26 | 工作经历中不包含OPPO、小米。 | 工作经历中不包含, 小米, OPPO | — | 工作经历中不包含, 小米 | ✗ |
+| 10-54 | 负向要求为“不接受外包从业经历超过 2 年”，候选人最近一段经历为“某互联网公司”，非外包。 | 负向要求为, 不接受外包从业经历超过, 候选人最近一段经历为 | 某互联网公司 | 负向要求为, 不接受外包从业经历超过 | ✓ |
+| 10-27 | conflict_of_interest: [] |  | — | — | ✗ |
+| 10-35 | nationality: "中国" | 中国, nationality | 中国, nationality | — | ✓ |
+| 10-53 | 目标事业群为 PCG。 | 目标事业群为, PCG | — | 目标事业群为, PCG | ✗ |
+
+## 4. LLM 原始输出(full JSON)
+
+```json
+{
+  "candidate_id": "R_a83262",
+  "job_requisition_id": "jr_x99",
+  "client_id": "CLI_TENCENT",
+  "overall_decision": "DROP",
+  "drop_reasons": [
+    "10-5:SKILL_MISMATCH",
+    "10-14:LANGUAGE_MISMATCH",
+    "10-17:HIGH_RISK_LEAVE_CODE"
+  ],
+  "pause_reasons": [
+    "10-12:AGE_LOGIC_EXCEPTION"
+  ],
+  "rule_flags": [
+    {
+      "rule_id": "10-5",
+      "rule_name": "简历匹配硬性要求一票否决",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "FAIL",
+      "evidence": "岗位要求必备技能 [React, TypeScript, Webpack]，候选人技能为 [Java, Spring Boot, MySQL, Redis, Kafka]，完全不匹配前端技术栈。",
+      "next_action": "block"
+    },
+    {
+      "rule_id": "10-6",
+      "rule_name": "推荐前置简历匹配与硬性要求规则",
+      "applicable_client": "通用",
+      "severity": "flag_only",
+      "applicable": true,
+      "result": "NOT_APPLICABLE",
+      "evidence": "候选人未通过硬性要求校验，不执行加分项识别。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-7",
+      "rule_name": "候选人期望薪资校验",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "候选人期望薪资 35k-45k，在岗位薪资范围 30k-50k 内。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-8",
+      "rule_name": "候选人意愿度校验",
+      "applicable_client": "通用",
+      "severity": "flag_only",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "outsourcing_acceptance: \"接受\"",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-9",
+      "rule_name": "简历履历空窗期检测与标记",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "2014年毕业，2020-03至2023-05在华腾，2023-06至2026-04在某公司，无超过3个月空窗期。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-10",
+      "rule_name": "简历履历空窗期与职业稳定性风险判定",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "平均每段工作时长超过1年（3年及2.8年）。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-12",
+      "rule_name": "学历年龄逻辑校验与风险预警",
+      "applicable_client": "通用",
+      "severity": "needs_human",
+      "applicable": true,
+      "result": "REVIEW",
+      "evidence": "出生1988年，本科毕业2014年，毕业年龄26岁，超出常规本科毕业年龄（22-23岁）3岁。",
+      "next_action": "pause"
+    },
+    {
+      "rule_id": "10-14",
+      "rule_name": "语言能力硬性门槛判断",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "FAIL",
+      "evidence": "岗位要求 CET-6 480以上，候选人仅提供 CET-4。",
+      "next_action": "block"
+    },
+    {
+      "rule_id": "10-15",
+      "rule_name": "特殊工时与出差意愿匹配",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "岗位未带有轮班、夜班、倒班或长期出差标签。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-16",
+      "rule_name": "通用黑名单检验规则-被动释放人员",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "离职原因包含YCH但属于高风险编码B8，由10-17规则处理。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-17",
+      "rule_name": "通用黑名单检验规则-高风险回流人员",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "FAIL",
+      "evidence": "候选人曾任职于华腾，离职编码为 B8 (有犯罪记录 YCH)，属于高风险类型。",
+      "next_action": "block"
+    },
+    {
+      "rule_id": "10-18",
+      "rule_name": "通用黑名单检验规则-EHS风险回流人员",
+      "applicable_client": "通用",
+      "severity": "needs_human",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "离职编码为B8，非A13(1)。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-24",
+      "rule_name": "简历与客户原始需求的关联",
+      "applicable_client": "通用",
+      "severity": "flag_only",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "关联至原始需求 jr_x99。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-25",
+      "rule_name": "华为荣耀竞对与客户互不挖角红线",
+      "applicable_client": "通用",
+      "severity": "needs_human",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "工作经历中不包含华为、荣耀。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-26",
+      "rule_name": "OPPO小米竞对与客户互不挖角红线",
+      "applicable_client": "通用",
+      "severity": "needs_human",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "工作经历中不包含OPPO、小米。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-29",
+      "rule_name": "通用二次入职推荐提醒规则",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "简历未提供曾在我司（CSI）任职的记录，仅有华腾经历。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-54",
+      "rule_name": "对标公司/行业画像库匹配与定向猎挖规则",
+      "applicable_client": "通用",
+      "severity": "terminal",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "负向要求为“不接受外包从业经历超过 2 年”，候选人最近一段经历为“某互联网公司”，非外包。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-27",
+      "rule_name": "腾讯亲属关系回避规则",
+      "applicable_client": "腾讯",
+      "severity": "needs_human",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "conflict_of_interest: []",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-28",
+      "rule_name": "腾讯亲属关系回避处理规则",
+      "applicable_client": "腾讯",
+      "severity": "terminal",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "hsm_feedback 为 null，无确认结果。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-35",
+      "rule_name": "腾讯外籍候选人实名与通道限制规范",
+      "applicable_client": "腾讯",
+      "severity": "needs_human",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "nationality: \"中国\"",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-38",
+      "rule_name": "腾讯历史从业经历识别与核实触发",
+      "applicable_client": "腾讯",
+      "severity": "terminal",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "工作履历中不包含腾讯或腾讯外包经历。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-39",
+      "rule_name": "腾讯历史从业经历核实结果处理",
+      "applicable_client": "腾讯",
+      "severity": "terminal",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "无腾讯历史背景，不适用。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-45",
+      "rule_name": "腾讯正编转外包回流标记",
+      "applicable_client": "腾讯",
+      "severity": "flag_only",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "无腾讯正式岗位工作经历。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-46",
+      "rule_name": "腾讯正编转外包回流凭证校验",
+      "applicable_client": "腾讯",
+      "severity": "needs_human",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "未被标记为正编转外包受控。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-47",
+      "rule_name": "腾讯婚育风险审视与推荐要点",
+      "applicable_client": "腾讯",
+      "severity": "needs_human",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "gender: \"男\"",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-40",
+      "rule_name": "腾讯主动离职人员紧急回流审核",
+      "applicable_client": "腾讯",
+      "severity": "needs_human",
+      "applicable": false,
+      "result": "NOT_APPLICABLE",
+      "evidence": "无腾讯历史从业经历。",
+      "next_action": "continue"
+    },
+    {
+      "rule_id": "10-53",
+      "rule_name": "非IEG事业群跳过内部技术面试",
+      "applicable_client": "腾讯",
+      "severity": "flag_only",
+      "applicable": true,
+      "result": "PASS",
+      "evidence": "目标事业群为 PCG。",
+      "next_action": "continue"
+    }
+  ],
+  "resume_augmentation": "### 简历预筛风险提示\n- **硬性技能不符**: 岗位要求 React/TS，候选人为 Java 后端背景。\n- **语言等级不足**: 岗位要求 CET-6，候选人仅有 CET-4。\n- **黑名单风险**: 候选人曾因 **B8 (有犯罪记录)** 从华腾离职，属于高风险回流人员。\n- **年龄逻辑异常**: 本科毕业年龄 26 岁，建议核实是否存在复读或入伍等情况。\n- **流程优化**: 目标部门 PCG，已标记跳过内部技术面试。",
+  "notifications": [
+    {
+      "recipient": "HSM",
+      "channel": "InApp",
+      "rule_id": "10-12",
+      "message": "候选人王五毕业年龄异常（26岁本科毕业），请核查教育周期年限偏差。"
+    }
+  ]
+}
+```
+
+## 5. matchResume 未调用(FAIL 路径,Robohire 配额节省)
+
+## 6. Neo4j 实例数据写入
+
+- **RuleCheckAudit** `rca_run_2026-05-12T02-36-07-829Z_15f9dd_s03-csi-blacklist-drop`
+  - run_id: `run_2026-05-12T02-36-07-829Z_15f9dd`
+  - decision: FAIL / DROP
+  - dims: client=`腾讯` BG=`PCG`
+  - LLM: model=`google/gemini-3-flash-preview` duration=17583 ms tokens=9019/3256
+  - rules_evaluated: 27 / 51
+  - rule_source: `json-fallback`
+  - partial_resume_fields: `[name, education, skills, languages, gender, birth_date, experience, expected_salary_range, outsourcing_acceptance, gap_periods, former_csi_employment, conflict_of_interest, nationality, former_tencent_employment, marital_status]`
+
+- **RuleCheckFlag** × 18 (applicable=true 的全部):
+  - `10-5` [terminal] result=FAIL next=block
+  - `10-6` [flag_only] result=NOT_APPLICABLE next=continue
+  - `10-7` [terminal] result=PASS next=continue
+  - `10-8` [flag_only] result=PASS next=continue
+  - `10-9` [terminal] result=PASS next=continue
+  - `10-10` [terminal] result=PASS next=continue
+  - `10-12` [needs_human] result=REVIEW next=pause
+  - `10-14` [terminal] result=FAIL next=block
+  - `10-16` [terminal] result=PASS next=continue
+  - `10-17` [terminal] result=FAIL next=block
+  - `10-18` [needs_human] result=PASS next=continue
+  - `10-24` [flag_only] result=PASS next=continue
+  - `10-25` [needs_human] result=PASS next=continue
+  - `10-26` [needs_human] result=PASS next=continue
+  - `10-54` [terminal] result=PASS next=continue
+  - `10-27` [needs_human] result=PASS next=continue
+  - `10-35` [needs_human] result=PASS next=continue
+  - `10-53` [flag_only] result=PASS next=continue
+
+## 7. Timings
+
+| Step | Duration |
+|---|---|
+| saveCandidate | 2 ms |
+| fetch requirement | 2 ms |
+| rule check (LLM) | 17.58 s |
+| matchResume | — |
+| saveMatchResults | — |
+| Neo4j write | 39 ms |
+| **total** | **17.63 s** |

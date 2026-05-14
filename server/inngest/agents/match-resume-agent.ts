@@ -27,9 +27,13 @@ import {
   type RequirementsAgentViewItem,
 } from '@/lib/raas-api-client';
 import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
+import { writeRuleCheckAudit, writeInstanceAnchorsOnly } from '@/lib/rule-check/neo4j-instance-writer';
+import { writeCandidateMatchResult } from '@/lib/rule-check/neo4j-match-result-writer';
+import { writeRuleCheckAuditPrisma } from '@/lib/rule-check/prisma-audit-writer';
 import {
   inngest,
   type MatchPassedNeedInterviewData,
+  type ResumeInfoMissingData,
   type ResumeProcessedData,
   type RuleCheckAuditMeta,
   type RuleCheckFailedData,
@@ -215,6 +219,12 @@ export const matchResumeAgent = inngest.createFunction(
       // Robohire `/match-resume` 的 resume 字段顶部。值在 gate-enabled +
       // PASS 路径填入,gate 关时永远 undefined。
       let pendingAugmentation: string | undefined;
+      // rule-check PASS 路径的 audit 元信息 — hoist 到 if 外,给 Match_Result 写入用
+      let passAuditResult: {
+        audit_id: string | null;
+        parent_audit_id: string | null;
+      } | null = null;
+      let ruleCheckAuditMetaForMatch: RuleCheckAuditMeta | null = null;
 
       // ── 4.0 NEW: rule-check LLM 预筛 (PASS/FAIL gate) ───────────────
       //
@@ -277,31 +287,115 @@ export const matchResumeAgent = inngest.createFunction(
 
       const resumeIdForEvents = typeof data.resume_id === 'string' ? data.resume_id : undefined;
 
+      // ── 5. FAIL 路径分流:有缺字段就 emit RESUME_INFO_MISSING(让 partner 触发补全),
+      //       否则 emit RULE_CHECK_FAILED(硬性失败,关 task)。
+      //       PASS 路径不扫 — 走到 Step 4a 调 RAAS matchResume,没必要再发缺字段事件。
+      //
+      // 规则评估 result=NOT_APPLICABLE/FAIL 时,evidence 写 "简历未提供 <field>" 表示缺字段。
+      // 我们扫这个 pattern 把字段抠出来作为补全清单。
+      // (跟 lib/events-catalog.ts:128 + raas_v4 RESUME_INFO_MISSING → resume_info_repair 对齐)
       if (ruleCheck.decision === 'FAIL') {
-        const failedPayload: RuleCheckFailedData = {
-          upload_id: uploadId ?? '',
-          candidate_id: candidateId ?? undefined,
-          resume_id: resumeIdForEvents,
-          job_requisition_id: jrid,
-          client_id: pickClientId(req),
-          failure_reasons: ruleCheck.failure_reasons,
-          hit_rules: ruleCheck.hit_flags.map((f) => ({
-            rule_id: f.rule_id,
-            rule_name: f.rule_name,
-            severity: f.severity,
-            result: f.result,
-            evidence: f.evidence,
-          })),
-          audit: ruleCheckAuditMeta,
-        };
-        await step.sendEvent(`emit-rule-check-failed-${stepKey}`, {
-          name: 'RULE_CHECK_FAILED',
-          data: failedPayload,
+        const missingFields = detectMissingFields(ruleCheck.llm_output?.rule_flags ?? []);
+        const auditIdForLink =
+          `rca_${(event.id as string | undefined) ?? `run_${Date.now()}`}_${jrid}`;
+
+        // FAIL 路径互斥发事件:
+        //   - 有缺字段 → emit RESUME_INFO_MISSING(可救:乐观假设补全后能 PASS,recruiter
+        //     补全后 partner 重发 RESUME_PROCESSED 走新一轮 matchResumeAgent。如果补完还
+        //     FAIL 且无 missing,会走下面 else 分支 emit RULE_CHECK_FAILED 终止)
+        //   - 无缺字段 → emit RULE_CHECK_FAILED(硬性失败,partner 关任务)
+        // 不同时发两个 — 让 partner 收到的信号一致,避免"既要补全又要关任务"矛盾。
+        if (missingFields.length > 0) {
+          const infoMissingPayload: ResumeInfoMissingData = {
+            upload_id: uploadId ?? '',
+            candidate_id: candidateId ?? undefined,
+            resume_id: resumeIdForEvents,
+            job_requisition_id: jrid,
+            client_id: pickClientId(req),
+            missing_fields: missingFields,
+            audit_id: auditIdForLink,
+            occurred_at: new Date().toISOString(),
+          };
+          await step.sendEvent(`emit-resume-info-missing-${stepKey}`, {
+            name: 'RESUME_INFO_MISSING',
+            data: infoMissingPayload,
+          });
+          logger.info(
+            `[${AGENT_NAME}] 📋 RESUME_INFO_MISSING · job_req=${jrid} ` +
+              `missing=${missingFields.map((m) => m.field).join(',')} — ` +
+              `partner 应触发 resume_info_repair 让用户补全`,
+          );
+        } else {
+          // 无 missing 字段的 FAIL = 候选人确实没通过硬性门槛(学历不符 / 黑名单 / 婚育风险等)
+          // 直接 emit MATCH_FAILED(跟 partner ontology §4 白名单对齐,语义"撮合失败")
+          // 不再发 RULE_CHECK_FAILED — partner 收 MATCH_FAILED 即可关任务,跟 Robohire match
+          // FAIL 走的是同一个事件。match_failed_source='rule_check_terminal' 区分来源。
+          const failedPayload: RuleCheckFailedData = {
+            upload_id: uploadId ?? '',
+            candidate_id: candidateId ?? undefined,
+            resume_id: resumeIdForEvents,
+            job_requisition_id: jrid,
+            client_id: pickClientId(req),
+            failure_reasons: ruleCheck.failure_reasons,
+            hit_rules: ruleCheck.hit_flags.map((f) => ({
+              rule_id: f.rule_id,
+              rule_name: f.rule_name,
+              severity: f.severity,
+              result: f.result,
+              evidence: f.evidence,
+            })),
+            audit: ruleCheckAuditMeta,
+            match_failed_source: 'rule_check_terminal',
+          };
+          await step.sendEvent(`emit-match-failed-${stepKey}`, {
+            name: 'MATCH_FAILED',
+            data: failedPayload,
+          });
+          logger.info(
+            `[${AGENT_NAME}] ⛔ MATCH_FAILED (rule_check_terminal) · job_req=${jrid} ` +
+              `reasons=${ruleCheck.failure_reasons.join(',') || '(none)'} — partner 应关任务`,
+          );
+        }
+        // 双写:Prisma audit/flag + Neo4j 实体。
+        // 不写 Candidate_Match_Result — rule-check 阶段只是"推理 + 证据",还没真正跑匹配。
+        // Match_Result 只在 rule-check PASS + RAAS /api/v1/match-resume 返回结果后才写。
+        await step.run(`audit-fail-${stepKey}`, async () => {
+          const ctx = {
+            run_id: (event.id as string | undefined) ?? `run_${Date.now()}`,
+            upload_id: uploadId ?? '',
+            candidate_id: candidateId ?? '',
+            resume_id: typeof data.resume_id === 'string' ? data.resume_id : '',
+            job_requisition_id: jrid,
+            trace_id: traceId ?? null,
+            parsed_resume:
+              data.parsed && typeof data.parsed === 'object'
+                ? ((data.parsed as Record<string, unknown>).data as
+                    | Record<string, unknown>
+                    | undefined) ?? null
+                : null,
+            job_requisition: req as unknown as Record<string, unknown>,
+            parent_audit_id:
+              (data as Record<string, unknown>).enrichment_applied &&
+              typeof ((data as Record<string, unknown>).enrichment_applied as Record<string, unknown>).parent_audit_id === 'string'
+                ? (((data as Record<string, unknown>).enrichment_applied as Record<string, unknown>).parent_audit_id as string)
+                : null,
+          };
+          const pAudit = await writeRuleCheckAuditPrisma({ verdict: ruleCheck, context: ctx });
+          const nEntity = await writeInstanceAnchorsOnly({
+            candidate_id: ctx.candidate_id,
+            resume_id: ctx.resume_id,
+            job_requisition_id: ctx.job_requisition_id,
+            parsed_resume: ctx.parsed_resume,
+            job_requisition: ctx.job_requisition,
+          });
+          logger.info(
+            `[${AGENT_NAME}] dual-write (FAIL) · job_req=${jrid} ` +
+              `prisma=${pAudit.wrote ? `${pAudit.audit_id} flags=${pAudit.n_flags}` : pAudit.reason} ` +
+              `neo4j_entity=${nEntity.wrote ? 'ok' : nEntity.reason} ` +
+              `match_result=skipped(rule-check 阶段不写 Match_Result)`,
+          );
+          return { prisma: pAudit, neo4j: nEntity };
         });
-        logger.info(
-          `[${AGENT_NAME}] ⛔ RULE_CHECK_FAILED · job_req=${jrid} ` +
-            `reasons=${ruleCheck.failure_reasons.join(',') || '(none)'} — skip matchResume`,
-        );
         summaries.push({
           job_requisition_id: jrid,
           ok: false,
@@ -325,6 +419,51 @@ export const matchResumeAgent = inngest.createFunction(
       logger.info(
         `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
       );
+      // 双写(Q架构纠偏):Prisma 写 audit/flag + Neo4j 写实体(同 FAIL 路径)
+      // 返回 audit_id + parent_audit_id 给下面 match-result step 复用,确保
+      // `cmr_<audit_id>` 跟 Prisma audit 一对一。
+      ruleCheckAuditMetaForMatch = ruleCheckAuditMeta;
+      passAuditResult = await step.run(`audit-pass-${stepKey}`, async () => {
+        const ctx = {
+          run_id: (event.id as string | undefined) ?? `run_${Date.now()}`,
+          upload_id: uploadId ?? '',
+          candidate_id: candidateId ?? '',
+          resume_id: typeof data.resume_id === 'string' ? data.resume_id : '',
+          job_requisition_id: jrid,
+          trace_id: traceId ?? null,
+          parsed_resume:
+            data.parsed && typeof data.parsed === 'object'
+              ? ((data.parsed as Record<string, unknown>).data as
+                  | Record<string, unknown>
+                  | undefined) ?? null
+              : null,
+          job_requisition: req as unknown as Record<string, unknown>,
+          parent_audit_id:
+            (data as Record<string, unknown>).enrichment_applied &&
+            typeof ((data as Record<string, unknown>).enrichment_applied as Record<string, unknown>).parent_audit_id === 'string'
+              ? (((data as Record<string, unknown>).enrichment_applied as Record<string, unknown>).parent_audit_id as string)
+              : null,
+        };
+        const pAudit = await writeRuleCheckAuditPrisma({ verdict: ruleCheck, context: ctx });
+        const nEntity = await writeInstanceAnchorsOnly({
+          candidate_id: ctx.candidate_id,
+          resume_id: ctx.resume_id,
+          job_requisition_id: ctx.job_requisition_id,
+          parsed_resume: ctx.parsed_resume,
+          job_requisition: ctx.job_requisition,
+        });
+        logger.info(
+          `[${AGENT_NAME}] dual-write (PASS) · job_req=${jrid} ` +
+            `prisma=${pAudit.wrote ? `${pAudit.audit_id} flags=${pAudit.n_flags}` : pAudit.reason} ` +
+            `neo4j=${nEntity.wrote ? 'ok' : nEntity.reason}`,
+        );
+        return {
+          prisma: pAudit,
+          neo4j: nEntity,
+          audit_id: pAudit.audit_id ?? null,
+          parent_audit_id: ctx.parent_audit_id,
+        };
+      });
 
       // Kenny §3:把 LLM 输出的 resume_augmentation markdown 段记下来,
       // 4a step 调 Robohire 时拼到 resume 顶部。env kill switch:
@@ -435,6 +574,51 @@ export const matchResumeAgent = inngest.createFunction(
           throw e;
         }
       });
+
+      // 4b.5 写 Candidate_Match_Result(rule-check PASS + RAAS match 数据齐全后)
+      // 只有 rule-check 启用且 PASS 时才写(rule-check 关时无 audit_id,不写)
+      const passAuditId = passAuditResult?.audit_id ?? null;
+      const passParentAuditId = passAuditResult?.parent_audit_id ?? null;
+      const evaluatedCount = ruleCheckAuditMetaForMatch?.rules_evaluated ?? 0;
+      if (passAuditId) {
+        await step.run(`match-result-pass-${stepKey}`, async () => {
+          const mScore =
+            typeof (matchResult.data as Record<string, unknown>)?.matchScore === 'number'
+              ? ((matchResult.data as Record<string, unknown>).matchScore as number)
+              : typeof (matchResult.data as Record<string, unknown>)?.overallMatchScore === 'number'
+                ? ((matchResult.data as Record<string, unknown>).overallMatchScore as number)
+                : null;
+          const mRec =
+            typeof (matchResult.data as Record<string, unknown>)?.recommendation === 'string'
+              ? ((matchResult.data as Record<string, unknown>).recommendation as string)
+              : null;
+          const nMatch = await writeCandidateMatchResult({
+            candidate_match_result_id: `cmr_${passAuditId}`,
+            candidate_id: candidateId ?? '',
+            job_requisition_id: jrid,
+            client_id: pickClientId(req),
+            rule_check_audit_id: passAuditId,
+            rule_check_decision: 'PASS',
+            failure_reason_codes: [],
+            rules_evaluated_count: evaluatedCount,
+            terminal_rule_hits: [],
+            match_score: mScore,
+            match_recommendation: mRec,
+            match_breakdown_json: JSON.stringify(matchResult.data).slice(0, 50_000),
+            raas_match_request_id: matchResult.requestId ?? null,
+            final_decision: 'PASS',
+            final_decision_reason: `rule-check PASS + RAAS matchResume ${mScore !== null ? `score=${mScore}` : 'completed'}${mRec ? ` rec=${mRec}` : ''}`,
+            decided_at: new Date().toISOString(),
+            parent_match_result_id: passParentAuditId ? `cmr_${passParentAuditId}` : null,
+          });
+          logger.info(
+            `[${AGENT_NAME}] match_result (PASS) · job_req=${jrid} ` +
+              `score=${mScore ?? 'n/a'} rec=${mRec ?? 'n/a'} ` +
+              `neo4j=${nMatch.wrote ? 'ok' : nMatch.reason}`,
+          );
+          return nMatch;
+        });
+      }
 
       // 4c. emit MATCH_PASSED_NEED_INTERVIEW (cascade)
       const payload: MatchPassedNeedInterviewData = {
@@ -554,6 +738,73 @@ function pickClientId(req: RequirementsAgentViewItem): string | undefined {
     if (typeof c === 'string' && c.trim().length > 0) return c.trim();
   }
   return undefined;
+}
+
+/**
+ * 从 rule_flags 里抠"简历缺关键字段"。
+ *
+ * LLM 在 prompt 指引下,如果遇到简历缺字段无法判定,会输出:
+ *   - result=NOT_APPLICABLE
+ *   - evidence 形如 "简历未提供 <字段名>" / "简历未提供期望薪资,标 NOT_APPLICABLE"
+ * 我们扫这些 evidence,把字段名抠出来去重,按 field 合并所有命中的规则。
+ *
+ * 故意做得保守:只识别明确的"简历未提供"/"缺 X"/"未提供 X" 文本,
+ * 避免把规则正常 NOT_APPLICABLE (如"触发条件不满足")误报成缺失。
+ */
+function detectMissingFields(
+  flags: Array<{
+    rule_id?: string;
+    rule_name?: string;
+    result?: string;
+    evidence?: string;
+  }>,
+): Array<{
+  field: string;
+  rule_ids: string[];
+  rule_names: string[];
+  evidence_excerpt?: string;
+}> {
+  // 匹配模式(LLM evidence 文本):
+  //   "简历未提供 期望薪资"
+  //   "简历未提供期望薪资,标 NOT_APPLICABLE"
+  //   "未提供 出生年份"
+  //   "缺 marital_status"
+  //   "缺失 国籍"
+  const re = /(?:简历)?(?:未提供|缺失?)\s*[:：]?\s*([一-龥A-Za-z_][一-龥A-Za-z0-9_]{1,30})/g;
+  const byField = new Map<
+    string,
+    { rule_ids: Set<string>; rule_names: Set<string>; evidence_excerpt?: string }
+  >();
+
+  for (const f of flags) {
+    if (f.result !== 'NOT_APPLICABLE') continue;
+    const ev = f.evidence ?? '';
+    if (!ev.includes('未提供') && !ev.includes('缺')) continue;
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(ev)) !== null) {
+      const field = m[1].trim();
+      // 跳掉一些 false-positive 词
+      if (['NOT_APPLICABLE', '触发条件', '该字段', '关键字段'].includes(field)) continue;
+      let bucket = byField.get(field);
+      if (!bucket) {
+        bucket = { rule_ids: new Set(), rule_names: new Set() };
+        byField.set(field, bucket);
+      }
+      if (f.rule_id) bucket.rule_ids.add(f.rule_id);
+      if (f.rule_name) bucket.rule_names.add(f.rule_name);
+      if (!bucket.evidence_excerpt) {
+        bucket.evidence_excerpt = ev.length > 120 ? ev.slice(0, 120) + '…' : ev;
+      }
+    }
+  }
+
+  return Array.from(byField.entries()).map(([field, v]) => ({
+    field,
+    rule_ids: Array.from(v.rule_ids),
+    rule_names: Array.from(v.rule_names),
+    evidence_excerpt: v.evidence_excerpt,
+  }));
 }
 
 /**

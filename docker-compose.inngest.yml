@@ -20,7 +20,7 @@
 
 services:
   inngest:
-    image: inngest/inngest:v1.4.0
+    image: inngest/inngest:v1.19.2
     container_name: ao-inngest
     restart: unless-stopped
     command:
@@ -35,7 +35,6 @@ services:
       #     - resumeParserAgent  (RESUME_DOWNLOADED → RESUME_PROCESSED)
       #     - createJdAgent      (REQUIREMENT_LOGGED → JD_GENERATED)
       #     - matchResumeAgent   (RESUME_PROCESSED → MATCH_*)
-      # (p4 合并前 resume-parser-agent 在端口 3020 独立跑,合并后已删除)
       # partner / 其他 SDK 不自动 sync — 用各自的 Inngest client 启动时
       # 自己 PUT 注册到本 dev server 即可。
       - -u
@@ -44,7 +43,12 @@ services:
       - "0.0.0.0:8288:8288"   # 显式 IPv4 绑定（避开 macOS Docker IPv6-only 行为）
       - "0.0.0.0:8289:8289"   # connect-gateway
     extra_hosts:
+      # host.docker.internal → 宿主机(已 built-in,这条保底)
       - "host.docker.internal:host-gateway"
+      # partner-raas-lan → 让容器内通过 host-gateway 路由到 LAN partner IP
+      # macOS Docker Desktop bridge 默认不直接到 LAN,这条让 Inngest GET
+      # partner manifest 时走宿主网络栈。
+      - "partner-raas-lan:host-gateway"
     volumes:
       - inngest-data:/var/lib/inngest
 

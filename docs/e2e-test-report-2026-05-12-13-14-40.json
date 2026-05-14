@@ -1,0 +1,31 @@
+{
+  "summary": {
+    "pass": 4,
+    "fail": 0,
+    "skip": 0,
+    "total": 4
+  },
+  "results": [
+    {
+      "step": "AO /api/rule-check-audits",
+      "status": "PASS",
+      "details": "HTTP 200",
+      "durationMs": 19
+    },
+    {
+      "step": "Inngest /v1/events",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Neo4j HTTP API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Allmeta Studio @ 10.100.0.70:3500",
+      "status": "PASS",
+      "details": "HTTP 401(需 token,本期延后切换)"
+    }
+  ]
+}

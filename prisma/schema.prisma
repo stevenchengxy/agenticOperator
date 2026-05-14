@@ -535,6 +535,105 @@ model JobDescription {
 }
 
 // =====================================================================
+// Rule Check audit (Q架构纠偏 2026-05-12) — 从 Neo4j 迁过来
+//
+// 设计原则:
+//   - 审计日志 / 大字段(prompt 21K · llm_raw 8K · parsed_resume 11K · jr_json 2.7K)
+//     是时间序列数据,不是实体图。该放关系 DB,Neo4j 只放纯实体 + 关系。
+//   - Soft link 到 Neo4j 实体:用 candidate_id / resume_id / job_requisition_id 关联
+//     (不做外键 FK,因为 Neo4j 节点不在 Prisma 里)
+//   - parent_audit_id 形成 audit lineage chain(INFO_MISSING_FILLED 重判时用)
+// =====================================================================
+
+model RuleCheckAudit {
+  // 主键 + 关联
+  audit_id              String   @id
+  run_id                String
+  scenario_id           String?
+  trace_id              String?
+
+  // 业务 ID(soft link 到 Neo4j 实体节点)
+  upload_id             String
+  candidate_id          String
+  resume_id             String
+  job_requisition_id    String
+
+  // dims(从 RAAS getRequirementsAgentView extract)
+  client_name           String?
+  business_group        String?
+  studio                String?
+
+  // 决策
+  decision              String   // PASS | FAIL
+  llm_decision          String   // PASS | FAIL | KEEP | DROP | PAUSE | UNKNOWN
+  failure_reasons       String   // JSON array
+
+  // LLM observability
+  llm_model             String
+  llm_duration_ms       Int
+  llm_prompt_tokens     Int?
+  llm_completion_tokens Int?
+  parse_error           String?
+
+  // 规则集
+  rules_evaluated       Int
+  rules_total_in_ontology Int
+  rule_source           String   // neo4j-direct | ontology-api | json-fallback
+  partial_resume_fields String   // JSON array
+  // 被 client/department filter 过滤掉的规则 + 原因(JSON 数组)— 前端 drawer 展示"为什么这条 ontology 规则没进 user_prompt"
+  filtered_out_rules    String?  // JSON array of { rule_id, rule_name, applicable_client, applicable_department, executor, reason }
+
+  // 完整 input snapshot(从 Neo4j 节点搬过来)
+  parsed_resume_json    String?  // 11K+ 完整 parsed.data
+  job_requisition_json  String?  // 2.7K+ 完整 RAAS requirement
+
+  // LLM I/O 全文
+  user_prompt           String?  // 21K
+  system_prompt         String?
+  llm_raw_text          String?  // 8K
+
+  // Augmentation
+  resume_augmentation   String?
+
+  // Lineage(INFO_MISSING_FILLED 重判时填)
+  parent_audit_id       String?
+
+  created_at            DateTime @default(now())
+
+  flags                 RuleCheckFlag[]
+
+  @@index([candidate_id])
+  @@index([resume_id])
+  @@index([job_requisition_id])
+  @@index([decision])
+  @@index([created_at])
+  @@index([parent_audit_id])
+  @@index([trace_id])
+}
+
+model RuleCheckFlag {
+  flag_id            String   @id
+  audit_id           String
+  audit              RuleCheckAudit @relation(fields: [audit_id], references: [audit_id], onDelete: Cascade)
+
+  rule_id            String
+  rule_name_snapshot String
+  severity           String   // terminal | needs_human | flag_only
+  applicable_client  String?  // 通用 | 腾讯 | ...
+  applicable         Boolean
+  result             String   // PASS | FAIL | NOT_APPLICABLE
+  evidence           String?
+  next_action        String?  // continue | block
+
+  created_at         DateTime @default(now())
+
+  @@index([audit_id])
+  @@index([rule_id])
+  @@index([result])
+  @@index([severity])
+}
+
+// =====================================================================
 // Schema status: 24 tables (10 P3-foundation + 12 chunk-1 + 2 recruitment).
 //
 // Skipped for later (advanced ML/KB; not consumed by current AO routes —

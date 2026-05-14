@@ -13,7 +13,7 @@
 //   LLM overall_decision="PAUSE" → FAIL    (需 HSM 复核,暂不推进 matchResume)
 //   LLM 解析失败                 → FAIL    (安全侧,加 parse_error 标记)
 
-import { applyClientFilter, classifyRules, extractDims } from './ontology';
+import { applyClientFilterWithReasons, classifyRules, extractDims } from './ontology';
 import { runLlm } from './llm';
 import { fetchRulesForMatchResume } from './ontology-source';
 import { RULE_CHECK_SYSTEM_PROMPT, composePrompt } from './prompt';
@@ -53,19 +53,32 @@ export function buildRuleCheckInput(args: BuildInputArgs): RuleCheckInput {
 function safeIsLlmOutput(x: unknown): x is LlmRuleCheckOutput {
   if (!x || typeof x !== 'object') return false;
   const r = x as Record<string, unknown>;
-  return r.overall_decision === 'KEEP' || r.overall_decision === 'DROP' || r.overall_decision === 'PAUSE';
+  // 接受新 binary schema('PASS'/'FAIL') + 老 schema ('KEEP'/'DROP'/'PAUSE')兼容
+  return (
+    r.overall_decision === 'PASS' ||
+    r.overall_decision === 'FAIL' ||
+    r.overall_decision === 'KEEP' ||
+    r.overall_decision === 'DROP' ||
+    r.overall_decision === 'PAUSE'
+  );
 }
 
 function collectHitFlags(out: LlmRuleCheckOutput | null): RuleFlag[] {
   if (!out || !Array.isArray(out.rule_flags)) return [];
+  // 新 binary:只有 FAIL。老 schema 兼容:REVIEW 也算 hit。
   return out.rule_flags.filter(
-    (f) => f.applicable === true && (f.result === 'FAIL' || f.result === 'REVIEW'),
+    (f) =>
+      f.applicable === true &&
+      (f.result === 'FAIL' || (f.result as string) === 'REVIEW'),
   );
 }
 
 function collectFailureReasons(out: LlmRuleCheckOutput | null): string[] {
   if (!out) return [];
   const reasons: string[] = [];
+  // 新 schema:failure_reasons 字段
+  if (Array.isArray(out.failure_reasons)) reasons.push(...out.failure_reasons);
+  // 老 schema 兼容:drop_reasons + pause_reasons
   if (Array.isArray(out.drop_reasons)) reasons.push(...out.drop_reasons);
   if (Array.isArray(out.pause_reasons)) reasons.push(...out.pause_reasons);
   return reasons;
@@ -100,7 +113,8 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
   const sourceResult = await fetchRulesForMatchResume();
   // (client × business_group) 过滤还是在这边做 — Ontology API 当前不支持
   // server-side client filter,等 Phase 3 叶洋 v5 + 陈洋 ontology 改动后切换
-  const filtered = applyClientFilter(sourceResult.rules, dims);
+  const filterResult = applyClientFilterWithReasons(sourceResult.rules, dims);
+  const filtered = filterResult.kept;
   const total = sourceResult.rules.length;
   const classified = classifyRules(filtered);
 
@@ -139,9 +153,13 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
         llm_model: 'unknown',
         llm_duration_ms: 0,
         raw_text_preview: '',
+        llm_raw_text: '',
+        user_prompt: userPrompt,
+        system_prompt: RULE_CHECK_SYSTEM_PROMPT,
         parse_error: (err as Error).message,
         partial_resume_fields: fieldsUsed,
         rule_source: sourceResult.source,
+        filtered_out_rules: filterResult.filtered_out,
       },
     };
   }
@@ -149,10 +167,14 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
   const parsed = safeIsLlmOutput(llmResult.parsed_json) ? llmResult.parsed_json : null;
   const llm_decision = parsed?.overall_decision ?? 'UNKNOWN';
 
+  // Binary folding:
+  //   新 schema:PASS → decision=PASS;FAIL → decision=FAIL
+  //   老 schema(向后兼容):KEEP → PASS;DROP/PAUSE → FAIL
+  //   解析失败 → FAIL-safe
   let decision: 'PASS' | 'FAIL';
   if (parsed === null) {
     decision = 'FAIL';
-  } else if (llm_decision === 'KEEP') {
+  } else if (llm_decision === 'PASS' || llm_decision === 'KEEP') {
     decision = 'PASS';
   } else {
     decision = 'FAIL';
@@ -184,9 +206,13 @@ export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerd
       llm_prompt_tokens: llmResult.prompt_tokens,
       llm_completion_tokens: llmResult.completion_tokens,
       raw_text_preview: llmResult.raw_text.slice(0, 500),
+      llm_raw_text: llmResult.raw_text,
+      user_prompt: userPrompt,
+      system_prompt: RULE_CHECK_SYSTEM_PROMPT,
       parse_error: llmResult.parse_error,
       partial_resume_fields: fieldsUsed,
       rule_source: sourceResult.source,
+      filtered_out_rules: filterResult.filtered_out,
     },
   };
 }

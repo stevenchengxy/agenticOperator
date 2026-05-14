@@ -136,7 +136,13 @@ export type RuleCheckAuditMeta = {
   client_id: string;
   business_group: string | null;
   studio: string | null;
-  llm_decision: "KEEP" | "DROP" | "PAUSE" | "UNKNOWN";
+  /**
+   * LLM 原始输出的 overall_decision。
+   * 新 schema (2026-05-12 后,二元): 'PASS' | 'FAIL'。
+   * 兼容旧 schema 历史值 'KEEP' / 'DROP' / 'PAUSE'。
+   * 'UNKNOWN' = LLM 输出解析失败。
+   */
+  llm_decision: "PASS" | "FAIL" | "KEEP" | "DROP" | "PAUSE" | "UNKNOWN";
   llm_model: string;
   llm_duration_ms: number;
   llm_prompt_tokens?: number;
@@ -153,6 +159,16 @@ export type RuleCheckPassedData = {
   audit: RuleCheckAuditMeta;
 };
 
+/**
+ * rule-check 硬性失败(无 missing 字段,确认匹配不通过)→ emit 给 RAAS 关任务
+ *
+ * 语义跟 partner ontology §4 白名单的 `MATCH_FAILED`("撮合失败")一致 —
+ * rule-check 这一层就是"候选人未通过硬性门槛"的具体实现。所以直接用 MATCH_FAILED,
+ * 不发额外的 RULE_CHECK_FAILED。
+ *
+ * (RuleCheckFailedData 类型名保留是因为字段结构跟 rule-check 紧耦合;
+ *  emit 时 event_name 用 'MATCH_FAILED')
+ */
 export type RuleCheckFailedData = {
   upload_id: string;
   candidate_id?: string;
@@ -168,6 +184,29 @@ export type RuleCheckFailedData = {
     evidence?: string;
   }>;
   audit: RuleCheckAuditMeta;
+  /** "rule_check_terminal" = AO rule-check 判定硬失败 — 区分跟 Robohire matchResume 后的 MATCH_FAILED */
+  match_failed_source: 'rule_check_terminal';
+};
+
+// rule-check 跑完发现关键字段缺失 → emit 给 RAAS 提示用户手动补全
+// (跟 lib/events-catalog.ts:128 / partner ontology RESUME_INFO_MISSING 对齐)
+// partner 那边 flow-runtime 接到这个事件会触发 `resume_info_repair` → Recruiter 处理
+export type ResumeInfoMissingData = {
+  upload_id: string;
+  candidate_id?: string;
+  resume_id?: string;
+  job_requisition_id?: string;
+  client_id?: string;
+  /** 哪些字段缺失,用于 RAAS UI 渲染"请补全 X / Y / Z" */
+  missing_fields: Array<{
+    field: string;
+    rule_ids: string[]; // 哪些规则被这个字段缺失卡住了
+    rule_names: string[];
+    evidence_excerpt?: string;
+  }>;
+  /** 关联到这次 rule-check 的 audit_id,方便审计追溯 */
+  audit_id?: string;
+  occurred_at: string;
 };
 
 // ─── §3.4 JD 生成相关事件 ─────────────────────────────────

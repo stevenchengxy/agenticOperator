@@ -1,0 +1,96 @@
+{
+  "summary": {
+    "pass": 16,
+    "fail": 1,
+    "skip": 0,
+    "total": 17
+  },
+  "results": [
+    {
+      "step": "AO API 端点",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Inngest event API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Neo4j HTTP API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "真实 partner RAAS API",
+      "status": "PASS",
+      "details": "HTTP 200 · 重跑链路可走通"
+    },
+    {
+      "step": "找到 FAIL 且 evidence 含 missing 字段的 audit",
+      "status": "PASS",
+      "details": "rca_01KRE2FHKY435W2B76WP4D1XJX_1omrdxe_0bc0y… · candidate=04bcaedb… · missing=缺失则挂起…"
+    },
+    {
+      "step": "parent audit 真实候选人",
+      "status": "PASS",
+      "details": "江银行 · candidate_id=04bcaedb… · job_req=R20260401429"
+    },
+    {
+      "step": "RAAS mock 填表字段",
+      "status": "PASS",
+      "details": "缺失则挂起"
+    },
+    {
+      "step": "Pre-emit Prisma audit 数",
+      "status": "PASS",
+      "details": "20 条"
+    },
+    {
+      "step": "partner emit RESUME_INFO_MISSING_FILLED",
+      "status": "PASS",
+      "details": "event_id=01KRE8GJ2RB18VGTMT8YBV4H…",
+      "durationMs": 2
+    },
+    {
+      "step": "infoFilledHandler 触发完成",
+      "status": "PASS",
+      "details": "status=Completed"
+    },
+    {
+      "step": "infoFilledHandler 重发 RESUME_PROCESSED",
+      "status": "PASS",
+      "details": "event_id=01KRE8GJBJBV4HZFMHWQSBDY… · parent=xe_0bc0y1d"
+    },
+    {
+      "step": "matchResumeAgent 收到 re-emit",
+      "status": "PASS",
+      "details": "status=Completed"
+    },
+    {
+      "step": "Post-rerun Prisma audit 数",
+      "status": "PASS",
+      "details": "21 条(增长 1)"
+    },
+    {
+      "step": "新生 child audit",
+      "status": "PASS",
+      "details": "WQSBDY58_1omrdxe_0bc0y1d · 跟 parent 同 candidate"
+    },
+    {
+      "step": "child.parent_audit_id == parent.audit_id",
+      "status": "PASS",
+      "details": "match: 1XJX_1omrdxe_0bc0y1d"
+    },
+    {
+      "step": "补全字段进入 child.parsed_resume",
+      "status": "PASS",
+      "details": "1/1 字段命中: 缺失则挂起"
+    },
+    {
+      "step": "Neo4j candidate-resume-jr 三角",
+      "status": "FAIL",
+      "details": "candidate=04bcaedb… resumes=0 jrs=1"
+    }
+  ]
+}

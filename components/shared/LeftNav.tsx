@@ -52,6 +52,7 @@ export function LeftNav() {
     { type: "group", title: t("nav_group_govern") },
     { type: "item", id: "integrations", icon: "plug",   label: t("nav_integrations"), href: "/datasources" },
     { type: "item", id: "audit",      icon: "book",     label: t("nav_audit"), href: "/audit" },
+    { type: "item", id: "rule-check", icon: "shield",   label: "Rule Check 审计", href: "/rule-check" },
     { type: "item", id: "permissions",icon: "key",      label: t("nav_permissions"), href: "#" },
     { type: "item", id: "compliance", icon: "shield",   label: t("nav_compliance"), href: "#" },
   ];

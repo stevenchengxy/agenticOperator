@@ -65,21 +65,41 @@ export class RaasApiError extends Error {
 // ─── Configuration (read lazily so tests can override env) ──────────
 
 function config() {
-  const baseUrl = process.env.RAAS_API_BASE_URL?.trim() ?? '';
-  const agentKey = process.env.AGENT_API_KEY?.trim() ?? '';
+  const baseUrl =
+    process.env.RAAS_INTERNAL_API_URL?.trim() ||
+    process.env.RAAS_API_BASE_URL?.trim() ||
+    '';
+  const agentKey =
+    process.env.RAAS_AGENT_API_KEY?.trim() ||
+    process.env.AGENT_API_KEY?.trim() ||
+    '';
   if (!baseUrl) {
-    throw new RaasApiError(0, 'CONFIG', 'RAAS_API_BASE_URL not set in env');
+    throw new RaasApiError(
+      0,
+      'CONFIG',
+      'RAAS_INTERNAL_API_URL (or RAAS_API_BASE_URL) not set in env',
+    );
   }
   if (!agentKey) {
-    throw new RaasApiError(0, 'CONFIG', 'AGENT_API_KEY not set in env');
+    throw new RaasApiError(
+      0,
+      'CONFIG',
+      'RAAS_AGENT_API_KEY (or AGENT_API_KEY) not set in env',
+    );
   }
   return { baseUrl, agentKey };
 }
 
 export function isRaasApiConfigured(): boolean {
   return (
-    !!process.env.RAAS_API_BASE_URL?.trim() &&
-    !!process.env.AGENT_API_KEY?.trim()
+    !!(
+      process.env.RAAS_INTERNAL_API_URL?.trim() ||
+      process.env.RAAS_API_BASE_URL?.trim()
+    ) &&
+    !!(
+      process.env.RAAS_AGENT_API_KEY?.trim() ||
+      process.env.AGENT_API_KEY?.trim()
+    )
   );
 }
 

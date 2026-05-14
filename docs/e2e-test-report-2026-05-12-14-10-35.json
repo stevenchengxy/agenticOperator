@@ -1,0 +1,112 @@
+{
+  "summary": {
+    "pass": 19,
+    "fail": 0,
+    "skip": 1,
+    "total": 20
+  },
+  "results": [
+    {
+      "step": "AO /api/rule-check-audits",
+      "status": "PASS",
+      "details": "HTTP 200",
+      "durationMs": 22
+    },
+    {
+      "step": "Inngest /v1/events",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Neo4j HTTP API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Allmeta Studio @ 10.100.0.70:3500",
+      "status": "PASS",
+      "details": "HTTP 401(需 token,本期延后切换)"
+    },
+    {
+      "step": "Partner RAAS API 可达性",
+      "status": "PASS",
+      "details": "HTTP 200(已通)"
+    },
+    {
+      "step": "Prisma RuleCheckAudit 数 ≥ 19",
+      "status": "PASS",
+      "details": "19 条"
+    },
+    {
+      "step": "找到含 parsed_resume_full 的 parent audit",
+      "status": "PASS",
+      "details": "rca_01KRE2FHKY435W2B76WP4D1XJX_1omrdxe_0bc0y1d… · 包含 29 字段 · flags=10"
+    },
+    {
+      "step": "parent audit.user_prompt 存在",
+      "status": "PASS",
+      "details": "21084 chars"
+    },
+    {
+      "step": "parent audit.llm_raw_text 存在",
+      "status": "PASS",
+      "details": "8128 chars"
+    },
+    {
+      "step": ":JobRequisition (旧无下划线) = 0",
+      "status": "PASS",
+      "details": "0 条"
+    },
+    {
+      "step": ":Job_Requisition (新下划线) ≥ 5",
+      "status": "PASS",
+      "details": "8 条"
+    },
+    {
+      "step": "Candidate -[:EVALUATED_FOR]-> Job_Requisition",
+      "status": "PASS",
+      "details": "11 条关系"
+    },
+    {
+      "step": "真实候选 04bcaedb → R20260401429 全图打通",
+      "status": "PASS",
+      "details": "client=腾讯"
+    },
+    {
+      "step": "Neo4j :RuleCheckAudit 数(老数据未清,新写已不进)",
+      "status": "SKIP",
+      "details": "19 条(应迁到 Prisma,新写不再进 Neo4j)"
+    },
+    {
+      "step": "emit RESUME_INFO_MISSING_FILLED",
+      "status": "PASS",
+      "details": "event_id=01KRE8CAG7JTXG3J…",
+      "durationMs": 1
+    },
+    {
+      "step": "infoFilledHandler 触发",
+      "status": "PASS",
+      "details": "status=Completed"
+    },
+    {
+      "step": "infoFilledHandler 重发 RESUME_PROCESSED",
+      "status": "PASS",
+      "details": "event_id=01KRE8CAQBCQCMFJ…"
+    },
+    {
+      "step": "GET /stats 返回正常",
+      "status": "PASS",
+      "details": "total=20 pass=0 fail=20"
+    },
+    {
+      "step": "Top failure rules 非空",
+      "status": "PASS",
+      "details": "10-5,10-7,10-9"
+    },
+    {
+      "step": "GET /matrix 返回正常",
+      "status": "PASS",
+      "details": "34 条 rule × 20 audits"
+    }
+  ]
+}

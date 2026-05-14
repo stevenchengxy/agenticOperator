@@ -1,0 +1,81 @@
+{
+  "summary": {
+    "pass": 11,
+    "fail": 1,
+    "skip": 2,
+    "total": 14
+  },
+  "results": [
+    {
+      "step": "AO API 端点",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Inngest event API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Neo4j HTTP API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "真实 partner RAAS API",
+      "status": "SKIP",
+      "details": "HTTP 0 · 重跑会断在 fetch requirements"
+    },
+    {
+      "step": "找到 FAIL 且含 missing 字段的 audit",
+      "status": "PASS",
+      "details": "8DA8H4PD1KT79W_1omrdxe_0bc0y1d · missing=性别,婚育情况"
+    },
+    {
+      "step": "parent audit 真实候选人",
+      "status": "PASS",
+      "details": "江银行 · candidate=04bcaedb… · job_req=R20260401429"
+    },
+    {
+      "step": "recruiter 表单输入(中文 key)",
+      "status": "PASS",
+      "details": "性别=男 · 婚育情况=未婚"
+    },
+    {
+      "step": "partner merge 后的英文 delta",
+      "status": "PASS",
+      "details": "gender,marital_status"
+    },
+    {
+      "step": "Pre-emit Prisma audit 数",
+      "status": "PASS",
+      "details": "22 条"
+    },
+    {
+      "step": "partner 重发 RESUME_PROCESSED",
+      "status": "PASS",
+      "details": "event_id=01KRFS2EHVS13Y0D74REJR29… · parent=xe_0bc0y1d",
+      "durationMs": 4
+    },
+    {
+      "step": "matchResumeAgent 被触发",
+      "status": "PASS",
+      "details": "status=Completed"
+    },
+    {
+      "step": "Post-rerun audit 数",
+      "status": "SKIP",
+      "details": "22 条(增长 0)"
+    },
+    {
+      "step": "新生 child audit",
+      "status": "FAIL",
+      "details": "没看到 child audit"
+    },
+    {
+      "step": "Neo4j candidate-resume-jr 三角",
+      "status": "PASS",
+      "details": "江银行 · resumes=1 jrs=1"
+    }
+  ]
+}

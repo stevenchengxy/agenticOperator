@@ -27,6 +27,7 @@ import {
   type RaasRequirementSpecification,
   type SyncJdInput,
 } from '@/lib/raas-api-client';
+import { writeJdToNeo4j } from '@/lib/jd-sync/neo4j-jd-writer';
 import { inngest, type JdGeneratedEnvelope } from '@/server/inngest/client';
 
 const AGENT_ID = 'create-jd-agent';
@@ -198,7 +199,7 @@ export const createJdAgent = inngest.createFunction(
     // (raas 内部)。最便捷写法 — 直接 spread generate-jd 的 data，
     // 再加上 requirement 详情里 raas snake_case 的增强字段（must-have /
     // nice-to-have / 学历 / 年限 / 面试形式等，generate-jd 不给的）。
-    await step.run(`sync-jd-${sanitize(requisitionId)}`, async () => {
+    const syncResult = await step.run(`sync-jd-${sanitize(requisitionId)}`, async () => {
       const input: SyncJdInput = {
         job_requisition_id: requisitionId,
         client_id: clientId,
@@ -235,6 +236,31 @@ export const createJdAgent = inngest.createFunction(
         }
         throw e;
       }
+    });
+
+    // ── 5.5 Best-effort 写 Neo4j: (:Job_Requisition)-[:HAS_POSTING]->(:Job_Posting)
+    //
+    // 跟 rule-check writer 同款契约:失败不抛、不重试、不阻断主流程。
+    // partner 的 RAAS Postgres 仍是 source of truth;Neo4j 这边写的是 graph
+    // snapshot,给 partner / 我们调试时图查"这个 JR 关联哪些 JD"用。
+    await step.run(`neo4j-jd-${sanitize(requisitionId)}`, async () => {
+      const w = await writeJdToNeo4j({
+        job_requisition_id: requisitionId,
+        job_posting_id: (syncResult as { job_posting_id?: string }).job_posting_id ?? null,
+        jd_id: jdId,
+        client_id: clientId,
+        trace_id: traceId ?? null,
+        requirement,
+        specification,
+        generated: jdData,
+        generator_model: 'raas-api/generate-jd',
+        generator_version: GENERATOR_VERSION,
+      });
+      logger.info(
+        `[${AGENT_NAME}] Neo4j JD write · jrid=${requisitionId} ` +
+          `wrote=${w.wrote} ${w.wrote ? `posting=${w.posting_id}` : `reason=${w.reason}`}`,
+      );
+      return w;
     });
 
     // ── 6. emit JD_GENERATED (cascade 触发，不再依赖订阅入库) ──

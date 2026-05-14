@@ -1,0 +1,41 @@
+{
+  "summary": {
+    "pass": 5,
+    "fail": 1,
+    "skip": 0,
+    "total": 6
+  },
+  "results": [
+    {
+      "step": "AO /api/rule-check-audits",
+      "status": "PASS",
+      "details": "HTTP 200",
+      "durationMs": 39
+    },
+    {
+      "step": "Inngest /v1/events",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Neo4j HTTP API",
+      "status": "PASS",
+      "details": "HTTP 200"
+    },
+    {
+      "step": "Allmeta Studio API 可达",
+      "status": "PASS",
+      "details": "HTTP 401(需 ONTOLOGY_API_TOKEN — 本次延后切换)"
+    },
+    {
+      "step": "R1 emit RESUME_PROCESSED",
+      "status": "PASS",
+      "details": "event_id=01KRE4X6WZTNV20K…"
+    },
+    {
+      "step": "R1 audit 出现",
+      "status": "FAIL",
+      "details": "等了 90s 没看到"
+    }
+  ]
+}

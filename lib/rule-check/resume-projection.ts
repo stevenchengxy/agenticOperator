@@ -52,7 +52,7 @@ export const RULE_REQUIRED_FIELDS: Record<string, readonly ResumeField[]> = {
   // ═════ STEP 1:红线与黑名单(experience-heavy)═════
   '10-25': ['experience'],                                            // 华为荣耀竞业冷冻
   '10-26': ['experience'],                                            // OPPO 小米竞业冷冻
-  '10-38': ['experience'],                                            // 腾讯历史从业识别
+  '10-38': ['experience', 'former_tencent_employment'],              // 腾讯历史从业识别(看 work_history + 离场类型)
   '10-39': ['former_tencent_employment'],                             // 腾讯历史从业核实结果(HSM 反馈触发)
   '10-40': ['former_tencent_employment'],                             // 腾讯主动离职紧急回流
   '10-17': ['former_csi_employment'],                                 // CSI 高风险回流(B7-1 / B3 / A15 / B8 编码)
