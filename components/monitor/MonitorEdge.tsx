@@ -62,7 +62,10 @@ export function MonitorEdge({ edge, fromNode, toNode, agg, isTrailEdge, isTrailM
   const d = bezierPath(f, t);
 
   // Label chip sizing: rough per-char width + padding
-  const mid = { x: (f.x + t.x) / 2, y: (f.y + t.y) / 2 };
+  // Position at 35% along the edge from source so fan-out labels (matcher, clarifier,
+  // jdReviewer, etc.) diverge near the originating node and don't collide at midpoints.
+  const LABEL_T = 0.35;
+  const mid = { x: f.x + (t.x - f.x) * LABEL_T, y: f.y + (t.y - f.y) * LABEL_T };
   const labelW = edge.label ? edge.label.length * 7 + 8 : 0;
 
   // Marker reference: accent variant for trail edges, regular otherwise

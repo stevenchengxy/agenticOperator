@@ -43,14 +43,15 @@ export const CANONICAL_WORKFLOW: WorkflowJsonNode[] = workflowJson as WorkflowJs
 //
 //   Row A (y=100): trig → reqSync → reqAnalyzer → clarifier → jdGenerator
 //                 → jdReviewer → taskAssigner → publisher → resumeCollector
-//                 → resumeParser → matcher
+//                 → resumeParser → matcher (x=1820; fits within 1920 viewBox)
 //
 //   Row B (y=460): portalSubmitter ← packageReviewer ← packageBuilder ←
 //                 resumeRefiner ← evaluator ← aiInterviewer ← interviewInviter
+//                 (uniformly ~180px spaced; interviewInviter x=1820 aligned with matcher)
 //
-//   HITL offsets:
-//     manualEntry    (x=540,  y=580) — fallback: REQUIREMENT_LOGGED path
-//     reClarifier    (x=540,  y=280) — NEW: CLARIFICATION_INCOMPLETE → CLARIFICATION_RETRY
+//   HITL offsets (y=280 row, 4 nodes):
+//     manualEntry    (x=400,  y=280) — directly below reqAnalyzer(400,100); short vertical edge
+//     reClarifier    (x=580,  y=280) — CLARIFICATION_INCOMPLETE → CLARIFICATION_RETRY
 //     manualPublish  (x=1300, y=280) — fallback: CHANNEL_PUBLISHED_FAILED
 //     resumeFixer    (x=1700, y=280) — fallback: RESUME_PARSE_ERROR
 //     packageFiller  (x=1100, y=620) — fallback: PACKAGE_MISSING_INFO
@@ -130,24 +131,26 @@ const NODE_LAYOUT: NodeLayout[] = [
   { id: 'publisher',        wsId: '7-1',   x: 1300, y: 100, kind: 'agent',   icon: 'plug'     },
   { id: 'resumeCollector',  wsId: '8',     x: 1500, y: 100, kind: 'hitl',    icon: 'db'       },  // actor=Human
   { id: 'resumeParser',     wsId: '9-1',   x: 1700, y: 100, kind: 'agent',   icon: 'cpu'      },
-  { id: 'matcher',          wsId: '10',    x: 1860, y: 100, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'matcher',          wsId: '10',    x: 1820, y: 100, kind: 'agent',   icon: 'sparkle'  },  // x: 1860→1820 to avoid right-edge overflow
 
   // ── HITL offsets (between A and B) ───────────────────────────────────────
-  { id: 'reClarifier',      wsId: '3-2',   x: 580,  y: 280, kind: 'hitl',    icon: 'user'     },  // NEW per canonical JSON
+  // y=280 row: manualEntry(400), reClarifier(580), manualPublish(1300), resumeFixer(1700) — 4 nodes, 200-1120px spacing
+  { id: 'manualEntry',      wsId: '1-2',   x: 400,  y: 280, kind: 'hitl',    icon: 'user'     },  // moved from (580,580): directly below reqAnalyzer(400,100)
+  { id: 'reClarifier',      wsId: '3-2',   x: 580,  y: 280, kind: 'hitl',    icon: 'user'     },  // per canonical JSON
   { id: 'manualPublish',    wsId: '7-2',   x: 1300, y: 280, kind: 'hitl',    icon: 'user'     },
   { id: 'resumeFixer',      wsId: '9-2',   x: 1700, y: 280, kind: 'hitl',    icon: 'user'     },
 
   // ── Row B: post-matching path ─────────────────────────────────────────────
-  { id: 'interviewInviter', wsId: '11-1',  x: 1860, y: 300, kind: 'agent',   icon: 'mail'     },
-  { id: 'aiInterviewer',    wsId: '11-2',  x: 1680, y: 460, kind: 'hitl',    icon: 'sparkle'  },  // actor=Human (candidate self-serve)
-  { id: 'evaluator',        wsId: '12',    x: 1500, y: 460, kind: 'agent',   icon: 'cpu'      },
-  { id: 'resumeRefiner',    wsId: '13',    x: 1300, y: 460, kind: 'agent',   icon: 'sparkle'  },
+  // Uniformly spaced ~180px apart; interviewInviter aligned with matcher(1820)
+  { id: 'interviewInviter', wsId: '11-1',  x: 1820, y: 460, kind: 'agent',   icon: 'mail'     },  // moved from (1860,300): top of Row B, aligned with matcher
+  { id: 'aiInterviewer',    wsId: '11-2',  x: 1640, y: 460, kind: 'hitl',    icon: 'sparkle'  },  // actor=Human (candidate self-serve)
+  { id: 'evaluator',        wsId: '12',    x: 1460, y: 460, kind: 'agent',   icon: 'cpu'      },
+  { id: 'resumeRefiner',    wsId: '13',    x: 1280, y: 460, kind: 'agent',   icon: 'sparkle'  },
   { id: 'packageBuilder',   wsId: '14-1',  x: 1100, y: 460, kind: 'agent',   icon: 'book'     },
-  { id: 'packageReviewer',  wsId: '15',    x: 900,  y: 460, kind: 'hitl',    icon: 'shield'   },
-  { id: 'portalSubmitter',  wsId: '16',    x: 700,  y: 460, kind: 'agent',   icon: 'mail'     },
+  { id: 'packageReviewer',  wsId: '15',    x: 920,  y: 460, kind: 'hitl',    icon: 'shield'   },
+  { id: 'portalSubmitter',  wsId: '16',    x: 740,  y: 460, kind: 'agent',   icon: 'mail'     },
 
   // ── HITL fallbacks (below B) ──────────────────────────────────────────────
-  { id: 'manualEntry',      wsId: '1-2',   x: 580,  y: 580, kind: 'hitl',    icon: 'user'     },
   { id: 'packageFiller',    wsId: '14-2',  x: 1100, y: 620, kind: 'hitl',    icon: 'user'     },
 ];
 
@@ -300,3 +303,30 @@ const NODE_BY_ID = new Map(NODES.map(n => [n.id, n]));
 export function nodeById(id: string): WorkflowNode | undefined {
   return NODE_BY_ID.get(id);
 }
+
+// ── Terminal events ───────────────────────────────────────────────────────────
+// Events that are emitted by at least one node but consumed by no node in the
+// graph. These represent terminal states in the workflow (e.g. MATCH_FAILED,
+// APPLICATION_SUBMITTED). Exposed for informational / future visual use.
+
+function computeTerminalEvents(): Set<string> {
+  const allEmits = new Set<string>();
+  const consumed = new Set<string>();
+  for (const layout of NODE_LAYOUT) {
+    if (layout.wsId === 'trig') continue;
+    const c = CANONICAL_BY_WSID.get(layout.wsId);
+    if (!c) continue;
+    for (const ev of c.triggered_event) allEmits.add(ev);
+    for (const ev of c.trigger) consumed.add(ev);
+  }
+  const terminal = new Set<string>();
+  for (const ev of allEmits) {
+    if (!consumed.has(ev)) terminal.add(ev);
+  }
+  return terminal;
+}
+
+/** Events emitted by workflow nodes that have no consumer in the graph.
+ *  These are terminal states — e.g. MATCH_FAILED, APPLICATION_SUBMITTED.
+ *  Currently informational; can drive visual terminal-state indicators in future. */
+export const TERMINAL_EVENTS: Set<string> = computeTerminalEvents();

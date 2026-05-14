@@ -79,8 +79,9 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
     : trailEntry
       ? (trailEntry.result === 'failure' || trailEntry.result === 'pending' ? 1.5 : 1)
       : (status === "idle" || status === "healthy" ? 1 : 1.5);
+  // Conceptual nodes: use "4 4" dash pattern (clearer than "4 3") to distinguish Human actors
   const strokeDasharray = !selected && !trailEntry && deployment === 'conceptual'
-    ? '4 3'
+    ? '4 4'
     : undefined;
 
   // Untouched nodes in trail mode: dim to 30% opacity
@@ -197,6 +198,13 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
         <text x={10} y={50} fontSize={10.5} fill={TRAIL_STROKE[trailEntry.result]} opacity={0.9}>
           {trailEntry.result}{trailEntry.current ? " (running)" : ""}
         </text>
+      )}
+      {/* Human actor badge: bottom-right corner of conceptual (actor=Human) nodes */}
+      {deployment === 'conceptual' && (
+        <g transform={`translate(${NODE_W - 38}, ${NODE_H - 14})`}>
+          <rect width={34} height={11} rx={5} fill="var(--c-claude-panel)" stroke="var(--c-claude-line)" strokeWidth={0.5} />
+          <text x={17} y={8} fontSize={8} textAnchor="middle" fill="var(--c-claude-ink-3)" letterSpacing="0.06em">HUMAN</text>
+        </g>
       )}
     </g>
   );

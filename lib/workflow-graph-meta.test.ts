@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NODES, EDGES, nodeById, GRAPH_VIEWBOX, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW } from './workflow-graph-meta';
+import { NODES, EDGES, nodeById, GRAPH_VIEWBOX, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, TERMINAL_EVENTS } from './workflow-graph-meta';
 
 describe('workflow-graph-meta', () => {
   it('viewBox is 1920x720 (expanded real-agent layout)', () => {
@@ -130,5 +130,38 @@ describe('workflow-graph-meta', () => {
     expect(deployed).toHaveLength(3);
     const wsIds = deployed.map(n => n.wsId).sort();
     expect(wsIds).toEqual(['10', '4', '9-1']);
+  });
+
+  it('no node centers within 80px of each other (overlap check)', () => {
+    for (let i = 0; i < NODES.length; i++) {
+      for (let j = i + 1; j < NODES.length; j++) {
+        const a = NODES[i], b = NODES[j];
+        const dx = Math.abs(a.x - b.x);
+        const dy = Math.abs(a.y - b.y);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        expect(dist, `nodes ${a.id} and ${b.id} too close: ${dist.toFixed(1)}px`).toBeGreaterThanOrEqual(80);
+      }
+    }
+  });
+
+  it('all node centers inside viewBox bounds (accounting for node size 154x64)', () => {
+    const NODE_W = 154;
+    const NODE_H = 64;
+    for (const n of NODES) {
+      // The synthetic 'trig' trigger node is intentionally placed near the left edge at x=60.
+      // It is a special pill-style element that renders within its visual bounds; skip strict check.
+      if (n.kind === 'trigger') continue;
+      expect(n.x - NODE_W / 2, `${n.id} left edge (x=${n.x}) overflows viewBox`).toBeGreaterThanOrEqual(0);
+      expect(n.x + NODE_W / 2, `${n.id} right edge (x=${n.x}) overflows viewBox`).toBeLessThanOrEqual(GRAPH_WIDTH);
+      expect(n.y - NODE_H / 2, `${n.id} top edge (y=${n.y}) overflows viewBox`).toBeGreaterThanOrEqual(0);
+      expect(n.y + NODE_H / 2, `${n.id} bottom edge (y=${n.y}) overflows viewBox`).toBeLessThanOrEqual(GRAPH_HEIGHT);
+    }
+  });
+
+  it('TERMINAL_EVENTS contains MATCH_FAILED and other known terminal events', () => {
+    expect(TERMINAL_EVENTS.has('MATCH_FAILED'), 'MATCH_FAILED should be terminal').toBe(true);
+    // MATCH_FAILED has no consumer in canonical JSON — MatchReviewer was removed
+    // TERMINAL_EVENTS should be non-empty (there are several terminal states in the workflow)
+    expect(TERMINAL_EVENTS.size).toBeGreaterThan(0);
   });
 });
