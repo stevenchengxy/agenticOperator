@@ -50,12 +50,25 @@ if (!existsSync(dbFile)) {
   }
 }
 
-// 3. Inngest container (soft-fail)
+// 3. Inngest event bus (soft-fail) — prefer Docker, fall back to local CLI hint
+const localInngestCli = resolve(ROOT, "node_modules/.bin/inngest-cli");
+const hasLocalCli = existsSync(localInngestCli);
+
 try {
   execSync("docker info", { cwd: ROOT, stdio: "ignore" });
 } catch {
   warn("Docker daemon unreachable — skipping Inngest container");
-  warn("UI will load; event stream / agent runs will be inert until you start Docker + run `npm run inngest:up`");
+  if (hasLocalCli) {
+    warn(
+      "fallback option: open another terminal and run `npm run inngest:dev`" +
+      " — uses local inngest-cli (already in node_modules), no Docker needed",
+    );
+  } else {
+    warn(
+      "no local inngest-cli either — run `npm install` first, then `npm run inngest:dev`",
+    );
+  }
+  warn("UI will load; event stream / agent runs are inert until Inngest is up");
   log("ready");
   process.exit(0);
 }
@@ -66,6 +79,9 @@ try {
   });
 } catch (e) {
   warn(`docker compose up failed: ${e.message}`);
+  if (hasLocalCli) {
+    warn("fallback: run `npm run inngest:dev` in another terminal (local CLI, no Docker)");
+  }
   warn("continuing without Inngest container");
 }
 

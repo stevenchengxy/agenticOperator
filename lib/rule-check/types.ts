@@ -1,0 +1,143 @@
+// Rule check production module — shared types.
+//
+// 来源:scripts/rule-check-poc/types.ts(经过 binary PASS/FAIL 简化)
+// 边界:这是 matchResumeAgent 在调 RAAS /match-resume 之前的预筛 LLM 评判,
+//      不替代 Robohire 的深度打分。
+
+export type Severity = 'terminal' | 'needs_human' | 'flag_only';
+
+export interface Rule {
+  id: string;
+  specificScenarioStage: string;
+  businessLogicRuleName: string;
+  applicableClient: '通用' | string;
+  applicableDepartment: string;
+  submissionCriteria: string;
+  standardizedLogicRule: string;
+  relatedEntities: string[];
+  businessBackgroundReason: string;
+  ruleSource: string;
+  executor: 'Agent' | 'Human';
+
+  /** 由 severity-infer 注入(ontology 暂无显式 gating_severity 字段)。 */
+  severity: Severity;
+}
+
+export interface OntologyDims {
+  client_id: string;
+  business_group: string | null;
+  studio: string | null;
+}
+
+export interface ClassifiedRules {
+  general: Rule[];
+  client_level: Rule[];
+  department_level: Rule[];
+  by_severity: {
+    terminal: Rule[];
+    needs_human: Rule[];
+    flag_only: Rule[];
+  };
+}
+
+// ─── 5-block input shape (与 docs/yeyang-prompt-adapter-onboarding.md §3.3 对齐) ───
+
+export interface RuleCheckRuntimeContext {
+  upload_id: string;
+  candidate_id: string;
+  resume_id: string;
+  employee_id: string;
+  filename?: string;
+  received_at?: string;
+  trace_id?: string | null;
+}
+
+export interface RuleCheckInput {
+  runtime_context: RuleCheckRuntimeContext;
+  /** @deprecated Library now fetches resume from neo4j via candidate_id; this field is ignored. */
+  resume?: Record<string, unknown>;
+  job_requisition: Record<string, unknown> & { job_requisition_id: string };
+  job_requisition_specification?: Record<string, unknown> | null;
+  hsm_feedback?: Record<string, unknown> | null;
+}
+
+// ─── Phase 3: neo4j-aware matchResume check ──────────────────────────────
+
+export type RuleStatus =
+  | 'pass'
+  | 'fail'
+  | 'pending'
+  | 'insufficient_info'
+  | 'not_triggered'
+  | 'not_executed';
+
+export type RuleResult = {
+  rule_id: string;
+  rule_name: string;
+  step_id: string;
+  status: RuleStatus;
+  /** Required when status ≠ 'pass' and ≠ 'not_triggered'. */
+  reason?: string;
+};
+
+export type RuleExplanation = {
+  rule_id: string;
+  rule_name: string;
+  step_id: string;
+  status: Exclude<RuleStatus, 'pass' | 'not_triggered'>;
+  reason: string;
+};
+
+export type MatchResumeCheckStats = {
+  total: number;
+  pass: number;
+  fail: number;
+  pending: number;
+  insufficient_info: number;
+  not_triggered: number;
+  not_executed: number;
+};
+
+export type MatchResumeCheckResult = {
+  decision: 'PASS' | 'FAIL' | 'REVIEW';
+  stats: MatchResumeCheckStats;
+  /** Every evaluated rule's status, in Set + within-Set order. Use for debug; the runner derives `explanations` from this. */
+  rule_results: RuleResult[];
+  explanations: RuleExplanation[];
+  /** Pre-fetched graph slots used to evaluate this run. UI consumers (the
+   *  /rule-check page) read this to build the drawer's graph view and
+   *  inference chain without re-fetching from neo4j. */
+  graph_context?: import('./graph-context').GraphContext;
+  audit: {
+    rules_evaluated: number;
+    graph_calls: number;
+    llm_model: string;
+    llm_duration_ms: number;
+    llm_round_trips: number;
+    llm_prompt_tokens?: number;
+    llm_completion_tokens?: number;
+    rule_source: 'ontology-api' | 'json-fallback';
+    fail_reason?:
+      | 'llm-call-error'
+      | 'ontology-graph-unavailable'
+      | 'tool-use-loop-exceeded'
+      | 'parse-error'
+      | string;
+    /** Truncated raw LLM output. Populated when fail_reason='parse-error'
+     *  so callers can diagnose what the model actually emitted. */
+    raw_llm_text?: string;
+    /** OpenAI-protocol finish_reason on the last LLM response. "length" =
+     *  max_tokens cap hit (truncation); "stop" = model finished cleanly. */
+    llm_finish_reason?: string;
+  };
+};
+
+/** Action_step group used by prompt rendering (Set ordering). */
+export interface MatchResumeStepGroup {
+  step_id: string;
+  order: number;
+  name: string;
+  description: string;
+  condition: string;
+  rules: Rule[];
+}
