@@ -4,6 +4,7 @@ import clsx from "clsx";
 import type { WorkflowNode } from "@/lib/workflow-graph-meta";
 import type { MonitorNodeAgg, NodeStatus } from "@/lib/monitor/types";
 import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
+import { useApp } from "@/lib/i18n";
 
 const STATUS_FILL: Record<NodeStatus, string> = {
   idle:     "var(--c-claude-panel)",
@@ -52,6 +53,7 @@ type Props = {
 };
 
 export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, onQueueClick, trailEntry, isTrailMode, selected }: Props) {
+  const { t } = useApp();
   const status = agg?.status ?? "idle";
   const running = agg?.running ?? 0;
   const hitl = agg?.hitlPending ?? 0;
@@ -62,9 +64,13 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
   const desc = getAgentDescription(canonicalShort);
   const tooltipText = desc?.description ?? node.sub ?? node.title;
 
+  // Deployment status (only present on WorkflowNode v2+; default to 'stubbed')
+  const deployment = (node as WorkflowNode).deployment ?? 'stubbed';
+
   // Trail mode overrides fill/stroke colors
   const fill   = trailEntry ? TRAIL_FILL[trailEntry.result]   : STATUS_FILL[status];
-  // Selected node gets accent outline regardless of status/trail
+  // Selected node gets accent outline regardless of status/trail.
+  // Conceptual (Human) nodes get a dashed stroke to indicate no Inngest function.
   const stroke = selected
     ? "var(--c-claude-accent)"
     : (trailEntry ? TRAIL_STROKE[trailEntry.result] : STATUS_STROKE[status]);
@@ -73,6 +79,9 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
     : trailEntry
       ? (trailEntry.result === 'failure' || trailEntry.result === 'pending' ? 1.5 : 1)
       : (status === "idle" || status === "healthy" ? 1 : 1.5);
+  const strokeDasharray = !selected && !trailEntry && deployment === 'conceptual'
+    ? '4 3'
+    : undefined;
 
   // Untouched nodes in trail mode: dim to 30% opacity
   const opacity = isTrailMode && !trailEntry ? 0.3 : 1;
@@ -117,6 +126,7 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
         fill={fill}
         stroke={stroke}
         strokeWidth={strokeWidth}
+        strokeDasharray={strokeDasharray}
       />
       {/* Shimmer overlay for running nodes — marching dashed accent outline */}
       {isRunning && (
@@ -128,6 +138,16 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
           height={NODE_H + 2}
           rx={11}
         />
+      )}
+      {/* Deployed indicator: green dot + LIVE badge at top-right corner */}
+      {deployment === 'deployed' && (
+        <g transform={`translate(${NODE_W - 38}, -6)`}>
+          <rect width={34} height={14} rx={7} fill="var(--c-claude-ok)" opacity={0.9} />
+          <circle cx={7} cy={7} r={3} fill="white" />
+          <text x={13} y={10.5} fontSize={8.5} fontWeight={700} fill="white" letterSpacing={0.5}>
+            {t('monitor_node_deployment_deployed')}
+          </text>
+        </g>
       )}
       <text x={10} y={20} fontSize={13.5} fontWeight={500} fill="var(--c-claude-ink-1)">
         {node.title}

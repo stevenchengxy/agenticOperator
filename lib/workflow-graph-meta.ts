@@ -1,11 +1,41 @@
 import type { IcName } from '@/components/shared/Ic';
+import workflowJson from './workflow-canonical.json';
 
-// ─── Graph mirrors real AGENT_MAP topology ────────────────────────────────────
+// ─── Canonical workflow types (sourced from allmetaOntology) ──────────────────
+
+export type WorkflowJsonNode = {
+  id: string;
+  name: string;
+  description: string;
+  actor: ('Agent' | 'Human')[];
+  trigger: string[];
+  actions: Array<{
+    order: string;
+    name: string;
+    description: string;
+    type: 'manual' | 'tool' | 'logic';
+    condition: string;
+  }>;
+  triggered_event: string[];
+};
+
+/** All 22 nodes from the authoritative workflow spec. */
+export const CANONICAL_WORKFLOW: WorkflowJsonNode[] = workflowJson as WorkflowJsonNode[];
+
+// ─── Graph layout + node type ─────────────────────────────────────────────────
 //
-// 22 nodes (23 AGENT_MAP entries minus Chatbot which is system-meta) plus a
-// single synthetic `trig` node representing the external system trigger.
-// HITL fallback agents are placed below/offset from their parent nodes.
-// Edges carry eventName so /api/monitor/overview/route.ts needs no local lookup.
+// 22 real workflow nodes + 1 synthetic `trig` node for the external trigger.
+// NODES + EDGES are derived programmatically from CANONICAL_WORKFLOW combined
+// with the visual layout table (NODE_LAYOUT) below.
+//
+// NODE_LAYOUT keys:
+//   id     — camelCase, matches existing convention (used by EDGES + tests)
+//   wsId   — workflow-canonical.json `id` field; 'trig' for the synthetic node
+//
+// Deployment status:
+//   deployed    — real Inngest function in resume-parser-agent
+//   stubbed     — AO-main stub-factory handles it
+//   conceptual  — actor=Human in canonical JSON; no Inngest function exists
 //
 // ViewBox: 1920×720 — extra canvas gives breathing room for HITL branches.
 //
@@ -15,23 +45,26 @@ import type { IcName } from '@/components/shared/Ic';
 //                 → jdReviewer → taskAssigner → publisher → resumeCollector
 //                 → resumeParser → matcher
 //
-//   Row B (y=280): matcher branches →
-//                 interviewInviter → aiInterviewer → evaluator → resumeRefiner
-//                 → packageBuilder → packageReviewer → portalSubmitter
+//   Row B (y=460): portalSubmitter ← packageReviewer ← packageBuilder ←
+//                 resumeRefiner ← evaluator ← aiInterviewer ← interviewInviter
 //
 //   HITL offsets:
-//     manualEntry    (x=540,  y=520) — fallback for Clarifier
-//     manualPublish  (x=1180, y=280) — fallback for Publisher
-//     resumeFixer    (x=1500, y=280) — fallback for ResumeParser
-//     matchReviewer  (x=1660, y=460) — terminal fallback for Matcher MATCH_FAILED
-//     packageFiller  (x=760,  y=460) — fallback for PackageBuilder
+//     manualEntry    (x=540,  y=580) — fallback: REQUIREMENT_LOGGED path
+//     reClarifier    (x=540,  y=280) — NEW: CLARIFICATION_INCOMPLETE → CLARIFICATION_RETRY
+//     manualPublish  (x=1300, y=280) — fallback: CHANNEL_PUBLISHED_FAILED
+//     resumeFixer    (x=1700, y=280) — fallback: RESUME_PARSE_ERROR
+//     packageFiller  (x=1100, y=620) — fallback: PACKAGE_MISSING_INFO
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type NodeKind = 'trigger' | 'agent' | 'branch' | 'hitl' | 'guard' | 'done';
 
+/** wsIds owned by resume-parser-agent (real deployed Inngest functions). */
+const RPA_OWNED_WSIDS = new Set(['4', '9-1', '10']);
+
 export type WorkflowNode = {
   id: string;
+  wsId: string;
   kind: NodeKind;
   x: number;
   y: number;
@@ -44,6 +77,15 @@ export type WorkflowNode = {
    * Falls back to `title` when absent.
    */
   agentName?: string;
+  /**
+   * Deployment status:
+   * - deployed   = real Inngest agent in resume-parser-agent
+   * - stubbed    = AO-main stub-factory
+   * - conceptual = Human actor, no Inngest function
+   */
+  deployment: 'deployed' | 'stubbed' | 'conceptual';
+  /** Raw canonical JSON node, if this wsId exists in the workflow spec. */
+  canonical?: WorkflowJsonNode;
 };
 
 export type WorkflowEdge = {
@@ -61,135 +103,198 @@ export const GRAPH_VIEWBOX = '0 0 1920 720' as const;
 export const GRAPH_WIDTH = 1920 as const;
 export const GRAPH_HEIGHT = 720 as const;
 
-// ── NODES ─────────────────────────────────────────────────────────────────────
-// Row A (y=100): main success path left-to-right
-// Row B (y=300): post-matching path (interview → eval → refine → package → submit)
-// HITL nodes: offset below/aside their parent
+// ── NODE_LAYOUT ───────────────────────────────────────────────────────────────
+// Visual positions + icon per node. wsId links each entry to CANONICAL_WORKFLOW.
+// Order here determines NODES array order.
 
-export const NODES: WorkflowNode[] = [
+type NodeLayout = {
+  id: string;
+  wsId: string;
+  x: number;
+  y: number;
+  kind: NodeKind;
+  icon: IcName;
+};
+
+const NODE_LAYOUT: NodeLayout[] = [
   // ── Trigger (synthetic) ──────────────────────────────────────────────────
-  { id: "trig",           kind: "trigger", x: 60,   y: 100, title: "定时同步 / Webhook",  sub: "SCHEDULED_SYNC · 客户 RMS",                           icon: "bolt"    },
+  { id: 'trig',             wsId: 'trig',  x: 60,   y: 100, kind: 'trigger', icon: 'bolt'     },
 
   // ── Row A: main path ─────────────────────────────────────────────────────
-  { id: "reqSync",        kind: "agent",   x: 220,  y: 100, title: "ReqSync",             sub: "需求同步 → REQUIREMENT_SYNCED",                        icon: "db"      },
-  { id: "reqAnalyzer",    kind: "agent",   x: 400,  y: 100, title: "ReqAnalyzer",         sub: "需求分析 → ANALYSIS_COMPLETED",                        icon: "sparkle" },
-  { id: "clarifier",      kind: "agent",   x: 580,  y: 100, title: "Clarifier",           sub: "需求澄清 → CLARIFICATION_READY",                       icon: "sparkle" },
-  { id: "jdGenerator",    kind: "agent",   x: 760,  y: 100, title: "JDGenerator",         sub: "JD 生成 → JD_GENERATED",                               icon: "sparkle" },
-  { id: "jdReviewer",     kind: "hitl",    x: 940,  y: 100, title: "JDReviewer",          sub: "JD 审批 → JD_APPROVED / JD_REJECTED",                  icon: "shield"  },
-  { id: "taskAssigner",   kind: "agent",   x: 1120, y: 100, title: "TaskAssigner",        sub: "任务分配 → TASK_ASSIGNED",                             icon: "cpu"     },
-  { id: "publisher",      kind: "agent",   x: 1300, y: 100, title: "Publisher",           sub: "多渠道发布 → CHANNEL_PUBLISHED",                       icon: "plug"    },
-  { id: "resumeCollector",kind: "agent",   x: 1500, y: 100, title: "ResumeCollector",     sub: "简历采集 → RESUME_DOWNLOADED",                         icon: "db"      },
-  { id: "resumeParser",   kind: "agent",   x: 1700, y: 100, title: "ResumeParser",        sub: "简历解析 → RESUME_PROCESSED",                          icon: "cpu"     },
-  { id: "matcher",        kind: "agent",   x: 1860, y: 100, title: "Matcher",             sub: "人岗匹配 → MATCH_PASSED / MATCH_FAILED",               icon: "sparkle" },
+  { id: 'reqSync',          wsId: '1-1',   x: 220,  y: 100, kind: 'agent',   icon: 'db'       },
+  { id: 'reqAnalyzer',      wsId: '2',     x: 400,  y: 100, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'clarifier',        wsId: '3',     x: 580,  y: 100, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'jdGenerator',      wsId: '4',     x: 760,  y: 100, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'jdReviewer',       wsId: '5',     x: 940,  y: 100, kind: 'hitl',    icon: 'shield'   },
+  { id: 'taskAssigner',     wsId: '6',     x: 1120, y: 100, kind: 'agent',   icon: 'cpu'      },
+  { id: 'publisher',        wsId: '7-1',   x: 1300, y: 100, kind: 'agent',   icon: 'plug'     },
+  { id: 'resumeCollector',  wsId: '8',     x: 1500, y: 100, kind: 'hitl',    icon: 'db'       },  // actor=Human
+  { id: 'resumeParser',     wsId: '9-1',   x: 1700, y: 100, kind: 'agent',   icon: 'cpu'      },
+  { id: 'matcher',          wsId: '10',    x: 1860, y: 100, kind: 'agent',   icon: 'sparkle'  },
 
-  // ── HITL fallbacks (row between A and B) ─────────────────────────────────
-  { id: "manualPublish",  kind: "hitl",    x: 1300, y: 280, title: "ManualPublish",       sub: "手动发布 → CHANNEL_PUBLISHED",                         icon: "user"    },
-  { id: "resumeFixer",    kind: "hitl",    x: 1700, y: 280, title: "ResumeFixer",         sub: "手动修复 → RESUME_PROCESSED",                          icon: "user"    },
+  // ── HITL offsets (between A and B) ───────────────────────────────────────
+  { id: 'reClarifier',      wsId: '3-2',   x: 580,  y: 280, kind: 'hitl',    icon: 'user'     },  // NEW per canonical JSON
+  { id: 'manualPublish',    wsId: '7-2',   x: 1300, y: 280, kind: 'hitl',    icon: 'user'     },
+  { id: 'resumeFixer',      wsId: '9-2',   x: 1700, y: 280, kind: 'hitl',    icon: 'user'     },
 
   // ── Row B: post-matching path ─────────────────────────────────────────────
-  { id: "interviewInviter",kind:"agent",   x: 1860, y: 300, title: "InterviewInviter",    sub: "面试邀约 → INTERVIEW_INVITATION_SENT",                  icon: "mail"    },
-  { id: "aiInterviewer",  kind: "agent",   x: 1680, y: 460, title: "AIInterviewer",       sub: "AI 面试 → AI_INTERVIEW_COMPLETED",                     icon: "sparkle" },
-  { id: "evaluator",      kind: "agent",   x: 1500, y: 460, title: "Evaluator",           sub: "面试评估 → EVALUATION_PASSED / FAILED",                icon: "cpu"     },
-  { id: "resumeRefiner",  kind: "agent",   x: 1300, y: 460, title: "ResumeRefiner",       sub: "简历优化 → RESUME_OPTIMIZED",                          icon: "sparkle" },
-  { id: "packageBuilder", kind: "agent",   x: 1100, y: 460, title: "PackageBuilder",      sub: "推荐包生成 → PACKAGE_GENERATED",                       icon: "book"    },
-  { id: "packageReviewer",kind: "hitl",    x: 900,  y: 460, title: "PackageReviewer",     sub: "推荐包审核 → PACKAGE_APPROVED",                        icon: "shield"  },
-  { id: "portalSubmitter",kind: "agent",   x: 700,  y: 460, title: "PortalSubmitter",     sub: "客户端提交 → APPLICATION_SUBMITTED",                   icon: "mail"    },
+  { id: 'interviewInviter', wsId: '11-1',  x: 1860, y: 300, kind: 'agent',   icon: 'mail'     },
+  { id: 'aiInterviewer',    wsId: '11-2',  x: 1680, y: 460, kind: 'hitl',    icon: 'sparkle'  },  // actor=Human (candidate self-serve)
+  { id: 'evaluator',        wsId: '12',    x: 1500, y: 460, kind: 'agent',   icon: 'cpu'      },
+  { id: 'resumeRefiner',    wsId: '13',    x: 1300, y: 460, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'packageBuilder',   wsId: '14-1',  x: 1100, y: 460, kind: 'agent',   icon: 'book'     },
+  { id: 'packageReviewer',  wsId: '15',    x: 900,  y: 460, kind: 'hitl',    icon: 'shield'   },
+  { id: 'portalSubmitter',  wsId: '16',    x: 700,  y: 460, kind: 'agent',   icon: 'mail'     },
 
   // ── HITL fallbacks (below B) ──────────────────────────────────────────────
-  { id: "manualEntry",    kind: "hitl",    x: 580,  y: 580, title: "ManualEntry",         sub: "手工录入 → REQUIREMENT_LOGGED",                        icon: "user"    },
-  { id: "matchReviewer",  kind: "hitl",    x: 1860, y: 580, title: "MatchReviewer",       sub: "匹配复审 (HITL)",                                      icon: "user"    },
-  { id: "packageFiller",  kind: "hitl",    x: 1100, y: 620, title: "PackageFiller",       sub: "推荐包补全 → PACKAGE_GENERATED",                       icon: "user"    },
+  { id: 'manualEntry',      wsId: '1-2',   x: 580,  y: 580, kind: 'hitl',    icon: 'user'     },
+  { id: 'packageFiller',    wsId: '14-2',  x: 1100, y: 620, kind: 'hitl',    icon: 'user'     },
 ];
 
-// ── EDGES ─────────────────────────────────────────────────────────────────────
-// eventName = the Inngest event that flows along this edge.
-// dashed = exception / fallback path.
+// ── Build NODES from layout + canonical JSON ──────────────────────────────────
 
-export const EDGES: WorkflowEdge[] = [
-  // System trigger → ReqSync
-  { from: "trig",            to: "reqSync",          eventName: "SCHEDULED_SYNC"              },
+const CANONICAL_BY_WSID: Map<string, WorkflowJsonNode> = new Map(
+  CANONICAL_WORKFLOW.map(n => [n.id, n])
+);
 
-  // ReqSync → ReqAnalyzer
-  { from: "reqSync",         to: "reqAnalyzer",       eventName: "REQUIREMENT_SYNCED"          },
+/**
+ * Display title override per wsId.
+ * The canonical JSON's `name` field uses its own naming convention (camelCase).
+ * We keep the existing AGENT_MAP `short` names as display titles to maintain
+ * compatibility with all existing tests, monitoring, and agent-descriptions lookups.
+ */
+const TITLE_BY_WSID: Record<string, string> = {
+  'trig':  '外部触发',
+  '1-1':   'ReqSync',
+  '1-2':   'ManualEntry',
+  '2':     'ReqAnalyzer',
+  '3':     'Clarifier',
+  '3-2':   'ReClarifier',
+  '4':     'JDGenerator',
+  '5':     'JDReviewer',
+  '6':     'TaskAssigner',
+  '7-1':   'Publisher',
+  '7-2':   'ManualPublish',
+  '8':     'ResumeCollector',
+  '9-1':   'ResumeParser',
+  '9-2':   'ResumeFixer',
+  '10':    'Matcher',
+  '11-1':  'InterviewInviter',
+  '11-2':  'AIInterviewer',
+  '12':    'Evaluator',
+  '13':    'ResumeRefiner',
+  '14-1':  'PackageBuilder',
+  '14-2':  'PackageFiller',
+  '15':    'PackageReviewer',
+  '16':    'PortalSubmitter',
+};
 
-  // ManualEntry → ReqAnalyzer (HITL re-entry)
-  { from: "manualEntry",     to: "reqAnalyzer",       eventName: "REQUIREMENT_LOGGED",          dashed: true },
+function deriveDeployment(wsId: string, canonical: WorkflowJsonNode | undefined): WorkflowNode['deployment'] {
+  if (wsId === 'trig') return 'conceptual';
+  if (RPA_OWNED_WSIDS.has(wsId)) return 'deployed';
+  if (canonical?.actor[0] === 'Human') return 'conceptual';
+  return 'stubbed';
+}
 
-  // ReqAnalyzer → Clarifier
-  { from: "reqAnalyzer",     to: "clarifier",         eventName: "ANALYSIS_COMPLETED"          },
+export const NODES: WorkflowNode[] = NODE_LAYOUT.map(layout => {
+  const canonical = CANONICAL_BY_WSID.get(layout.wsId);
+  const title = TITLE_BY_WSID[layout.wsId] ?? layout.id;
+  return {
+    id: layout.id,
+    wsId: layout.wsId,
+    kind: layout.kind,
+    x: layout.x,
+    y: layout.y,
+    icon: layout.icon,
+    title,
+    sub: canonical?.description.slice(0, 100) ?? (layout.wsId === 'trig' ? 'SCHEDULED_SYNC / Webhook' : ''),
+    deployment: deriveDeployment(layout.wsId, canonical),
+    canonical,
+  };
+});
 
-  // Clarifier → ManualEntry (info missing → HITL)
-  { from: "clarifier",       to: "manualEntry",       eventName: "CLARIFICATION_INCOMPLETE",    dashed: true, label: "缺失" },
+// ── Build EDGES from canonical trigger/triggered_event arrays ─────────────────
 
-  // Clarifier → JDGenerator (happy path)
-  { from: "clarifier",       to: "jdGenerator",       eventName: "CLARIFICATION_READY"         },
+const EDGE_LABEL_MAP: Record<string, string> = {
+  'CLARIFICATION_INCOMPLETE':    '缺失',
+  'CLARIFICATION_READY':         'OK',
+  'JD_REJECTED':                 '驳回',
+  'JD_APPROVED':                 '通过',
+  'CHANNEL_PUBLISHED_FAILED':    '发布失败',
+  'RESUME_PARSE_ERROR':          '解析失败',
+  'MATCH_PASSED_NEED_INTERVIEW': '需面试',
+  'MATCH_PASSED_NO_INTERVIEW':   '免面',
+  'MATCH_FAILED':                '不匹配',
+  'PACKAGE_MISSING_INFO':        '缺信息',
+};
 
-  // JDGenerator → JDReviewer
-  { from: "jdGenerator",     to: "jdReviewer",        eventName: "JD_GENERATED"                },
+function isExceptionalEvent(eventName: string): boolean {
+  return (
+    eventName.endsWith('_FAILED') ||
+    eventName.endsWith('_INCOMPLETE') ||
+    eventName.endsWith('_REJECTED') ||
+    eventName.endsWith('_ERROR') ||
+    eventName.endsWith('_BLOCKED') ||
+    eventName.endsWith('_CONFLICT') ||
+    eventName.endsWith('_ALERT')
+  );
+}
 
-  // JDReviewer → JDGenerator (rejected — regenerate)
-  { from: "jdReviewer",      to: "jdGenerator",       eventName: "JD_REJECTED",                 dashed: true, label: "重写" },
+function buildEdges(): WorkflowEdge[] {
+  const edges: WorkflowEdge[] = [];
 
-  // JDReviewer → TaskAssigner (approved)
-  { from: "jdReviewer",      to: "taskAssigner",      eventName: "JD_APPROVED"                 },
+  // Build a map: eventName → list of node ids that consume it
+  const CONSUMER_BY_EVENT: Map<string, string[]> = new Map();
+  for (const layout of NODE_LAYOUT) {
+    if (layout.wsId === 'trig') continue;
+    const canonical = CANONICAL_BY_WSID.get(layout.wsId);
+    if (!canonical) continue;
+    for (const ev of canonical.trigger) {
+      if (!CONSUMER_BY_EVENT.has(ev)) CONSUMER_BY_EVENT.set(ev, []);
+      CONSUMER_BY_EVENT.get(ev)!.push(layout.id);
+    }
+  }
 
-  // TaskAssigner → Publisher
-  { from: "taskAssigner",    to: "publisher",         eventName: "TASK_ASSIGNED"               },
+  // Synthetic trigger node → nodes subscribed to SCHEDULED_SYNC
+  const externalTriggerEvents = ['SCHEDULED_SYNC'];
+  for (const ev of externalTriggerEvents) {
+    for (const consumerId of CONSUMER_BY_EVENT.get(ev) ?? []) {
+      edges.push({
+        from: 'trig',
+        to: consumerId,
+        eventName: ev,
+        dashed: false,
+      });
+    }
+  }
 
-  // Publisher → ResumeCollector (success)
-  { from: "publisher",       to: "resumeCollector",   eventName: "CHANNEL_PUBLISHED"           },
+  // For each emitting node, find consumers of its emitted events
+  for (const layout of NODE_LAYOUT) {
+    if (layout.wsId === 'trig') continue;
+    const canonical = CANONICAL_BY_WSID.get(layout.wsId);
+    if (!canonical) continue;
 
-  // Publisher → ManualPublish (publish failed)
-  { from: "publisher",       to: "manualPublish",     eventName: "CHANNEL_PUBLISHED_FAILED",    dashed: true, label: "发布失败" },
+    for (const emittedEvent of canonical.triggered_event) {
+      const consumers = CONSUMER_BY_EVENT.get(emittedEvent) ?? [];
+      for (const consumerId of consumers) {
+        const dashed = isExceptionalEvent(emittedEvent);
+        edges.push({
+          from: layout.id,
+          to: consumerId,
+          eventName: emittedEvent,
+          dashed,
+          label: EDGE_LABEL_MAP[emittedEvent],
+        });
+      }
+    }
+  }
 
-  // ManualPublish → ResumeCollector (manual recovery)
-  { from: "manualPublish",   to: "resumeCollector",   eventName: "CHANNEL_PUBLISHED",           dashed: true },
+  return edges;
+}
 
-  // ResumeCollector → ResumeParser
-  { from: "resumeCollector", to: "resumeParser",      eventName: "RESUME_DOWNLOADED"           },
+export const EDGES: WorkflowEdge[] = buildEdges();
 
-  // ResumeParser → Matcher (success)
-  { from: "resumeParser",    to: "matcher",           eventName: "RESUME_PROCESSED"            },
-
-  // ResumeParser → ResumeFixer (parse failed)
-  { from: "resumeParser",    to: "resumeFixer",       eventName: "RESUME_PARSE_ERROR",          dashed: true, label: "解析失败" },
-
-  // ResumeFixer → Matcher (manual recovery)
-  { from: "resumeFixer",     to: "matcher",           eventName: "RESUME_PROCESSED",            dashed: true },
-
-  // Matcher → InterviewInviter (needs interview)
-  { from: "matcher",         to: "interviewInviter",  eventName: "MATCH_PASSED_NEED_INTERVIEW", label: "需面试" },
-
-  // Matcher → ResumeRefiner (no interview needed)
-  { from: "matcher",         to: "resumeRefiner",     eventName: "MATCH_PASSED_NO_INTERVIEW",   label: "免面" },
-
-  // Matcher → MatchReviewer (failed match — HITL review)
-  { from: "matcher",         to: "matchReviewer",     eventName: "MATCH_FAILED",                dashed: true, label: "不符" },
-
-  // InterviewInviter → AIInterviewer
-  { from: "interviewInviter",to: "aiInterviewer",     eventName: "INTERVIEW_INVITATION_SENT"   },
-
-  // AIInterviewer → Evaluator
-  { from: "aiInterviewer",   to: "evaluator",         eventName: "AI_INTERVIEW_COMPLETED"      },
-
-  // Evaluator → ResumeRefiner (passed)
-  { from: "evaluator",       to: "resumeRefiner",     eventName: "EVALUATION_PASSED"           },
-
-  // ResumeRefiner → PackageBuilder
-  { from: "resumeRefiner",   to: "packageBuilder",    eventName: "RESUME_OPTIMIZED"            },
-
-  // PackageBuilder → PackageFiller (missing info)
-  { from: "packageBuilder",  to: "packageFiller",     eventName: "PACKAGE_MISSING_INFO",        dashed: true },
-
-  // PackageFiller → PackageReviewer (filled, re-join)
-  { from: "packageFiller",   to: "packageReviewer",   eventName: "PACKAGE_GENERATED",           dashed: true },
-
-  // PackageBuilder → PackageReviewer (complete)
-  { from: "packageBuilder",  to: "packageReviewer",   eventName: "PACKAGE_GENERATED"           },
-
-  // PackageReviewer → PortalSubmitter
-  { from: "packageReviewer", to: "portalSubmitter",   eventName: "PACKAGE_APPROVED"            },
-];
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const NODE_BY_ID = new Map(NODES.map(n => [n.id, n]));
 export function nodeById(id: string): WorkflowNode | undefined {

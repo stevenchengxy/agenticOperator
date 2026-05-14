@@ -203,17 +203,7 @@ export const AGENT_FUNCTIONS: AgentFunctionMeta[] = [
     ],
     failureModes: ["低置信样本", "技能词典覆盖不足"],
   },
-  {
-    short: "MatchReviewer",
-    summary: "MATCH_FAILED 时人工复核，可强制 override 重新进入流程。",
-    operations: [
-      "展示拒绝原因 + 关键字段 diff",
-      "人工 override 或确认拒绝",
-    ],
-    tools: ["HSM 复核 UI"],
-    inputs: ["MATCH_FAILED"],
-    outputs: [],
-  },
+  // MatchReviewer removed: not in canonical workflow spec. MATCH_FAILED is terminal.
   {
     short: "InterviewInviter",
     summary: "向通过 Matcher 的候选人发出 AI 面试邀请。",

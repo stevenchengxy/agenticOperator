@@ -239,7 +239,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     display_manualentry: "手工录入",
     display_manualpublish: "手工发布",
     display_matcher: "人岗匹配器",
-    display_matchreviewer: "匹配复审",
+    display_reclarifier: "需求重新澄清",
     display_packagebuilder: "推荐包构建",
     display_packagefiller: "推荐包补全",
     display_packagereviewer: "推荐包审核",
@@ -252,6 +252,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     display_resumeparser: "简历解析器",
     display_resumerefiner: "简历优化器",
     display_taskassigner: "任务分配器",
+    monitor_node_deployment_deployed: "已部署",
+    monitor_node_deployment_stubbed: "Stub 实现",
+    monitor_node_deployment_conceptual: "人工节点",
 
     // P2: inbox + triggers
     nav_inbox: "待办",
@@ -747,7 +750,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     display_manualentry: "Manual Entry",
     display_manualpublish: "Manual Publish",
     display_matcher: "Matcher",
-    display_matchreviewer: "Match Reviewer",
+    display_reclarifier: "Re-Clarifier",
     display_packagebuilder: "Package Builder",
     display_packagefiller: "Package Filler",
     display_packagereviewer: "Package Reviewer",
@@ -760,6 +763,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     display_resumeparser: "Resume Parser",
     display_resumerefiner: "Resume Refiner",
     display_taskassigner: "Task Assigner",
+    monitor_node_deployment_deployed: "Deployed",
+    monitor_node_deployment_stubbed: "Stub",
+    monitor_node_deployment_conceptual: "Human",
 
     // P2: inbox + triggers
     nav_inbox: "Inbox",

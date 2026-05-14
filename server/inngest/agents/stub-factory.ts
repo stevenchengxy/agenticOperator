@@ -49,7 +49,7 @@ type EventData = Record<string, unknown> & { _runId?: string };
 
 export function createStubAgent(meta: AgentMeta) {
   if (meta.triggersEvents.length === 0) {
-    // Nothing to listen to — skip (e.g. Chatbot, MatchReviewer terminal-only)
+    // Nothing to listen to — skip (e.g. Chatbot which has no trigger events)
     return null;
   }
 
