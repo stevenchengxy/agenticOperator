@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { usePoll } from "@/lib/monitor/usePoll";
 import { MonitorGraph } from "./MonitorGraph";
 import { ClaudeCard, ClaudeMetric, ClaudeBadge } from "./atoms";
@@ -20,6 +21,22 @@ export function RunDetailContent({ runId }: { runId: string }) {
     4_000,
   );
   const [tab, setTab] = React.useState<'timeline' | 'events' | 'tokens' | 'hitl'>('timeline');
+  const searchParams = useSearchParams();
+  const focusAt = searchParams?.get('focus');
+  const timelineRef = React.useRef<HTMLLIElement | null>(null);
+
+  // Auto-switch to timeline tab when a focus anchor is present
+  React.useEffect(() => {
+    if (focusAt && tab !== 'timeline') setTab('timeline');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusAt]);
+
+  // Scroll the focused activity into view once data loads
+  React.useEffect(() => {
+    if (focusAt && timelineRef.current) {
+      timelineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [focusAt, data]);
 
   if (error && !data) {
     return (
@@ -144,17 +161,27 @@ export function RunDetailContent({ runId }: { runId: string }) {
       {tab === 'timeline' && (
         <ClaudeCard>
           <ul className="flex flex-col divide-y divide-claude-line">
-            {(data?.activity ?? []).map((a, i) => (
-              <li key={i} className="py-2 first:pt-0 last:pb-0 text-[12.5px]">
-                <span className="text-claude-ink-4 tabular-nums mr-2">
-                  {new Date(a.ts).toLocaleTimeString()}
-                </span>
-                <span className="text-claude-ink-1 font-medium">{a.agent}</span>
-                <span className="text-claude-ink-3">
-                  {' '}— {a.type}: {a.narrative}
-                </span>
-              </li>
-            ))}
+            {(data?.activity ?? []).map((a, i) => {
+              const isFocused = focusAt === a.ts;
+              return (
+                <li
+                  key={i}
+                  ref={isFocused ? timelineRef : undefined}
+                  className={
+                    "py-2 first:pt-0 last:pb-0 text-[12.5px] rounded " +
+                    (isFocused ? "bg-claude-warn/10 " : "")
+                  }
+                >
+                  <span className="text-claude-ink-4 tabular-nums mr-2">
+                    {new Date(a.ts).toLocaleTimeString()}
+                  </span>
+                  <span className="text-claude-ink-1 font-medium">{a.agent}</span>
+                  <span className="text-claude-ink-3">
+                    {' '}— {a.type}: {a.narrative}
+                  </span>
+                </li>
+              );
+            })}
             {(!data || data.activity.length === 0) && (
               <li className="text-claude-ink-4 text-[12.5px]">No activity yet.</li>
             )}

@@ -34,7 +34,10 @@ export function KpiStrip({
         onClick={kpi && kpi.failuresInWindow > 0 ? () => onApplyStatusFilter('failed') : undefined}
       />
       <ClaudeMetric label="Tokens (window)" value={kpi ? fmt(kpi.tokensInWindow) : "—"} />
-      <ClaudeMetric label="Queue p95" value={kpi ? `${kpi.queueLagP95Ms}ms` : "—"} />
+      <ClaudeMetric
+        label="Queue p95"
+        value={kpi == null || kpi.queueLagP95Ms == null ? "—" : `${kpi.queueLagP95Ms}ms`}
+      />
     </div>
   );
 }

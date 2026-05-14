@@ -34,6 +34,7 @@ describe('GET /api/monitor/failures/[runId]', () => {
       status: 'failed',
       startedAt: new Date('2026-01-01T00:00:00Z'),
       completedAt: new Date('2026-01-01T00:10:00Z'),
+      lastActivityAt: new Date('2026-01-01T00:10:00Z'),
     });
     (prisma.workflowStep.findMany as any).mockResolvedValue([
       {
@@ -43,7 +44,9 @@ describe('GET /api/monitor/failures/[runId]', () => {
         stepName: 'Generate JD',
         status: 'failed',
         error: 'Error: API timeout after 30s',
+        startedAt: new Date('2026-01-01T00:04:00Z'),
         completedAt: new Date('2026-01-01T00:05:00Z'),
+        durationMs: 60000,
       },
     ]);
     (prisma.agentActivity.findMany as any).mockResolvedValue([

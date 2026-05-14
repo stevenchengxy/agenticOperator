@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { NODES } from '@/lib/workflow-graph-meta';
-import { sumTokensFromActivities } from '@/lib/monitor/aggregations';
+import { sumTokensFromActivities, safeParse } from '@/lib/monitor/aggregations';
 import type { MonitorRunDetail, RunTrailStep } from '@/lib/monitor/types';
 
 export async function GET(
@@ -84,21 +84,25 @@ export async function GET(
     }
 
     // ── tokensByAgent rollup ─────────────────────────────────────
-    const tokensByAgent: MonitorRunDetail['tokensByAgent'] = {};
+    // Group activities by agent name (for per-agent token rollup), then call
+    // sumTokensFromActivities on each group.
+    const tokenActivitiesByAgent = new Map<string, typeof activities>();
     for (const a of activities) {
       if (a.type !== 'tool') continue;
-      const parsed = a.metadata ? safeParse(a.metadata) : null;
-      const promptTokens     = numericOrZero(parsed?.promptTokens);
-      const completionTokens = numericOrZero(parsed?.completionTokens);
-      const totalTokens      = numericOrZero(parsed?.totalTokens) || (promptTokens + completionTokens);
-      const model            = typeof parsed?.model === 'string' ? parsed.model : null;
-      const k = a.agentName;
-      const cur = tokensByAgent[k] ?? { prompt: 0, completion: 0, total: 0, model };
-      cur.prompt += promptTokens;
-      cur.completion += completionTokens;
-      cur.total += totalTokens;
-      if (!cur.model) cur.model = model;
-      tokensByAgent[k] = cur;
+      const list = tokenActivitiesByAgent.get(a.agentName) ?? [];
+      list.push(a);
+      tokenActivitiesByAgent.set(a.agentName, list);
+    }
+    const tokensByAgent: MonitorRunDetail['tokensByAgent'] = {};
+    for (const [agentName, rows] of tokenActivitiesByAgent) {
+      const tokens = sumTokensFromActivities(rows);
+      // Extract model from the first row that has it
+      let model: string | null = null;
+      for (const r of rows) {
+        const m = r.metadata ? safeParse(r.metadata) : null;
+        if (m && typeof m.model === 'string') { model = m.model; break; }
+      }
+      tokensByAgent[agentName] = { ...tokens, model };
     }
 
     const detail: MonitorRunDetail = {
@@ -136,15 +140,8 @@ export async function GET(
     };
     return NextResponse.json(detail);
   } catch (e) {
+    // eslint-disable-next-line no-console
     console.error('[/api/monitor/runs/[id]] failed:', (e as Error).message);
     return NextResponse.json({ error: 'internal' }, { status: 500 });
   }
-}
-
-function safeParse(s: string): Record<string, any> | undefined {
-  try { return JSON.parse(s); } catch { return undefined; }
-}
-
-function numericOrZero(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }

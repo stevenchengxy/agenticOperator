@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
+import { safeParse } from '@/lib/monitor/aggregations';
 import type { MonitorQueueResponse } from '@/lib/monitor/types';
 
 const VALID_BUCKETS = ['accepted', 'pending', 'rejected', 'dlq'] as const;
@@ -73,11 +74,8 @@ export async function GET(req: Request): Promise<Response> {
     };
     return NextResponse.json(body);
   } catch (e) {
+    // eslint-disable-next-line no-console
     console.error('[/api/monitor/queue] failed:', (e as Error).message);
     return NextResponse.json({ error: 'internal' }, { status: 500 });
   }
-}
-
-function safeParse(s: string): unknown {
-  try { return JSON.parse(s); } catch { return undefined; }
 }

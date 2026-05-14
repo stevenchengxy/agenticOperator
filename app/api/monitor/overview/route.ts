@@ -6,6 +6,7 @@ import {
   pickNodeStatus,
   sumTokensFromActivities,
   buildEdgeAggregates,
+  safeParse,
 } from '@/lib/monitor/aggregations';
 import type {
   MonitorOverviewResponse,
@@ -106,8 +107,8 @@ export async function GET(req: Request): Promise<Response> {
       failuresInWindow: failuresAll.length,
       tokensInWindow: tokensTotal.total,
       queueDepth: eventInstances.filter(e => e.status === 'accepted').length,
-      queueLagP50Ms: 0,   // p50/p95 not yet implemented; placeholder so client renders.
-      queueLagP95Ms: 0,
+      queueLagP50Ms: null,   // not yet measured; route returns null until lag tracking lands
+      queueLagP95Ms: null,
     };
 
     // ── Per-node aggregates ────────────────────────────────────
@@ -241,10 +242,6 @@ export async function GET(req: Request): Promise<Response> {
     console.error('[/api/monitor/overview] failed:', (e as Error).message);
     return NextResponse.json({ error: 'internal' }, { status: 500 });
   }
-}
-
-function safeParse(s: string): Record<string, unknown> | undefined {
-  try { return JSON.parse(s); } catch { return undefined; }
 }
 
 function extractClientLabel(triggerData: string | null): string | null {

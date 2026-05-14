@@ -22,7 +22,7 @@ export function FailuresFeed({ rows }: { rows: MonitorFailureRow[] }) {
           {rows.map((r, i) => (
             <li key={`${r.runId}-${r.at}`} className="py-2 first:pt-0 last:pb-0">
               <Link
-                href={r.runId ? `/monitor/runs/${encodeURIComponent(r.runId)}` : '#'}
+                href={r.runId ? `/monitor/runs/${encodeURIComponent(r.runId)}?focus=${encodeURIComponent(r.at)}` : '#'}
                 className="flex items-start gap-2 text-[12.5px] no-underline hover:bg-claude-panel rounded px-1 py-1 -mx-1"
               >
                 <ClaudeBadge tone={r.severity === 'error' ? 'err' : 'warn'} size="xs">

@@ -9,7 +9,9 @@ export default function RunDetailPage() {
   const id = typeof params?.id === 'string' ? params.id : String(params?.id ?? '');
   return (
     <Shell crumbs={["Monitor", `Run ${id}`]} directionTag="Monitor · Run Detail">
-      <RunDetailContent runId={id} />
+      <React.Suspense fallback={<div className="p-6 text-claude-ink-3">Loading...</div>}>
+        <RunDetailContent runId={id} />
+      </React.Suspense>
     </Shell>
   );
 }

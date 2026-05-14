@@ -4,7 +4,7 @@ import { QueueContent } from "@/components/monitor/QueueContent";
 
 export default function MonitorQueuePage() {
   return (
-    <Shell crumbs={["Monitor", "Queue"]} directionTag="">
+    <Shell crumbs={["Monitor", "Queue"]} directionTag="Monitor · Event Queue">
       <QueueContent />
     </Shell>
   );

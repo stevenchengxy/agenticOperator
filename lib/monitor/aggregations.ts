@@ -3,6 +3,21 @@ import type {
   NodeStatus,
 } from './types';
 
+// ── safeParse ────────────────────────────────────────────────────
+/**
+ * Safe JSON parser. Returns the parsed object or undefined when input is
+ * null/empty or invalid JSON. Used across the monitor API routes to
+ * defensively parse Prisma TEXT/JSON columns.
+ */
+export function safeParse(s: string | null | undefined): Record<string, unknown> | undefined {
+  if (!s) return undefined;
+  try {
+    return JSON.parse(s) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── pickNodeStatus ───────────────────────────────────────────────
 // One signal wins. Order matters: explicit failure first, then
 // degradation, then idle vs healthy.

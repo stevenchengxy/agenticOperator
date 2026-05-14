@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { nodeById } from '@/lib/workflow-graph-meta';
-import { sumTokensFromActivities, buildHourlyBuckets } from '@/lib/monitor/aggregations';
+import { sumTokensFromActivities, buildHourlyBuckets, safeParse } from '@/lib/monitor/aggregations';
 import type { MonitorAgentDetail } from '@/lib/monitor/types';
 
 // ── /api/monitor/agents/[name] ────────────────────────────────────────
@@ -127,8 +127,3 @@ export async function GET(
   }
 }
 
-// ── helpers ──────────────────────────────────────────────────────────
-
-function safeParse(s: string): Record<string, unknown> | undefined {
-  try { return JSON.parse(s) as Record<string, unknown>; } catch { return undefined; }
-}

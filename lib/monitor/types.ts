@@ -39,8 +39,8 @@ export type MonitorKpi = {
   failuresInWindow: number;
   tokensInWindow: number;
   queueDepth: number;
-  queueLagP50Ms: number;
-  queueLagP95Ms: number;
+  queueLagP50Ms: number | null;
+  queueLagP95Ms: number | null;
 };
 
 export type MonitorFailureRow = {
@@ -133,6 +133,44 @@ export type MonitorAgentDetail = {
   tokenSpend: Array<{ bucket: string; prompt: number; completion: number; total: number }>;
   errorRate:  Array<{ bucket: string; total: number; failed: number }>;
   recentErrors: Array<{ runId: string; narrative: string; ts: string; metadata?: Record<string, unknown> }>;
+};
+
+export type MonitorFailureDetailResponse = {
+  run: {
+    id: string;
+    triggerEvent: string;
+    status: 'running' | 'completed' | 'failed' | 'suspended' | 'paused';
+    startedAt: string;
+    completedAt: string | null;
+    lastActivityAt: string;
+  };
+  steps: Array<{
+    id: string;
+    runId: string;
+    nodeId: string;
+    stepName: string;
+    status: string;
+    error: string | null;
+    startedAt: string;
+    completedAt: string | null;
+    durationMs: number | null;
+  }>;
+  retries: Array<{
+    id: string;
+    runId: string | null;
+    agentName: string;
+    type: string;
+    narrative: string;
+    metadata: string | null;
+    createdAt: string;
+  }>;
+  events: Array<{
+    id: string;
+    name: string;
+    source: string;
+    status: string;
+    ts: string;
+  }>;
 };
 
 export type MonitorQueueEventRow = {

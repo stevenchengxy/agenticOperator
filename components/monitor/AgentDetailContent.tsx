@@ -62,6 +62,7 @@ export function AgentDetailContent({ name }: { name: string }) {
         {(['episodes', 'tokens', 'errors', 'config'] as const).map(t => (
           <button
             key={t}
+            type="button"
             onClick={() => setTab(t)}
             className={
               "px-3 py-2 text-[13px] " +
