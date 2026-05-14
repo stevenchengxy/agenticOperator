@@ -84,6 +84,8 @@ function MonitorContentInner() {
           edgeAggs={data?.edges}
           onNodeClick={(id) => router.push(`/monitor/agents/${encodeURIComponent(id)}`)}
           onRunningClick={(id) => setMiniAgent(id)}
+          onHitlClick={(id) => router.push(`/inbox?agent=${encodeURIComponent(id)}`)}
+          onQueueClick={(id) => router.push(`/monitor/queue?nodeId=${encodeURIComponent(id)}`)}
         />
       </div>
 

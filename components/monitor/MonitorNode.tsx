@@ -25,9 +25,11 @@ type Props = {
   agg?: MonitorNodeAgg;
   onClick?: () => void;
   onRunningClick?: () => void;
+  onHitlClick?: () => void;
+  onQueueClick?: () => void;
 };
 
-export function MonitorNode({ node, agg, onClick, onRunningClick }: Props) {
+export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, onQueueClick }: Props) {
   const status = agg?.status ?? "idle";
   const running = agg?.running ?? 0;
   const hitl = agg?.hitlPending ?? 0;
@@ -63,7 +65,11 @@ export function MonitorNode({ node, agg, onClick, onRunningClick }: Props) {
           </g>
         )}
         {hitl > 0 && (
-          <g transform={`translate(${running > 0 ? 42 : 0}, 0)`}>
+          <g
+            transform={`translate(${running > 0 ? 42 : 0}, 0)`}
+            onClick={(e) => { e.stopPropagation(); onHitlClick?.(); }}
+            className={clsx(onHitlClick && "cursor-pointer")}
+          >
             <rect width={32} height={18} rx={9} fill="color-mix(in oklch, var(--c-claude-warn) 22%, transparent)" />
             <text x={16} y={13} fontSize={11} textAnchor="middle" fill="var(--c-claude-warn)" fontWeight={500}>
               {hitl} ⏸
@@ -71,7 +77,11 @@ export function MonitorNode({ node, agg, onClick, onRunningClick }: Props) {
           </g>
         )}
         {queue > 0 && (
-          <g transform={`translate(${(running > 0 ? 42 : 0) + (hitl > 0 ? 36 : 0)}, 0)`}>
+          <g
+            transform={`translate(${(running > 0 ? 42 : 0) + (hitl > 0 ? 36 : 0)}, 0)`}
+            onClick={(e) => { e.stopPropagation(); onQueueClick?.(); }}
+            className={clsx(onQueueClick && "cursor-pointer")}
+          >
             <rect width={36} height={18} rx={9} fill="var(--c-claude-panel)" />
             <text x={18} y={13} fontSize={11} textAnchor="middle" fill="var(--c-claude-ink-2)" fontWeight={500}>
               Q {queue}

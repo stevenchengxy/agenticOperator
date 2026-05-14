@@ -20,9 +20,11 @@ type Props = {
   edgeAggs?: MonitorEdgeAgg[];
   onNodeClick?: (nodeId: string) => void;
   onRunningClick?: (nodeId: string) => void;
+  onHitlClick?: (nodeId: string) => void;
+  onQueueClick?: (nodeId: string) => void;
 };
 
-export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick }: Props) {
+export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick }: Props) {
   const aggByName = new Map((nodeAggs ?? []).map(a => [a.name, a]));
   const edgeAggByKey = new Map((edgeAggs ?? []).map(e => [`${e.from}->${e.to}`, e]));
 
@@ -57,6 +59,8 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick }
             agg={aggByName.get(n.id)}
             onClick={onNodeClick ? () => onNodeClick(n.id) : undefined}
             onRunningClick={onRunningClick ? () => onRunningClick(n.id) : undefined}
+            onHitlClick={onHitlClick ? () => onHitlClick(n.id) : undefined}
+            onQueueClick={onQueueClick ? () => onQueueClick(n.id) : undefined}
           />
         ))}
       </svg>

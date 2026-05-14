@@ -20,7 +20,7 @@ export function FailuresFeed({ rows }: { rows: MonitorFailureRow[] }) {
       ) : (
         <ul className="flex flex-col divide-y divide-claude-line">
           {rows.map((r, i) => (
-            <li key={i} className="py-2 first:pt-0 last:pb-0">
+            <li key={`${r.runId}-${r.at}`} className="py-2 first:pt-0 last:pb-0">
               <Link
                 href={r.runId ? `/monitor/runs/${encodeURIComponent(r.runId)}` : '#'}
                 className="flex items-start gap-2 text-[12.5px] no-underline hover:bg-claude-panel rounded px-1 py-1 -mx-1"
