@@ -39,7 +39,7 @@ let cachedBody: MonitorOverviewResponse | null = null;
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const filter = parseFilter(url);
-  const cacheKey = JSON.stringify(filter);
+  const cacheKey = `${filter.sinceMs}|${filter.client ?? ''}|${filter.triggerEvent ?? ''}|${filter.status ?? ''}`;
 
   if (cachedBody && cacheKey === cachedKey && Date.now() - cachedAt < CACHE_TTL_MS) {
     return NextResponse.json(cachedBody);
@@ -49,13 +49,7 @@ export async function GET(req: Request): Promise<Response> {
     const since = new Date(filter.since);
 
     // 1) Run-level aggregates
-    // _runsInWindow is fetched for future per-window status analysis;
-    // not yet consumed by KPI rollup (placeholder counts are zero).
-    const [_runsInWindow, activeRunsCount, recentRunRows] = await Promise.all([
-      prisma.workflowRun.findMany({
-        where: { startedAt: { gte: since } },
-        select: { id: true, status: true, triggerEvent: true, triggerData: true, startedAt: true, lastActivityAt: true },
-      }),
+    const [activeRunsCount, recentRunRows] = await Promise.all([
       prisma.workflowRun.count({ where: { status: 'running' } }),
       prisma.workflowRun.findMany({
         orderBy: { lastActivityAt: 'desc' },
