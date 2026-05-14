@@ -200,3 +200,35 @@ export type MonitorQueueResponse = {
   limit: number;
   rows: Array<MonitorQueueEventRow | MonitorQueueDlqRow>;
 };
+
+export type InstanceCard = {
+  runId: string;
+  triggerEvent: string;
+  status: 'running' | 'completed' | 'failed' | 'suspended' | 'paused';
+  startedAt: string;
+  lastActivityAt: string;
+  completedAt: string | null;
+
+  // Entity refs parsed from triggerData JSON
+  client: string | null;
+  jdTitle: string | null;
+  jdId: string | null;
+  candidateName: string | null;
+  candidateId: string | null;
+  resumeId: string | null;
+
+  // Progress
+  currentAgent: string | null;
+  currentStage: string | null;
+  agentsTouched: number;
+
+  // Flags
+  pendingHitl: boolean;
+  hasFailure: boolean;
+};
+
+export type MonitorInstancesResponse = {
+  scope: 'live' | 'recent';
+  total: number;
+  items: InstanceCard[];
+};

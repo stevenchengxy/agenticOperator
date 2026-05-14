@@ -7,8 +7,8 @@ import { FilterChips } from "./FilterChips";
 import { KpiStrip } from "./KpiStrip";
 import { FailuresFeed } from "./FailuresFeed";
 import { HitlFeed } from "./HitlFeed";
-import { RecentRunsStrip } from "./RecentRunsStrip";
 import { MiniRunList } from "./MiniRunList";
+import { InstanceCardsSection } from "./InstanceCardsSection";
 import { MonitorHeader } from "./MonitorHeader";
 import { ActionBar } from "./ActionBar";
 import { AgentDetailPanel } from "./AgentDetailPanel";
@@ -104,6 +104,8 @@ function MonitorContentInner() {
         />
       </div>
 
+      <InstanceCardsSection paused={paused} />
+
       <div className="mb-6 relative">
         <MonitorGraph
           nodeAggs={data?.nodes}
@@ -116,10 +118,9 @@ function MonitorContentInner() {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <RecentRunsStrip rows={data?.recentRuns ?? []} />
-        <FailuresFeed   rows={data?.failures ?? []} />
-        <HitlFeed       rows={data?.hitl ?? []} />
+      <div className="grid grid-cols-2 gap-4">
+        <FailuresFeed rows={data?.failures ?? []} />
+        <HitlFeed     rows={data?.hitl ?? []} />
       </div>
 
       {miniAgent && (
