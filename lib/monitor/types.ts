@@ -108,3 +108,29 @@ export type MonitorRunDetail = {
   tokensByAgent: Record<string, { prompt: number; completion: number; total: number; model: string | null }>;
   hitl: Array<{ taskId: string; status: string; title: string; createdAt: string; completedAt: string | null }>;
 };
+
+export type MonitorAgentDetail = {
+  name: string;
+  title: string;
+  config: {
+    enabled: boolean;
+    temperature: number | null;
+    maxRetries: number | null;
+    tier: string | null;
+    maxOutputTokens: number | null;
+    promptAppend: string | null;
+  } | null;
+  recentEpisodes: Array<{
+    id: string;
+    runId: string;
+    clientId: string | null;
+    durationMs: number;
+    tokenUsage: { prompt: number; completion: number; total: number };
+    modelUsed: string | null;
+    judgeScore: number | null;
+    createdAt: string;
+  }>;
+  tokenSpend: Array<{ bucket: string; prompt: number; completion: number; total: number }>;
+  errorRate:  Array<{ bucket: string; total: number; failed: number }>;
+  recentErrors: Array<{ runId: string; narrative: string; ts: string; metadata?: Record<string, unknown> }>;
+};
