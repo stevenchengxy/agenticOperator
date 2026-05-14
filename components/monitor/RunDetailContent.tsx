@@ -3,7 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { usePoll } from "@/lib/monitor/usePoll";
 import { MonitorGraph } from "./MonitorGraph";
-import { ClaudeCard, ClaudeMetric, ClaudeBadge, ClaudeSectionTitle } from "./atoms";
+import { ClaudeCard, ClaudeMetric, ClaudeBadge } from "./atoms";
 import type { MonitorRunDetail } from "@/lib/monitor/types";
 
 const STATUS_TONE: Record<string, 'accent' | 'ok' | 'err' | 'warn' | 'neutral'> = {
@@ -33,6 +33,11 @@ export function RunDetailContent({ runId }: { runId: string }) {
   }
 
   // Build the trail map for the graph: nodeId → { result, current }
+  // NOTE: `current` flag relies on NODES being defined in topological order
+  // in lib/workflow-graph-meta.ts. The "last" pending step in the trail
+  // array equals the run's current execution position only because trail is
+  // produced by iterating NODES in source order. If nodes are ever reordered,
+  // add an enteredAt sort here or compute "last" by max(enteredAt) instead.
   const trailMap = new Map(
     (data?.trail ?? []).map((t, i, arr) => {
       // The "current" node is the last pending step while the run is still running

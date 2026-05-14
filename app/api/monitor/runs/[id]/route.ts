@@ -44,7 +44,7 @@ export async function GET(
         },
         orderBy: { ts: 'asc' },
         take: 200,
-        select: { id: true, name: true, ts: true, source: true },
+        select: { id: true, name: true, ts: true },
       }),
     ]);
 

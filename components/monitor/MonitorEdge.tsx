@@ -28,9 +28,11 @@ export function MonitorEdge({ edge, fromNode, toNode, agg, isTrailEdge, isTrailM
   const strokeWidth = isTrailMode
     ? (isTrailEdge ? 2.0 : 0.5)
     : (count >= 100 ? 2.2 : count >= 10 ? 1.6 : 1);
-  const stroke = isTrailMode && !isTrailEdge
+  const stroke = !isTrailMode
     ? "var(--c-claude-line)"
-    : "var(--c-claude-line)";
+    : isTrailEdge
+      ? "var(--c-claude-accent)"     // traversed trail edges: highlight coral
+      : "var(--c-claude-line)";       // untouched in trail mode: muted line
 
   const mid = { x: (f.x + t.x) / 2, y: (f.y + t.y) / 2 };
 
