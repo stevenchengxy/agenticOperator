@@ -46,9 +46,11 @@ type Props = {
   trailEntry?: TrailEntry;
   /** When true, aggregate badges (running/hitl/queue) are hidden and untouched nodes are greyed. */
   isTrailMode?: boolean;
+  /** When true, this node's detail panel is open — render with stronger accent outline. */
+  selected?: boolean;
 };
 
-export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, onQueueClick, trailEntry, isTrailMode }: Props) {
+export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, onQueueClick, trailEntry, isTrailMode, selected }: Props) {
   const status = agg?.status ?? "idle";
   const running = agg?.running ?? 0;
   const hitl = agg?.hitlPending ?? 0;
@@ -56,10 +58,15 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
 
   // Trail mode overrides fill/stroke colors
   const fill   = trailEntry ? TRAIL_FILL[trailEntry.result]   : STATUS_FILL[status];
-  const stroke = trailEntry ? TRAIL_STROKE[trailEntry.result] : STATUS_STROKE[status];
-  const strokeWidth = trailEntry
-    ? (trailEntry.result === 'failure' || trailEntry.result === 'pending' ? 1.5 : 1)
-    : (status === "idle" || status === "healthy" ? 1 : 1.5);
+  // Selected node gets accent outline regardless of status/trail
+  const stroke = selected
+    ? "var(--c-claude-accent)"
+    : (trailEntry ? TRAIL_STROKE[trailEntry.result] : STATUS_STROKE[status]);
+  const strokeWidth = selected
+    ? 2
+    : trailEntry
+      ? (trailEntry.result === 'failure' || trailEntry.result === 'pending' ? 1.5 : 1)
+      : (status === "idle" || status === "healthy" ? 1 : 1.5);
 
   // Untouched nodes in trail mode: dim to 30% opacity
   const opacity = isTrailMode && !trailEntry ? 0.3 : 1;
@@ -74,6 +81,19 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
       opacity={opacity}
       className={clsx(onClick && "cursor-pointer", shouldPulse && "monitor-pulse")}
     >
+      {selected && (
+        <rect
+          x={-3}
+          y={-3}
+          width={NODE_W + 6}
+          height={NODE_H + 6}
+          rx={13}
+          fill="none"
+          stroke="var(--c-claude-accent)"
+          strokeWidth={1}
+          opacity={0.25}
+        />
+      )}
       <rect
         width={NODE_W}
         height={NODE_H}

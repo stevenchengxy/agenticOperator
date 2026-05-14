@@ -14,6 +14,8 @@ import type {
 } from "@/lib/monitor/types";
 import { MonitorNode } from "./MonitorNode";
 import { MonitorEdge } from "./MonitorEdge";
+import { StageBackdrop } from "./StageBackdrop";
+import { NodeStateLegend } from "./NodeStateLegend";
 
 type TrailEntry = { result: 'success' | 'failure' | 'pending' | 'skipped'; current: boolean };
 
@@ -26,15 +28,17 @@ type Props = {
   onQueueClick?: (nodeId: string) => void;
   /** Trail map for run-detail mode. When provided, nodes switch to trail-colored rendering. */
   trail?: Map<string, TrailEntry>;
+  /** The node whose detail panel is currently open. */
+  selectedNodeId?: string | null;
 };
 
-export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail }: Props) {
+export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail, selectedNodeId }: Props) {
   const aggByName = new Map((nodeAggs ?? []).map(a => [a.name, a]));
   const edgeAggByKey = new Map((edgeAggs ?? []).map(e => [`${e.from}->${e.to}`, e]));
   const isTrailMode = trail != null;
 
   return (
-    <div className="w-full overflow-auto rounded-[12px] border border-claude-line bg-claude-surface">
+    <div className="w-full overflow-auto rounded-[12px] border border-claude-line bg-claude-surface relative">
       <svg
         viewBox={GRAPH_VIEWBOX}
         width="100%"
@@ -42,7 +46,9 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
         preserveAspectRatio="xMidYMid meet"
         style={{ minWidth: GRAPH_WIDTH }}
       >
-        {/* Edges drawn first so nodes overlay them */}
+        {/* Stage backdrop bands behind everything */}
+        <StageBackdrop />
+        {/* Edges drawn next so nodes overlay them */}
         {EDGES.map((e, i) => {
           const from = nodeById(e.from);
           const to   = nodeById(e.to);
@@ -74,9 +80,12 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
             onQueueClick={onQueueClick ? () => onQueueClick(n.id) : undefined}
             trailEntry={trail?.get(n.id)}
             isTrailMode={isTrailMode}
+            selected={n.id === selectedNodeId}
           />
         ))}
       </svg>
+      {/* Legend overlay in bottom-right corner of the graph card */}
+      <NodeStateLegend />
     </div>
   );
 }

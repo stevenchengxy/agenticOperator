@@ -9,6 +9,9 @@ import { FailuresFeed } from "./FailuresFeed";
 import { HitlFeed } from "./HitlFeed";
 import { RecentRunsStrip } from "./RecentRunsStrip";
 import { MiniRunList } from "./MiniRunList";
+import { MonitorHeader } from "./MonitorHeader";
+import { ActionBar } from "./ActionBar";
+import { AgentDetailPanel } from "./AgentDetailPanel";
 import type { MonitorOverviewResponse, MonitorRunRow } from "@/lib/monitor/types";
 
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
@@ -21,6 +24,13 @@ function MonitorContentInner() {
   const windowMs = Number(sp.get('windowMs') ?? DEFAULT_WINDOW_MS);
   const status = sp.get('status') ?? undefined;
   const [search, setSearch] = React.useState<string>(sp.get('q') ?? '');
+
+  // Pause/resume polling
+  const [paused, setPaused] = React.useState(false);
+  const onTogglePause = React.useCallback(() => setPaused(p => !p), []);
+
+  // Selected agent for the right-rail detail panel
+  const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
 
   const updateUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(sp.toString());
@@ -36,7 +46,7 @@ function MonitorContentInner() {
     return `/api/monitor/overview?${p.toString()}`;
   }, [windowMs, status]);
 
-  const { data, error } = usePoll<MonitorOverviewResponse>(apiUrl, 4_000);
+  const { data, error, lastSuccessAt } = usePoll<MonitorOverviewResponse>(apiUrl, 4_000, paused);
 
   // Mini run list state (when a node's "running ▶" badge is clicked)
   const [miniAgent, setMiniAgent] = React.useState<string | null>(null);
@@ -47,17 +57,33 @@ function MonitorContentInner() {
     return data.recentRuns.filter(r => r.status === 'running').slice(0, 5);
   }, [miniAgent, data]);
 
+  // Header stats derived from KPI data
+  const headerStats = React.useMemo(() => {
+    if (!data?.kpi) return null;
+    const kpi = data.kpi;
+    return {
+      activeRuns: kpi.activeRuns,
+      pendingHitl: kpi.pendingHitl,
+      failuresInWindow: kpi.failuresInWindow,
+      tokensInWindow: kpi.tokensInWindow,
+    };
+  }, [data]);
+
   return (
     <div className="p-6 max-w-[1620px] mx-auto">
-      <div className="flex items-baseline justify-between mb-4">
-        <div>
-          <h1 className="text-[28px] font-medium leading-tight">Monitor</h1>
-          <p className="text-claude-ink-3 text-[13px] mt-1">
-            Runtime state of all workflow agents.
-            {error && <span className="text-claude-err"> · {error}</span>}
-          </p>
-        </div>
-      </div>
+      <MonitorHeader
+        stats={headerStats}
+        lastSuccessAt={lastSuccessAt}
+        hasError={!!error}
+      />
+
+      <ActionBar paused={paused} onTogglePause={onTogglePause} />
+
+      {error && (
+        <p className="text-claude-err text-[12px] mb-2">
+          Polling error: {error}
+        </p>
+      )}
 
       <div className="mb-4">
         <FilterChips
@@ -78,14 +104,15 @@ function MonitorContentInner() {
         />
       </div>
 
-      <div className="mb-6">
+      <div className="mb-6 relative">
         <MonitorGraph
           nodeAggs={data?.nodes}
           edgeAggs={data?.edges}
-          onNodeClick={(id) => router.push(`/monitor/agents/${encodeURIComponent(id)}`)}
+          onNodeClick={(id) => setSelectedAgentId(prev => prev === id ? null : id)}
           onRunningClick={(id) => setMiniAgent(id)}
           onHitlClick={(id) => router.push(`/inbox?agent=${encodeURIComponent(id)}`)}
           onQueueClick={(id) => router.push(`/monitor/queue?nodeId=${encodeURIComponent(id)}`)}
+          selectedNodeId={selectedAgentId}
         />
       </div>
 
@@ -102,6 +129,11 @@ function MonitorContentInner() {
           onClose={() => setMiniAgent(null)}
         />
       )}
+
+      <AgentDetailPanel
+        nodeId={selectedAgentId}
+        onClose={() => setSelectedAgentId(null)}
+      />
     </div>
   );
 }
@@ -110,7 +142,10 @@ export function MonitorContent() {
   return (
     <React.Suspense fallback={
       <div className="p-6 max-w-[1620px] mx-auto">
-        <h1 className="text-[28px] font-medium leading-tight">Monitor</h1>
+        <div className="text-[11px] uppercase tracking-[0.16em] text-claude-ink-4 font-medium mb-2">
+          Agentic Operator · Live Ops
+        </div>
+        <h1 className="text-[44px] font-medium leading-[1.05]">Monitor</h1>
         <p className="text-claude-ink-3 text-[13px] mt-1">Loading…</p>
       </div>
     }>

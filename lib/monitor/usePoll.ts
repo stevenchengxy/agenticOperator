@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
 
-// usePoll<T>(url, intervalMs)
-// - First request fires immediately on mount.
+// usePoll<T>(url, intervalMs, paused)
+// - First request fires immediately on mount (unless paused).
 // - Subsequent requests fire every intervalMs.
 // - Errors are stored in state and visible in `error`; previous data is
 //   kept so the UI doesn't flash to "nothing".
@@ -10,13 +10,19 @@ import { useEffect, useRef, useState } from 'react';
 //   so stale responses from a previous URL never overwrite fresh data.
 // - `refresh` has a stable identity across renders so consumers can list
 //   it as a useEffect/useCallback dependency without causing loops.
-export function usePoll<T>(url: string, intervalMs = 4_000): {
+// - `lastSuccessAt` is set each time a successful response is received;
+//   used by StreamPill to distinguish "connected" vs "disconnected".
+// - `paused` suspends all polling without unmounting; the effect re-runs
+//   when paused changes, which triggers an immediate fetch on resume.
+export function usePoll<T>(url: string, intervalMs = 4_000, paused = false): {
   data: T | null;
   error: string | null;
+  lastSuccessAt: Date | null;
   refresh: () => void;
 } {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastSuccessAt, setLastSuccessAt] = useState<Date | null>(null);
 
   // Stable refresh identity: the function itself is stable, but it reads
   // the latest url/intervalMs from a ref each call.
@@ -27,6 +33,13 @@ export function usePoll<T>(url: string, intervalMs = 4_000): {
   const refreshRef = useRef<() => void>(() => {});
 
   useEffect(() => {
+    // When paused, abort any in-flight request and do not start polling.
+    if (paused) {
+      stateRef.current.ac?.abort();
+      stateRef.current.ac = null;
+      return;
+    }
+
     const fire = async () => {
       // Abort any prior in-flight fetch from this effect's lifetime.
       stateRef.current.ac?.abort();
@@ -39,6 +52,7 @@ export function usePoll<T>(url: string, intervalMs = 4_000): {
         if (!ac.signal.aborted) {
           setData(json);
           setError(null);
+          setLastSuccessAt(new Date());
         }
       } catch (e) {
         if ((e as Error).name === 'AbortError') return;
@@ -54,7 +68,7 @@ export function usePoll<T>(url: string, intervalMs = 4_000): {
       stateRef.current.ac?.abort();
       stateRef.current.ac = null;
     };
-  }, [url, intervalMs]);
+  }, [url, intervalMs, paused]);
 
   // Stable wrapper. Calling refresh() always invokes the latest fire
   // closure stored in refreshRef.
@@ -62,5 +76,5 @@ export function usePoll<T>(url: string, intervalMs = 4_000): {
     refreshRef.current();
   }).current;
 
-  return { data, error, refresh: stableRefresh };
+  return { data, error, lastSuccessAt, refresh: stableRefresh };
 }
