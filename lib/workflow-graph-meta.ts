@@ -26,6 +26,14 @@ export const GRAPH_VIEWBOX = '0 0 1620 560' as const;
 export const GRAPH_WIDTH = 1620 as const;
 export const GRAPH_HEIGHT = 560 as const;
 
+// NOTE: `title` and `sub` use Chinese copy. WorkflowContent.tsx previously
+// localized some `sub` values via `t("agent_*")`. After extraction, those
+// values are inlined as zh-CN because this module is pure data (no React
+// context, no useApp). The trade-off is acceptable per CLAUDE.md: agent
+// names, customer names, and other mock-domain copy stay hardcoded;
+// only true UI chrome goes through t(). Language toggle no longer
+// translates these strings — that's by design.
+
 export const NODES: WorkflowNode[] = [
   { id: "trig", kind: "trigger", x: 20, y: 240, title: "定时同步 / Webhook", sub: "SCHEDULED_SYNC · 客户 RMS", icon: "bolt" },
   { id: "sync", kind: "agent", x: 200, y: 240, title: "ReqSync", sub: "需求同步 → REQUIREMENT_SYNCED", icon: "db" },
