@@ -49,7 +49,9 @@ export const AGENT_MAP: AgentMeta[] = [
   // System-level meta agent (not on workflow canvas). Registered so
   // /api/agents/Chatbot/explain + /api/agents/Chatbot/activity work and
   // chatbot audit rows surface in cross-agent UIs.
-  { short: 'Chatbot',          wsId: 'system-chatbot', stage: 'system', kind: 'auto',   ownerTeam: 'AO·UI',     version: 'v1.0.0', triggersEvents: [],                                                 emitsEvents: [],                                                                           terminal: false },
+  // terminal=true because it emits no events and is outside the business
+  // workflow chain (trigger-or-terminal invariant in agent-mapping.test.ts).
+  { short: 'Chatbot',          wsId: 'system-chatbot', stage: 'system', kind: 'auto',   ownerTeam: 'AO·UI',     version: 'v1.0.0', triggersEvents: [],                                                 emitsEvents: [],                                                                           terminal: true  },
 ];
 
 export function byShort(s: string): AgentMeta | undefined {

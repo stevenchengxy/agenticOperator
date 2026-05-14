@@ -1,5 +1,44 @@
 import type { IcName } from '@/components/shared/Ic';
 
+// ─── Audit: Graph NODES vs AGENT_MAP ─────────────────────────────────────────
+//
+// The graph canvas has 18 NODES (see below). lib/agent-mapping.ts AGENT_MAP has
+// 23 entries. This mismatch is INTENTIONAL — the graph is a simplified conceptual
+// workflow view, not a 1:1 deployment registry.
+//
+// Non-agent control nodes (4 nodes that have no AGENT_MAP entry):
+//   id="trig"    kind=trigger  — conceptual trigger node (SCHEDULED_SYNC / Webhook)
+//   id="clarify" kind=branch   — decision diamond: "信息完整?" (branch, not an agent)
+//   id="match"   kind=branch   — decision diamond: "人岗匹配" (Matcher handles logic)
+//   id="reject"  kind=done     — terminal sink: MATCH_FAILED archive (not an agent)
+//
+// AGENT_MAP entries NOT represented on the graph (intentionally merged / omitted):
+//   ManualEntry      (wsId=1-2)  — merged into the clarify HITL "ask" node conceptually
+//   Clarifier        (wsId=3)    — modelled as the "clarify" branch node; its logic is
+//                                  the branch condition, not a distinct canvas node
+//   JDReviewer       (wsId=5)    — merged into graph "jdappr" HITL node (title "HSM 审批 JD")
+//   TaskAssigner     (wsId=6)    — omitted; sits between JD_APPROVED and Publisher;
+//                                  not prominent enough for a top-level canvas node
+//   ManualPublish    (wsId=7-2)  — omitted; fallback HITL for publisher failures;
+//                                  shown as Publisher's sub (terminal:true path)
+//   ResumeFixer      (wsId=9-2)  — omitted; HITL fallback when ResumeParser fails
+//   MatchReviewer    (wsId=10-HITL) — omitted; HITL for MATCH_FAILED review
+//   InterviewInviter (wsId=11-1) — omitted; its role is implied by AIInterviewer entering
+//   ResumeRefiner    (wsId=13)   — omitted; sits between Evaluator and PackageBuilder;
+//                                  conceptually part of the package preparation lane
+//   PackageFiller    (wsId=14-2) — omitted; HITL fallback for PackageBuilder
+//   PackageReviewer  (wsId=15)   — merged into graph "review" HITL node
+//   Chatbot          (wsId=system-chatbot) — system-level meta agent; deliberately
+//                                  not part of the business workflow canvas
+//
+// agentName fallback mapping (for DB lookups when title ≠ AGENT_MAP.short):
+//   id="parse"  → agentName="ResumeParser"  (title is "ResumeParser + DupeCheck")
+//   All other agent-kind nodes: no agentName override; title IS the canonical short.
+//   Non-agent nodes (trig/clarify/match/reject/ask/jdappr/review/guard) have no
+//   AGENT_MAP entry; lookups gracefully return null.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type NodeKind = 'trigger' | 'agent' | 'branch' | 'hitl' | 'guard' | 'done';
 
 export type WorkflowNode = {

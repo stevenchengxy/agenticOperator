@@ -14,13 +14,13 @@ import { wsClient } from '@/server/clients/ws';
 describe('GET /api/agents', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns 22 agents with merged static + dynamic data', async () => {
+  it('returns 23 agents with merged static + dynamic data', async () => {
     (wsClient.fetchRuns as any).mockResolvedValue({ runs: [], total: 0 });
     (wsClient.fetchActivityFeed as any).mockResolvedValue({ items: [], total: 0 });
     const res = await GET(new Request('http://x/api/agents'));
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.agents).toHaveLength(22);
+    expect(json.agents).toHaveLength(23);
     const matcher = json.agents.find((a: any) => a.short === 'Matcher');
     expect(matcher.wsId).toBe('10');
     expect(matcher.displayName).toBe('display_matcher');

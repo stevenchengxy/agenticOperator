@@ -3,6 +3,7 @@ import React from "react";
 import clsx from "clsx";
 import type { WorkflowNode } from "@/lib/workflow-graph-meta";
 import type { MonitorNodeAgg, NodeStatus } from "@/lib/monitor/types";
+import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
 
 const STATUS_FILL: Record<NodeStatus, string> = {
   idle:     "var(--c-claude-panel)",
@@ -56,6 +57,11 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
   const hitl = agg?.hitlPending ?? 0;
   const queue = agg?.queueDepth ?? 0;
 
+  // Resolve tooltip text: use agent description if available, fallback to sub / title
+  const canonicalShort = node.agentName ?? node.title;
+  const desc = getAgentDescription(canonicalShort);
+  const tooltipText = desc?.description ?? node.sub ?? node.title;
+
   // Trail mode overrides fill/stroke colors
   const fill   = trailEntry ? TRAIL_FILL[trailEntry.result]   : STATUS_FILL[status];
   // Selected node gets accent outline regardless of status/trail
@@ -89,6 +95,8 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
         isRunning && "monitor-node-running",
       )}
     >
+      {/* Native SVG tooltip — appears after ~1s hover, lightweight, no JS state */}
+      <title>{tooltipText}</title>
       {selected && (
         <rect
           x={-3}

@@ -7,7 +7,9 @@ import { ClaudeCard, ClaudeMetric, ClaudeBadge, ClaudeSectionTitle } from "./ato
 import { TokenChart } from "./TokenChart";
 import { ErrorRateChart } from "./ErrorRateChart";
 import { MonitorGraph } from "./MonitorGraph";
+import { InternalFlowDiagram } from "./InternalFlowDiagram";
 import { nodeById } from "@/lib/workflow-graph-meta";
+import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
 import { useApp } from "@/lib/i18n";
 import type { MonitorAgentDetail, MonitorNodeAgg } from "@/lib/monitor/types";
 
@@ -36,6 +38,9 @@ export function AgentDetailContent({ name }: { name: string }) {
 
   // Resolve the workflow node for this agent (name is node id)
   const node = nodeById(name);
+
+  // Resolve the agent description for internal flow + description text
+  const agentDesc = data ? getAgentDescription(data.title) : getAgentDescription(name);
 
   // Build nodeAggs from candidateDistribution for the workflow position graph
   const workflowNodeAggs: MonitorNodeAgg[] = React.useMemo(() => {
@@ -88,6 +93,15 @@ export function AgentDetailContent({ name }: { name: string }) {
           emphasis={successRate >= 0.95 ? 'ok' : 'warn'}
         />
       </div>
+
+      {/* ── Internal Flow ─────────────────────────────────────────── */}
+      <ClaudeSectionTitle>{t('monitor_internal_flow_title')}</ClaudeSectionTitle>
+      <ClaudeCard className="mb-6">
+        <p className="text-claude-ink-3 text-[12.5px] mb-3">
+          {agentDesc?.description ?? '—'}
+        </p>
+        <InternalFlowDiagram desc={agentDesc} />
+      </ClaudeCard>
 
       {/* ── Workflow Position ────────────────────────────────────── */}
       <ClaudeSectionTitle>{t('monitor_workflow_position')}</ClaudeSectionTitle>

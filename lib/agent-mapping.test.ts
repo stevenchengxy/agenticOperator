@@ -2,18 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { AGENT_MAP, byShort, byWsId } from './agent-mapping';
 
 describe('AGENT_MAP', () => {
-  it('has exactly 22 entries', () => {
-    expect(AGENT_MAP).toHaveLength(22);
+  it('has exactly 23 entries', () => {
+    expect(AGENT_MAP).toHaveLength(23);
   });
 
   it('every short name is unique', () => {
     const shorts = AGENT_MAP.map((a) => a.short);
-    expect(new Set(shorts).size).toBe(22);
+    expect(new Set(shorts).size).toBe(23);
   });
 
   it('every wsId is unique', () => {
     const ids = AGENT_MAP.map((a) => a.wsId);
-    expect(new Set(ids).size).toBe(22);
+    expect(new Set(ids).size).toBe(23);
   });
 
   it('uses only the 9 valid stages', () => {
@@ -48,9 +48,10 @@ describe('AGENT_MAP', () => {
     expect(a?.terminal).toBe(true);
   });
 
-  it('exactly 3 agents are terminal', () => {
+  it('exactly 4 agents are terminal', () => {
+    // Chatbot is terminal because it emits no events and is outside the business workflow chain.
     const terms = AGENT_MAP.filter((a) => a.terminal).map((a) => a.short);
-    expect(terms.sort()).toEqual(['InterviewInviter', 'PortalSubmitter', 'Publisher']);
+    expect(terms.sort()).toEqual(['Chatbot', 'InterviewInviter', 'PortalSubmitter', 'Publisher']);
   });
 
   it('every agent has at least 1 trigger event OR is terminal', () => {

@@ -420,6 +420,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_panel_input: "输入",
     monitor_panel_processing_logic: "处理逻辑",
     monitor_panel_output: "输出",
+    monitor_internal_flow_title: "内部流程",
+    monitor_internal_flow_empty: "无可视化步骤",
     monitor_workflow_position: "工作流位置",
     monitor_workflow_position_desc: "候选人当前在各个 agent 的分布。亮色节点 = 当前详情对应的 agent。",
 
@@ -851,6 +853,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_panel_input: "Input",
     monitor_panel_processing_logic: "Processing Logic",
     monitor_panel_output: "Output",
+    monitor_internal_flow_title: "Internal flow",
+    monitor_internal_flow_empty: "No flow steps documented",
     monitor_workflow_position: "Workflow Position",
     monitor_workflow_position_desc: "Candidate distribution across agents. Highlighted node = this agent.",
 
