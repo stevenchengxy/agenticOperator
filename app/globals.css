@@ -49,6 +49,20 @@
   --shadow-sh-1: var(--sh-1);
   --shadow-sh-2: var(--sh-2);
   --shadow-sh-3: var(--sh-3);
+
+  --color-claude-bg:        var(--c-claude-bg);
+  --color-claude-surface:   var(--c-claude-surface);
+  --color-claude-panel:     var(--c-claude-panel);
+  --color-claude-line:      var(--c-claude-line);
+  --color-claude-ink-1:     var(--c-claude-ink-1);
+  --color-claude-ink-2:     var(--c-claude-ink-2);
+  --color-claude-ink-3:     var(--c-claude-ink-3);
+  --color-claude-ink-4:     var(--c-claude-ink-4);
+  --color-claude-accent:    var(--c-claude-accent);
+  --color-claude-accent-bg: var(--c-claude-accent-bg);
+  --color-claude-ok:        var(--c-claude-ok);
+  --color-claude-warn:      var(--c-claude-warn);
+  --color-claude-err:       var(--c-claude-err);
 }
 
 /* ===== Agentic Operator — shared design tokens ===== */
@@ -100,6 +114,21 @@
   --sh-1: 0 1px 0 rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.04);
   --sh-2: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 20px -8px rgba(15, 23, 42, 0.10);
   --sh-3: 0 12px 40px -12px rgba(15, 23, 42, 0.22);
+
+  /* Claude-style scoped token group — only consumed under [data-style="claude"] */
+  --c-claude-bg:        oklch(0.985 0.005 80);
+  --c-claude-surface:   oklch(0.995 0.003 80);
+  --c-claude-panel:     oklch(0.96  0.008 80);
+  --c-claude-line:      oklch(0.88  0.008 75);
+  --c-claude-ink-1:     oklch(0.22  0.01  80);
+  --c-claude-ink-2:     oklch(0.4   0.01  80);
+  --c-claude-ink-3:     oklch(0.55  0.01  80);
+  --c-claude-ink-4:     oklch(0.7   0.01  80);
+  --c-claude-accent:    oklch(0.67  0.14  35);
+  --c-claude-accent-bg: oklch(0.94  0.05  35);
+  --c-claude-ok:        oklch(0.7   0.13  145);
+  --c-claude-warn:      oklch(0.78  0.12  80);
+  --c-claude-err:       oklch(0.6   0.18  25);
 }
 
 [data-theme="dark"] {
@@ -138,7 +167,43 @@
   --sh-1: 0 1px 0 rgba(0, 0, 0, 0.30), 0 1px 2px rgba(0, 0, 0, 0.30);
   --sh-2: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 20px -8px rgba(0, 0, 0, 0.50);
   --sh-3: 0 12px 40px -12px rgba(0, 0, 0, 0.70);
+
+  --c-claude-bg:        oklch(0.18  0.005 80);
+  --c-claude-surface:   oklch(0.22  0.005 80);
+  --c-claude-panel:     oklch(0.25  0.005 80);
+  --c-claude-line:      oklch(0.32  0.005 80);
+  --c-claude-ink-1:     oklch(0.92  0.005 80);
+  --c-claude-ink-2:     oklch(0.75  0.005 80);
+  --c-claude-ink-3:     oklch(0.6   0.005 80);
+  --c-claude-ink-4:     oklch(0.45  0.005 80);
+  --c-claude-accent:    oklch(0.72  0.15  35);
+  --c-claude-accent-bg: oklch(0.3   0.08  35);
+  --c-claude-ok:        oklch(0.7   0.13  145);
+  --c-claude-warn:      oklch(0.75  0.12  80);
+  --c-claude-err:       oklch(0.65  0.18  25);
 }
+
+/* Scope: any element marked data-style="claude" gets the calm palette,
+   generous whitespace, serif headings. Existing routes never set this
+   attribute so they keep the console aesthetic. */
+[data-style="claude"] {
+  background: var(--c-claude-bg);
+  color: var(--c-claude-ink-1);
+  font-family: ui-sans-serif, "SF Pro Text", "Inter", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+[data-style="claude"] h1,
+[data-style="claude"] h2 {
+  font-family: ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+}
+
+@keyframes monitorPulse {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50%      { filter: drop-shadow(0 0 4px var(--c-claude-accent)); }
+}
+[data-style="claude"] .monitor-pulse { animation: monitorPulse 2s ease-in-out infinite; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }

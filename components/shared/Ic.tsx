@@ -81,6 +81,18 @@ export const Ic = {
       <path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0V8ZM12 18v4" />
     </svg>
   ),
+  pulse: (p: P) => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full" {...p}>
+      <path d="M2 8h3l1.5-4 3 8 1.5-4H14" />
+    </svg>
+  ),
+  gauge: (p: P) => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full" {...p}>
+      <path d="M2 11a6 6 0 1 1 12 0" />
+      <path d="M8 11l3-4" />
+      <circle cx="8" cy="11" r="0.6" fill="currentColor" />
+    </svg>
+  ),
   gear: (p: P) => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...p}>
       <circle cx="12" cy="12" r="3" />
