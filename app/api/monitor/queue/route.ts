@@ -18,10 +18,11 @@ export async function GET(req: Request): Promise<Response> {
     if (bucketParam === 'dlq') {
       const [rows, total] = await Promise.all([
         prisma.dLQEntry.findMany({
+          where: { resolvedAt: null },
           orderBy: { createdAt: 'desc' },
           skip: offset, take: limit,
         }),
-        prisma.dLQEntry.count(),
+        prisma.dLQEntry.count({ where: { resolvedAt: null } }),
       ]);
       const body: MonitorQueueResponse = {
         bucket: 'dlq',

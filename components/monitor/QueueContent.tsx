@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ClaudeCard, ClaudeChip, ClaudeBadge } from "./atoms";
 import { usePoll } from "@/lib/monitor/usePoll";
-import type { MonitorQueueResponse } from "@/lib/monitor/types";
+import type { MonitorQueueResponse, MonitorQueueEventRow, MonitorQueueDlqRow } from "@/lib/monitor/types";
 
 const BUCKETS = ['accepted', 'pending', 'rejected', 'dlq'] as const;
 
@@ -19,6 +19,9 @@ function QueueContentInner() {
     8_000,
   );
 
+  // Bucket change resets pagination by omitting `offset` — different buckets
+  // have different sizes, so a "page 3" offset for one rarely makes sense
+  // for another.
   const setBucket = (b: string) =>
     router.replace(`/monitor/queue?bucket=${b}`);
 
@@ -40,9 +43,10 @@ function QueueContentInner() {
           <div className="text-claude-ink-4 text-[12.5px]">Loading…</div>
         ) : data.rows.length === 0 ? (
           <div className="text-claude-ink-4 text-[12.5px]">No rows in this bucket.</div>
-        ) : bucket === 'dlq' ? (
+        ) : data.bucket === 'dlq' ? (
+          // Manual narrowing by data.bucket — TS can't infer union from a parallel field
           <ul className="flex flex-col divide-y divide-claude-line">
-            {(data.rows as any[]).map(r => (
+            {(data.rows as MonitorQueueDlqRow[]).map(r => (
               <li key={r.id} className="py-2 text-[12.5px] flex items-center gap-2">
                 <ClaudeBadge tone="err" size="xs">DLQ</ClaudeBadge>
                 <code className="text-claude-ink-1">{r.eventName}</code>
@@ -52,6 +56,7 @@ function QueueContentInner() {
             ))}
           </ul>
         ) : (
+          // Manual narrowing by data.bucket — TS can't infer union from a parallel field
           <table className="w-full text-[12.5px]">
             <thead className="text-claude-ink-4">
               <tr>
@@ -63,7 +68,7 @@ function QueueContentInner() {
               </tr>
             </thead>
             <tbody>
-              {(data.rows as any[]).map(r => (
+              {(data.rows as MonitorQueueEventRow[]).map(r => (
                 <tr key={r.id} className="border-t border-claude-line">
                   <td className="py-1"><code className="text-claude-ink-1">{r.name}</code></td>
                   <td className="py-1 text-claude-ink-3">{r.source}</td>
