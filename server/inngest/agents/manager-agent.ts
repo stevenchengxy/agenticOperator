@@ -1,12 +1,15 @@
 // server/inngest/agents/manager-agent.ts
 //
-// Manager Agent — Behavior axis Phase 1.
+// Manager Agent — Behavior axis Phase 1 + 2.
 //
 // Inngest function subscribed to MONITOR_ALERT events. For each alert:
 //   1. Applies pure rule-based decision policy (manager-rules.ts)
 //   2. Persists decision back onto BehaviorAlert row
 //   3. Executes the action (escalate → HumanTask; throttle/auto_restart → log v1; monitor → no-op)
 //   4. Publishes MANAGER_ACTION for the full causal trail
+//
+// managerAgentHandler is exported separately so it can be unit-tested
+// without going through the Inngest framework.
 
 import { inngest } from '@/server/inngest/client';
 import { em } from '@/server/em';
@@ -14,9 +17,22 @@ import { prisma } from '@/server/db';
 import { decide } from './manager-rules';
 import type { MonitorAlertData, ManagerActionData } from '@/lib/behavior/types';
 
-export const managerAgent = inngest.createFunction(
-  { id: 'agent.manager', name: 'Manager Agent (response decisions)', triggers: [{ event: 'MONITOR_ALERT' }] },
-  async ({ event, step }) => {
+// ── Step shim type (matches subset of Inngest StepTools used in the handler) ──
+
+type StepShim = {
+  run: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+  sleep?: (name: string, duration: string) => Promise<void>;
+};
+
+// ── Extracted handler (testable without Inngest framework) ────────────────
+
+export async function managerAgentHandler({
+  event,
+  step,
+}: {
+  event: { data: MonitorAlertData; id?: string };
+  step: StepShim;
+}) {
     const alertData = event.data as MonitorAlertData;
     const decision = await decide(alertData);
 
@@ -159,5 +175,11 @@ export const managerAgent = inngest.createFunction(
     });
 
     return { alertId: alertData.alertId, alertKey: alertData.alertKey, decision };
-  },
+}
+
+// ── Inngest function wrapper ──────────────────────────────────────────────
+
+export const managerAgent = inngest.createFunction(
+  { id: 'agent.manager', name: 'Manager Agent (response decisions)', triggers: [{ event: 'MONITOR_ALERT' }] },
+  async (ctx) => managerAgentHandler(ctx as unknown as Parameters<typeof managerAgentHandler>[0]),
 );

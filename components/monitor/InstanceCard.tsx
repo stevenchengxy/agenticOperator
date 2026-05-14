@@ -89,7 +89,15 @@ function ProgressBar({ agentsTouched }: { agentsTouched: number }) {
 }
 
 // ── Component ──────────────────────────────────────────────────────
-export function InstanceCard({ card }: { card: InstanceCardType }) {
+export function InstanceCard({
+  card,
+  selected,
+  onToggleSelect,
+}: {
+  card: InstanceCardType;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const { t } = useApp();
   const { title, subtitle } = deriveTitle(card);
   const tone = STATUS_TONE[card.status] ?? 'neutral';
@@ -102,7 +110,22 @@ export function InstanceCard({ card }: { card: InstanceCardType }) {
       href={`/monitor/runs/${encodeURIComponent(card.runId)}`}
       className="block no-underline"
     >
-      <ClaudeCard className="p-4 hover:bg-claude-panel/40 hover:shadow-sm transition-all cursor-pointer">
+      <ClaudeCard className="relative p-4 hover:bg-claude-panel/40 hover:shadow-sm transition-all cursor-pointer">
+        {/* Checkbox — only rendered when in select mode (onToggleSelect provided) */}
+        {onToggleSelect && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); onToggleSelect(); }}
+            className="absolute top-2 left-2 w-4 h-4 rounded border border-claude-line bg-claude-surface flex items-center justify-center text-claude-accent"
+            aria-label="Select"
+          >
+            {selected && (
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <path d="M1 5l2.5 2.5L9 2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+              </svg>
+            )}
+          </button>
+        )}
         {/* ── Title row: status dot + title + pill ── */}
         <div className="flex items-center gap-2 mb-1.5">
           {/* Status dot */}

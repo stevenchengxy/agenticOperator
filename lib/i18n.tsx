@@ -487,6 +487,32 @@ export const I18N: Record<Lang, Record<string, string>> = {
     behavior_action_auto_restart: "自动重启",
     behavior_no_open_alerts: "无待处理告警",
     behavior_no_actions: "无近期决策",
+
+    // Audit log page
+    monitor_audit_title: "审计日志",
+    monitor_audit_subtitle: "所有 Manage 写操作的完整 trail",
+    monitor_audit_filter_action: "动作",
+    monitor_audit_filter_time: "时间",
+    monitor_audit_filter_trace: "Trace ID",
+    monitor_audit_col_time: "时间",
+    monitor_audit_col_action: "动作",
+    monitor_audit_col_trace: "Trace",
+    monitor_audit_col_source: "来源",
+    monitor_audit_col_actor: "操作人",
+    monitor_audit_col_reason: "理由",
+    monitor_audit_empty: "无匹配的审计记录",
+    monitor_audit_view_link: "查看审计",
+    monitor_audit_refresh: "刷新",
+    monitor_audit_auto: "自动刷新",
+
+    // Batch operations
+    monitor_batch_selected: "已选 {n}",
+    monitor_batch_cancel_all: "批量终止",
+    monitor_batch_pause_all: "批量暂停",
+    monitor_batch_resume_all: "批量恢复",
+    monitor_batch_clear: "取消选择",
+    monitor_batch_confirm: "确认对 {n} 条 run 执行 {action}？",
+    monitor_batch_success: "成功 {ok} · 失败 {fail}",
   },
   en: {
     brand: "Agentic Operator",
@@ -969,6 +995,32 @@ export const I18N: Record<Lang, Record<string, string>> = {
     behavior_action_auto_restart: "Auto-restart",
     behavior_no_open_alerts: "No open alerts",
     behavior_no_actions: "No recent decisions",
+
+    // Audit log page
+    monitor_audit_title: "Audit Log",
+    monitor_audit_subtitle: "Full trail of all Manage write operations",
+    monitor_audit_filter_action: "Action",
+    monitor_audit_filter_time: "Time",
+    monitor_audit_filter_trace: "Trace ID",
+    monitor_audit_col_time: "Time",
+    monitor_audit_col_action: "Action",
+    monitor_audit_col_trace: "Trace",
+    monitor_audit_col_source: "Source",
+    monitor_audit_col_actor: "Actor",
+    monitor_audit_col_reason: "Reason",
+    monitor_audit_empty: "No audit entries match the current filters.",
+    monitor_audit_view_link: "View audit",
+    monitor_audit_refresh: "Refresh",
+    monitor_audit_auto: "Auto-refresh",
+
+    // Batch operations
+    monitor_batch_selected: "{n} selected",
+    monitor_batch_cancel_all: "Cancel all",
+    monitor_batch_pause_all: "Pause all",
+    monitor_batch_resume_all: "Resume all",
+    monitor_batch_clear: "Clear",
+    monitor_batch_confirm: "Apply {action} to {n} runs?",
+    monitor_batch_success: "OK {ok} · Failed {fail}",
   },
 };
 

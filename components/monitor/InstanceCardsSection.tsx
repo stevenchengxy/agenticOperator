@@ -2,9 +2,108 @@
 import React from "react";
 import { usePoll } from "@/lib/monitor/usePoll";
 import { InstanceCard } from "./InstanceCard";
-import { ClaudeChip, ClaudeBadge } from "./atoms";
+import { ClaudeChip, ClaudeBadge, ClaudeButton } from "./atoms";
 import { useApp } from "@/lib/i18n";
 import type { InstanceCard as InstanceCardType, MonitorInstancesResponse } from "@/lib/monitor/types";
+
+// ── Batch action types ──────────────────────────────────────────────────────
+
+type BatchAction = "cancel" | "pause" | "resume";
+
+// ── BatchActionButton ───────────────────────────────────────────────────────
+
+function BatchActionButton({
+  action,
+  runIds,
+  onComplete,
+}: {
+  action: BatchAction;
+  runIds: string[];
+  onComplete: () => void;
+}) {
+  const { t } = useApp();
+  const [confirming, setConfirming] = React.useState(false);
+  const [reason, setReason] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [toast, setToast] = React.useState<string | null>(null);
+
+  const labelKey = `monitor_batch_${action}_all` as const;
+
+  const handleConfirm = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/manage/runs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, runIds, reason: reason.trim() || undefined }),
+      });
+      const json = (await res.json()) as { results?: { runId: string; ok: boolean }[] };
+      const results = json.results ?? [];
+      const ok = results.filter((r) => r.ok).length;
+      const fail = results.filter((r) => !r.ok).length;
+      const msg = t("monitor_batch_success")
+        .replace("{ok}", String(ok))
+        .replace("{fail}", String(fail));
+      setToast(msg);
+      setTimeout(() => setToast(null), 3000);
+      onComplete();
+    } catch {
+      setToast("Error calling batch API");
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      setLoading(false);
+      setConfirming(false);
+      setReason("");
+    }
+  };
+
+  return (
+    <>
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-50 px-4 py-2 rounded-[8px] bg-claude-accent text-white text-[13px] shadow-lg">
+          {toast}
+        </div>
+      )}
+
+      {confirming && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30"
+          onClick={() => setConfirming(false)}
+        >
+          <div
+            className="bg-claude-surface border border-claude-line rounded-[12px] p-5 shadow-xl w-[360px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[14px] text-claude-ink-1 font-medium mb-3">
+              {t("monitor_batch_confirm")
+                .replace("{n}", String(runIds.length))
+                .replace("{action}", action)}
+            </p>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={t("manage_reason_placeholder")}
+              className="w-full border border-claude-line rounded-[6px] px-3 py-1.5 text-[12.5px] bg-claude-surface text-claude-ink-1 focus:outline-none mb-3"
+            />
+            <div className="flex justify-end gap-2">
+              <ClaudeButton size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+                {t("manage_cancel_btn")}
+              </ClaudeButton>
+              <ClaudeButton size="sm" variant="primary" onClick={handleConfirm} disabled={loading}>
+                {loading ? "…" : t("manage_confirm_btn")}
+              </ClaudeButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ClaudeButton size="sm" onClick={() => setConfirming(true)}>
+        {t(labelKey)}
+      </ClaudeButton>
+    </>
+  );
+}
 
 // ── Group-by logic ─────────────────────────────────────────────────
 
@@ -89,6 +188,17 @@ export function InstanceCardsSection({
   const { t } = useApp();
   const [scope, setScope] = React.useState<'live' | 'recent'>('live');
   const [groupBy, setGroupBy] = React.useState<GroupBy>('status');
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+
+  const toggle = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
 
   const apiUrl = `/api/monitor/instances?scope=${scope}&limit=60`;
   const { data, error, refresh } = usePoll<MonitorInstancesResponse>(
@@ -160,6 +270,19 @@ export function InstanceCardsSection({
 
   return (
     <div className="mb-6">
+      {/* Batch action bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-10 mb-3 rounded-[10px] border border-claude-line bg-claude-accent-bg p-3 flex items-center gap-3 flex-wrap">
+          <span className="text-[13px] font-medium text-claude-accent">
+            {t("monitor_batch_selected").replace("{n}", String(selectedIds.size))}
+          </span>
+          <BatchActionButton action="cancel" runIds={Array.from(selectedIds)} onComplete={clearSelection} />
+          <BatchActionButton action="pause"  runIds={Array.from(selectedIds)} onComplete={clearSelection} />
+          <BatchActionButton action="resume" runIds={Array.from(selectedIds)} onComplete={clearSelection} />
+          <ClaudeButton variant="ghost" size="sm" onClick={clearSelection}>{t("monitor_batch_clear")}</ClaudeButton>
+        </div>
+      )}
+
       {/* Section header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -275,7 +398,12 @@ export function InstanceCardsSection({
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {group.cards.map((card) => (
-                <InstanceCard key={card.runId} card={card} />
+                <InstanceCard
+                  key={card.runId}
+                  card={card}
+                  selected={selectedIds.has(card.runId)}
+                  onToggleSelect={() => toggle(card.runId)}
+                />
               ))}
             </div>
           </div>

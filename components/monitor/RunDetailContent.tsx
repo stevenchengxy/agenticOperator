@@ -513,6 +513,13 @@ export function RunDetailContent({ runId }: { runId: string }) {
         <Link href="/monitor" className="text-claude-accent text-[12.5px] no-underline">
           {t('monitor_back_to_monitor')}
         </Link>
+        <span className="text-claude-ink-4 text-[12.5px]">·</span>
+        <Link
+          href={`/monitor/audit?traceId=${encodeURIComponent(runId)}`}
+          className="text-claude-accent text-[12.5px] no-underline hover:underline"
+        >
+          {t('monitor_audit_view_link')}
+        </Link>
         {/* Retrying badge — shown when polling returns an error but we still have data */}
         {error && data && (
           <ClaudeBadge tone="warn" size="xs">

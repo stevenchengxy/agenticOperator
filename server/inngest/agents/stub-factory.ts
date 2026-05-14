@@ -69,22 +69,29 @@ export function createStubAgent(meta: AgentMeta) {
       }
 
       // ── Throttle check (Phase 2 Manage axis) ─────────────────────────────
-      // If AgentConfig.throttleUntil is in the future, sleep until it before
-      // processing the event. This lets operators slow a struggling agent
-      // without cancelling in-flight work.
-      await step.run("check-throttle", async () => {
-        const cfg = await prisma.agentConfig.findUnique({ where: { id: meta.short } });
-        if (cfg?.throttleUntil && cfg.throttleUntil > new Date()) {
-          const delayMs = cfg.throttleUntil.getTime() - Date.now();
-          console.info(
-            `[stub-factory] ${meta.short} throttled for ${delayMs}ms — reason: ${cfg.throttleReason ?? "none"}`,
-          );
-          // Inngest doesn't support dynamic sleep inside step.run, so we
-          // log the intent here. In production, swap to step.sleep outside
-          // of step.run with a computed duration. For stub/demo purposes the
-          // log is the observable effect.
-        }
+      // Step 0: read throttle config in its own step so the result is
+      // serializable and Inngest can replay it correctly after a sleep.
+      const throttleMs = await step.run("read-throttle", async () => {
+        const cfg = await prisma.agentConfig
+          .findUnique({ where: { id: meta.short } })
+          .catch(() => null);
+        if (!cfg?.throttleUntil) return 0;
+        const ms = new Date(cfg.throttleUntil).getTime() - Date.now();
+        // Cap at 5 minutes so stubs don't stall indefinitely
+        return ms > 0 ? Math.min(ms, 5 * 60 * 1000) : 0;
       });
+
+      // Step 1: sleep if throttled.
+      // IMPORTANT: step.sleep must be called at the TOP LEVEL of the handler
+      // (not inside step.run) so Inngest can interrupt and resume correctly.
+      if (throttleMs > 0) {
+        await step.sleep("throttle-wait", `${throttleMs}ms`);
+        await step.run("log-throttle", async () => {
+          console.info(
+            `[stub-factory] ${meta.short} honored throttle ${throttleMs}ms`,
+          );
+        });
+      }
 
       const eventData = (event.data ?? {}) as EventData;
       // _runId propagated from earlier agents; fall back to Inngest event id
