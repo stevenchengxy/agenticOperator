@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Use vi.hoisted so the mocks are available inside vi.mock factories,
 // which run before the surrounding module body.
@@ -52,6 +52,16 @@ beforeEach(() => {
   vi.clearAllMocks();
   _resetForTests();
   invalidateCache();
+  // Default: passthrough OFF + strict schema ON for existing rejection tests
+  // (they explicitly test rejection behavior). Passthrough tests override
+  // EM_PASSTHROUGH="1" themselves.
+  process.env.EM_PASSTHROUGH = "0";
+  process.env.EM_STRICT_SCHEMA = "true";
+});
+
+afterEach(() => {
+  delete process.env.EM_PASSTHROUGH;
+  delete process.env.EM_STRICT_SCHEMA;
 });
 
 describe("em.publish — happy path", () => {
@@ -208,6 +218,80 @@ describe("em.publish — cascade causality", () => {
     const writeArgs = prismaMock.eventInstance.create.mock.calls[0][0];
     expect(writeArgs.data.causedByEventId).toBe("parent-evt-7");
     expect(writeArgs.data.causedByName).toBe("RESUME_DOWNLOADED");
+  });
+});
+
+// ── Passthrough mode ──────────────────────────────────────────────────────────
+//
+// When EM_PASSTHROUGH=1 (default ON in production code), events that fail
+// schema validation — either no schema registered (no_schema) or data mismatch
+// (schema) — are persisted with status='accepted_passthrough' and forwarded to
+// Inngest. This lets operators audit ALL events until schemas are formalized.
+
+describe("em.publish — passthrough mode (no_schema)", () => {
+  it("accepts unregistered event, persists accepted_passthrough, forwards to Inngest", async () => {
+    process.env.EM_PASSTHROUGH = "1";
+
+    const r = await em.publish("TOTALLY_MADE_UP_EVENT", { foo: 1 }, {
+      source: "test",
+    });
+
+    expect(r.accepted).toBe(true);
+    if (r.accepted) {
+      expect(r.schemaVersionUsed).toBe("passthrough");
+      expect(r.eventId).toBeTruthy();
+    }
+
+    // EventInstance written with status=accepted_passthrough
+    expect(prismaMock.eventInstance.create).toHaveBeenCalledTimes(1);
+    const writeArgs = prismaMock.eventInstance.create.mock.calls[0][0];
+    expect(writeArgs.data.status).toBe("accepted_passthrough");
+    expect(writeArgs.data.schemaVersionUsed).toBe("passthrough");
+    expect(writeArgs.data.name).toBe("TOTALLY_MADE_UP_EVENT");
+
+    // Inngest send fired for the original event (not EVENT_REJECTED)
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls[0][0].name).toBe("TOTALLY_MADE_UP_EVENT");
+
+    // No EVENT_REJECTED meta event emitted
+    const sentNames = sendMock.mock.calls.map((c) => c[0].name);
+    expect(sentNames).not.toContain("EVENT_REJECTED");
+  });
+});
+
+describe("em.publish — passthrough mode (schema mismatch)", () => {
+  it("accepts event with failing schema, records errors in schemaErrors, forwards to Inngest", async () => {
+    process.env.EM_PASSTHROUGH = "1";
+
+    const bad = { ...VALID_RESUME_DOWNLOADED, payload: { /* missing upload_id */ bucket: "x", object_key: "y" } };
+    const r = await em.publish("RESUME_DOWNLOADED", bad, {
+      source: "raas-bridge",
+      externalEventId: "evt-passthrough-schema-1",
+    });
+
+    expect(r.accepted).toBe(true);
+    if (r.accepted) {
+      expect(r.schemaVersionUsed).toBe("passthrough");
+    }
+
+    // EventInstance written with status=accepted_passthrough and schemaErrors populated
+    expect(prismaMock.eventInstance.create).toHaveBeenCalledTimes(1);
+    const writeArgs = prismaMock.eventInstance.create.mock.calls[0][0];
+    expect(writeArgs.data.status).toBe("accepted_passthrough");
+    expect(writeArgs.data.schemaErrors).toBeTruthy();
+    // schemaErrors is stored as JSON string — parse and verify it has entries
+    const errors = JSON.parse(writeArgs.data.schemaErrors as string);
+    expect(Array.isArray(errors)).toBe(true);
+    expect(errors.length).toBeGreaterThan(0);
+
+    // Inngest send fired for the original event
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(sendMock.mock.calls[0][0].name).toBe("RESUME_DOWNLOADED");
+    expect(sendMock.mock.calls[0][0].id).toBe("evt-passthrough-schema-1");
+
+    // No EVENT_REJECTED meta event emitted
+    const sentNames = sendMock.mock.calls.map((c) => c[0].name);
+    expect(sentNames).not.toContain("EVENT_REJECTED");
   });
 });
 

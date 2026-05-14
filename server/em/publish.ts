@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { inngest } from "../inngest/client";
 import {
   writeAcceptedInstance,
+  writePassthroughInstance,
   writeRejectedInstance,
   findInstanceByExternalId,
   writeAudit,
@@ -149,12 +150,17 @@ async function publishInner(
 
   // Step 2 — Schema validate (multi-version).
   //
-  // When EM_STRICT_SCHEMA=true (production): unknown or invalid events are
-  // rejected and emit EVENT_REJECTED. Default (dev/testing): unregistered
-  // events pass through as "unvalidated" so the event stream stays populated
-  // while schemas are being defined. Events with a registered schema that fail
-  // validation are always rejected regardless of this flag.
-  const strictSchema = process.env.EM_STRICT_SCHEMA === "true";
+  // When EM_PASSTHROUGH=1 (default ON for dev/local until whitelist is wired):
+  //   - no_schema: persist EventInstance(status=accepted_passthrough), forward to Inngest.
+  //   - schema mismatch: same — record errors in schemaErrors JSON, forward anyway.
+  //
+  // When EM_PASSTHROUGH=0 and EM_STRICT_SCHEMA=true (production enforcement):
+  //   - no_schema → reject + emit EVENT_REJECTED
+  //   - schema mismatch → reject + emit EVENT_REJECTED
+  //
+  // Filter rejections are always respected (currently noop returning allow=true).
+  const passthroughEnabled = process.env.EM_PASSTHROUGH !== "0";
+  const strictSchema = !passthroughEnabled && process.env.EM_STRICT_SCHEMA === "true";
 
   let acceptedData: unknown = data;
   let schemaVersionUsed: string;
@@ -162,7 +168,24 @@ async function publishInner(
   const parsed: TryParseResult = await tryParse(name, data);
   if (!parsed.ok) {
     if (parsed.error === "no_schema") {
-      if (strictSchema) {
+      if (passthroughEnabled) {
+        // Passthrough mode: persist accepted_passthrough, forward to Inngest.
+        await writePassthroughInstance({
+          id: eventId,
+          name,
+          source: opts.source,
+          externalEventId: opts.externalEventId,
+          causedByEventId: opts.causedBy?.eventId,
+          causedByName: opts.causedBy?.name,
+          passthroughReason: `no schema registered for event ${name}`,
+          triedVersions: parsed.triedVersions,
+          payloadForSummary: data,
+        });
+        degradedMode.recordPublish();
+        const idempotencyKey = opts.idempotencyKey ?? opts.externalEventId ?? eventId;
+        await inngest.send({ id: idempotencyKey, name, data: data as Record<string, unknown> });
+        return { accepted: true, eventId, schemaVersionUsed: "passthrough" };
+      } else if (strictSchema) {
         await writeRejectedInstance({
           id: eventId,
           name,
@@ -189,39 +212,48 @@ async function publishInner(
           });
         }
         return { accepted: false, reason: "no_schema", details: parsed };
+      } else {
+        // Non-strict, non-passthrough: legacy unvalidated path (old behavior for
+        // backward compat when both flags are off).
+        schemaVersionUsed = "unvalidated";
       }
-      // Non-strict: pass through unregistered events so the event stream stays
-      // populated during integration testing. Flagged with "unvalidated" so UI
-      // can distinguish from properly-validated events.
-      schemaVersionUsed = "unvalidated";
     } else {
-      // Schema exists but data fails validation — always reject regardless of mode.
+      // Schema exists but data fails validation.
       const summarized = parsed.issues
         .slice(0, 3)
         .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join("; ");
-      await writeRejectedInstance({
-        id: eventId,
-        name,
-        source: opts.source,
-        externalEventId: opts.externalEventId,
-        status: "rejected_schema",
-        rejectionType: "SCHEMA_VALIDATION_FAILED",
-        rejectionReason: summarized,
-        schemaErrors: parsed.issues.map((i) => ({
+
+      if (passthroughEnabled) {
+        // Passthrough mode: record errors but forward to Inngest anyway.
+        const schemaErrorsJson = parsed.issues.map((i) => ({
           path: i.path.join("."),
           code: i.code,
           message: i.message,
-        })),
-        triedVersions: parsed.triedVersions,
-        payloadForSummary: data,
-      });
-      degradedMode.recordReject();
-      if (emitOnFail) {
-        await emitRejection({
-          originalEventName: name,
-          originalEventId: opts.externalEventId,
-          originalSource: opts.source,
+        }));
+        await writePassthroughInstance({
+          id: eventId,
+          name,
+          source: opts.source,
+          externalEventId: opts.externalEventId,
+          causedByEventId: opts.causedBy?.eventId,
+          causedByName: opts.causedBy?.name,
+          passthroughReason: summarized,
+          schemaErrors: schemaErrorsJson,
+          triedVersions: parsed.triedVersions,
+          payloadForSummary: data,
+        });
+        degradedMode.recordPublish();
+        const idempotencyKey = opts.idempotencyKey ?? opts.externalEventId ?? eventId;
+        await inngest.send({ id: idempotencyKey, name, data: data as Record<string, unknown> });
+        return { accepted: true, eventId, schemaVersionUsed: "passthrough" };
+      } else {
+        await writeRejectedInstance({
+          id: eventId,
+          name,
+          source: opts.source,
+          externalEventId: opts.externalEventId,
+          status: "rejected_schema",
           rejectionType: "SCHEMA_VALIDATION_FAILED",
           rejectionReason: summarized,
           schemaErrors: parsed.issues.map((i) => ({
@@ -230,10 +262,27 @@ async function publishInner(
             message: i.message,
           })),
           triedVersions: parsed.triedVersions,
-          payloadSample: toPlainRecord(data),
+          payloadForSummary: data,
         });
+        degradedMode.recordReject();
+        if (emitOnFail) {
+          await emitRejection({
+            originalEventName: name,
+            originalEventId: opts.externalEventId,
+            originalSource: opts.source,
+            rejectionType: "SCHEMA_VALIDATION_FAILED",
+            rejectionReason: summarized,
+            schemaErrors: parsed.issues.map((i) => ({
+              path: i.path.join("."),
+              code: i.code,
+              message: i.message,
+            })),
+            triedVersions: parsed.triedVersions,
+            payloadSample: toPlainRecord(data),
+          });
+        }
+        return { accepted: false, reason: "schema", details: parsed.issues };
       }
-      return { accepted: false, reason: "schema", details: parsed.issues };
     }
   } else {
     acceptedData = parsed.data;

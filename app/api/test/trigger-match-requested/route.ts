@@ -26,7 +26,7 @@
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { inngest } from "@/server/inngest/client";
+import { em } from "@/server/em";
 
 type Body = Partial<{
   jd_id: string;
@@ -110,16 +110,31 @@ export async function POST(req: Request): Promise<Response> {
     },
   };
 
+  const externalEventId = envelope.event_id;
   try {
-    const result = await inngest.send({
-      name: "AO_MATCH_REQUESTED",
-      data: envelope,
+    const result = await em.publish("AO_MATCH_REQUESTED", envelope, {
+      source: "manual.test-trigger",
+      externalEventId,
     });
-    return NextResponse.json({
-      ok: true,
-      sent: { name: "AO_MATCH_REQUESTED", data: envelope },
-      inngest_ids: result.ids,
-    });
+    if (result.accepted) {
+      return NextResponse.json({
+        ok: true,
+        sent: { name: "AO_MATCH_REQUESTED", data: envelope },
+        em_event_id: result.eventId,
+        schema_version: result.schemaVersionUsed,
+      });
+    } else {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "EM_REJECTED",
+          reason: result.reason,
+          details: result.details,
+          sent: { name: "AO_MATCH_REQUESTED", data: envelope },
+        },
+        { status: 422 },
+      );
+    }
   } catch (e) {
     return NextResponse.json(
       {

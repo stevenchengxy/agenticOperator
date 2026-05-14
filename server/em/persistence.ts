@@ -31,6 +31,20 @@ export type RejectedInstanceWrite = {
   payloadForSummary: unknown;
 };
 
+export type PassthroughInstanceWrite = {
+  id: string;
+  name: string;
+  source: string;
+  externalEventId?: string;
+  causedByEventId?: string;
+  causedByName?: string;
+  /** The reason why passthrough was applied: "no_schema" | "schema_mismatch" */
+  passthroughReason: string;
+  schemaErrors?: unknown;
+  triedVersions?: string[];
+  payloadForSummary: unknown;
+};
+
 export async function writeAcceptedInstance(w: AcceptedInstanceWrite): Promise<void> {
   await prisma.eventInstance.create({
     data: {
@@ -42,6 +56,25 @@ export async function writeAcceptedInstance(w: AcceptedInstanceWrite): Promise<v
       schemaVersionUsed: w.schemaVersionUsed,
       causedByEventId: w.causedByEventId ?? null,
       causedByName: w.causedByName ?? null,
+      payloadSummary: summarize(w.payloadForSummary),
+    },
+  });
+}
+
+export async function writePassthroughInstance(w: PassthroughInstanceWrite): Promise<void> {
+  await prisma.eventInstance.create({
+    data: {
+      id: w.id,
+      externalEventId: w.externalEventId ?? null,
+      name: w.name,
+      source: w.source,
+      status: "accepted_passthrough",
+      schemaVersionUsed: "passthrough",
+      causedByEventId: w.causedByEventId ?? null,
+      causedByName: w.causedByName ?? null,
+      rejectionReason: w.passthroughReason,
+      schemaErrors: w.schemaErrors ? JSON.stringify(w.schemaErrors) : null,
+      triedVersions: w.triedVersions ? JSON.stringify(w.triedVersions) : null,
       payloadSummary: summarize(w.payloadForSummary),
     },
   });

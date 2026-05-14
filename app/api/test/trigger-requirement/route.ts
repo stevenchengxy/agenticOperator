@@ -31,7 +31,7 @@
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { inngest } from "@/server/inngest/client";
+import { em } from "@/server/em";
 
 type ReqBody = Partial<{
   client_job_title: string;
@@ -144,16 +144,31 @@ export async function POST(req: Request): Promise<Response> {
   };
 
   try {
-    const result = await inngest.send({
-      name: "REQUIREMENT_LOGGED",
-      data: envelope,
+    const result = await em.publish("REQUIREMENT_LOGGED", envelope, {
+      source: "manual.test-trigger",
+      externalEventId: eventId,
+      traceId,
     });
-    return NextResponse.json({
-      ok: true,
-      requisition_id: requirementId,
-      sent: { name: "REQUIREMENT_LOGGED", data: envelope },
-      inngest_ids: result.ids,
-    });
+    if (result.accepted) {
+      return NextResponse.json({
+        ok: true,
+        requisition_id: requirementId,
+        sent: { name: "REQUIREMENT_LOGGED", data: envelope },
+        em_event_id: result.eventId,
+        schema_version: result.schemaVersionUsed,
+      });
+    } else {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "EM_REJECTED",
+          reason: result.reason,
+          details: result.details,
+          sent: { name: "REQUIREMENT_LOGGED", data: envelope },
+        },
+        { status: 422 },
+      );
+    }
   } catch (e) {
     return NextResponse.json(
       {

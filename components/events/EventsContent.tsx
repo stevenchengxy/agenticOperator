@@ -7,6 +7,7 @@ import { Badge, Btn, StatusDot, EmptyState } from "@/components/shared/atoms";
 import { EVENT_CATALOG, EventDef, kindDot, STAGE_LABELS } from "@/lib/events-catalog";
 import { fetchJson } from "@/lib/api/client";
 import type { EventsResponse, EventsMeta } from "@/lib/api/types";
+import type { EventLiveResponse } from "@/app/api/events/[name]/live/route";
 import {
   useInngestEvents,
   type InngestEventRow,
@@ -71,6 +72,31 @@ function toLegacy(c: EventsResponse["events"][number]): EventDef {
     retiredAt: c.retiredAt,
     sourceFile: c.sourceFile,
   };
+}
+
+// ── useEventLive ─────────────────────────────────────────────────────────────
+// Fetches /api/events/[name]/live for the selected event. Polls every 10s
+// to keep the recent-instances list current after test triggers.
+function useEventLive(name: string): EventLiveResponse | null {
+  const [data, setData] = React.useState<EventLiveResponse | null>(null);
+  React.useEffect(() => {
+    if (!name) return;
+    let cancelled = false;
+    const tick = () => {
+      fetchJson<EventLiveResponse>(
+        `/api/events/${encodeURIComponent(name)}/live`,
+      )
+        .then((r) => { if (!cancelled) setData(r); })
+        .catch(() => { /* non-fatal */ });
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [name]);
+  return data;
 }
 
 export function EventsContent() {
@@ -1520,6 +1546,8 @@ function TabSubscribers({ event }: { event: EventDef }) {
 // inbound; row-click opens the full trail page.
 function TabInstances({ event }: { event: EventDef }) {
   const { lang } = useApp();
+  const live = useEventLive(event.name);
+
   return (
     <div className="flex flex-col min-h-0">
       <div
@@ -1534,9 +1562,134 @@ function TabInstances({ event }: { event: EventDef }) {
           ? "每条「实例」代表此事件被 em.publish() 触发并落库的一次具体执行记录，包含 trace_id、payload 快照及处理耗时。"
           : "Each instance is one concrete firing of this event — recorded by em.publish() with a trace_id, payload snapshot, and processing duration."}
       </div>
+
+      {/* Live panel — 24h sparkline + recent instances from /api/events/[name]/live */}
+      {live && <EventDetailLive live={live} eventName={event.name} />}
+
       <div className="flex-1 overflow-auto">
         <EventInstancesTab mode="instances" query={{ name: event.name }} />
       </div>
+    </div>
+  );
+}
+
+// ── EventDetailLive ─────────────────────────────────────────────────────────
+// Shows the live 24h volume sparkline + last 20 EventInstance rows fetched
+// from /api/events/[name]/live. Rendered above the existing EventInstancesTab
+// so operator can see the summary at a glance.
+function EventDetailLive({ live, eventName }: { live: EventLiveResponse; eventName: string }) {
+  const maxCount = Math.max(...live.volume24h.map((b) => b.count), 1);
+  const total24h = live.volume24h.reduce((a, b) => a + b.count, 0);
+
+  const statusColor = (status: string) => {
+    if (status === "accepted") return "var(--c-ok)";
+    if (status === "accepted_passthrough") return "var(--c-info)";
+    if (status.startsWith("rejected")) return "var(--c-err)";
+    if (status === "duplicate") return "var(--c-warn)";
+    return "var(--c-ink-3)";
+  };
+
+  return (
+    <div
+      className="shrink-0 border-b border-line"
+      style={{ padding: "14px 22px", background: "var(--c-surface)" }}
+    >
+      {/* 24h volume sparkline */}
+      <div className="flex items-center gap-3 mb-3">
+        <div className="text-[11.5px] font-semibold text-ink-1">
+          24h 发布量
+          <span className="ml-2 mono text-[10.5px] text-ink-3">
+            {total24h.toLocaleString()} 条
+          </span>
+        </div>
+        {!live.registered && (
+          <span
+            className="mono text-[9px] px-1.5 py-0.5 rounded-sm"
+            style={{
+              background: "color-mix(in oklab, var(--c-warn) 14%, transparent)",
+              color: "var(--c-warn)",
+              border: "1px solid color-mix(in oklab, var(--c-warn) 25%, transparent)",
+            }}
+          >
+            未注册 (passthrough)
+          </span>
+        )}
+        <div className="flex-1" />
+        <span className="mono text-[10px] text-ink-4">每格 = 1h</span>
+      </div>
+
+      {/* Sparkline bars */}
+      <div className="flex items-end gap-px mb-3" style={{ height: 36 }}>
+        {live.volume24h.map((b) => {
+          const pct = (b.count / maxCount) * 100;
+          const isRecent = new Date(b.bucket).getTime() > Date.now() - 2 * 60 * 60 * 1000;
+          return (
+            <div
+              key={b.bucket}
+              className="flex-1 rounded-sm"
+              style={{
+                height: `${Math.max(pct, b.count > 0 ? 8 : 2)}%`,
+                background: b.count > 0
+                  ? isRecent
+                    ? "var(--c-accent)"
+                    : "var(--c-ok)"
+                  : "var(--c-line)",
+                transition: "height 0.3s ease",
+              }}
+              title={`${new Date(b.bucket).toLocaleTimeString(undefined, { hour12: false, hour: "2-digit", minute: "2-digit" })} · ${b.count}`}
+            />
+          );
+        })}
+      </div>
+
+      {/* Last 20 EventInstance rows */}
+      {live.recentInstances.length > 0 ? (
+        <div>
+          <div className="text-[11px] font-semibold text-ink-3 mb-1.5">最近 20 条实例</div>
+          <div className="flex flex-col gap-px overflow-auto" style={{ maxHeight: 140 }}>
+            {live.recentInstances.map((inst) => (
+              <a
+                key={inst.id}
+                href={`/monitor/queue?bucket=accepted&event=${encodeURIComponent(eventName)}`}
+                className="flex items-center gap-2 rounded-sm no-underline hover:bg-panel"
+                style={{ padding: "3px 6px" }}
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: statusColor(inst.status) }}
+                  title={inst.status}
+                />
+                <span className="mono text-[10.5px] text-ink-3 flex-shrink-0" style={{ minWidth: 90 }}>
+                  {new Date(inst.ts).toLocaleTimeString(undefined, { hour12: false })}
+                </span>
+                <span className="mono text-[10.5px] text-ink-2 flex-shrink-0" style={{ minWidth: 80 }}>
+                  {inst.source}
+                </span>
+                <span
+                  className="mono text-[9.5px] px-1 rounded-sm flex-shrink-0"
+                  style={{
+                    background: "var(--c-panel)",
+                    color: statusColor(inst.status),
+                    border: `1px solid color-mix(in oklab, ${statusColor(inst.status)} 25%, transparent)`,
+                  }}
+                >
+                  {inst.status}
+                </span>
+                {inst.rejectionReason && (
+                  <span
+                    className="mono text-[10px] text-ink-4 truncate"
+                    title={inst.rejectionReason}
+                  >
+                    {inst.rejectionReason}
+                  </span>
+                )}
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="text-ink-4 text-[11.5px]">— 尚无实例数据 —</div>
+      )}
     </div>
   );
 }
