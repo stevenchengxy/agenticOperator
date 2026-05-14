@@ -14,68 +14,14 @@ import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/rou
 import { NeighborhoodPanel } from "./NeighborhoodPanel";
 import { RecentEntitiesPanel } from "./RecentEntitiesPanel";
 import { AgentChatbot } from "./AgentChatbot";
-
-type NodeKind = "trigger" | "agent" | "branch" | "hitl" | "guard" | "done";
-
-type NodeDef = {
-  id: string;
-  kind: NodeKind;
-  x: number;
-  y: number;
-  title: string;
-  sub: string;
-  icon: IcName;
-  // The hardcoded `status?: "running" | "review" | "degraded"` field was
-  // removed (2026-05-09) — live health from /api/agents/health drives the
-  // dot now. The static field had no source of truth and lied as soon as
-  // anything actually changed.
-};
+import { NODES, EDGES, type WorkflowNode } from "@/lib/workflow-graph-meta";
 
 export function WorkflowContent() {
   const { t } = useApp();
   const [selectedId, setSelectedId] = React.useState("jd");
 
-  const nodes: NodeDef[] = [
-    { id: "trig", kind: "trigger", x: 20, y: 240, title: "定时同步 / Webhook", sub: "SCHEDULED_SYNC · 客户 RMS", icon: "bolt" },
-    { id: "sync", kind: "agent", x: 200, y: 240, title: "ReqSync", sub: t("agent_req_sync") + " → REQUIREMENT_SYNCED", icon: "db" },
-    { id: "analyze", kind: "agent", x: 380, y: 240, title: "ReqAnalyzer", sub: t("agent_req_analyzer") + " → ANALYSIS_COMPLETED", icon: "sparkle" },
-    { id: "clarify", kind: "branch", x: 560, y: 240, title: "信息完整?", sub: "缺失字段 / 冲突", icon: "branch" },
-    { id: "ask", kind: "hitl", x: 740, y: 360, title: "HSM 澄清", sub: "CLARIFICATION_RETRY", icon: "user" },
-    { id: "jd", kind: "agent", x: 740, y: 140, title: "JDGenerator", sub: t("agent_jd_gen") + " → JD_GENERATED", icon: "sparkle" },
-    { id: "jdappr", kind: "hitl", x: 920, y: 140, title: "HSM 审批 JD", sub: "JD_APPROVED / JD_REJECTED", icon: "shield" },
-    { id: "publish", kind: "agent", x: 1100, y: 140, title: "Publisher", sub: t("agent_publisher") + " → CHANNEL_PUBLISHED", icon: "plug" },
-    { id: "collect", kind: "agent", x: 1280, y: 140, title: "ResumeCollector", sub: "RESUME_DOWNLOADED", icon: "db" },
-    { id: "parse", kind: "agent", x: 1280, y: 240, title: "ResumeParser + DupeCheck", sub: "RESUME_PROCESSED / LOCKED_CONFLICT", icon: "cpu" },
-    { id: "match", kind: "branch", x: 1100, y: 340, title: "人岗匹配", sub: "Matcher · 硬性 / 加分 / 负向", icon: "branch" },
-    { id: "reject", kind: "done", x: 1280, y: 420, title: "归档 · MATCH_FAILED", sub: "黑名单 / 硬性不符", icon: "cross" },
-    { id: "itv", kind: "agent", x: 920, y: 340, title: "AIInterviewer", sub: t("agent_interviewer") + " → AI_INTERVIEW_COMPLETED", icon: "sparkle" },
-    { id: "eval", kind: "agent", x: 740, y: 340, title: "Evaluator", sub: "EVALUATION_PASSED / FAILED", icon: "cpu" },
-    { id: "pkg", kind: "agent", x: 560, y: 340, title: "PackageBuilder", sub: "PACKAGE_GENERATED · 简历+评估", icon: "book" },
-    { id: "review", kind: "hitl", x: 380, y: 440, title: "HSM 审核推荐包", sub: "PACKAGE_APPROVED · SLA 4h", icon: "user" },
-    { id: "guard", kind: "guard", x: 200, y: 440, title: "合规 & 黑名单", sub: "PII / EEO / Blacklist", icon: "shield" },
-    { id: "submit", kind: "agent", x: 20, y: 440, title: "PortalSubmitter", sub: "APPLICATION_SUBMITTED", icon: "mail" },
-  ];
-
-  const edges = [
-    { from: "trig", to: "sync" },
-    { from: "sync", to: "analyze" },
-    { from: "analyze", to: "clarify" },
-    { from: "clarify", to: "jd", label: "OK" },
-    { from: "clarify", to: "ask", label: "缺失", dashed: true },
-    { from: "ask", to: "analyze", dashed: true },
-    { from: "jd", to: "jdappr" },
-    { from: "jdappr", to: "publish" },
-    { from: "publish", to: "collect" },
-    { from: "collect", to: "parse" },
-    { from: "parse", to: "match" },
-    { from: "match", to: "reject", label: "不符", dashed: true },
-    { from: "match", to: "itv", label: "匹配" },
-    { from: "itv", to: "eval" },
-    { from: "eval", to: "pkg" },
-    { from: "pkg", to: "review" },
-    { from: "review", to: "guard" },
-    { from: "guard", to: "submit" },
-  ];
+  const nodes = NODES;
+  const edges = EDGES;
 
   const sel = nodes.find((n) => n.id === selectedId) || nodes[0];
 
@@ -310,10 +256,10 @@ function PaletteSection({ title, items }: { title: string; items: { icon: IcName
   );
 }
 
-// Maps a NodeDef.title (which may carry decoration like "ResumeParser +
+// Maps a WorkflowNode.title (which may carry decoration like "ResumeParser +
 // DupeCheck") to the AGENT_FUNCTIONS short. Single source of truth so
 // /workflow canvas + Inspector + summary computation all agree.
-function nodeAgentShort(node: NodeDef): string | null {
+function nodeAgentShort(node: WorkflowNode): string | null {
   if (node.kind !== "agent") return null;
   const tries = [node.title, node.title.split(/\s|\+|·/)[0]].filter(Boolean);
   for (const t of tries) {
@@ -336,7 +282,7 @@ function WFNode({
   selected,
   onSelect,
 }: {
-  node: NodeDef;
+  node: WorkflowNode;
   liveHealth: AgentHealth | null;
   selected: boolean;
   onSelect: () => void;
@@ -425,7 +371,7 @@ function Inspector({
   liveHealth,
   onJumpToAgent,
 }: {
-  node: NodeDef;
+  node: WorkflowNode;
   liveHealth: AgentHealth | null;
   onJumpToAgent: (short: string) => void;
 }) {
