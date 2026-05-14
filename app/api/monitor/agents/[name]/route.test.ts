@@ -28,10 +28,10 @@ describe('GET /api/monitor/agents/[name]', () => {
   });
 
   it('returns 200 with the canonical shape for a known node id', async () => {
-    const res = await GET(new Request('http://x/api/monitor/agents/jd'), ctx('jd'));
+    const res = await GET(new Request('http://x/api/monitor/agents/jdGenerator'), ctx('jdGenerator'));
     const j = await res.json();
     expect(res.status).toBe(200);
-    expect(j.name).toBe('jd');
+    expect(j.name).toBe('jdGenerator');
     expect(j.title).toBe('JDGenerator');
     expect(Array.isArray(j.recentEpisodes)).toBe(true);
     expect(Array.isArray(j.tokenSpend)).toBe(true);

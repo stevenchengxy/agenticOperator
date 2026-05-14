@@ -160,35 +160,12 @@ export async function GET(req: Request): Promise<Response> {
     });
 
     // ── Edges (event volumes) ──────────────────────────────────
-    // EDGES doesn't carry an eventName today — they used to be drawn just
-    // as a layout aid. To compute volume we attach an eventName-per-edge
-    // mapping inline here (small table). When EDGES grows an eventName
-    // field, drop this lookup.
-    const EDGE_EVENT: Record<string, string | null> = {
-      'trig->sync':       'SCHEDULED_SYNC',
-      'sync->analyze':    'REQUIREMENT_SYNCED',
-      'analyze->clarify': 'ANALYSIS_COMPLETED',
-      'clarify->jd':      'CLARIFICATION_READY',
-      'clarify->ask':     'CLARIFICATION_INCOMPLETE',
-      'ask->analyze':     'REQUIREMENT_LOGGED',
-      'jd->jdappr':       'JD_GENERATED',
-      'jdappr->publish':  'JD_APPROVED',
-      'publish->collect': 'CHANNEL_PUBLISHED',
-      'collect->parse':   'RESUME_DOWNLOADED',
-      'parse->match':     'RESUME_PROCESSED',
-      'match->reject':    'MATCH_FAILED',
-      'match->itv':       'MATCH_PASSED_NEED_INTERVIEW',
-      'itv->eval':        'AI_INTERVIEW_COMPLETED',
-      'eval->pkg':        'EVALUATION_PASSED',
-      'pkg->review':      'PACKAGE_GENERATED',
-      'review->guard':    'PACKAGE_APPROVED',
-      'guard->submit':    'APPLICATION_SUBMITTED',
-    };
-    const edgesWithEvent = EDGES.map(e => ({
-      ...e,
-      eventName: EDGE_EVENT[`${e.from}->${e.to}`] ?? '',
-    }));
-    const edges = buildEdgeAggregates(edgesWithEvent, eventInstances);
+    // EDGES now carries eventName directly (added in graph rework v8).
+    // No local lookup table needed — use EDGES as-is.
+    const edges = buildEdgeAggregates(
+      EDGES.map(e => ({ ...e, eventName: e.eventName ?? '' })),
+      eventInstances,
+    );
 
     // ── Failure feed ───────────────────────────────────────────
     const failures: MonitorFailureRow[] = failuresAll

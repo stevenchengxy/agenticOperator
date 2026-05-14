@@ -438,6 +438,13 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_failure_no_failed_steps: "未记录失败步骤。",
     monitor_failure_no_retries: "无重试活动。",
     monitor_failure_back_to_run: "返回运行",
+
+    // Run trail playback
+    monitor_playback_play: "播放",
+    monitor_playback_pause: "暂停",
+    monitor_playback_reset: "重置",
+    monitor_playback_speed: "倍速",
+    monitor_playback_step_of: "步 / 共",
   },
   en: {
     brand: "Agentic Operator",
@@ -871,6 +878,13 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_failure_no_failed_steps: "No failed steps recorded.",
     monitor_failure_no_retries: "No retry activity.",
     monitor_failure_back_to_run: "← Run",
+
+    // Run trail playback
+    monitor_playback_play: "Play",
+    monitor_playback_pause: "Pause",
+    monitor_playback_reset: "Reset",
+    monitor_playback_speed: "Speed",
+    monitor_playback_step_of: "of",
   },
 };
 

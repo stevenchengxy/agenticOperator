@@ -76,7 +76,7 @@ describe('GET /api/monitor/runs/[id]', () => {
     const res = await GET(new Request('http://x/api/monitor/runs/r-parse'), ctx('r-parse'));
     const j = await res.json();
     expect(res.status).toBe(200);
-    const parseStep = j.trail.find((t: any) => t.nodeId === 'parse');
+    const parseStep = j.trail.find((t: any) => t.nodeId === 'resumeParser');
     expect(parseStep).toBeDefined();
     expect(parseStep.result).toBe('success');
     expect(parseStep.stepCount).toBe(2);

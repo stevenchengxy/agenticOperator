@@ -406,19 +406,67 @@ export function RunDetailContent({ runId }: { runId: string }) {
     );
   }
 
-  // Build the trail map for the graph
-  const trailMap = new Map(
-    (data?.trail ?? []).map((tr, i, arr) => {
-      const current =
-        data?.run.status === 'running' &&
-        i === arr.length - 1 &&
-        tr.result === 'pending';
-      return [tr.nodeId, { result: tr.result, current }] as [
-        string,
-        { result: typeof tr.result; current: boolean },
-      ];
-    }),
-  );
+  // ── Playback state ────────────────────────────────────────────
+  const [playing, setPlaying] = React.useState(false);
+  const [stepIndex, setStepIndex] = React.useState<number | null>(null); // null = show full trail
+  const [speed, setSpeed] = React.useState(4); // default 4x
+
+  const trailSteps = data?.trail ?? [];
+  const totalSteps = trailSteps.length;
+
+  // Advance step on a timer when playing
+  React.useEffect(() => {
+    if (!playing || stepIndex == null) return;
+    if (stepIndex >= totalSteps - 1) {
+      setPlaying(false);
+      return;
+    }
+    const cur = trailSteps[stepIndex];
+    const next = trailSteps[stepIndex + 1];
+    const realGapMs = Math.max(
+      0,
+      new Date(next.enteredAt).getTime() - new Date(cur.enteredAt).getTime(),
+    );
+    const playGapMs = Math.min(2000, Math.max(300, realGapMs / speed));
+    const id = setTimeout(() => setStepIndex(si => (si != null ? si + 1 : null)), playGapMs);
+    return () => clearTimeout(id);
+  }, [playing, stepIndex, totalSteps, speed, trailSteps]);
+
+  const onPlay = () => {
+    if (stepIndex == null || stepIndex >= totalSteps - 1) setStepIndex(0);
+    setPlaying(true);
+  };
+  const onPause = () => setPlaying(false);
+  const onReset = () => { setPlaying(false); setStepIndex(null); };
+
+  // Build the visible trail map (respects stepIndex for playback)
+  const visibleTrail = React.useMemo(() => {
+    if (stepIndex == null) {
+      // Full trail (default static view)
+      return new Map(
+        (data?.trail ?? []).map((tr, i, arr) => {
+          const current =
+            data?.run.status === 'running' &&
+            i === arr.length - 1 &&
+            tr.result === 'pending';
+          return [tr.nodeId, { result: tr.result, current }] as [
+            string,
+            { result: typeof tr.result; current: boolean },
+          ];
+        }),
+      );
+    }
+    // Playback: only reveal steps 0..stepIndex
+    return new Map(
+      trailSteps.slice(0, stepIndex + 1).map((tr, i, sliced) => {
+        const isLast = i === sliced.length - 1;
+        return [tr.nodeId, {
+          result: (isLast && playing ? 'pending' : tr.result) as typeof tr.result,
+          current: playing && isLast,
+        }] as [string, { result: typeof tr.result; current: boolean }];
+      }),
+    );
+  }, [trailSteps, stepIndex, playing, data]);
 
   const totalTokens = data
     ? Object.values(data.tokensByAgent).reduce((s, tk) => s + tk.total, 0)
@@ -521,9 +569,78 @@ export function RunDetailContent({ runId }: { runId: string }) {
         />
       </div>
 
-      {/* Trail graph */}
+      {/* Trail graph with playback controls */}
       <div className="mb-6">
-        <MonitorGraph trail={trailMap} />
+        {/* Playback control bar */}
+        {totalSteps > 0 && (
+          <div className="mb-2 flex items-center gap-3 flex-wrap">
+            {/* Play / Pause */}
+            <button
+              type="button"
+              onClick={playing ? onPause : onPlay}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-claude-accent text-white text-[12.5px] font-medium hover:opacity-90 transition-opacity"
+            >
+              {playing ? (
+                <>
+                  <span>⏸</span>
+                  <span>{t('monitor_playback_pause')}</span>
+                </>
+              ) : (
+                <>
+                  <span>▷</span>
+                  <span>{t('monitor_playback_play')}</span>
+                </>
+              )}
+            </button>
+
+            {/* Speed selector */}
+            <div className="flex items-center gap-1.5 text-[12px] text-claude-ink-3">
+              <span>{t('monitor_playback_speed')}:</span>
+              {([1, 4, 16] as const).map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setSpeed(s)}
+                  className={
+                    "px-2 py-0.5 rounded text-[11.5px] font-medium transition-colors " +
+                    (speed === s
+                      ? "bg-claude-accent text-white"
+                      : "bg-claude-panel text-claude-ink-3 hover:text-claude-ink-1")
+                  }
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
+
+            {/* Reset */}
+            <button
+              type="button"
+              onClick={onReset}
+              className="px-2.5 py-1 rounded-lg bg-claude-panel text-claude-ink-3 text-[12px] hover:text-claude-ink-1 transition-colors"
+            >
+              ⏮ {t('monitor_playback_reset')}
+            </button>
+
+            {/* Step counter + timestamp */}
+            {stepIndex != null && (
+              <span className="ml-auto text-[12px] text-claude-ink-3 tabular-nums">
+                {t('monitor_playback_step_of').split('/')[0]?.trim() || 'Step'} {stepIndex + 1}{' '}
+                {t('monitor_playback_step_of').includes('/') ? '/' : t('monitor_playback_step_of')}{' '}
+                {totalSteps}
+                {trailSteps[stepIndex]?.enteredAt && (
+                  <span className="ml-1 text-claude-ink-4">
+                    · {new Date(trailSteps[stepIndex].enteredAt).toLocaleTimeString('en-US', {
+                        hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+                      })}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+        )}
+
+        <MonitorGraph trail={visibleTrail} />
       </div>
 
       {/* Tab bar */}
