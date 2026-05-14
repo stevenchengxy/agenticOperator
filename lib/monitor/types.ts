@@ -134,3 +134,31 @@ export type MonitorAgentDetail = {
   errorRate:  Array<{ bucket: string; total: number; failed: number }>;
   recentErrors: Array<{ runId: string; narrative: string; ts: string; metadata?: Record<string, unknown> }>;
 };
+
+export type MonitorQueueEventRow = {
+  id: string;
+  name: string;
+  source: string;
+  status: string;
+  ts: string;
+  payloadDigest?: string;
+  rejectionReason?: string;
+  schemaErrors?: unknown;
+};
+
+export type MonitorQueueDlqRow = {
+  id: string;
+  eventName: string;
+  reason: string;
+  retries: number;
+  createdAt: string;
+  resolvedAt: string | null;
+};
+
+export type MonitorQueueResponse = {
+  bucket: 'accepted' | 'pending' | 'rejected' | 'dlq';
+  total: number;
+  offset: number;
+  limit: number;
+  rows: Array<MonitorQueueEventRow | MonitorQueueDlqRow>;
+};
