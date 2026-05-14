@@ -9,12 +9,13 @@ vi.mock('@/server/db', () => ({
   },
 }));
 
-import { GET } from './route';
+import { GET, _resetCacheForTest } from './route';
 import { prisma } from '@/server/db';
 
 describe('GET /api/monitor/overview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetCacheForTest();
     (prisma.workflowRun.findMany as any).mockResolvedValue([]);
     (prisma.workflowRun.count as any).mockResolvedValue(0);
     (prisma.workflowRun.groupBy as any).mockResolvedValue([]);

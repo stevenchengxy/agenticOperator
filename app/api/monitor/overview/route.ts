@@ -36,6 +36,15 @@ let cachedAt = 0;
 let cachedKey = '';
 let cachedBody: MonitorOverviewResponse | null = null;
 
+// Test-only reset hook. Call from beforeEach in route.test.ts to ensure
+// cached state doesn't leak across tests. Underscore-prefixed by
+// convention so it's clearly not part of the public route API.
+export function _resetCacheForTest(): void {
+  cachedAt = 0;
+  cachedKey = '';
+  cachedBody = null;
+}
+
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const filter = parseFilter(url);
@@ -49,11 +58,20 @@ export async function GET(req: Request): Promise<Response> {
     const since = new Date(filter.since);
 
     // 1) Run-level aggregates
+    const recentRunRowsWhere: Record<string, unknown> = {};
+    if (filter.status)       recentRunRowsWhere.status = filter.status;
+    if (filter.triggerEvent) recentRunRowsWhere.triggerEvent = filter.triggerEvent;
+    // filter.client lives inside triggerData JSON; SQLite + Prisma can't
+    // path-query JSON cleanly, so client-level filtering is deferred.
+    // TODO: implement post-fetch filter or raw query for filter.client.
+    // The cache key already includes client so per-filter caching is correct.
+
     const [activeRunsCount, recentRunRows] = await Promise.all([
       prisma.workflowRun.count({ where: { status: 'running' } }),
       prisma.workflowRun.findMany({
+        where: Object.keys(recentRunRowsWhere).length > 0 ? recentRunRowsWhere : undefined,
         orderBy: { lastActivityAt: 'desc' },
-        take: 12,
+        take: 20,
         select: { id: true, status: true, triggerEvent: true, triggerData: true, startedAt: true, lastActivityAt: true },
       }),
     ]);
@@ -111,9 +129,11 @@ export async function GET(req: Request): Promise<Response> {
     const tenSecAgo = new Date(Date.now() - 10_000);
 
     const nodes: MonitorNodeAgg[] = NODES.map(n => {
-      // Match by node title (e.g. "JDGenerator"). Branch / hitl / done
-      // nodes never match an agent name -> empty rows.
-      const rows = titleToActivity.get(n.title) ?? [];
+      // Match by agentName when present (e.g. parse node has title
+      // "ResumeParser + DupeCheck" but canonical agentName "ResumeParser").
+      // Falls back to title for nodes where the two are identical.
+      // Branch / hitl / done nodes never match an agent name -> empty rows.
+      const rows = titleToActivity.get(n.agentName ?? n.title) ?? [];
       const completedInWindow = rows.filter(r => r.type === 'agent_complete').length;
       const failedInWindow = rows.filter(r => r.type === 'agent_error' || r.type === 'anomaly').length;
       const tokens = sumTokensFromActivities(rows.filter(r => r.type === 'tool'));

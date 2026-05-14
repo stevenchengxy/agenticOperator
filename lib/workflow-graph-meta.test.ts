@@ -30,4 +30,10 @@ describe('workflow-graph-meta', () => {
     expect(nodeById('jd')?.title).toBeDefined();
     expect(nodeById('does-not-exist')).toBeUndefined();
   });
+
+  it('parse node carries an explicit agentName to handle title/agent-short divergence', () => {
+    const parse = nodeById('parse');
+    expect(parse).toBeDefined();
+    expect(parse?.agentName).toBe('ResumeParser');
+  });
 });

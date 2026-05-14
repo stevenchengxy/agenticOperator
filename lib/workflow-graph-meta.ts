@@ -10,6 +10,14 @@ export type WorkflowNode = {
   title: string;
   sub: string;
   icon: IcName;
+  /**
+   * Canonical agent short name as it appears in AgentActivity.agentName.
+   * Use this for DB lookups when the display `title` differs from the agent's
+   * registered short (e.g. id=`parse` has title "ResumeParser + DupeCheck"
+   * but canonical agentName is "ResumeParser"). Falls back to `title` when
+   * absent.
+   */
+  agentName?: string;
 };
 
 export type WorkflowEdge = {
@@ -44,7 +52,7 @@ export const NODES: WorkflowNode[] = [
   { id: "jdappr", kind: "hitl", x: 920, y: 140, title: "HSM 审批 JD", sub: "JD_APPROVED / JD_REJECTED", icon: "shield" },
   { id: "publish", kind: "agent", x: 1100, y: 140, title: "Publisher", sub: "多渠道发布 → CHANNEL_PUBLISHED", icon: "plug" },
   { id: "collect", kind: "agent", x: 1280, y: 140, title: "ResumeCollector", sub: "RESUME_DOWNLOADED", icon: "db" },
-  { id: "parse", kind: "agent", x: 1280, y: 240, title: "ResumeParser + DupeCheck", sub: "RESUME_PROCESSED / LOCKED_CONFLICT", icon: "cpu" },
+  { id: "parse", kind: "agent", x: 1280, y: 240, title: "ResumeParser + DupeCheck", agentName: "ResumeParser", sub: "RESUME_PROCESSED / LOCKED_CONFLICT", icon: "cpu" },
   { id: "match", kind: "branch", x: 1100, y: 340, title: "人岗匹配", sub: "Matcher · 硬性 / 加分 / 负向", icon: "branch" },
   { id: "reject", kind: "done", x: 1280, y: 420, title: "归档 · MATCH_FAILED", sub: "黑名单 / 硬性不符", icon: "cross" },
   { id: "itv", kind: "agent", x: 920, y: 340, title: "AIInterviewer", sub: "AI 面试官 → AI_INTERVIEW_COMPLETED", icon: "sparkle" },
