@@ -105,6 +105,16 @@ export type MonitorRunDetail = {
   trail: RunTrailStep[];
   events: Array<{ name: string; ts: string; source: 'inbound' | 'outbound'; eventInstanceId: string | null }>;
   activity: Array<{ ts: string; agent: string; type: string; narrative: string; metadata?: Record<string, unknown> }>;
+  steps: Array<{
+    id: string;
+    nodeId: string;
+    stepName: string;
+    status: string;
+    error: string | null;
+    startedAt: string;
+    completedAt: string | null;
+    durationMs: number | null;
+  }>;
   tokensByAgent: Record<string, { prompt: number; completion: number; total: number; model: string | null }>;
   hitl: Array<{ taskId: string; status: string; title: string; createdAt: string; completedAt: string | null }>;
 };

@@ -2,9 +2,11 @@
 import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeSectionTitle, ClaudeBadge } from "./atoms";
+import { useApp } from "@/lib/i18n";
 import type { MonitorFailureDetailResponse } from "@/lib/monitor/types";
 
 export function FailureDetailContent({ runId }: { runId: string }) {
+  const { t } = useApp();
   const [data, setData] = React.useState<MonitorFailureDetailResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -23,16 +25,18 @@ export function FailureDetailContent({ runId }: { runId: string }) {
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
       <div className="mb-4">
-        <Link href={`/monitor/runs/${runId}`} className="text-claude-accent text-[12.5px] no-underline">← Run {runId.slice(0, 8)}</Link>
+        <Link href={`/monitor/runs/${runId}`} className="text-claude-accent text-[12.5px] no-underline">
+          {t('monitor_failure_back_to_run')} {runId.slice(0, 8)}
+        </Link>
       </div>
-      <h1 className="text-[24px] font-medium mb-4">Failure detail</h1>
+      <h1 className="text-[24px] font-medium mb-4">{t('monitor_failure_title')}</h1>
       {error && <p className="text-claude-err">{error}</p>}
       {data && (
         <>
           <ClaudeCard className="mb-3">
-            <ClaudeSectionTitle>Failed steps</ClaudeSectionTitle>
+            <ClaudeSectionTitle>{t('monitor_failure_failed_steps')}</ClaudeSectionTitle>
             {data.steps.length === 0 ? (
-              <div className="text-claude-ink-4 text-[12.5px]">No failed steps recorded.</div>
+              <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_failure_no_failed_steps')}</div>
             ) : (
               <ul className="flex flex-col divide-y divide-claude-line">
                 {data.steps.map((s: MonitorFailureDetailResponse['steps'][number]) => (
@@ -50,9 +54,9 @@ export function FailureDetailContent({ runId }: { runId: string }) {
             )}
           </ClaudeCard>
           <ClaudeCard>
-            <ClaudeSectionTitle>Retry history</ClaudeSectionTitle>
+            <ClaudeSectionTitle>{t('monitor_failure_retry_history')}</ClaudeSectionTitle>
             {data.retries.length === 0 ? (
-              <div className="text-claude-ink-4 text-[12.5px]">No retry activity.</div>
+              <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_failure_no_retries')}</div>
             ) : (
               <ul className="text-[12.5px]">
                 {data.retries.map((a: MonitorFailureDetailResponse['retries'][number]) => (

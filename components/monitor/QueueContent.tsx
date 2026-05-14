@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ClaudeCard, ClaudeChip, ClaudeBadge } from "./atoms";
 import { usePoll } from "@/lib/monitor/usePoll";
+import { useApp } from "@/lib/i18n";
 import type { MonitorQueueResponse, MonitorQueueEventRow, MonitorQueueDlqRow } from "@/lib/monitor/types";
 
 const BUCKETS = ['accepted', 'pending', 'rejected', 'dlq'] as const;
 
 function QueueContentInner() {
+  const { t } = useApp();
   const router = useRouter();
   const sp = useSearchParams();
   const bucket = (sp.get('bucket') ?? 'accepted') as (typeof BUCKETS)[number];
@@ -28,9 +30,11 @@ function QueueContentInner() {
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
       <div className="mb-4">
-        <Link href="/monitor" className="text-claude-accent text-[12.5px] no-underline">← Monitor</Link>
+        <Link href="/monitor" className="text-claude-accent text-[12.5px] no-underline">
+          {t('monitor_queue_back')}
+        </Link>
       </div>
-      <h1 className="text-[24px] font-medium mb-4">Event queue</h1>
+      <h1 className="text-[24px] font-medium mb-4">{t('monitor_queue_title')}</h1>
       <div className="flex items-center gap-2 mb-4">
         {BUCKETS.map(b => (
           <ClaudeChip key={b} active={bucket === b} onClick={() => setBucket(b)}>
@@ -40,9 +44,9 @@ function QueueContentInner() {
       </div>
       <ClaudeCard>
         {!data ? (
-          <div className="text-claude-ink-4 text-[12.5px]">Loading…</div>
+          <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_queue_loading')}</div>
         ) : data.rows.length === 0 ? (
-          <div className="text-claude-ink-4 text-[12.5px]">No rows in this bucket.</div>
+          <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_queue_empty')}</div>
         ) : data.bucket === 'dlq' ? (
           // Manual narrowing by data.bucket — TS can't infer union from a parallel field
           <ul className="flex flex-col divide-y divide-claude-line">

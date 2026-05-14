@@ -13,9 +13,10 @@ export async function GET(
     const run = await prisma.workflowRun.findUnique({ where: { id } });
     if (!run) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
-    const [activities, hitlRows, eventRows] = await Promise.all([
+    const [activities, hitlRows, eventRows, stepRows] = await Promise.all([
       prisma.agentActivity.findMany({
-        where: { runId: id },
+        // Chatbot rows are conversational ABOUT the run, not part of its execution. Filter for the timeline.
+        where: { runId: id, agentName: { not: 'Chatbot' } },
         orderBy: { createdAt: 'asc' },
         select: {
           agentName: true,
@@ -45,6 +46,20 @@ export async function GET(
         orderBy: { ts: 'asc' },
         take: 200,
         select: { id: true, name: true, ts: true },
+      }),
+      prisma.workflowStep.findMany({
+        where: { runId: id },
+        orderBy: { startedAt: 'asc' },
+        select: {
+          id: true,
+          nodeId: true,
+          stepName: true,
+          status: true,
+          error: true,
+          startedAt: true,
+          completedAt: true,
+          durationMs: true,
+        },
       }),
     ]);
 
@@ -128,6 +143,16 @@ export async function GET(
         type: a.type,
         narrative: a.narrative,
         metadata: a.metadata ? safeParse(a.metadata) : undefined,
+      })),
+      steps: stepRows.map(s => ({
+        id: s.id,
+        nodeId: s.nodeId,
+        stepName: s.stepName,
+        status: s.status,
+        error: s.error,
+        startedAt: s.startedAt.toISOString(),
+        completedAt: s.completedAt?.toISOString() ?? null,
+        durationMs: s.durationMs,
       })),
       tokensByAgent,
       hitl: hitlRows.map(h => ({

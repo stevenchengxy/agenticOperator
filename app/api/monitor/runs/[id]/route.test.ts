@@ -6,6 +6,7 @@ vi.mock('@/server/db', () => ({
     agentActivity: { findMany: vi.fn() },
     humanTask: { findMany: vi.fn() },
     eventInstance: { findMany: vi.fn() },
+    workflowStep: { findMany: vi.fn() },
   },
 }));
 
@@ -45,6 +46,7 @@ describe('GET /api/monitor/runs/[id]', () => {
     ]);
     (prisma.humanTask.findMany as any).mockResolvedValue([]);
     (prisma.eventInstance.findMany as any).mockResolvedValue([]);
+    (prisma.workflowStep.findMany as any).mockResolvedValue([]);
     const res = await GET(new Request('http://x/api/monitor/runs/r1'), ctx('r1'));
     const j = await res.json();
     expect(res.status).toBe(200);
@@ -69,6 +71,7 @@ describe('GET /api/monitor/runs/[id]', () => {
     ]);
     (prisma.humanTask.findMany as any).mockResolvedValue([]);
     (prisma.eventInstance.findMany as any).mockResolvedValue([]);
+    (prisma.workflowStep.findMany as any).mockResolvedValue([]);
 
     const res = await GET(new Request('http://x/api/monitor/runs/r-parse'), ctx('r-parse'));
     const j = await res.json();

@@ -19,30 +19,34 @@ function elapsedLabel(startedAt: string): string {
   return `${h}h${rem > 0 ? `${rem}m` : ''}`;
 }
 
-function agentDots(agentsTouched: number, label: string, max = 5): React.ReactNode {
-  const filled = Math.min(agentsTouched, max);
-  return (
-    <span className="inline-flex gap-0.5 items-center">
-      {Array.from({ length: max }).map((_, i) => (
-        <span
-          key={i}
-          className={`inline-block w-1.5 h-1.5 rounded-full ${
-            i < filled ? 'bg-claude-accent' : 'bg-claude-line'
-          }`}
-        />
-      ))}
-      <span className="ml-1 text-claude-ink-3">{agentsTouched} {label}</span>
-    </span>
-  );
-}
+// ── Status dot color ───────────────────────────────────────────────
+const STATUS_DOT_COLOR: Record<string, string> = {
+  running:   'bg-claude-accent',
+  paused:    'bg-claude-warn',
+  suspended: 'bg-claude-warn',
+  failed:    'bg-claude-err',
+  completed: 'bg-claude-ok',
+};
 
-// ── Status pill ────────────────────────────────────────────────────
+// ── Status pill tone ───────────────────────────────────────────────
 const STATUS_TONE: Record<string, 'accent' | 'warn' | 'err' | 'ok' | 'neutral'> = {
   running:   'accent',
   paused:    'warn',
   suspended: 'warn',
   failed:    'err',
   completed: 'ok',
+};
+
+// ── Stage chip labels ──────────────────────────────────────────────
+const STAGE_LABELS: Record<string, string> = {
+  req:       'Stage 1',
+  jd:        'Stage 2',
+  source:    'Stage 3',
+  screen:    'Stage 4',
+  interview: 'Stage 5',
+  eval:      'Stage 6',
+  package:   'Stage 7',
+  submit:    'Stage 8',
 };
 
 // ── Title derivation ───────────────────────────────────────────────
@@ -68,78 +72,106 @@ function deriveTitle(card: InstanceCardType): { title: string; subtitle: string 
   return { title: `Run ${card.runId.slice(0, 8)}`, subtitle: card.triggerEvent };
 }
 
+// ── Progress bar ───────────────────────────────────────────────────
+// Use 18 as the approximate total agent count in the full pipeline.
+const TOTAL_PIPELINE_AGENTS = 18;
+
+function ProgressBar({ agentsTouched }: { agentsTouched: number }) {
+  const pct = Math.min((agentsTouched / TOTAL_PIPELINE_AGENTS) * 100, 100);
+  return (
+    <div className="h-1 rounded-full bg-claude-line overflow-hidden">
+      <div
+        className="h-1 rounded-full bg-claude-accent transition-all duration-500"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────
 export function InstanceCard({ card }: { card: InstanceCardType }) {
   const { t } = useApp();
   const { title, subtitle } = deriveTitle(card);
   const tone = STATUS_TONE[card.status] ?? 'neutral';
+  const dotColor = STATUS_DOT_COLOR[card.status] ?? 'bg-claude-ink-4';
   const elapsed = elapsedLabel(card.startedAt);
-  const stageLabel = card.currentStage ? card.currentStage.toUpperCase() : null;
+  const stageChip = card.currentStage ? (STAGE_LABELS[card.currentStage] ?? card.currentStage.toUpperCase()) : null;
 
   return (
     <Link
       href={`/monitor/runs/${encodeURIComponent(card.runId)}`}
       className="block no-underline"
     >
-      <ClaudeCard className="p-4 hover:bg-claude-panel transition-colors cursor-pointer">
-        {/* Header row */}
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[11px] uppercase tracking-[0.10em] text-claude-ink-4 font-medium truncate mr-2">
-            {card.triggerEvent} · {elapsed}
+      <ClaudeCard className="p-4 hover:bg-claude-panel/40 hover:shadow-sm transition-all cursor-pointer">
+        {/* ── Title row: status dot + title + pill ── */}
+        <div className="flex items-center gap-2 mb-1.5">
+          {/* Status dot */}
+          <span className={`shrink-0 inline-block w-2.5 h-2.5 rounded-full ${dotColor}`} />
+          {/* Title */}
+          <span className="text-[14.5px] font-medium text-claude-ink-1 leading-snug truncate flex-1 min-w-0">
+            {title}
           </span>
+          {/* Status pill */}
           <ClaudeBadge tone={tone} size="xs">
             {card.status}
           </ClaudeBadge>
         </div>
 
-        {/* Title */}
-        <div className="text-[13.5px] font-medium text-claude-ink-1 leading-snug truncate mb-0.5">
-          {title}
+        {/* ── Horizontal rule ── */}
+        <div className="border-t border-claude-line mb-2" />
+
+        {/* ── Meta line: trigger + duration ── */}
+        <div className="text-[11px] uppercase tracking-[0.10em] text-claude-ink-4 font-medium mb-1 truncate">
+          {card.triggerEvent} · {elapsed}
         </div>
 
-        {/* Subtitle (entity refs) */}
-        <div className="text-[11.5px] text-claude-ink-3 truncate mb-3">
-          {subtitle}
-        </div>
+        {/* ── Entity sub-refs ── */}
+        {subtitle !== card.triggerEvent && (
+          <div className="text-[11.5px] text-claude-ink-3 truncate mb-3">
+            {subtitle}
+          </div>
+        )}
+        {subtitle === card.triggerEvent && <div className="mb-3" />}
 
-        {/* Divider */}
-        <div className="border-t border-claude-line mb-3" />
-
-        {/* Progress row */}
-        <div className="flex items-center justify-between mb-0.5">
-          <span className="text-[12px] text-claude-ink-2">
-            {card.currentAgent
-              ? <><span className="text-claude-ink-4">{t("monitor_card_current")} </span>{card.currentAgent}</>
-              : <span className="text-claude-ink-4">No activity yet</span>
-            }
+        {/* ── Progress bar ── */}
+        <ProgressBar agentsTouched={card.agentsTouched} />
+        <div className="flex items-center justify-between mt-1 mb-2">
+          <span className="text-[11px] text-claude-ink-4">
+            {card.agentsTouched} / {TOTAL_PIPELINE_AGENTS} {t("monitor_card_agents_touched")}
           </span>
-          <span>{agentDots(card.agentsTouched, t("monitor_card_agents_touched"))}</span>
         </div>
 
-        {stageLabel && (
-          <div className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4 mb-3">
-            {t("monitor_card_stage")} {stageLabel}
+        {/* ── Current agent line ── */}
+        {card.currentAgent ? (
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[11.5px] text-claude-ink-4">►</span>
+            <span className="text-[12.5px] text-claude-ink-2 font-medium truncate flex-1">
+              {card.currentAgent}
+            </span>
+            {stageChip && (
+              <span className="shrink-0 text-[10.5px] px-1.5 py-0.5 rounded bg-claude-panel text-claude-ink-3 font-medium">
+                {stageChip}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="text-[11.5px] text-claude-ink-4 mb-2">
+            {t("monitor_card_current")} —
           </div>
         )}
 
-        {/* Divider (only if flags exist) */}
-        {(card.pendingHitl || card.hasFailure) && (
-          <>
-            <div className="border-t border-claude-line mb-2" />
-            <div className="flex items-center gap-2">
-              {card.pendingHitl && (
-                <ClaudeBadge tone="warn" size="xs">{t("monitor_card_hitl")}</ClaudeBadge>
-              )}
-              {card.hasFailure && (
-                <ClaudeBadge tone="err" size="xs">{t("monitor_card_failure")}</ClaudeBadge>
-              )}
-              <span className="ml-auto text-claude-ink-4 text-[13px] font-medium">→</span>
-            </div>
-          </>
-        )}
-
-        {/* Arrow when no flags */}
-        {!card.pendingHitl && !card.hasFailure && (
+        {/* ── Flag badges + open arrow ── */}
+        {(card.pendingHitl || card.hasFailure) ? (
+          <div className="flex items-center gap-2 border-t border-claude-line pt-2 mt-1">
+            {card.pendingHitl && (
+              <span className="text-[11px] text-claude-warn font-medium">⚠ {t("monitor_card_hitl")}</span>
+            )}
+            {card.hasFailure && (
+              <span className="text-[11px] text-claude-err font-medium">⛔ {t("monitor_card_failure")}</span>
+            )}
+            <span className="ml-auto text-claude-ink-4 text-[13px] font-medium">Open →</span>
+          </div>
+        ) : (
           <div className="flex justify-end">
             <span className="text-claude-ink-4 text-[13px] font-medium">→</span>
           </div>
