@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { ClaudeChip } from "./atoms";
+import { useApp } from "@/lib/i18n";
 
 const WINDOW_OPTIONS: Array<{ id: string; ms: number; label: string }> = [
   { id: '5m',  ms: 5 * 60 * 1000,                label: '5min' },
@@ -24,9 +25,10 @@ export function FilterChips({
   search: string;
   onSearchChange: (s: string) => void;
 }) {
+  const { t } = useApp();
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4">Time</span>
+      <span className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4">{t("monitor_filter_time")}</span>
       {WINDOW_OPTIONS.map(opt => (
         <ClaudeChip
           key={opt.id}
@@ -36,17 +38,17 @@ export function FilterChips({
           {opt.label}
         </ClaudeChip>
       ))}
-      <span className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4 ml-3">Status</span>
-      <ClaudeChip active={!status} onClick={() => onStatusChange(undefined)}>All</ClaudeChip>
-      <ClaudeChip active={status === 'running'} onClick={() => onStatusChange('running')}>Running</ClaudeChip>
-      <ClaudeChip active={status === 'failed'} onClick={() => onStatusChange('failed')}>Failed</ClaudeChip>
-      <ClaudeChip active={status === 'completed'} onClick={() => onStatusChange('completed')}>Completed</ClaudeChip>
+      <span className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4 ml-3">{t("monitor_filter_status")}</span>
+      <ClaudeChip active={!status} onClick={() => onStatusChange(undefined)}>{t("monitor_filter_all")}</ClaudeChip>
+      <ClaudeChip active={status === 'running'} onClick={() => onStatusChange('running')}>{t("monitor_filter_running")}</ClaudeChip>
+      <ClaudeChip active={status === 'failed'} onClick={() => onStatusChange('failed')}>{t("monitor_filter_failed")}</ClaudeChip>
+      <ClaudeChip active={status === 'completed'} onClick={() => onStatusChange('completed')}>{t("monitor_filter_completed")}</ClaudeChip>
       <div className="ml-auto">
         <input
           type="search"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="run / candidate / jd id…"
+          placeholder={t("monitor_filter_placeholder")}
           className="rounded-full border border-claude-line bg-claude-surface px-3 py-1 text-[12.5px] w-[260px] focus:outline-none focus:ring-1 focus:ring-claude-accent"
         />
       </div>

@@ -2,6 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeSectionTitle, ClaudeBadge } from "./atoms";
+import { useApp } from "@/lib/i18n";
 import type { MonitorFailureRow } from "@/lib/monitor/types";
 
 function timeAgo(iso: string) {
@@ -12,14 +13,15 @@ function timeAgo(iso: string) {
 }
 
 export function FailuresFeed({ rows }: { rows: MonitorFailureRow[] }) {
+  const { t } = useApp();
   return (
     <ClaudeCard className="h-full">
-      <ClaudeSectionTitle>Failures</ClaudeSectionTitle>
+      <ClaudeSectionTitle>{t("monitor_failures_title")}</ClaudeSectionTitle>
       {rows.length === 0 ? (
-        <div className="text-claude-ink-4 text-[12.5px]">No failures in window.</div>
+        <div className="text-claude-ink-4 text-[12.5px]">{t("monitor_failures_empty")}</div>
       ) : (
         <ul className="flex flex-col divide-y divide-claude-line">
-          {rows.map((r, i) => (
+          {rows.map((r) => (
             <li key={`${r.runId}-${r.at}`} className="py-2 first:pt-0 last:pb-0">
               <Link
                 href={r.runId ? `/monitor/runs/${encodeURIComponent(r.runId)}?focus=${encodeURIComponent(r.at)}` : '#'}

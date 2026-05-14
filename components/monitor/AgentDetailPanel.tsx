@@ -4,6 +4,7 @@ import Link from "next/link";
 import { byShort } from "@/lib/agent-mapping";
 import { nodeById } from "@/lib/workflow-graph-meta";
 import { ClaudeBadge } from "./atoms";
+import { useApp } from "@/lib/i18n";
 
 type ActivityRow = {
   ts: string;
@@ -17,6 +18,8 @@ type Props = {
 };
 
 export function AgentDetailPanel({ nodeId, onClose }: Props) {
+  const { t } = useApp();
+
   if (!nodeId) return null;
   const node = nodeById(nodeId);
   if (!node) return null;
@@ -89,7 +92,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
 
         {meta && (
           <>
-            <Section title="Triggers">
+            <Section title={t("monitor_agent_triggers")}>
               {meta.triggersEvents.length > 0 ? (
                 <ul className="text-[12px] text-claude-ink-2 space-y-0.5">
                   {meta.triggersEvents.map((e) => (
@@ -103,7 +106,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
               )}
             </Section>
 
-            <Section title="Emits">
+            <Section title={t("monitor_agent_emits")}>
               {meta.emitsEvents.length > 0 ? (
                 <ul className="text-[12px] text-claude-ink-2 space-y-0.5">
                   {meta.emitsEvents.map((e) => (
@@ -117,7 +120,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
               )}
             </Section>
 
-            <Section title="Kind">
+            <Section title={t("monitor_agent_kind")}>
               <ClaudeBadge
                 tone={
                   meta.kind === "hitl"
@@ -136,7 +139,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
           </>
         )}
 
-        <Section title="Recent activity">
+        <Section title={t("monitor_agent_recent_activity")}>
           {activity.length === 0 ? (
             <Empty>No recent activity.</Empty>
           ) : (
@@ -164,7 +167,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
             href={`/monitor/agents/${encodeURIComponent(node.id)}`}
             className="text-claude-accent text-[13px] no-underline hover:underline"
           >
-            Open full detail →
+            {t("monitor_agent_open_detail")}
           </Link>
         </div>
       </div>

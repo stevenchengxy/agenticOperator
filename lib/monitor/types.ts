@@ -232,3 +232,19 @@ export type MonitorInstancesResponse = {
   total: number;
   items: InstanceCard[];
 };
+
+// ── System Status ──────────────────────────────────────────────────
+
+export type SubsystemHealth = {
+  id: 'em' | 'raas' | 'neo4j' | 'inngest';
+  label: string;
+  state: 'healthy' | 'degraded' | 'down' | 'unknown';
+  lastUpdate: string | null;
+  metrics: Array<{ label: string; value: string }>;
+  detail: string | null;
+};
+
+export type MonitorSystemStatusResponse = {
+  subsystems: SubsystemHealth[];
+  fetchedAt: string;
+};

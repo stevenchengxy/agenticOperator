@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 
 const STREAM_CONNECTED_THRESHOLD_MS = 10_000;
 
@@ -19,6 +20,7 @@ export function MonitorHeader({
   lastSuccessAt: Date | null;
   hasError: boolean;
 }) {
+  const { t } = useApp();
   const ageMs = lastSuccessAt ? Date.now() - lastSuccessAt.getTime() : Infinity;
   const connected = !hasError && ageMs < STREAM_CONNECTED_THRESHOLD_MS;
 
@@ -26,22 +28,22 @@ export function MonitorHeader({
     <div className="flex items-start justify-between mb-2">
       <div>
         <div className="text-[11px] uppercase tracking-[0.16em] text-claude-ink-4 font-medium mb-2">
-          Agentic Operator · Live Ops
+          {t("monitor_hero_subtitle")}
         </div>
         <h1 className="text-[44px] font-medium leading-[1.05] text-claude-ink-1">
           Monitor
         </h1>
       </div>
       <div className="flex items-center gap-8">
-        <StatTile label="Active" value={stats?.activeRuns ?? "—"} />
-        <StatTile label="HITL" value={stats?.pendingHitl ?? "—"} />
+        <StatTile label={t("monitor_stat_active")} value={stats?.activeRuns ?? "—"} />
+        <StatTile label={t("monitor_stat_hitl")} value={stats?.pendingHitl ?? "—"} />
         <StatTile
-          label="Failures"
+          label={t("monitor_stat_failures")}
           value={stats?.failuresInWindow ?? "—"}
           tone={stats && stats.failuresInWindow > 0 ? "err" : undefined}
         />
         <StatTile
-          label="Tokens"
+          label={t("monitor_stat_tokens")}
           value={stats ? fmt(stats.tokensInWindow) : "—"}
         />
         <StreamPill connected={connected} />
@@ -76,6 +78,7 @@ function StatTile({
 }
 
 function StreamPill({ connected }: { connected: boolean }) {
+  const { t } = useApp();
   return (
     <div
       className={
@@ -91,7 +94,7 @@ function StreamPill({ connected }: { connected: boolean }) {
           (connected ? "bg-claude-ok" : "bg-claude-ink-4")
         }
       />
-      {connected ? "Stream connected" : "Disconnected"}
+      {connected ? t("monitor_stream_connected") : t("monitor_stream_disconnected")}
     </div>
   );
 }

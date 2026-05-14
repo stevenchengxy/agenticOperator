@@ -12,6 +12,7 @@ import { InstanceCardsSection } from "./InstanceCardsSection";
 import { MonitorHeader } from "./MonitorHeader";
 import { ActionBar } from "./ActionBar";
 import { AgentDetailPanel } from "./AgentDetailPanel";
+import { SystemStatusCards } from "./SystemStatusCards";
 import type { MonitorOverviewResponse, MonitorRunRow } from "@/lib/monitor/types";
 
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
@@ -23,6 +24,7 @@ function MonitorContentInner() {
   // URL state
   const windowMs = Number(sp.get('windowMs') ?? DEFAULT_WINDOW_MS);
   const status = sp.get('status') ?? undefined;
+  // Search state hoisted here so it feeds both FilterChips and InstanceCardsSection
   const [search, setSearch] = React.useState<string>(sp.get('q') ?? '');
 
   // Pause/resume polling
@@ -52,8 +54,6 @@ function MonitorContentInner() {
   const [miniAgent, setMiniAgent] = React.useState<string | null>(null);
   const miniRows: MonitorRunRow[] = React.useMemo(() => {
     if (!miniAgent || !data) return [];
-    // v1 approximation: recentRuns isn't keyed by agent — show global
-    // running slice. Per-agent endpoint deferred per plan §"Known gaps".
     return data.recentRuns.filter(r => r.status === 'running').slice(0, 5);
   }, [miniAgent, data]);
 
@@ -78,6 +78,9 @@ function MonitorContentInner() {
       />
 
       <ActionBar paused={paused} onTogglePause={onTogglePause} />
+
+      {/* System Status Cards — infrastructure visibility */}
+      <SystemStatusCards paused={paused} />
 
       {error && (
         <p className="text-claude-err text-[12px] mb-2">
@@ -104,7 +107,7 @@ function MonitorContentInner() {
         />
       </div>
 
-      <InstanceCardsSection paused={paused} />
+      <InstanceCardsSection paused={paused} searchQuery={search} />
 
       <div className="mb-6 relative">
         <MonitorGraph

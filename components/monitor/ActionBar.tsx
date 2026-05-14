@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { ClaudeButton } from "./atoms";
+import { useApp } from "@/lib/i18n";
 
 const TEST_EVENTS = [
   {
@@ -27,6 +28,7 @@ export function ActionBar({
   paused: boolean;
   onTogglePause: () => void;
 }) {
+  const { t } = useApp();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [sending, setSending] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
@@ -62,13 +64,13 @@ export function ActionBar({
     <div className="flex items-center gap-2 mb-3 flex-wrap relative">
       <ClaudeButton onClick={onTogglePause}>
         <span aria-hidden>{paused ? "▷" : "⏸"}</span>
-        {paused ? "Play Livestream" : "Pause Livestream"}
+        {paused ? t("monitor_action_play") : t("monitor_action_pause")}
       </ClaudeButton>
 
       <div className="relative" ref={menuRef}>
         <ClaudeButton onClick={() => setMenuOpen((o) => !o)}>
           <span aria-hidden>+</span>
-          Send Test Event
+          {t("monitor_action_send_test")}
         </ClaudeButton>
         {menuOpen && (
           <div className="absolute top-full left-0 mt-1 z-20 min-w-[220px] rounded-[10px] border border-claude-line bg-claude-surface shadow-sm py-1">
@@ -94,7 +96,7 @@ export function ActionBar({
         className="inline-flex items-center gap-1.5 rounded-[8px] border border-claude-line bg-claude-surface text-claude-ink-1 hover:bg-claude-panel px-3 py-1.5 text-[12.5px] no-underline"
       >
         <span aria-hidden>↗</span>
-        Open Inngest Console
+        {t("monitor_action_inngest")}
       </a>
 
       {toast && (

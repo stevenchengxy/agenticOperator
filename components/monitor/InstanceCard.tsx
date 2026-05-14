@@ -2,6 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeBadge } from "./atoms";
+import { useApp } from "@/lib/i18n";
 import type { InstanceCard as InstanceCardType } from "@/lib/monitor/types";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -18,7 +19,7 @@ function elapsedLabel(startedAt: string): string {
   return `${h}h${rem > 0 ? `${rem}m` : ''}`;
 }
 
-function agentDots(agentsTouched: number, max = 5): React.ReactNode {
+function agentDots(agentsTouched: number, label: string, max = 5): React.ReactNode {
   const filled = Math.min(agentsTouched, max);
   return (
     <span className="inline-flex gap-0.5 items-center">
@@ -30,7 +31,7 @@ function agentDots(agentsTouched: number, max = 5): React.ReactNode {
           }`}
         />
       ))}
-      <span className="ml-1 text-claude-ink-3">{agentsTouched} agent{agentsTouched !== 1 ? 's' : ''}</span>
+      <span className="ml-1 text-claude-ink-3">{agentsTouched} {label}</span>
     </span>
   );
 }
@@ -69,6 +70,7 @@ function deriveTitle(card: InstanceCardType): { title: string; subtitle: string 
 
 // ── Component ──────────────────────────────────────────────────────
 export function InstanceCard({ card }: { card: InstanceCardType }) {
+  const { t } = useApp();
   const { title, subtitle } = deriveTitle(card);
   const tone = STATUS_TONE[card.status] ?? 'neutral';
   const elapsed = elapsedLabel(card.startedAt);
@@ -107,16 +109,16 @@ export function InstanceCard({ card }: { card: InstanceCardType }) {
         <div className="flex items-center justify-between mb-0.5">
           <span className="text-[12px] text-claude-ink-2">
             {card.currentAgent
-              ? <><span className="text-claude-ink-4">Current: </span>{card.currentAgent}</>
+              ? <><span className="text-claude-ink-4">{t("monitor_card_current")} </span>{card.currentAgent}</>
               : <span className="text-claude-ink-4">No activity yet</span>
             }
           </span>
-          <span>{agentDots(card.agentsTouched)}</span>
+          <span>{agentDots(card.agentsTouched, t("monitor_card_agents_touched"))}</span>
         </div>
 
         {stageLabel && (
           <div className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4 mb-3">
-            Stage: {stageLabel}
+            {t("monitor_card_stage")} {stageLabel}
           </div>
         )}
 
@@ -126,10 +128,10 @@ export function InstanceCard({ card }: { card: InstanceCardType }) {
             <div className="border-t border-claude-line mb-2" />
             <div className="flex items-center gap-2">
               {card.pendingHitl && (
-                <ClaudeBadge tone="warn" size="xs">HITL waiting</ClaudeBadge>
+                <ClaudeBadge tone="warn" size="xs">{t("monitor_card_hitl")}</ClaudeBadge>
               )}
               {card.hasFailure && (
-                <ClaudeBadge tone="err" size="xs">failure</ClaudeBadge>
+                <ClaudeBadge tone="err" size="xs">{t("monitor_card_failure")}</ClaudeBadge>
               )}
               <span className="ml-auto text-claude-ink-4 text-[13px] font-medium">→</span>
             </div>

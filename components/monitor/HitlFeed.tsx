@@ -2,14 +2,16 @@
 import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeSectionTitle, ClaudeBadge } from "./atoms";
+import { useApp } from "@/lib/i18n";
 import type { MonitorHitlRow } from "@/lib/monitor/types";
 
 export function HitlFeed({ rows }: { rows: MonitorHitlRow[] }) {
+  const { t } = useApp();
   return (
     <ClaudeCard className="h-full">
-      <ClaudeSectionTitle>Pending HITL</ClaudeSectionTitle>
+      <ClaudeSectionTitle>{t("monitor_hitl_title")}</ClaudeSectionTitle>
       {rows.length === 0 ? (
-        <div className="text-claude-ink-4 text-[12.5px]">No tasks waiting.</div>
+        <div className="text-claude-ink-4 text-[12.5px]">{t("monitor_hitl_empty")}</div>
       ) : (
         <ul className="flex flex-col divide-y divide-claude-line">
           {rows.map((r) => (
