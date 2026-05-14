@@ -31,6 +31,7 @@ import {
   type MatchPassedNeedInterviewData,
   type ResumeProcessedData,
 } from '../client';
+import { emPublish } from '../../em-bridge';
 
 const AGENT_ID = 'match-resume-agent';
 const AGENT_NAME = 'matchResume';
@@ -292,6 +293,18 @@ export const matchResumeAgent = inngest.createFunction(
         requestId: matchResult.requestId,
         savedAs: matchResult.savedAs,
       };
+      // Publish through AO-main's EM for EventInstance audit trail.
+      // TODO: remove this bridge call once RPA merges into AO-main and can
+      //       call em.publish() directly without HTTP round-trip.
+      await step.run(`em-audit-match-${stepKey}`, async () => {
+        await emPublish('MATCH_PASSED_NEED_INTERVIEW', payload, {
+          source: 'rpa.matchResumeAgent',
+          causedBy: { eventId: event.id ?? '', name: event.name },
+        });
+      });
+
+      // Keep the original inngest send for backward compat — downstream
+      // chain depends on this send. The em-bridge call above is additive.
       await step.sendEvent(`emit-match-${stepKey}`, {
         name: 'MATCH_PASSED_NEED_INTERVIEW',
         data: payload,

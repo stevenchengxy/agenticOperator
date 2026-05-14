@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import { useApp } from "@/lib/i18n";
 import type { BehaviorAlertRow } from "@/lib/behavior/types";
 
@@ -36,8 +36,32 @@ function SeverityChip({ severity }: { severity: string }) {
 
 // ── AlertRow ──────────────────────────────────────────────────────────────
 
-function AlertRow({ alert }: { alert: BehaviorAlertRow }) {
+function AlertRow({
+  alert,
+  onResolved,
+}: {
+  alert: BehaviorAlertRow;
+  onResolved: (id: string) => void;
+}) {
   const isResolved = !!alert.resolvedAt;
+  const [resolving, setResolving] = useState(false);
+
+  async function handleResolve() {
+    setResolving(true);
+    try {
+      const res = await fetch(`/api/behavior/alerts/${alert.id}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        onResolved(alert.id);
+      }
+    } finally {
+      setResolving(false);
+    }
+  }
+
   return (
     <div
       className="py-[10px] border-b border-line last:border-0"
@@ -46,6 +70,16 @@ function AlertRow({ alert }: { alert: BehaviorAlertRow }) {
       <div className="flex items-center gap-[8px] mb-[4px]">
         <SeverityChip severity={alert.severity} />
         <span className="text-[11px] mono text-ink-4 ml-auto">{relativeTime(alert.firstSeenAt)}</span>
+        {!isResolved && (
+          <button
+            onClick={handleResolve}
+            disabled={resolving}
+            className="text-[10.5px] px-[8px] py-[2px] rounded border border-line text-ink-3 hover:text-ink-1 hover:border-ink-3 transition-colors disabled:opacity-50"
+            title="Resolve this alert"
+          >
+            {resolving ? '…' : 'Resolve'}
+          </button>
+        )}
       </div>
       <div className="text-[13px] font-medium text-ink-1 mb-[2px] truncate">{alert.alertKey}</div>
       <div className="text-[11.5px] text-ink-3 mono">{alert.ruleId}</div>
@@ -65,6 +99,14 @@ function AlertRow({ alert }: { alert: BehaviorAlertRow }) {
 
 export function AlertList({ alerts }: { alerts: BehaviorAlertRow[] }) {
   const { t } = useApp();
+  // Track locally-resolved alert IDs so the Resolve button disappears immediately
+  // without waiting for the next poll cycle.
+  const [locallyResolved, setLocallyResolved] = useState<Set<string>>(new Set());
+
+  function markResolved(id: string) {
+    setLocallyResolved((prev) => new Set(prev).add(id));
+  }
+
   if (alerts.length === 0) {
     return (
       <div className="flex items-center justify-center h-24 text-[12px] text-ink-4">
@@ -75,7 +117,11 @@ export function AlertList({ alerts }: { alerts: BehaviorAlertRow[] }) {
   return (
     <div>
       {alerts.map((a) => (
-        <AlertRow key={a.id} alert={a} />
+        <AlertRow
+          key={a.id}
+          alert={locallyResolved.has(a.id) ? { ...a, resolvedAt: new Date().toISOString() } : a}
+          onResolved={markResolved}
+        />
       ))}
     </div>
   );

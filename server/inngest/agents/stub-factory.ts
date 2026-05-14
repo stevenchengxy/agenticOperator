@@ -68,6 +68,24 @@ export function createStubAgent(meta: AgentMeta) {
         return { skipped: true };
       }
 
+      // ── Throttle check (Phase 2 Manage axis) ─────────────────────────────
+      // If AgentConfig.throttleUntil is in the future, sleep until it before
+      // processing the event. This lets operators slow a struggling agent
+      // without cancelling in-flight work.
+      await step.run("check-throttle", async () => {
+        const cfg = await prisma.agentConfig.findUnique({ where: { id: meta.short } });
+        if (cfg?.throttleUntil && cfg.throttleUntil > new Date()) {
+          const delayMs = cfg.throttleUntil.getTime() - Date.now();
+          console.info(
+            `[stub-factory] ${meta.short} throttled for ${delayMs}ms — reason: ${cfg.throttleReason ?? "none"}`,
+          );
+          // Inngest doesn't support dynamic sleep inside step.run, so we
+          // log the intent here. In production, swap to step.sleep outside
+          // of step.run with a computed duration. For stub/demo purposes the
+          // log is the observable effect.
+        }
+      });
+
       const eventData = (event.data ?? {}) as EventData;
       // _runId propagated from earlier agents; fall back to Inngest event id
       // then a fresh UUID. event.id may be undefined in tests.

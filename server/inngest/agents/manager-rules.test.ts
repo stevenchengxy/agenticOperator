@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { decideAction } from './manager-rules';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { decideAction, decide } from './manager-rules';
 import type { MonitorAlertData } from '@/lib/behavior/types';
 
 function makeAlert(alertKey: string, severity: string = 'error'): MonitorAlertData {
@@ -59,5 +59,48 @@ describe('decideAction — manager-rules v1', () => {
     const d = decideAction(makeAlert('some_unknown_rule.foo', 'warning'));
     expect(d.action).toBe('monitor');
     expect(d.reason).toContain('Unknown alert type');
+  });
+});
+
+// ── Phase 2: decide() scaffold (BEHAVIOR_DECISION_MODE env) ────────────────
+
+describe('decide — LLM scaffold (Phase 2)', () => {
+  const originalEnv = process.env.BEHAVIOR_DECISION_MODE;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.BEHAVIOR_DECISION_MODE;
+    } else {
+      process.env.BEHAVIOR_DECISION_MODE = originalEnv;
+    }
+  });
+
+  it('defaults to rules mode — returns same result as decideAction', async () => {
+    delete process.env.BEHAVIOR_DECISION_MODE;
+    const alert = makeAlert('agent_error_rate.JDGenerator', 'error');
+    const d = await decide(alert);
+    expect(d.action).toBe('escalate');
+    expect(d.reason).toContain('20%');
+  });
+
+  it('llm mode: falls back to rules (stub) and returns valid decision', async () => {
+    process.env.BEHAVIOR_DECISION_MODE = 'llm';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const alert = makeAlert('queue_backlog.RESUME_DOWNLOADED', 'warning');
+    const d = await decide(alert);
+
+    // LLM not implemented — falls back to rules
+    expect(d.action).toBe('throttle');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('LLM mode not yet implemented'));
+
+    warnSpy.mockRestore();
+  });
+
+  it('rules mode (explicit): behaves identically to default', async () => {
+    process.env.BEHAVIOR_DECISION_MODE = 'rules';
+    const alert = makeAlert('em_degraded', 'error');
+    const d = await decide(alert);
+    expect(d.action).toBe('escalate');
   });
 });

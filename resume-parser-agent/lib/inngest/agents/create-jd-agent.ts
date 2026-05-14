@@ -28,6 +28,7 @@ import {
   type SyncJdInput,
 } from '../../raas-api-client';
 import { inngest, type JdGeneratedEnvelope } from '../client';
+import { emPublish } from '../../em-bridge';
 
 const AGENT_ID = 'create-jd-agent';
 const AGENT_NAME = 'createJD';
@@ -342,6 +343,18 @@ export const createJdAgent = inngest.createFunction(
       },
     };
 
+    // Publish through AO-main's EM for EventInstance audit trail.
+    // TODO: remove this bridge call once RPA merges into AO-main and can
+    //       call em.publish() directly without HTTP round-trip.
+    await step.run(`em-audit-jd-generated-${sanitize(requisitionId)}`, async () => {
+      await emPublish('JD_GENERATED', outboundEnvelope, {
+        source: 'rpa.createJdAgent',
+        causedBy: { eventId: event.id ?? '', name: event.name },
+      });
+    });
+
+    // Keep the original inngest send for backward compat — downstream
+    // chain depends on this send. The em-bridge call above is additive.
     await step.sendEvent(`emit-jd-generated-${sanitize(requisitionId)}`, {
       name: 'JD_GENERATED',
       data: outboundEnvelope,

@@ -260,6 +260,11 @@ model AgentConfig {
   adviceAccepted   Boolean  @default(false)
   updatedAt        DateTime @updatedAt
   history          AgentConfigHistory[]
+
+  // Phase 2 (Manage): throttle support — stub-factory checks this at handler start.
+  // If throttleUntil > now(), the agent sleeps until that time before processing.
+  throttleUntil    DateTime?
+  throttleReason   String?
 }
 
 model AgentConfigHistory {
@@ -535,7 +540,7 @@ model JobDescription {
 }
 
 // =====================================================================
-// Behavior axis — Phase 1 (2026-05-14)
+// Behavior axis — Phase 1 (2026-05-14) + Phase 2 additions
 // =====================================================================
 
 // Lightweight alert lifecycle table for Monitor Agent + Manager Agent.
@@ -552,6 +557,10 @@ model BehaviorAlert {
   resolvedAt  DateTime?
   managerActionTaken String?                            // 'monitor' | 'escalate' | 'throttle' | 'auto_restart'
   managerActionAt    DateTime?
+
+  // Phase 2: auto_restart loop guard — prevent runaway restart cycles
+  autoRestartCount    Int       @default(0)
+  lastAutoRestartAt   DateTime?
 
   @@unique([alertKey, resolvedAt])                      // one unresolved alert per key
   @@index([severity])

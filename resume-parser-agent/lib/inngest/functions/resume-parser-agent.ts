@@ -29,6 +29,7 @@ import {
   type SaveCandidateInput,
 } from '../../raas-api-client';
 import { inngest, type ResumeProcessedData } from '../client';
+import { emPublish } from '../../em-bridge';
 
 export const resumeParserAgent = inngest.createFunction(
   {
@@ -227,6 +228,19 @@ export const resumeParserAgent = inngest.createFunction(
       parserVersion: 'v7-pull-model@2026-05-08',
     };
 
+    // Publish through AO-main's EM for EventInstance audit trail.
+    // TODO: remove this bridge call once RPA merges into AO-main and can
+    //       call em.publish() directly without HTTP round-trip.
+    await step.run('em-audit-resume-processed', async () => {
+      await emPublish('RESUME_PROCESSED', processedPayload, {
+        source: 'rpa.resumeParserAgent',
+        causedBy: { eventId: event.id ?? '', name: event.name },
+      });
+    });
+
+    // Keep the original inngest send for backward compat — RPA's downstream
+    // chain (match-resume-agent) depends on this send. The em-bridge call
+    // above is additive (audit only).
     await step.sendEvent('emit-resume-processed', {
       name: 'RESUME_PROCESSED',
       data: processedPayload,

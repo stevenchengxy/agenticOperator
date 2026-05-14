@@ -11,14 +11,14 @@
 import { inngest } from '@/server/inngest/client';
 import { em } from '@/server/em';
 import { prisma } from '@/server/db';
-import { decideAction } from './manager-rules';
+import { decide } from './manager-rules';
 import type { MonitorAlertData, ManagerActionData } from '@/lib/behavior/types';
 
 export const managerAgent = inngest.createFunction(
   { id: 'agent.manager', name: 'Manager Agent (response decisions)', triggers: [{ event: 'MONITOR_ALERT' }] },
   async ({ event, step }) => {
     const alertData = event.data as MonitorAlertData;
-    const decision = decideAction(alertData);
+    const decision = await decide(alertData);
 
     // Step 1: Persist decision on BehaviorAlert
     await step.run('persist-decision', async () => {
@@ -56,13 +56,87 @@ export const managerAgent = inngest.createFunction(
           break;
         }
         case 'auto_restart': {
-          // v1: log a recommendation; real auto-restart requires Manage axis integration
-          console.log(`[manager-agent] auto_restart recommended for ${alertData.alertKey} — deferred to Manage axis v2`);
+          // Phase 2: real auto_restart — POST to /api/manage/runs/[id]/restart
+          // Check autoRestartCount cap first (max 2 restarts per 1h per alert key)
+          const alertRow = await prisma.behaviorAlert.findUnique({ where: { id: alertData.alertId } });
+          const lastAt = alertRow?.lastAutoRestartAt;
+          const count = alertRow?.autoRestartCount ?? 0;
+          const withinWindow = lastAt && (Date.now() - lastAt.getTime()) < 60 * 60 * 1000;
+          const cappedOut = withinWindow && count >= 2;
+
+          if (cappedOut) {
+            // Fall back to escalate — runaway restart loop prevention
+            console.warn(
+              `[manager-agent] auto_restart cap hit for ${alertData.alertKey} (count=${count}) — escalating instead`,
+            );
+            await prisma.humanTask.create({
+              data: {
+                runId: 'system',
+                nodeId: 'manager-agent',
+                nodeName: 'ManagerAgent',
+                title: `Auto-restart cap hit: ${alertData.alertKey}`,
+                payload: JSON.stringify({
+                  alertId: alertData.alertId,
+                  alertKey: alertData.alertKey,
+                  severity: alertData.severity,
+                  reason: `Auto-restart attempted ${count} times in 1h — requires operator review.`,
+                }),
+                status: 'pending',
+              },
+            });
+            break;
+          }
+
+          // Attempt the restart via Manage API
+          try {
+            const baseUrl = process.env.AO_INTERNAL_URL ?? 'http://localhost:3002';
+            const affectedRunId = alertData.alertKey.split('.')[1] ?? '';
+            if (affectedRunId) {
+              const resp = await fetch(`${baseUrl}/api/manage/runs/${affectedRunId}/restart`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: `Manager Agent auto_restart: ${decision.reason}` }),
+                signal: AbortSignal.timeout(8000),
+              });
+              if (resp.ok) {
+                // Increment counter + mark alert resolved
+                await prisma.behaviorAlert.update({
+                  where: { id: alertData.alertId },
+                  data: {
+                    autoRestartCount: { increment: 1 },
+                    lastAutoRestartAt: new Date(),
+                    resolvedAt: new Date(),
+                  },
+                });
+                console.log(`[manager-agent] auto_restart succeeded for ${affectedRunId}`);
+              } else {
+                console.warn(`[manager-agent] auto_restart failed: HTTP ${resp.status}`);
+              }
+            }
+          } catch (e) {
+            console.warn(`[manager-agent] auto_restart fetch failed: ${(e as Error).message}`);
+          }
           break;
         }
         case 'throttle': {
-          // v1: log a recommendation; real throttling requires AgentConfig write
-          console.log(`[manager-agent] throttle recommendation for ${alertData.alertKey}: ${decision.reason}`);
+          // Phase 2: real throttle — POST to /api/manage/agents/[name]/throttle
+          try {
+            const baseUrl = process.env.AO_INTERNAL_URL ?? 'http://localhost:3002';
+            const agentName = alertData.alertKey.split('.')[1] ?? alertData.alertKey;
+            const resp = await fetch(`${baseUrl}/api/manage/agents/${agentName}/throttle`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ untilMs: 60_000, reason: decision.reason }),
+              signal: AbortSignal.timeout(5000),
+            });
+            if (resp.ok) {
+              console.log(`[manager-agent] throttle applied to ${agentName} for 60s`);
+            } else {
+              console.warn(`[manager-agent] throttle failed: HTTP ${resp.status}`);
+            }
+          } catch (e) {
+            console.warn(`[manager-agent] throttle fetch failed: ${(e as Error).message}`);
+          }
           break;
         }
         case 'monitor': {

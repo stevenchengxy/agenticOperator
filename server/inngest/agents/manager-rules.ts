@@ -1,12 +1,30 @@
 // server/inngest/agents/manager-rules.ts
 //
 // Pure, side-effect-free decision policy for the Manager Agent (v1: hand-tuned rules).
-// Every branch is unit-testable in isolation. v2 will add an LLM decision path
-// gated by AgentConfig.behaviorConfig.useLlmManager.
+// Every branch is unit-testable in isolation.
+//
+// Phase 2 addition: BEHAVIOR_DECISION_MODE env scaffold.
+// Set BEHAVIOR_DECISION_MODE=llm to route decisions through the LLM path.
+// LLM call is not yet implemented — it falls back to rules with a warning.
 
 import type { MonitorAlertData, ManagerDecision } from '@/lib/behavior/types';
 
 export type { ManagerDecision };
+
+/**
+ * Top-level decision entry point. Checks BEHAVIOR_DECISION_MODE env;
+ * if 'llm', runs the LLM path (not yet implemented — falls back to rules).
+ * Otherwise delegates directly to decideAction (rule-based).
+ */
+export async function decide(alert: MonitorAlertData): Promise<ManagerDecision> {
+  if (process.env.BEHAVIOR_DECISION_MODE === 'llm') {
+    // TODO: call LLM with alert context. For v1 scaffold: return rules result.
+    // Expected shape: fetch Anthropic API with alert payload + last 10 MANAGER_ACTION
+    // decisions for this agent as context, return structured JSON decision.
+    console.warn('[behavior] LLM mode not yet implemented, falling back to rules');
+  }
+  return decideAction(alert);
+}
 
 /**
  * Decide what the Manager Agent should do in response to a MONITOR_ALERT.
