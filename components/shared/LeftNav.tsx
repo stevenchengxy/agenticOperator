@@ -17,6 +17,7 @@ export function LeftNav() {
   const pathname = usePathname();
   const [inboxCount, setInboxCount] = React.useState<string>("—");
   const [monitorCount, setMonitorCount] = React.useState<string>("—");
+  const [behaviorCount, setBehaviorCount] = React.useState<string>("—");
 
   React.useEffect(() => {
     const tick = () => {
@@ -41,6 +42,17 @@ export function LeftNav() {
     return () => clearInterval(id);
   }, []);
 
+  React.useEffect(() => {
+    const tick = () => {
+      fetchJson<{ kpi: { open: number } }>("/api/behavior", { cache: "no-store" })
+        .then((j) => setBehaviorCount(j.kpi.open > 0 ? String(j.kpi.open) : ""))
+        .catch(() => {/* keep "—" */});
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
   // IA reorg (UX review feedback):
   //   - Events / Triggers move from "Build" to "Operate" — they're observability
   //     surfaces over the runtime, not authoring tools.
@@ -54,6 +66,7 @@ export function LeftNav() {
     { type: "item", id: "overview",   icon: "grid",     label: t("nav_overview"), href: "/overview" },
     { type: "item", id: "fleet",      icon: "cpu",      label: t("nav_fleet"), count: "22", href: "/fleet" },
     { type: "item", id: "monitor",    icon: "gauge",    label: t("nav_monitor"), count: monitorCount, href: "/monitor" },
+    { type: "item", id: "behavior",   icon: "sparkle",  label: t("nav_behavior"), count: behaviorCount, href: "/behavior" },
     { type: "item", id: "inbox",      icon: "user",     label: t("nav_inbox"), count: inboxCount, href: "/inbox" },
     { type: "item", id: "events",     icon: "bolt",     label: t("nav_events"), href: "/events" },
     { type: "item", id: "triggers",   icon: "clock",    label: t("nav_triggers"), href: "/triggers" },

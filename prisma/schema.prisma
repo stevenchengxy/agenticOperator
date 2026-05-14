@@ -535,6 +535,30 @@ model JobDescription {
 }
 
 // =====================================================================
+// Behavior axis — Phase 1 (2026-05-14)
+// =====================================================================
+
+// Lightweight alert lifecycle table for Monitor Agent + Manager Agent.
+// Dedup contract: one unresolved row per alertKey (resolvedAt IS NULL).
+// Lifecycle: firstSeenAt → lastSeenAt (updated on repeat fire) → resolvedAt.
+model BehaviorAlert {
+  id          String   @id @default(cuid())
+  alertKey    String                                    // dedupe key e.g. 'agent_error_rate.JDGenerator'
+  severity    String                                    // 'warning' | 'error'
+  ruleId      String                                    // which heuristic fired
+  details     String                                    // JSON: per-rule context
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  resolvedAt  DateTime?
+  managerActionTaken String?                            // 'monitor' | 'escalate' | 'throttle' | 'auto_restart'
+  managerActionAt    DateTime?
+
+  @@unique([alertKey, resolvedAt])                      // one unresolved alert per key
+  @@index([severity])
+  @@index([firstSeenAt])
+}
+
+// =====================================================================
 // Schema status: 24 tables (10 P3-foundation + 12 chunk-1 + 2 recruitment).
 //
 // Skipped for later (advanced ML/KB; not consumed by current AO routes —

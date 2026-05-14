@@ -17,6 +17,8 @@
 
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { createStubAgent } from "./agents/stub-factory";
+import { monitorAgent } from "./agents/monitor-agent";
+import { managerAgent } from "./agents/manager-agent";
 
 // Build a stub for every business agent that has at least one trigger event.
 // Chatbot has triggersEvents=[] so it is naturally excluded.
@@ -28,12 +30,13 @@ const stubFunctions = businessAgents
   .map(createStubAgent)
   .filter((fn): fn is NonNullable<typeof fn> => fn !== null);
 
-export const allFunctions = stubFunctions;
+// Behavior axis agents (Phase 1): Monitor Agent (cron) + Manager Agent (event-driven)
+export const allFunctions = [...stubFunctions, monitorAgent, managerAgent];
 
 // Server-side startup log so operators can confirm registration count.
 if (typeof window === "undefined") {
   // eslint-disable-next-line no-console
   console.log(
-    `[inngest] registered ${stubFunctions.length} stub agent functions`,
+    `[inngest] registered ${stubFunctions.length} stub agent functions + 2 behavior agents (monitor + manager)`,
   );
 }
