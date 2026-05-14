@@ -20,6 +20,17 @@ export function ErrorRateChart({ data }: { data: MonitorAgentDetail['errorRate']
         x2={W - PAD.right} y2={PAD.top + innerH}
         stroke="var(--c-claude-line)"
       />
+      {data.every(d => d.total === 0) && (
+        <text
+          x={(W) / 2}
+          y={(H) / 2 + 4}
+          fontSize={11}
+          textAnchor="middle"
+          fill="var(--c-claude-ink-4)"
+        >
+          No errors in window
+        </text>
+      )}
       {/* Bars */}
       {data.map((d, i) => {
         const totalH  = innerH * (d.total  / peak);

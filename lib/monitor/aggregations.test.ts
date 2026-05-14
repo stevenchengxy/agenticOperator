@@ -3,6 +3,7 @@ import {
   pickNodeStatus,
   sumTokensFromActivities,
   buildEdgeAggregates,
+  buildHourlyBuckets,
 } from './aggregations';
 
 describe('pickNodeStatus', () => {
@@ -51,5 +52,34 @@ describe('buildEdgeAggregates', () => {
     expect(out[0].countInWindow).toBe(2);
     expect(out[0].lastEventAt).toBe('2026-05-14T10:01:00.000Z');
     expect(out[1].countInWindow).toBe(1);
+  });
+});
+
+describe('buildHourlyBuckets', () => {
+  it('returns exactly 24 buckets for a since point inside the 24h window', () => {
+    const since = new Date(Date.now() - 23 * 60 * 60 * 1000);
+    const out = buildHourlyBuckets(since, () => 0);
+    expect(out).toHaveLength(24);
+  });
+
+  it('pad path produces distinct timestamps stepping backward by an hour', () => {
+    // Force the pad path by passing a near-present since.
+    const since = new Date(Date.now() - 30 * 60 * 1000); // 30 min ago
+    const out = buildHourlyBuckets(since, () => 0);
+    expect(out).toHaveLength(24);
+    // Padded buckets MUST have distinct timestamps (the bug was reusing one).
+    const stamps = new Set(out.map(b => b.bucket));
+    expect(stamps.size).toBe(24);
+  });
+
+  it('compute callback receives bucketStart and bucketEnd one HOUR apart', () => {
+    const since = new Date(Date.now() - 23 * 60 * 60 * 1000);
+    let firstPair: [Date, Date] | null = null;
+    buildHourlyBuckets(since, (s, e) => {
+      if (!firstPair) firstPair = [s, e];
+      return 0;
+    });
+    expect(firstPair).not.toBeNull();
+    expect(firstPair![1].getTime() - firstPair![0].getTime()).toBe(60 * 60 * 1000);
   });
 });

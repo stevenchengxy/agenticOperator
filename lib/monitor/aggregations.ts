@@ -53,6 +53,40 @@ function numericOrZero(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+// ── buildHourlyBuckets ──────────────────────────────────────────
+/**
+ * Bucket a 24-hour-ish window into hourly slots aligned to clock hour
+ * boundaries. Each slot is computed by the caller's `compute(bucketStart,
+ * bucketEnd)` callback. Returns exactly 24 buckets, padded backward in time
+ * from the earliest produced slot if `since` was less than 24h ago.
+ *
+ * Bucket boundaries are aligned: bucketStart = Math.floor(since/HOUR)*HOUR,
+ * advancing by HOUR until reaching `now`.
+ */
+export function buildHourlyBuckets<T>(
+  since: Date,
+  compute: (bucketStart: Date, bucketEnd: Date) => T,
+): Array<{ bucket: string; value: T }> {
+  const HOUR = 60 * 60 * 1000;
+  const buckets: Array<{ bucket: string; value: T }> = [];
+  let start = new Date(Math.floor(since.getTime() / HOUR) * HOUR);
+  const end = new Date();
+  while (start < end && buckets.length < 24) {
+    const next = new Date(start.getTime() + HOUR);
+    buckets.push({ bucket: start.toISOString(), value: compute(start, next) });
+    start = next;
+  }
+  // Pad backward in time to reach exactly 24 buckets. Each pad bucket
+  // gets a timestamp one HOUR earlier than the previous earliest.
+  while (buckets.length < 24) {
+    const earliestMs = new Date(buckets[0]?.bucket ?? Date.now()).getTime();
+    const padStart = new Date(earliestMs - HOUR);
+    const padEnd = new Date(earliestMs);
+    buckets.unshift({ bucket: padStart.toISOString(), value: compute(padStart, padEnd) });
+  }
+  return buckets;
+}
+
 // ── buildEdgeAggregates ─────────────────────────────────────────
 // Edge volume = how many event_instances of the edge's eventName
 // landed in the window. Computed by event name lookup, not by trying

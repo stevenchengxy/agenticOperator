@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { usePoll } from "@/lib/monitor/usePoll";
 import { ClaudeCard, ClaudeMetric, ClaudeBadge, ClaudeSectionTitle } from "./atoms";
 import { TokenChart } from "./TokenChart";
@@ -8,6 +9,7 @@ import { ErrorRateChart } from "./ErrorRateChart";
 import type { MonitorAgentDetail } from "@/lib/monitor/types";
 
 export function AgentDetailContent({ name }: { name: string }) {
+  const router = useRouter();
   const { data, error } = usePoll<MonitorAgentDetail>(
     `/api/monitor/agents/${encodeURIComponent(name)}`,
     10_000,
@@ -95,23 +97,20 @@ export function AgentDetailContent({ name }: { name: string }) {
               </thead>
               <tbody>
                 {data!.recentEpisodes.map(e => (
-                  <tr key={e.id} className="border-t border-claude-line">
+                  <tr
+                    key={e.id}
+                    className="border-t border-claude-line cursor-pointer hover:bg-claude-panel"
+                    onClick={() => router.push(`/monitor/runs/${encodeURIComponent(e.runId)}`)}
+                  >
                     <td className="py-1">
-                      <Link
-                        href={`/monitor/runs/${encodeURIComponent(e.runId)}`}
-                        className="text-claude-accent no-underline"
-                      >
-                        {e.runId.slice(0, 8)}…
-                      </Link>
+                      <span className="text-claude-accent">{e.runId.slice(0, 8)}…</span>
                     </td>
                     <td className="py-1">{e.clientId ?? '—'}</td>
                     <td className="py-1 text-right tabular-nums">{e.durationMs}ms</td>
                     <td className="py-1 text-right tabular-nums">{e.tokenUsage.total.toLocaleString()}</td>
                     <td className="py-1 text-right tabular-nums">{e.judgeScore?.toFixed(2) ?? '—'}</td>
                     <td className="py-1 pl-3 text-claude-ink-3">{e.modelUsed ?? '—'}</td>
-                    <td className="py-1 pl-3 text-claude-ink-3 tabular-nums">
-                      {new Date(e.createdAt).toLocaleTimeString()}
-                    </td>
+                    <td className="py-1 pl-3 text-claude-ink-3 tabular-nums">{new Date(e.createdAt).toLocaleTimeString()}</td>
                   </tr>
                 ))}
               </tbody>

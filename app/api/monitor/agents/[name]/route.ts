@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { nodeById } from '@/lib/workflow-graph-meta';
-import { sumTokensFromActivities } from '@/lib/monitor/aggregations';
+import { sumTokensFromActivities, buildHourlyBuckets } from '@/lib/monitor/aggregations';
 import type { MonitorAgentDetail } from '@/lib/monitor/types';
 
 // ── /api/monitor/agents/[name] ────────────────────────────────────────
@@ -128,28 +128,6 @@ export async function GET(
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
-
-function buildHourlyBuckets<T>(
-  since: Date,
-  compute: (bucketStart: Date, bucketEnd: Date) => T,
-): Array<{ bucket: string; value: T }> {
-  const buckets: Array<{ bucket: string; value: T }> = [];
-  const HOUR = 60 * 60 * 1000;
-  // Align start to the hour boundary for clean buckets
-  let start = new Date(Math.floor(since.getTime() / HOUR) * HOUR);
-  const end = new Date();
-  while (start < end && buckets.length < 24) {
-    const next = new Date(start.getTime() + HOUR);
-    buckets.push({ bucket: start.toISOString(), value: compute(start, next) });
-    start = next;
-  }
-  // Pad to exactly 24 buckets if window had fewer (e.g. at start of day)
-  while (buckets.length < 24) {
-    const padStart = new Date(Math.floor(since.getTime() / HOUR) * HOUR - (24 - buckets.length) * HOUR);
-    buckets.unshift({ bucket: padStart.toISOString(), value: compute(new Date(0), new Date(0)) });
-  }
-  return buckets;
-}
 
 function safeParse(s: string): Record<string, unknown> | undefined {
   try { return JSON.parse(s) as Record<string, unknown>; } catch { return undefined; }
