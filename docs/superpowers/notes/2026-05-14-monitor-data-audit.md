@@ -40,7 +40,9 @@ Sample (3 entries):
 {"source":"inline resume_text (389 chars)","input_bytes":389,"text_chars":389,"llm_prompt_chars":389}
 ```
 
-**Note:** The tool metadata contains document source + character counts but **does NOT yet include LLM token telemetry** (promptTokens, completionTokens, totalTokens). The `withLlmTelemetry()` instrumentation has not fired on this DB snapshot. Token charts will be empty until the instrumentation is enabled and agents run.
+**Note:** The tool metadata contains document source + character counts but **does NOT yet include LLM token telemetry** (promptTokens, completionTokens, totalTokens). The instrumentation code exists in `server/llm/instrumented.ts` (function `withLlmTelemetry`), but it has not been invoked by any tool calls in the agent runs captured by this DB snapshot — see sample metadata above for the actual shape currently being written. Token charts will be empty until the instrumentation is enabled and agents run.
+
+**Metadata representativeness:** All 104 tool rows follow the same pattern — 100% have `source` field; 62% (64/104) have character counts (`text_chars`, `llm_prompt_chars`). The samples above are representative of the full dataset.
 
 ## Known gaps
 
