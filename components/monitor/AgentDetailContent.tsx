@@ -9,7 +9,7 @@ import { ErrorRateChart } from "./ErrorRateChart";
 import { MonitorGraph } from "./MonitorGraph";
 import { InternalFlowDiagram } from "./InternalFlowDiagram";
 import { nodeById } from "@/lib/workflow-graph-meta";
-import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
+import { getAgentDescriptionFull } from "@/lib/monitor/agent-descriptions";
 import { useApp } from "@/lib/i18n";
 import type { MonitorAgentDetail, MonitorNodeAgg } from "@/lib/monitor/types";
 import { AgentConfigEditor } from "./AgentConfigEditor";
@@ -21,7 +21,7 @@ export function AgentDetailContent({ name }: { name: string }) {
     `/api/monitor/agents/${encodeURIComponent(name)}`,
     10_000,
   );
-  const [tab, setTab] = React.useState<'episodes' | 'tokens' | 'errors' | 'config'>('episodes');
+  const [tab, setTab] = React.useState<'episodes' | 'tokens' | 'errors' | 'config' | 'events'>('episodes');
 
   if (error && !data) {
     return (
@@ -41,7 +41,7 @@ export function AgentDetailContent({ name }: { name: string }) {
   const node = nodeById(name);
 
   // Resolve the agent description for internal flow + description text
-  const agentDesc = data ? getAgentDescription(data.title) : getAgentDescription(name);
+  const agentDesc = data ? getAgentDescriptionFull(data.title) : getAgentDescriptionFull(name);
 
   // Build nodeAggs from candidateDistribution for the workflow position graph
   const workflowNodeAggs: MonitorNodeAgg[] = React.useMemo(() => {
@@ -66,6 +66,7 @@ export function AgentDetailContent({ name }: { name: string }) {
     tokens:   t('monitor_agent_tab_tokens'),
     errors:   t('monitor_agent_tab_errors'),
     config:   t('monitor_agent_tab_config'),
+    events:   t('monitor_agent_tab_events'),
   };
 
   return (
@@ -119,7 +120,7 @@ export function AgentDetailContent({ name }: { name: string }) {
 
       {/* Tab bar */}
       <div className="flex items-center gap-2 mb-3 border-b border-claude-line">
-        {(['episodes', 'tokens', 'errors', 'config'] as const).map(tb => (
+        {(['episodes', 'tokens', 'errors', 'config', 'events'] as const).map(tb => (
           <button
             key={tb}
             type="button"
@@ -228,6 +229,55 @@ export function AgentDetailContent({ name }: { name: string }) {
             agentName={name}
             initialConfig={data?.config ?? null}
           />
+        </ClaudeCard>
+      )}
+
+      {/* ── Events ────────────────────────────────────────────── */}
+      {tab === 'events' && (
+        <ClaudeCard>
+          {(data?.recentEventActivity ?? []).length === 0 ? (
+            <div className="text-claude-ink-4 text-[12.5px]">
+              {t('agent_no_events')}
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {data!.recentEventActivity.map((ev, i) => (
+                <li
+                  key={i}
+                  className="flex items-center gap-3 text-[12.5px] border-b border-claude-line pb-2 last:border-b-0"
+                >
+                  <ClaudeBadge
+                    tone={ev.type === 'event_emitted' ? 'accent' : 'neutral'}
+                    size="xs"
+                  >
+                    {ev.type === 'event_emitted' ? '↑ emit' : '↓ recv'}
+                  </ClaudeBadge>
+                  {ev.eventName ? (
+                    <Link
+                      href={`/events/${encodeURIComponent(ev.eventName)}`}
+                      className="font-mono text-claude-accent no-underline hover:underline"
+                    >
+                      {ev.eventName}
+                    </Link>
+                  ) : (
+                    <span className="font-mono text-claude-ink-3">—</span>
+                  )}
+                  <span className="text-claude-ink-3 flex-1 truncate">{ev.narrative}</span>
+                  <span className="text-claude-ink-4 tabular-nums text-[10.5px]">
+                    {new Date(ev.ts).toLocaleTimeString()}
+                  </span>
+                  {ev.runId && (
+                    <Link
+                      href={`/monitor/runs/${encodeURIComponent(ev.runId)}`}
+                      className="text-claude-accent text-[11px] no-underline hover:underline"
+                    >
+                      run →
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </ClaudeCard>
       )}
     </div>

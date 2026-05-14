@@ -12,12 +12,21 @@ import type {
   MonitorNodeAgg,
   MonitorEdgeAgg,
 } from "@/lib/monitor/types";
+import type { WorkflowEdge } from "@/lib/workflow-graph-meta";
 import { MonitorNode } from "./MonitorNode";
 import { MonitorEdge } from "./MonitorEdge";
 import { StageBackdrop } from "./StageBackdrop";
 import { NodeStateLegend } from "./NodeStateLegend";
+import { MiniMap } from "./MiniMap";
 
 type TrailEntry = { result: 'success' | 'failure' | 'pending' | 'skipped'; current: boolean };
+
+type HoveredEdgeInfo = {
+  edge: WorkflowEdge;
+  agg?: MonitorEdgeAgg;
+  x: number;
+  y: number;
+};
 
 type Props = {
   nodeAggs?: MonitorNodeAgg[];
@@ -43,8 +52,26 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const dragRef = React.useRef<{ x: number; y: number; pan: typeof pan } | null>(null);
   const svgRef = React.useRef<SVGSVGElement>(null);
+  const svgWrapperRef = React.useRef<HTMLDivElement>(null);
   // Track dragging state for cursor styling
   const [isDragging, setIsDragging] = React.useState(false);
+  // Container size for MiniMap viewport math
+  const [containerSize, setContainerSize] = React.useState({ width: 1000, height: 600 });
+  // Edge hover popover state
+  const [hoveredEdge, setHoveredEdge] = React.useState<HoveredEdgeInfo | null>(null);
+
+  // Measure container size with ResizeObserver so MiniMap viewport rect stays accurate
+  React.useEffect(() => {
+    if (!svgWrapperRef.current) return;
+    const update = () => {
+      const r = svgWrapperRef.current!.getBoundingClientRect();
+      setContainerSize({ width: r.width, height: r.height });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(svgWrapperRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   // Wheel zoom — must use addEventListener with { passive: false } because
   // React's synthetic onWheel uses passive listeners, which silently ignores
@@ -89,7 +116,7 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
   };
 
   return (
-    <div className="w-full overflow-auto rounded-[12px] border border-claude-line bg-claude-surface relative">
+    <div ref={svgWrapperRef} className="w-full overflow-auto rounded-[12px] border border-claude-line bg-claude-surface relative">
       <svg
         ref={svgRef}
         viewBox={GRAPH_VIEWBOX}
@@ -149,6 +176,8 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
                 agg={edgeAggByKey.get(`${e.from}->${e.to}`)}
                 isTrailEdge={isTrailEdge}
                 isTrailMode={isTrailMode}
+                onHover={setHoveredEdge}
+                svgWrapper={svgWrapperRef.current}
               />
             );
           })}
@@ -168,8 +197,30 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
           ))}
         </g>
       </svg>
-      {/* Zoom controls overlay — top-right of the graph card */}
-      <div className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full bg-claude-surface/80 backdrop-blur-sm border border-claude-line px-2 py-1 text-[11px] text-claude-ink-3">
+
+      {/* Edge hover popover — pointer-events: none so it doesn't interfere with the SVG */}
+      {hoveredEdge && (
+        <div
+          className="absolute z-20 pointer-events-none bg-claude-surface border border-claude-line shadow-sm rounded-md px-2 py-1 text-[11px]"
+          style={{
+            left: `${hoveredEdge.x + 10}px`,
+            top: `${hoveredEdge.y - 36}px`,
+          }}
+        >
+          <div className="font-mono text-claude-ink-1">
+            {hoveredEdge.edge.eventName ?? hoveredEdge.edge.label ?? '—'}
+          </div>
+          <div className="text-claude-ink-3">
+            {hoveredEdge.agg?.countInWindow ?? 0} in 24h
+            {hoveredEdge.agg?.lastEventAt
+              ? ` · last ${new Date(hoveredEdge.agg.lastEventAt).toLocaleTimeString()}`
+              : null}
+          </div>
+        </div>
+      )}
+
+      {/* Zoom controls overlay — top-left of the graph card */}
+      <div className="absolute top-3 left-3 inline-flex items-center gap-1 rounded-full bg-claude-surface/80 backdrop-blur-sm border border-claude-line px-2 py-1 text-[11px] text-claude-ink-3">
         <button
           onClick={() => setScale(s => Math.min(2.5, s * 1.2))}
           className="px-1.5 hover:text-claude-ink-1"
@@ -190,6 +241,19 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
           ⟲
         </button>
       </div>
+
+      {/* MiniMap — top-right corner */}
+      <div className="absolute top-3 right-3 pointer-events-auto">
+        <MiniMap
+          nodeAggs={nodeAggs}
+          scale={scale}
+          pan={pan}
+          containerWidth={containerSize.width}
+          containerHeight={containerSize.height}
+          onPanTo={setPan}
+        />
+      </div>
+
       {/* Legend overlay in bottom-right corner of the graph card */}
       <NodeStateLegend />
     </div>

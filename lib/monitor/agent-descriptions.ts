@@ -17,6 +17,19 @@ export type AgentDescription = {
   processingLogic: string[];
 };
 
+export type AgentAction = {
+  order: string;
+  name: string;
+  description: string;
+  type: 'manual' | 'tool' | 'logic';
+  condition: string;
+};
+
+/** AgentDescription extended with the raw actions array for expandable step views. */
+export type AgentDescriptionFull = AgentDescription & {
+  actions: AgentAction[];
+};
+
 // Build lookup maps
 const BY_WSID = new Map<string, WorkflowJsonNode>(CANONICAL_WORKFLOW.map(n => [n.id, n]));
 const WSID_BY_SHORT = new Map<string, string>(AGENT_MAP.map(a => [a.short, a.wsId]));
@@ -73,5 +86,57 @@ export function getAgentDescription(canonicalShort: string): AgentDescription | 
     input,
     output,
     processingLogic,
+  };
+}
+
+/**
+ * Like getAgentDescription but also exposes the raw actions array so consumers
+ * can render expandable step detail panels without re-truncating the descriptions.
+ * Returns null for unknown agents or static-only agents (e.g. Chatbot) that
+ * don't have structured action data.
+ */
+export function getAgentDescriptionFull(canonicalShort: string): AgentDescriptionFull | null {
+  // Static agents don't have structured action data — synthesize empty actions
+  if (STATIC_DESCRIPTIONS[canonicalShort]) {
+    const base = STATIC_DESCRIPTIONS[canonicalShort];
+    return {
+      ...base,
+      actions: base.processingLogic.map((step, i) => ({
+        order: String(i + 1),
+        name: step.split(':')[0] ?? step,
+        description: step,
+        type: 'logic' as const,
+        condition: '—',
+      })),
+    };
+  }
+
+  const wsId = WSID_BY_SHORT.get(canonicalShort);
+  if (!wsId) return null;
+
+  const node = BY_WSID.get(wsId);
+  if (!node) return null;
+
+  const input =
+    node.trigger.length > 0
+      ? `订阅事件: ${node.trigger.join(' · ')}`
+      : '由人工/外部系统直接触发 (无 Inngest 触发事件)';
+
+  const output =
+    node.triggered_event.length > 0
+      ? `发出事件: ${node.triggered_event.join(' · ')}`
+      : '终止节点 / 无下游事件';
+
+  const processingLogic = node.actions.map(
+    a =>
+      `${a.name}: ${a.description.length > 120 ? a.description.slice(0, 120) + '…' : a.description}`,
+  );
+
+  return {
+    description: node.description,
+    input,
+    output,
+    processingLogic,
+    actions: node.actions,
   };
 }

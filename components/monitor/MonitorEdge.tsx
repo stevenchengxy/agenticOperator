@@ -3,6 +3,13 @@ import React from "react";
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow-graph-meta";
 import type { MonitorEdgeAgg } from "@/lib/monitor/types";
 
+type HoverInfo = {
+  edge: WorkflowEdge;
+  agg?: MonitorEdgeAgg;
+  x: number;
+  y: number;
+};
+
 type Props = {
   edge: WorkflowEdge;
   fromNode: WorkflowNode;
@@ -12,6 +19,10 @@ type Props = {
   isTrailEdge?: boolean;
   /** True when rendering in trail mode (suppresses density animation). */
   isTrailMode?: boolean;
+  /** Called on edge hover with client coords relative to the wrapper; null on leave. */
+  onHover?: (info: HoverInfo | null) => void;
+  /** The SVG wrapper element — used to compute coords relative to the container. */
+  svgWrapper?: HTMLElement | null;
 };
 
 function endpoint(n: WorkflowNode) {
@@ -41,7 +52,7 @@ function bezierPath(f: { x: number; y: number }, t: { x: number; y: number }): s
   return `M ${f.x} ${f.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${t.x} ${t.y}`;
 }
 
-export function MonitorEdge({ edge, fromNode, toNode, agg, isTrailEdge, isTrailMode }: Props) {
+export function MonitorEdge({ edge, fromNode, toNode, agg, isTrailEdge, isTrailMode, onHover, svgWrapper }: Props) {
   const f = endpoint(fromNode);
   const t = endpoint(toNode);
   const count = agg?.countInWindow ?? 0;
@@ -73,8 +84,37 @@ export function MonitorEdge({ edge, fromNode, toNode, agg, isTrailEdge, isTrailM
     ? "url(#monitor-arrowhead-accent)"
     : "url(#monitor-arrowhead)";
 
+  const handleMouseEnter = (e: React.MouseEvent<SVGPathElement>) => {
+    if (!onHover) return;
+    const svgEl = e.currentTarget.ownerSVGElement;
+    const wrapper = svgWrapper ?? (svgEl?.parentElement as HTMLElement | null);
+    const wrapperRect = wrapper?.getBoundingClientRect();
+    onHover({
+      edge,
+      agg,
+      x: wrapperRect ? e.clientX - wrapperRect.left : e.clientX,
+      y: wrapperRect ? e.clientY - wrapperRect.top : e.clientY,
+    });
+  };
+
+  const handleMouseLeave = (_e: React.MouseEvent<SVGPathElement>) => {
+    onHover?.(null);
+  };
+
   return (
     <g opacity={opacity}>
+      {/* Wider invisible path for easier mouse targeting */}
+      <path
+        d={d}
+        stroke="transparent"
+        strokeWidth={12}
+        fill="none"
+        pointerEvents="stroke"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        style={{ cursor: onHover ? 'help' : undefined }}
+      />
+      {/* Visible edge */}
       <path
         d={d}
         fill="none"
@@ -82,6 +122,7 @@ export function MonitorEdge({ edge, fromNode, toNode, agg, isTrailEdge, isTrailM
         strokeWidth={strokeWidth}
         strokeDasharray={edge.dashed ? "5 4" : undefined}
         markerEnd={markerEnd}
+        pointerEvents="none"
       />
       {/* Density animation: a small dot travels along the bezier if count > 0 (aggregate mode only) */}
       {count > 0 && !isTrailMode && (

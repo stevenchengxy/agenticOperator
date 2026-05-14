@@ -12,6 +12,18 @@ import type { MonitorAgentDetail, CandidateDistributionEntry } from '@/lib/monit
 // (title "ResumeParser + DupeCheck", agentName "ResumeParser") maps
 // correctly to AgentActivity rows.
 
+function extractEventNameFromMeta(meta: Record<string, unknown> | undefined): string | null {
+  if (!meta) return null;
+  if (typeof meta.nextEventName === 'string') return meta.nextEventName;
+  if (typeof meta.eventName === 'string') return meta.eventName;
+  return null;
+}
+
+function extractEventNameFromNarrative(narrative: string): string | null {
+  const m = narrative.match(/(?:Emitting|Received|emitting|received)\s+([A-Z_]+)/);
+  return m ? m[1] : null;
+}
+
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ name: string }> },
@@ -25,7 +37,7 @@ export async function GET(
   try {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const [activities, episodes, config, distributionGroups] = await Promise.all([
+    const [activities, episodes, config, distributionGroups, eventActivities] = await Promise.all([
       prisma.agentActivity.findMany({
         where: { agentName, createdAt: { gte: since24h } },
         orderBy: { createdAt: 'asc' },
@@ -45,6 +57,16 @@ export async function GET(
         where: { createdAt: { gte: since24h } },
         _count: { agentName: true },
       }).catch(() => [] as Array<{ agentName: string; _count: { agentName: number } }>),
+      // Recent emit/receive events for this agent
+      prisma.agentActivity.findMany({
+        where: {
+          agentName,
+          type: { in: ['event_received', 'event_emitted'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { type: true, metadata: true, createdAt: true, narrative: true, runId: true },
+      }).catch(() => []),
     ]);
 
     // ── 24h hourly token buckets ──────────────────────────────
@@ -116,6 +138,20 @@ export async function GET(
       };
     });
 
+    // ── Recent emit/receive event activity ───────────────────
+    const recentEventActivity: MonitorAgentDetail['recentEventActivity'] = (
+      eventActivities as Array<{ type: string; metadata: string | null; createdAt: Date; narrative: string; runId: string | null }>
+    ).map(a => {
+      const meta = a.metadata ? safeParse(a.metadata) : undefined;
+      return {
+        ts: a.createdAt.toISOString(),
+        type: a.type as 'event_received' | 'event_emitted',
+        eventName: extractEventNameFromMeta(meta) ?? extractEventNameFromNarrative(a.narrative),
+        narrative: a.narrative,
+        runId: a.runId,
+      };
+    });
+
     const detail: MonitorAgentDetail = {
       name: node.id,
       title: node.title,
@@ -143,6 +179,7 @@ export async function GET(
       })),
       recentErrors,
       candidateDistribution,
+      recentEventActivity,
     };
     return NextResponse.json(detail);
   } catch (e) {

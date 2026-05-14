@@ -150,6 +150,13 @@ export type MonitorAgentDetail = {
   errorRate:  Array<{ bucket: string; total: number; failed: number }>;
   recentErrors: Array<{ runId: string; narrative: string; ts: string; metadata?: Record<string, unknown> }>;
   candidateDistribution: CandidateDistributionEntry[];
+  recentEventActivity: Array<{
+    ts: string;
+    type: 'event_received' | 'event_emitted';
+    eventName: string | null;
+    narrative: string;
+    runId: string | null;
+  }>;
 };
 
 export type MonitorFailureDetailResponse = {

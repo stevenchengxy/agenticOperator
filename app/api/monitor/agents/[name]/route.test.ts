@@ -37,5 +37,6 @@ describe('GET /api/monitor/agents/[name]', () => {
     expect(Array.isArray(j.tokenSpend)).toBe(true);
     expect(j.tokenSpend).toHaveLength(24); // 24 hourly buckets
     expect(Array.isArray(j.candidateDistribution)).toBe(true);
+    expect(Array.isArray(j.recentEventActivity)).toBe(true);
   });
 });
