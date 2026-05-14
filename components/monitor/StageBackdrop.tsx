@@ -18,7 +18,7 @@ type Cluster = {
 
 const NODE_W = 154;
 const NODE_H = 64;
-const PAD = 14;
+const PAD = 20;
 
 function computeClusters(): Cluster[] {
   const byStage = new Map<string, WorkflowNode[]>();
@@ -78,25 +78,28 @@ export function StageBackdrop() {
     <g>
       {clusters.map((c) => (
         <g key={c.stage}>
+          {/* Rect starts 16px below minY to leave room for the label above */}
           <rect
             x={c.minX}
-            y={c.minY}
+            y={c.minY + 16}
             width={c.maxX - c.minX}
-            height={c.maxY - c.minY}
+            height={c.maxY - c.minY - 16}
             rx={14}
             fill="var(--c-claude-bg)"
             stroke="var(--c-claude-line)"
             strokeWidth={0.5}
             strokeDasharray="3 4"
-            opacity={0.6}
+            opacity={0.22}
           />
+          {/* Label sits above the rect in the 16px buffer zone */}
           <text
-            x={c.minX + 10}
-            y={c.minY + 14}
+            x={(c.minX + c.maxX) / 2}
+            y={c.minY + 10}
             fontSize={9.5}
             letterSpacing="0.14em"
             fill="var(--c-claude-ink-4)"
             fontWeight={500}
+            textAnchor="middle"
           >
             {STAGE_LABELS[c.stage] ?? c.stage.toUpperCase()}
           </text>

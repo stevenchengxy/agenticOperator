@@ -46,6 +46,32 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
         preserveAspectRatio="xMidYMid meet"
         style={{ minWidth: GRAPH_WIDTH }}
       >
+        <defs>
+          {/* Regular arrowhead for normal edges */}
+          <marker
+            id="monitor-arrowhead"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--c-claude-ink-4)" />
+          </marker>
+          {/* Accent arrowhead for trail-traversed edges */}
+          <marker
+            id="monitor-arrowhead-accent"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--c-claude-accent)" />
+          </marker>
+        </defs>
         {/* Stage backdrop bands behind everything */}
         <StageBackdrop />
         {/* Edges drawn next so nodes overlay them */}
