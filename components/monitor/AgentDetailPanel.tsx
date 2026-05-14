@@ -21,17 +21,26 @@ type Props = {
 export function AgentDetailPanel({ nodeId, onClose }: Props) {
   const { t } = useApp();
 
-  if (!nodeId) return null;
-  const node = nodeById(nodeId);
-  if (!node) return null;
-
-  const canonicalShort = node.agentName ?? node.title;
-  const meta = byShort(canonicalShort);
-  const desc = getAgentDescription(canonicalShort);
+  // Derive node / canonicalShort / meta / desc WITHOUT early returns so the
+  // hooks below always run in the same order. Hooks must be unconditional
+  // per the Rules of Hooks; the JSX-level null-return for the missing-node
+  // case happens AFTER all hooks have been called.
+  const node = nodeId ? nodeById(nodeId) : null;
+  const canonicalShort = node ? (node.agentName ?? node.title) : "";
+  const meta = canonicalShort ? byShort(canonicalShort) : null;
+  const desc = canonicalShort ? getAgentDescription(canonicalShort) : null;
 
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
 
+  // Reset activity when the selected agent changes (or panel closes) so the
+  // previous agent's rows don't briefly show under the new agent's title.
   React.useEffect(() => {
+    setActivity([]);
+  }, [canonicalShort]);
+
+  // Fetch recent activity. No-op when no agent is selected.
+  React.useEffect(() => {
+    if (!canonicalShort) return;
     const ac = new AbortController();
     fetch(
       `/api/agent-activity?agent=${encodeURIComponent(canonicalShort)}&limit=10`,
@@ -55,7 +64,8 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
     return () => ac.abort();
   }, [canonicalShort]);
 
-  // Close on Escape
+  // Close on Escape. Always attached so the panel can dismiss on key even
+  // while data is loading; the handler self-guards via the onClose callback.
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -63,6 +73,9 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // Conditional render AFTER hooks. Safe per Rules of Hooks.
+  if (!nodeId || !node) return null;
 
   return (
     <aside className="fixed top-0 right-0 h-full w-[420px] bg-claude-surface border-l border-claude-line shadow-lg overflow-y-auto z-30">
