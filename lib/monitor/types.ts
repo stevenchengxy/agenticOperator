@@ -119,6 +119,12 @@ export type MonitorRunDetail = {
   hitl: Array<{ taskId: string; status: string; title: string; createdAt: string; completedAt: string | null }>;
 };
 
+export type CandidateDistributionEntry = {
+  nodeId: string;
+  activeCount: number;
+  passedCount24h: number;
+};
+
 export type MonitorAgentDetail = {
   name: string;
   title: string;
@@ -143,6 +149,7 @@ export type MonitorAgentDetail = {
   tokenSpend: Array<{ bucket: string; prompt: number; completion: number; total: number }>;
   errorRate:  Array<{ bucket: string; total: number; failed: number }>;
   recentErrors: Array<{ runId: string; narrative: string; ts: string; metadata?: Record<string, unknown> }>;
+  candidateDistribution: CandidateDistributionEntry[];
 };
 
 export type MonitorFailureDetailResponse = {

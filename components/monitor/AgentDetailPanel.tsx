@@ -3,6 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { byShort } from "@/lib/agent-mapping";
 import { nodeById } from "@/lib/workflow-graph-meta";
+import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
 import { ClaudeBadge } from "./atoms";
 import { useApp } from "@/lib/i18n";
 
@@ -26,6 +27,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
 
   const canonicalShort = node.agentName ?? node.title;
   const meta = byShort(canonicalShort);
+  const desc = getAgentDescription(canonicalShort);
 
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
 
@@ -70,9 +72,16 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
             <div className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4 mb-1">
               {meta?.stage ?? node.kind}
             </div>
-            <h2 className="text-[20px] font-medium leading-tight">
-              {node.title}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-[20px] font-medium leading-tight">
+                {node.title}
+              </h2>
+              {activity.length > 0 && (
+                <span className="text-[11px] bg-claude-panel text-claude-ink-3 rounded-full px-2 py-0.5 tabular-nums">
+                  {activity.length} activities
+                </span>
+              )}
+            </div>
             <div className="text-[12px] text-claude-ink-3 mt-1">
               {canonicalShort}
             </div>
@@ -86,8 +95,9 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
           </button>
         </div>
 
+        {/* Description */}
         <p className="text-[13px] text-claude-ink-2 leading-relaxed mb-4">
-          {node.sub}
+          {desc?.description ?? node.sub}
         </p>
 
         {meta && (
@@ -109,6 +119,30 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
               ) : (
                 <Empty>none</Empty>
               )}
+            </Section>
+
+            <Section title={t("monitor_panel_input")}>
+              <p className="text-[12px] text-claude-ink-2 leading-relaxed">
+                {desc?.input ?? "—"}
+              </p>
+            </Section>
+
+            <Section title={t("monitor_panel_processing_logic")}>
+              {desc?.processingLogic && desc.processingLogic.length > 0 ? (
+                <ol className="text-[12px] text-claude-ink-2 space-y-1 list-decimal list-inside">
+                  {desc.processingLogic.map((step, i) => (
+                    <li key={i} className="leading-relaxed">{step}</li>
+                  ))}
+                </ol>
+              ) : (
+                <Empty>—</Empty>
+              )}
+            </Section>
+
+            <Section title={t("monitor_panel_output")}>
+              <p className="text-[12px] text-claude-ink-2 leading-relaxed">
+                {desc?.output ?? "—"}
+              </p>
             </Section>
 
             <Section title={t("monitor_agent_emits")}>

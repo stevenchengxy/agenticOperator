@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/server/db', () => ({
   prisma: {
-    agentActivity: { findMany: vi.fn() },
+    agentActivity: { findMany: vi.fn(), groupBy: vi.fn() },
     agentEpisode: { findMany: vi.fn() },
     agentConfig: { findUnique: vi.fn() },
   },
@@ -17,6 +17,7 @@ describe('GET /api/monitor/agents/[name]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (prisma.agentActivity.findMany as any).mockResolvedValue([]);
+    (prisma.agentActivity.groupBy as any).mockResolvedValue([]);
     (prisma.agentEpisode.findMany as any).mockResolvedValue([]);
     (prisma.agentConfig.findUnique as any).mockResolvedValue(null);
   });
@@ -35,5 +36,6 @@ describe('GET /api/monitor/agents/[name]', () => {
     expect(Array.isArray(j.recentEpisodes)).toBe(true);
     expect(Array.isArray(j.tokenSpend)).toBe(true);
     expect(j.tokenSpend).toHaveLength(24); // 24 hourly buckets
+    expect(Array.isArray(j.candidateDistribution)).toBe(true);
   });
 });

@@ -79,9 +79,12 @@ function relTime(iso: string): string {
 export function InstanceCardsSection({
   paused = false,
   searchQuery = '',
+  compact = false,
 }: {
   paused?: boolean;
   searchQuery?: string;
+  /** When true, shows top cards in a horizontal scroll strip instead of the full 3-col grid. */
+  compact?: boolean;
 }) {
   const { t } = useApp();
   const [scope, setScope] = React.useState<'live' | 'recent'>('live');
@@ -112,11 +115,48 @@ export function InstanceCardsSection({
     );
   }, [allItems, searchQuery]);
 
+  // In compact mode: flatten all items, take top 6, show as horizontal scroll
+  const compactItems = React.useMemo(() => filteredItems.slice(0, 6), [filteredItems]);
+
   const groups = React.useMemo(() => groupItems(filteredItems, groupBy), [filteredItems, groupBy]);
   const total = data?.total ?? 0;
   const isFiltered = searchQuery.trim().length > 0;
 
   const showEntityBadges = groupBy === 'candidate' || groupBy === 'jd';
+
+  // In compact mode render a minimal horizontal strip with no controls
+  if (compact) {
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between mb-2 flex-shrink-0">
+          <h2 className="text-[12px] font-medium text-claude-ink-2 uppercase tracking-[0.08em]">
+            {t("monitor_instances_title")}
+          </h2>
+          {total > 0 && (
+            <ClaudeBadge tone={scope === 'live' ? 'accent' : 'neutral'} size="xs">
+              {total}
+            </ClaudeBadge>
+          )}
+        </div>
+        {error && (
+          <p className="text-claude-err text-[11px] mb-1 flex-shrink-0">Error</p>
+        )}
+        {compactItems.length === 0 ? (
+          <div className="text-claude-ink-4 text-[12px] py-4 text-center flex-1">
+            {scope === 'live' ? 'No live instances.' : 'No recent runs.'}
+          </div>
+        ) : (
+          <div className="flex gap-2 overflow-x-auto flex-1 pb-1">
+            {compactItems.map((card) => (
+              <div key={card.runId} className="min-w-[180px] max-w-[200px] flex-shrink-0">
+                <InstanceCard card={card} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-6">

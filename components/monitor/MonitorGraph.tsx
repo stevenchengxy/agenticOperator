@@ -30,9 +30,11 @@ type Props = {
   trail?: Map<string, TrailEntry>;
   /** The node whose detail panel is currently open. */
   selectedNodeId?: string | null;
+  /** Override the SVG rendered height (defaults to GRAPH_HEIGHT). */
+  graphHeight?: number;
 };
 
-export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail, selectedNodeId }: Props) {
+export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail, selectedNodeId, graphHeight }: Props) {
   const aggByName = new Map((nodeAggs ?? []).map(a => [a.name, a]));
   const edgeAggByKey = new Map((edgeAggs ?? []).map(e => [`${e.from}->${e.to}`, e]));
   const isTrailMode = trail != null;
@@ -42,7 +44,7 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
       <svg
         viewBox={GRAPH_VIEWBOX}
         width="100%"
-        height={GRAPH_HEIGHT}
+        height={graphHeight ?? GRAPH_HEIGHT}
         preserveAspectRatio="xMidYMid meet"
         style={{ minWidth: GRAPH_WIDTH }}
       >

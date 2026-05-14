@@ -6,8 +6,10 @@ import { usePoll } from "@/lib/monitor/usePoll";
 import { ClaudeCard, ClaudeMetric, ClaudeBadge, ClaudeSectionTitle } from "./atoms";
 import { TokenChart } from "./TokenChart";
 import { ErrorRateChart } from "./ErrorRateChart";
+import { MonitorGraph } from "./MonitorGraph";
+import { nodeById } from "@/lib/workflow-graph-meta";
 import { useApp } from "@/lib/i18n";
-import type { MonitorAgentDetail } from "@/lib/monitor/types";
+import type { MonitorAgentDetail, MonitorNodeAgg } from "@/lib/monitor/types";
 
 export function AgentDetailContent({ name }: { name: string }) {
   const { t } = useApp();
@@ -31,6 +33,27 @@ export function AgentDetailContent({ name }: { name: string }) {
   const errorsTotal   = data ? data.errorRate.reduce((s, b) => s + b.failed, 0) : 0;
   const attemptsTotal = data ? data.errorRate.reduce((s, b) => s + b.total, 0) : 0;
   const successRate   = attemptsTotal > 0 ? 1 - errorsTotal / attemptsTotal : 1;
+
+  // Resolve the workflow node for this agent (name is node id)
+  const node = nodeById(name);
+
+  // Build nodeAggs from candidateDistribution for the workflow position graph
+  const workflowNodeAggs: MonitorNodeAgg[] = React.useMemo(() => {
+    if (!data?.candidateDistribution) return [];
+    return data.candidateDistribution.map(entry => ({
+      name: entry.nodeId,
+      running: entry.activeCount,
+      completedInWindow: entry.passedCount24h,
+      failedInWindow: 0,
+      hitlPending: 0,
+      successRate1h: 1,
+      queueDepth: 0,
+      tokensInWindow: { prompt: 0, completion: 0, total: 0 },
+      avgDurationMs: 0,
+      status: entry.activeCount > 0 ? 'healthy' : (entry.passedCount24h > 0 ? 'idle' : 'idle') as MonitorNodeAgg['status'],
+      pulse: entry.activeCount > 0,
+    }));
+  }, [data?.candidateDistribution]);
 
   const TAB_LABELS: Record<typeof tab, string> = {
     episodes: t('monitor_agent_tab_episodes'),
@@ -65,6 +88,19 @@ export function AgentDetailContent({ name }: { name: string }) {
           emphasis={successRate >= 0.95 ? 'ok' : 'warn'}
         />
       </div>
+
+      {/* ── Workflow Position ────────────────────────────────────── */}
+      <ClaudeSectionTitle>{t('monitor_workflow_position')}</ClaudeSectionTitle>
+      <ClaudeCard className="mb-6">
+        <p className="text-claude-ink-3 text-[12.5px] mb-3">
+          {t('monitor_workflow_position_desc')}
+        </p>
+        <MonitorGraph
+          nodeAggs={workflowNodeAggs}
+          selectedNodeId={node?.id}
+          graphHeight={480}
+        />
+      </ClaudeCard>
 
       {/* Tab bar */}
       <div className="flex items-center gap-2 mb-3 border-b border-claude-line">

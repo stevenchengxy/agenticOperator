@@ -79,7 +79,7 @@ function MonitorContentInner() {
 
       <ActionBar paused={paused} onTogglePause={onTogglePause} />
 
-      {/* System Status Cards — infrastructure visibility */}
+      {/* System Status Cards — collapsed by default, infrastructure visibility on demand */}
       <SystemStatusCards paused={paused} />
 
       {error && (
@@ -88,7 +88,8 @@ function MonitorContentInner() {
         </p>
       )}
 
-      <div className="mb-4">
+      {/* Filter + KPI row — compact, single visual strip */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
         <FilterChips
           windowMs={windowMs}
           onWindowChange={(ms) => updateUrl(p => p.set('windowMs', String(ms)))}
@@ -98,8 +99,7 @@ function MonitorContentInner() {
           onSearchChange={setSearch}
         />
       </div>
-
-      <div className="mb-4">
+      <div className="mb-3">
         <KpiStrip
           kpi={data?.kpi ?? null}
           onApplyStatusFilter={(s) => updateUrl(p => p.set('status', s))}
@@ -107,9 +107,8 @@ function MonitorContentInner() {
         />
       </div>
 
-      <InstanceCardsSection paused={paused} searchQuery={search} />
-
-      <div className="mb-6 relative">
+      {/* ── PRIMARY: Agent Network Graph ── */}
+      <div className="mb-4 relative">
         <MonitorGraph
           nodeAggs={data?.nodes}
           edgeAggs={data?.edges}
@@ -118,12 +117,29 @@ function MonitorContentInner() {
           onHitlClick={(id) => router.push(`/inbox?agent=${encodeURIComponent(id)}`)}
           onQueueClick={(id) => router.push(`/monitor/queue?nodeId=${encodeURIComponent(id)}`)}
           selectedNodeId={selectedAgentId}
+          graphHeight={700}
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <FailuresFeed rows={data?.failures ?? []} />
-        <HitlFeed     rows={data?.hitl ?? []} />
+      {/* ── BOTTOM STRIP: Instances · Failures · HITL (compact 3-col) ── */}
+      <div
+        className="grid gap-4 mb-6"
+        style={{ gridTemplateColumns: "30% 35% 35%", height: 220 }}
+      >
+        {/* Live Instances — compact horizontal scroll */}
+        <div className="border border-claude-line rounded-[10px] bg-claude-surface p-3 overflow-hidden flex flex-col">
+          <InstanceCardsSection paused={paused} searchQuery={search} compact />
+        </div>
+
+        {/* Failures Feed */}
+        <div className="border border-claude-line rounded-[10px] bg-claude-surface p-3 overflow-y-auto">
+          <FailuresFeed rows={data?.failures ?? []} />
+        </div>
+
+        {/* HITL Feed */}
+        <div className="border border-claude-line rounded-[10px] bg-claude-surface p-3 overflow-y-auto">
+          <HitlFeed rows={data?.hitl ?? []} />
+        </div>
       </div>
 
       {miniAgent && (

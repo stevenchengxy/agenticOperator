@@ -417,6 +417,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_agent_config_prompt_append: "追加 Prompt",
     monitor_agent_config_readonly: "只读。编辑 AgentConfig 属于管理轴（单独规格）。",
     monitor_agent_failed_load: "加载智能体失败：",
+    monitor_panel_input: "输入",
+    monitor_panel_processing_logic: "处理逻辑",
+    monitor_panel_output: "输出",
+    monitor_workflow_position: "工作流位置",
+    monitor_workflow_position_desc: "候选人当前在各个 agent 的分布。亮色节点 = 当前详情对应的 agent。",
 
     // Queue page
     monitor_queue_title: "事件队列",
@@ -843,6 +848,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_agent_config_prompt_append: "Prompt append",
     monitor_agent_config_readonly: "Read-only. Editing AgentConfig is part of the Manage axis (separate spec).",
     monitor_agent_failed_load: "Failed to load agent:",
+    monitor_panel_input: "Input",
+    monitor_panel_processing_logic: "Processing Logic",
+    monitor_panel_output: "Output",
+    monitor_workflow_position: "Workflow Position",
+    monitor_workflow_position_desc: "Candidate distribution across agents. Highlighted node = this agent.",
 
     // Queue page
     monitor_queue_title: "Event queue",

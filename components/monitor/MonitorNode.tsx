@@ -7,8 +7,8 @@ import type { MonitorNodeAgg, NodeStatus } from "@/lib/monitor/types";
 const STATUS_FILL: Record<NodeStatus, string> = {
   idle:     "var(--c-claude-panel)",
   healthy:  "var(--c-claude-surface)",
-  degraded: "color-mix(in oklch, var(--c-claude-warn) 18%, var(--c-claude-surface))",
-  failing:  "color-mix(in oklch, var(--c-claude-err) 22%, var(--c-claude-surface))",
+  degraded: "color-mix(in oklch, var(--c-claude-warn) 22%, var(--c-claude-surface))",
+  failing:  "color-mix(in oklch, var(--c-claude-err) 28%, var(--c-claude-surface))",
 };
 const STATUS_STROKE: Record<NodeStatus, string> = {
   idle:     "var(--c-claude-line)",
@@ -74,12 +74,20 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
   // Pulsing: aggregate mode uses agg.pulse; trail mode pulses the current pending node
   const shouldPulse = trailEntry?.current || agg?.pulse;
 
+  // Running shimmer: applied as a class on the <g> so the CSS selector
+  // `[data-style="claude"] .monitor-node-running rect.shimmer` can target it.
+  const isRunning = running > 0 && !isTrailMode;
+
   return (
     <g
       transform={`translate(${node.x - NODE_W / 2}, ${node.y - NODE_H / 2})`}
       onClick={onClick}
       opacity={opacity}
-      className={clsx(onClick && "cursor-pointer", shouldPulse && "monitor-pulse")}
+      className={clsx(
+        onClick && "cursor-pointer",
+        shouldPulse && "monitor-pulse",
+        isRunning && "monitor-node-running",
+      )}
     >
       {selected && (
         <rect
@@ -102,7 +110,18 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
         stroke={stroke}
         strokeWidth={strokeWidth}
       />
-      <text x={10} y={20} fontSize={12.5} fontWeight={500} fill="var(--c-claude-ink-1)">
+      {/* Shimmer overlay for running nodes — marching dashed accent outline */}
+      {isRunning && (
+        <rect
+          className="shimmer"
+          x={-1}
+          y={-1}
+          width={NODE_W + 2}
+          height={NODE_H + 2}
+          rx={11}
+        />
+      )}
+      <text x={10} y={20} fontSize={13.5} fontWeight={500} fill="var(--c-claude-ink-1)">
         {node.title}
       </text>
       {/* Aggregate badges: only rendered in aggregate mode (not trail mode) */}
@@ -113,32 +132,32 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
               onClick={(e) => { e.stopPropagation(); onRunningClick?.(); }}
               className={clsx(onRunningClick && "cursor-pointer")}
             >
-              <rect width={36} height={18} rx={9} fill="var(--c-claude-accent-bg)" />
-              <text x={18} y={13} fontSize={11} textAnchor="middle" fill="var(--c-claude-accent)" fontWeight={500}>
+              <rect width={46} height={20} rx={10} fill="var(--c-claude-accent-bg)" />
+              <text x={23} y={14} fontSize={13} fontWeight={700} textAnchor="middle" fill="var(--c-claude-accent)">
                 {running} ▶
               </text>
             </g>
           )}
           {hitl > 0 && (
             <g
-              transform={`translate(${running > 0 ? 42 : 0}, 0)`}
+              transform={`translate(${running > 0 ? 52 : 0}, 0)`}
               onClick={(e) => { e.stopPropagation(); onHitlClick?.(); }}
               className={clsx(onHitlClick && "cursor-pointer")}
             >
-              <rect width={32} height={18} rx={9} fill="color-mix(in oklch, var(--c-claude-warn) 22%, transparent)" />
-              <text x={16} y={13} fontSize={11} textAnchor="middle" fill="var(--c-claude-warn)" fontWeight={500}>
+              <rect width={34} height={20} rx={10} fill="color-mix(in oklch, var(--c-claude-warn) 22%, transparent)" />
+              <text x={17} y={14} fontSize={11} textAnchor="middle" fill="var(--c-claude-warn)" fontWeight={500}>
                 {hitl} ⏸
               </text>
             </g>
           )}
           {queue > 0 && (
             <g
-              transform={`translate(${(running > 0 ? 42 : 0) + (hitl > 0 ? 36 : 0)}, 0)`}
+              transform={`translate(${(running > 0 ? 52 : 0) + (hitl > 0 ? 40 : 0)}, 0)`}
               onClick={(e) => { e.stopPropagation(); onQueueClick?.(); }}
               className={clsx(onQueueClick && "cursor-pointer")}
             >
-              <rect width={36} height={18} rx={9} fill="var(--c-claude-panel)" />
-              <text x={18} y={13} fontSize={11} textAnchor="middle" fill="var(--c-claude-ink-2)" fontWeight={500}>
+              <rect width={38} height={20} rx={10} fill="var(--c-claude-panel)" />
+              <text x={19} y={14} fontSize={11} textAnchor="middle" fill="var(--c-claude-ink-2)" fontWeight={500}>
                 Q {queue}
               </text>
             </g>

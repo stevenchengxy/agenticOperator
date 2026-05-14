@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
-import { nodeById } from '@/lib/workflow-graph-meta';
+import { nodeById, NODES } from '@/lib/workflow-graph-meta';
 import { sumTokensFromActivities, buildHourlyBuckets, safeParse } from '@/lib/monitor/aggregations';
-import type { MonitorAgentDetail } from '@/lib/monitor/types';
+import type { MonitorAgentDetail, CandidateDistributionEntry } from '@/lib/monitor/types';
 
 // ── /api/monitor/agents/[name] ────────────────────────────────────────
 //
@@ -25,7 +25,7 @@ export async function GET(
   try {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const [activities, episodes, config] = await Promise.all([
+    const [activities, episodes, config, distributionGroups] = await Promise.all([
       prisma.agentActivity.findMany({
         where: { agentName, createdAt: { gte: since24h } },
         orderBy: { createdAt: 'asc' },
@@ -39,6 +39,12 @@ export async function GET(
         take: 50,
       }).catch(() => []),
       prisma.agentConfig.findUnique({ where: { id: node.title } }).catch(() => null),
+      // Candidate distribution: count AgentActivity rows per agentName in last 24h
+      prisma.agentActivity.groupBy({
+        by: ['agentName'],
+        where: { createdAt: { gte: since24h } },
+        _count: { agentName: true },
+      }).catch(() => [] as Array<{ agentName: string; _count: { agentName: number } }>),
     ]);
 
     // ── 24h hourly token buckets ──────────────────────────────
@@ -92,6 +98,24 @@ export async function GET(
       };
     });
 
+    // ── Candidate distribution across all workflow nodes ──────────
+    // Build a map from agentName → 24h activity count from groupBy result
+    const distMap = new Map<string, number>(
+      (distributionGroups as Array<{ agentName: string; _count: { agentName: number } }>)
+        .map(g => [g.agentName, g._count.agentName]),
+    );
+
+    const candidateDistribution: CandidateDistributionEntry[] = NODES.map(n => {
+      const canonName = n.agentName ?? n.title;
+      const passedCount24h = distMap.get(canonName) ?? 0;
+      return {
+        nodeId: n.id,
+        // activeCount: approximate via recent activity rows (running type) — 0 when no live data
+        activeCount: 0,
+        passedCount24h,
+      };
+    });
+
     const detail: MonitorAgentDetail = {
       name: node.id,
       title: node.title,
@@ -118,6 +142,7 @@ export async function GET(
         failed: b.value.failed,
       })),
       recentErrors,
+      candidateDistribution,
     };
     return NextResponse.json(detail);
   } catch (e) {

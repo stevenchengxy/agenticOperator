@@ -205,6 +205,18 @@
 }
 [data-style="claude"] .monitor-pulse { animation: monitorPulse 2s ease-in-out infinite; }
 
+@keyframes nodeShimmer {
+  0%   { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -24; }
+}
+[data-style="claude"] .monitor-node-running rect.shimmer {
+  stroke: var(--c-claude-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 6;
+  fill: none;
+  animation: nodeShimmer 1.5s linear infinite;
+}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
