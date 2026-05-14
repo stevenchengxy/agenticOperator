@@ -97,7 +97,12 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
                 <ul className="text-[12px] text-claude-ink-2 space-y-0.5">
                   {meta.triggersEvents.map((e) => (
                     <li key={e}>
-                      <code className="font-mono">{e}</code>
+                      <Link
+                        href={`/events/${encodeURIComponent(e)}`}
+                        className="font-mono text-claude-accent no-underline hover:underline"
+                      >
+                        {e}
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -111,7 +116,12 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
                 <ul className="text-[12px] text-claude-ink-2 space-y-0.5">
                   {meta.emitsEvents.map((e) => (
                     <li key={e}>
-                      <code className="font-mono">{e}</code>
+                      <Link
+                        href={`/events/${encodeURIComponent(e)}`}
+                        className="font-mono text-claude-accent no-underline hover:underline"
+                      >
+                        {e}
+                      </Link>
                     </li>
                   ))}
                 </ul>

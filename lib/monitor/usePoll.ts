@@ -14,14 +14,19 @@ import { useEffect, useRef, useState } from 'react';
 //   used by StreamPill to distinguish "connected" vs "disconnected".
 // - `paused` suspends all polling without unmounting; the effect re-runs
 //   when paused changes, which triggers an immediate fetch on resume.
+// - `httpStatus` is the HTTP status code of the last response (null if
+//   the request hasn't completed yet or was aborted). Consumers can use
+//   this to distinguish 404 (not found) from 5xx (server error).
 export function usePoll<T>(url: string, intervalMs = 4_000, paused = false): {
   data: T | null;
   error: string | null;
+  httpStatus: number | null;
   lastSuccessAt: Date | null;
   refresh: () => void;
 } {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [httpStatus, setHttpStatus] = useState<number | null>(null);
   const [lastSuccessAt, setLastSuccessAt] = useState<Date | null>(null);
 
   // Stable refresh identity: the function itself is stable, but it reads
@@ -47,11 +52,15 @@ export function usePoll<T>(url: string, intervalMs = 4_000, paused = false): {
       stateRef.current.ac = ac;
       try {
         const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          if (!ac.signal.aborted) setHttpStatus(res.status);
+          throw new Error(`HTTP ${res.status}`);
+        }
         const json = (await res.json()) as T;
         if (!ac.signal.aborted) {
           setData(json);
           setError(null);
+          setHttpStatus(res.status);
           setLastSuccessAt(new Date());
         }
       } catch (e) {
@@ -76,5 +85,5 @@ export function usePoll<T>(url: string, intervalMs = 4_000, paused = false): {
     refreshRef.current();
   }).current;
 
-  return { data, error, lastSuccessAt, refresh: stableRefresh };
+  return { data, error, httpStatus, lastSuccessAt, refresh: stableRefresh };
 }
