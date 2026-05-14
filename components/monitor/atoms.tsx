@@ -44,21 +44,37 @@ export function ClaudeMetric({
     : emphasis === "warn" ? "text-claude-warn"
     : emphasis === "err" ? "text-claude-err"
     : "text-claude-ink-1";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={clsx(
-        "text-left rounded-[10px] px-5 py-4 transition-colors",
-        onClick ? "cursor-pointer hover:bg-claude-panel" : "cursor-default",
-      )}
-    >
+
+  const baseClass = "text-left rounded-[10px] px-5 py-4 transition-colors block w-full";
+  const interactiveClass = "cursor-pointer hover:bg-claude-panel";
+  const staticClass = "cursor-default";
+
+  const content = (
+    <>
       <div className="text-[11px] uppercase tracking-[0.08em] text-claude-ink-4 mb-1">{label}</div>
       <div className={clsx("text-[24px] font-medium tabular-nums leading-tight", tone)}>
         {value}
       </div>
       {hint != null && <div className="text-[12px] text-claude-ink-3 mt-1">{hint}</div>}
-    </button>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={clsx(baseClass, interactiveClass)}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={clsx(baseClass, staticClass)}>
+      {content}
+    </div>
   );
 }
 

@@ -171,7 +171,7 @@
   --c-claude-bg:        oklch(0.18  0.005 80);
   --c-claude-surface:   oklch(0.22  0.005 80);
   --c-claude-panel:     oklch(0.25  0.005 80);
-  --c-claude-line:      oklch(0.32  0.005 80);
+  --c-claude-line:      oklch(0.32  0.005 75);
   --c-claude-ink-1:     oklch(0.92  0.005 80);
   --c-claude-ink-2:     oklch(0.75  0.005 80);
   --c-claude-ink-3:     oklch(0.6   0.005 80);
