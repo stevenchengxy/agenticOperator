@@ -80,3 +80,31 @@ export type MonitorOverviewResponse = {
   hitl: MonitorHitlRow[];
   recentRuns: MonitorRunRow[];
 };
+
+export type RunTrailStep = {
+  nodeId: string;
+  enteredAt: string;
+  leftAt: string | null;
+  result: 'success' | 'failure' | 'pending' | 'skipped';
+  durationMs: number | null;
+  stepCount: number;
+  tokensUsed: number;
+  relatedEpisodeId: string | null;
+};
+
+export type MonitorRunDetail = {
+  run: {
+    id: string;
+    triggerEvent: string;
+    triggerData: Record<string, unknown>;
+    status: 'running' | 'completed' | 'failed' | 'suspended' | 'paused';
+    startedAt: string;
+    completedAt: string | null;
+    lastActivityAt: string;
+  };
+  trail: RunTrailStep[];
+  events: Array<{ name: string; ts: string; source: 'inbound' | 'outbound'; eventInstanceId: string | null }>;
+  activity: Array<{ ts: string; agent: string; type: string; narrative: string; metadata?: Record<string, unknown> }>;
+  tokensByAgent: Record<string, { prompt: number; completion: number; total: number; model: string | null }>;
+  hitl: Array<{ taskId: string; status: string; title: string; createdAt: string; completedAt: string | null }>;
+};

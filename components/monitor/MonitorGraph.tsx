@@ -15,6 +15,8 @@ import type {
 import { MonitorNode } from "./MonitorNode";
 import { MonitorEdge } from "./MonitorEdge";
 
+type TrailEntry = { result: 'success' | 'failure' | 'pending' | 'skipped'; current: boolean };
+
 type Props = {
   nodeAggs?: MonitorNodeAgg[];
   edgeAggs?: MonitorEdgeAgg[];
@@ -22,11 +24,14 @@ type Props = {
   onRunningClick?: (nodeId: string) => void;
   onHitlClick?: (nodeId: string) => void;
   onQueueClick?: (nodeId: string) => void;
+  /** Trail map for run-detail mode. When provided, nodes switch to trail-colored rendering. */
+  trail?: Map<string, TrailEntry>;
 };
 
-export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick }: Props) {
+export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail }: Props) {
   const aggByName = new Map((nodeAggs ?? []).map(a => [a.name, a]));
   const edgeAggByKey = new Map((edgeAggs ?? []).map(e => [`${e.from}->${e.to}`, e]));
+  const isTrailMode = trail != null;
 
   return (
     <div className="w-full overflow-auto rounded-[12px] border border-claude-line bg-claude-surface">
@@ -42,6 +47,10 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
           const from = nodeById(e.from);
           const to   = nodeById(e.to);
           if (!from || !to) return null;
+          // In trail mode, edges connecting touched nodes get bolder
+          const trailFrom = trail?.get(e.from);
+          const trailTo   = trail?.get(e.to);
+          const isTrailEdge = isTrailMode && trailFrom != null && trailTo != null;
           return (
             <MonitorEdge
               key={i}
@@ -49,6 +58,8 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
               fromNode={from}
               toNode={to}
               agg={edgeAggByKey.get(`${e.from}->${e.to}`)}
+              isTrailEdge={isTrailEdge}
+              isTrailMode={isTrailMode}
             />
           );
         })}
@@ -61,6 +72,8 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
             onRunningClick={onRunningClick ? () => onRunningClick(n.id) : undefined}
             onHitlClick={onHitlClick ? () => onHitlClick(n.id) : undefined}
             onQueueClick={onQueueClick ? () => onQueueClick(n.id) : undefined}
+            trailEntry={trail?.get(n.id)}
+            isTrailMode={isTrailMode}
           />
         ))}
       </svg>

@@ -1,0 +1,15 @@
+"use client";
+import React from "react";
+import { useParams } from "next/navigation";
+import { Shell } from "@/components/shared/Shell";
+import { RunDetailContent } from "@/components/monitor/RunDetailContent";
+
+export default function RunDetailPage() {
+  const params = useParams();
+  const id = typeof params?.id === 'string' ? params.id : String(params?.id ?? '');
+  return (
+    <Shell crumbs={["Monitor", `Run ${id}`]} directionTag="Monitor · Run Detail">
+      <RunDetailContent runId={id} />
+    </Shell>
+  );
+}
