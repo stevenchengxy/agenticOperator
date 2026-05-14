@@ -1,8 +1,39 @@
 // AO-main Inngest function registry.
 //
-// AO-main is the control-plane (UI + EM gateway + RAAS bridge); it does not
-// host any agent runtimes. The full REQUIREMENT_LOGGED → JD_GENERATED →
-// RESUME_DOWNLOADED → RESUME_PROCESSED → MATCH_* chain runs in
-// resume-parser-agent (port 3020).
+// Generates a stub Inngest function for every business agent in AGENT_MAP so
+// that test events (Send Test Event → REQUIREMENT_LOGGED etc.) produce real
+// cascading activity visible in Overview / Fleet / Monitor / Events / Inbox.
+//
+// Each stub:
+//   · registers on the agent's triggersEvents
+//   · writes WorkflowRun + AgentActivity via agent-logger
+//   · handles HITL (creates HumanTask, auto-resolves after STUB_HITL_DELAY_MS)
+//   · emits the agent's next event(s) via em.publish with _runId propagated
+//
+// Env gates:
+//   STUB_AGENTS=0        — disable stubs (e.g. when running real agent runtimes)
+//   STUB_SUCCESS_RATE    — default 0.9  (90 % take the happy path)
+//   STUB_HITL_DELAY_MS   — default 5000 (HITL auto-resolves after 5 s for demo)
 
-export const allFunctions: never[] = [];
+import { AGENT_MAP } from "@/lib/agent-mapping";
+import { createStubAgent } from "./agents/stub-factory";
+
+// Build a stub for every business agent that has at least one trigger event.
+// Chatbot has triggersEvents=[] so it is naturally excluded.
+const businessAgents = AGENT_MAP.filter(
+  (a) => a.short !== "Chatbot" && a.triggersEvents.length > 0,
+);
+
+const stubFunctions = businessAgents
+  .map(createStubAgent)
+  .filter((fn): fn is NonNullable<typeof fn> => fn !== null);
+
+export const allFunctions = stubFunctions;
+
+// Server-side startup log so operators can confirm registration count.
+if (typeof window === "undefined") {
+  // eslint-disable-next-line no-console
+  console.log(
+    `[inngest] registered ${stubFunctions.length} stub agent functions`,
+  );
+}
