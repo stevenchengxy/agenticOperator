@@ -90,12 +90,12 @@ export const createJdAgent = inngest.createFunction(
     id: AGENT_ID,
     name: 'Create JD Agent (workflow node 4)',
     retries: 1,
+    triggers: [
+      { event: 'REQUIREMENT_LOGGED' },
+      { event: 'CLARIFICATION_READY' },
+      { event: 'JD_REJECTED' },
+    ],
   },
-  [
-    { event: 'REQUIREMENT_LOGGED' },
-    { event: 'CLARIFICATION_READY' },
-    { event: 'JD_REJECTED' },
-  ],
   async ({ event, step, logger }) => {
     if (!isRaasApiConfigured()) {
       throw new NonRetriableError(

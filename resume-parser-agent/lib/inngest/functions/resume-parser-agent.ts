@@ -36,8 +36,8 @@ export const resumeParserAgent = inngest.createFunction(
     id: 'resume-parser-agent',
     name: 'Resume Parser Agent',
     retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
+    triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
-  { event: 'RESUME_DOWNLOADED' },
   async ({ event, step, logger }) => {
     // RESUME_DOWNLOADED 兼容两种 shape:
     //   A) RAAS canonical envelope —
@@ -219,11 +219,11 @@ export const resumeParserAgent = inngest.createFunction(
       // 透传上传时关联的岗位 — matchResumeAgent 据此决定"单岗位精准匹配"
       // 还是"上传者名下全部 recruiting 岗位扫描"。
       job_requisition_id: job_requisition_id ?? null,
-      // 老的 4 对象嵌套字段保留为空 (RAAS 不再要求 agent 转结构)
+      // v0_1_010: 3 个 Nested(runtime 已删)— 在 RPA 这一步保留为空,
+      // 由下游 Allmeta mapper(toAllmetaCandidate/Resume/Expectation)实际填充
       candidate: {} as ResumeProcessedData['candidate'],
       candidate_expectation: {} as ResumeProcessedData['candidate_expectation'],
       resume: {} as ResumeProcessedData['resume'],
-      runtime: {} as ResumeProcessedData['runtime'],
       parsedAt: new Date().toISOString(),
       parserVersion: 'v7-pull-model@2026-05-08',
     };

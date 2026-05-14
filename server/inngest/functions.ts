@@ -23,6 +23,22 @@ import { createStubAgent } from "./agents/stub-factory";
 import { monitorAgent } from "./agents/monitor-agent";
 import { managerAgent } from "./agents/manager-agent";
 
+// Real production agents (live in resume-parser-agent/). They're authored
+// against RPA's own Inngest client instance (app id "agentic-operator"),
+// but since we serve through AO-main's /api/inngest route, importing them
+// here also exposes them to the Inngest dev server so all 24 functions
+// (19 stub + 2 behavior + 3 real) show up in a single dashboard.
+//
+// IMPORTANT: when RPA is ALSO running as a separate process (port 3020),
+// it serves the same function set under its own /api/inngest route. The
+// Inngest dev server treats them as distinct apps, but both subscribe to
+// the same event names. To avoid double-handling in that scenario, run
+// only one side (or set STUB_AGENTS=0 + disable RPA serve). For local dev
+// where RPA isn't running, this is the only way to see the real handlers.
+import { resumeParserAgent } from "@/resume-parser-agent/lib/inngest/functions/resume-parser-agent";
+import { createJdAgent } from "@/resume-parser-agent/lib/inngest/agents/create-jd-agent";
+import { matchResumeAgent } from "@/resume-parser-agent/lib/inngest/agents/match-resume-agent";
+
 // wsIds with real Inngest agents in resume-parser-agent (RPA).
 // AO-main must NOT register stubs for these — doing so would cause both the
 // stub AND the real agent to run on the same trigger event (race condition).
@@ -46,12 +62,23 @@ const stubFunctions = businessAgents
   .filter((fn): fn is NonNullable<typeof fn> => fn !== null);
 
 // Behavior axis agents (Phase 1): Monitor Agent (cron) + Manager Agent (event-driven)
-export const allFunctions = [...stubFunctions, monitorAgent, managerAgent];
+const behaviorFunctions = [monitorAgent, managerAgent];
+
+// Real production agents from resume-parser-agent — the 3 functions that
+// actually call RAAS / LLM / MinIO. Their wsIds (4, 9-1, 10) are excluded
+// from stub generation above so they don't double-handle events.
+const realFunctions = [resumeParserAgent, createJdAgent, matchResumeAgent];
+
+export const allFunctions = [
+  ...stubFunctions,
+  ...behaviorFunctions,
+  ...realFunctions,
+];
 
 // Server-side startup log so operators can confirm registration count.
 if (typeof window === "undefined") {
   // eslint-disable-next-line no-console
   console.log(
-    `[inngest] registered ${stubFunctions.length} stub agent functions (${RPA_OWNED_WSIDS.size} RPA-owned wsIds skipped) + 2 behavior agents (monitor + manager)`,
+    `[inngest] registered ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior + ${realFunctions.length} real agents = ${allFunctions.length} total`,
   );
 }

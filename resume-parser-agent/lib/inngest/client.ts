@@ -1,4 +1,4 @@
-import { EventSchemas, Inngest } from 'inngest';
+import { Inngest } from 'inngest';
 
 // ─── §3.1 输入事件（来自 RAAS）──────────────────────────────
 export type ResumeDownloadedData = {
@@ -19,53 +19,50 @@ export type ResumeDownloadedData = {
   upload_id?: string;
 };
 
-// ─── §3.2 RAAS 期望的解析结果（4 对象嵌套）────────────────
+// ─── §3.2 解析结果(v0_1_010 终稿,对齐 docs/data/objects_v0_1_010.json)────────
+// 字段命名 / 类型跟 RoboHire vendor + Allmeta DataObject 一致。
+// mapper 会把这些 Nested 转成 Allmeta `POST /api/v1/ontology/instances/{label}` payload。
+
 export type CandidateNested = {
   name: string | null;
-  mobile: string | null;
+  phone: string | null;              // v0_1_010: was `mobile`, renamed to vendor name
   email: string | null;
   gender: string | null;
   birth_date: string | null;
-  current_location: string | null;
+  address: string | null;            // v0_1_010: was `current_location`, renamed to vendor name
   highest_acquired_degree: string | null;
   work_years: number | null;
-  current_company: string | null;
-  current_title: string | null;
-  skills: string[];
+  github: string | null;             // v0_1_010 new — RoboHire 顶级直返
+  ethnicity: string | null;          // v0_1_010 new — 派生 otherSections.个人信息补充"民族"
+  native_place: string | null;       // v0_1_010 new — 派生 otherSections.个人信息补充"籍贯"
+  // ❌ Removed v0_1_010: current_company / current_title / skills(技能跟简历走,在 ResumeNested.skills)
 };
 
 export type CandidateExpectationNested = {
-  expected_salary_monthly_min: number | null;
-  expected_salary_monthly_max: number | null;
-  expected_cities: string[];
-  expected_industries: string[];
-  expected_roles: string[];
-  expected_work_mode: string | null;
+  expected_positions: string | null;       // v0_1_010: renamed + type changed string[] → string
+                                            //   (mapper 多值用 "/" 或 "、" join)
+  expected_locations: string | null;       // v0_1_010: renamed + type changed
+  expected_industries: string | null;      // v0_1_010: renamed + type changed
+  expected_salary_range: string | null;    // v0_1_010 new — String,例 "6k-8k",不拆 min/max
+  expected_work_mode: string | null;       // remote/hybrid/onsite
+  // ❌ Removed v0_1_010: expected_salary_monthly_min / _max(改回单 String)
 };
 
 export type ResumeNested = {
-  summary: string | null;
-  skills_extracted: string[];
-  work_history: Array<{
-    title?: string;
-    company?: string;
-    startDate?: string;
-    endDate?: string;
-    description?: string;
-  }> | null;
-  education_history: Array<{
-    degree?: string;
-    field?: string;
-    institution?: string;
-    graduationYear?: string;
-  }> | null;
-  project_history: unknown[] | null;
+  summary: string | null;                  // RoboHire summary
+  skills: string[];                        // v0_1_010: renamed from `skills_extracted`(仅此字段保持 List)
+  experience: string | null;               // v0_1_010: renamed work_history → experience;类型 Object[] → String(JSON.stringify)
+  education: string | null;                // v0_1_010: renamed education_history → education;同上
+  projects: string | null;                 // v0_1_010: renamed project_history → projects;同上
+  certifications: string | null;           // v0_1_010 new — RoboHire certifications 序列化
+  languages: string | null;                // v0_1_010 new — RoboHire languages 序列化
+  portfolio: string | null;                // v0_1_010 new — RoboHire 顶级
+  publications: string | null;             // v0_1_010 new — RoboHire 顶级
+  patents: string | null;                  // v0_1_010 new — RoboHire 顶级
+  awards: string | null;                   // v0_1_010 new — RoboHire 顶级
 };
 
-export type RuntimeNested = {
-  current_title: string | null;
-  current_company: string | null;
-};
+// ❌ Removed v0_1_010: RuntimeNested(historical duplicate of current_company/current_title)
 
 export type ResumeProcessedData = {
   // 透传
@@ -78,11 +75,10 @@ export type ResumeProcessedData = {
   size: number | null;
   sourceEventName: string | null;
   receivedAt: string;
-  // 解析结果（Workflow A 之后保留为空对象 — RAAS 处理 schema 映射）
+  // 解析结果（v0_1_010 — 3 个 Nested 对应 Allmeta 3 个 DataObject;runtime 已删）
   candidate: CandidateNested | Record<string, never>;
   candidate_expectation: CandidateExpectationNested | Record<string, never>;
   resume: ResumeNested | Record<string, never>;
-  runtime: RuntimeNested | Record<string, never>;
   // 元数据
   parsedAt: string;
   parserVersion: string;
@@ -237,23 +233,28 @@ export type JdGeneratedEnvelope = {
   };
 };
 
-// ─── EventSchemas ──────────────────────────────────────────
-type Events = {
+// Inngest v4 dropped EventSchemas / fromRecord — typed events are now
+// declared by passing a generic on Inngest. We list the event-type union
+// as documentation (consumed by event types exported from this module),
+// but the inngest client construction is now schemas-free.
+//
+// Event type map (retained for type exports + future v4 generic uplift):
+//   RESUME_DOWNLOADED, RESUME_PROCESSED, MATCH_*, REQUIREMENT_LOGGED,
+//   CLARIFICATION_READY, JD_REJECTED, JD_GENERATED.
+export type RpaEvents = {
   RESUME_DOWNLOADED: { data: ResumeDownloadedData };
   RESUME_PROCESSED: { data: ResumeProcessedData };
   MATCH_PASSED_NEED_INTERVIEW: { data: MatchPassedNeedInterviewData };
   MATCH_PASSED_NO_INTERVIEW: { data: MatchPassedNeedInterviewData };
   MATCH_FAILED: { data: MatchPassedNeedInterviewData };
-  // ── JD 生成链 ──
   REQUIREMENT_LOGGED: { data: RequirementLoggedData };
-  CLARIFICATION_READY: { data: RequirementLoggedData };  // 同 shape，下游也是 createJdAgent
-  JD_REJECTED: { data: RequirementLoggedData };          // 同 shape
+  CLARIFICATION_READY: { data: RequirementLoggedData };
+  JD_REJECTED: { data: RequirementLoggedData };
   JD_GENERATED: { data: JdGeneratedEnvelope };
 };
 
 export const inngest = new Inngest({
   id: 'agentic-operator',
-  schemas: new EventSchemas().fromRecord<Events>(),
 });
 
 // 字段映射版本号 (RoboHire output → RAAS schema)

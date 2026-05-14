@@ -41,8 +41,8 @@ export const matchResumeAgent = inngest.createFunction(
     id: AGENT_ID,
     name: 'Match Resume Agent (workflow node 10)',
     retries: 2,
+    triggers: [{ event: 'RESUME_PROCESSED' }],
   },
-  { event: 'RESUME_PROCESSED' },
   async ({ event, step, logger }) => {
     const data = unwrapResumeProcessedEvent(event.data);
     const traceId = getTraceId(event.data);
@@ -213,8 +213,14 @@ export const matchResumeAgent = inngest.createFunction(
               { resume: resumeText, jd: jdText },
               { traceId },
             );
+            // v0_1_010: RoboHire `data.matchScore` / `data.recommendation` 顶级字段实测永远 === null,
+            // 真实评分在 data.overallMatchScore.score / data.overallFit.verdict。
+            const overallScore = (r.data as { overallMatchScore?: { score?: number } } | undefined)
+              ?.overallMatchScore?.score;
+            const overallVerdict = (r.data as { overallFit?: { verdict?: string } } | undefined)
+              ?.overallFit?.verdict;
             logger.info(
-              `[${AGENT_NAME}] RAAS match OK · job_req=${jrid} score=${r.data?.matchScore} rec=${r.data?.recommendation} requestId=${r.requestId}`,
+              `[${AGENT_NAME}] RAAS match OK · job_req=${jrid} score=${overallScore ?? '?'} verdict=${overallVerdict ?? '?'} requestId=${r.requestId}`,
             );
             return {
               ok: true as const,
