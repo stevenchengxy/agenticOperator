@@ -31,11 +31,12 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
   const desc = canonicalShort ? getAgentDescription(canonicalShort) : null;
 
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
+  const [activityFilter, setActivityFilter] = React.useState<'all' | 'events' | 'tools' | 'errors'>('all');
 
-  // Reset activity when the selected agent changes (or panel closes) so the
-  // previous agent's rows don't briefly show under the new agent's title.
+  // Reset activity and filter when the selected agent changes (or panel closes)
   React.useEffect(() => {
     setActivity([]);
+    setActivityFilter('all');
   }, [canonicalShort]);
 
   // Fetch recent activity. No-op when no agent is selected.
@@ -43,7 +44,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
     if (!canonicalShort) return;
     const ac = new AbortController();
     fetch(
-      `/api/agent-activity?agent=${encodeURIComponent(canonicalShort)}&limit=10`,
+      `/api/agent-activity?agent=${encodeURIComponent(canonicalShort)}&limit=20`,
       { signal: ac.signal, cache: "no-store" },
     )
       .then((r) => (r.ok ? r.json() : null))
@@ -63,6 +64,16 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
       });
     return () => ac.abort();
   }, [canonicalShort]);
+
+  const filteredActivity = React.useMemo(() => {
+    if (activityFilter === 'all') return activity;
+    if (activityFilter === 'events') return activity.filter(a => a.type.startsWith('event_'));
+    if (activityFilter === 'tools') return activity.filter(a => a.type === 'tool');
+    if (activityFilter === 'errors') return activity.filter(a =>
+      a.type === 'agent_error' || a.type === 'anomaly'
+    );
+    return activity;
+  }, [activity, activityFilter]);
 
   // Close on Escape. Always attached so the panel can dismiss on key even
   // while data is loading; the handler self-guards via the onClose callback.
@@ -197,22 +208,52 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
         )}
 
         <Section title={t("monitor_agent_recent_activity")}>
-          {activity.length === 0 ? (
-            <Empty>No recent activity.</Empty>
+          {/* Activity filter chips */}
+          <div className="flex gap-1 mb-2 flex-wrap text-[11px]">
+            {(['all', 'events', 'tools', 'errors'] as const).map(f => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setActivityFilter(f)}
+                className={
+                  "px-2 py-0.5 rounded-full transition-colors " +
+                  (activityFilter === f
+                    ? "bg-claude-accent-bg text-claude-accent"
+                    : "bg-claude-panel text-claude-ink-3 hover:text-claude-ink-1")
+                }
+              >
+                {f === 'all' ? t('monitor_activity_all')
+                 : f === 'events' ? t('monitor_activity_events')
+                 : f === 'tools' ? t('monitor_activity_tools')
+                 : t('monitor_activity_errors')}
+              </button>
+            ))}
+          </div>
+          {filteredActivity.length === 0 ? (
+            <Empty>{activity.length === 0 ? 'No recent activity.' : 'No matching activity.'}</Empty>
           ) : (
             <ul className="space-y-1.5 text-[12px]">
-              {activity.map((a, i) => (
+              {filteredActivity.map((a, i) => (
                 <li key={i} className="border-l-2 border-claude-line pl-2">
-                  <div className="text-claude-ink-4 tabular-nums text-[10.5px]">
-                    {new Date(a.ts).toLocaleTimeString()}
-                  </div>
-                  <div>
-                    <span className="text-claude-ink-1 font-medium">
-                      {a.type}
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-claude-ink-4 tabular-nums text-[10.5px]">
+                      {new Date(a.ts).toLocaleTimeString()}
                     </span>
-                    :{" "}
-                    <span className="text-claude-ink-3">{a.narrative}</span>
+                    <ClaudeBadge
+                      tone={
+                        a.type === 'agent_error' || a.type === 'anomaly'
+                          ? 'err'
+                          : a.type.startsWith('event_')
+                            ? 'accent'
+                            : a.type === 'tool'
+                              ? 'warn'
+                              : 'neutral'
+                      }
+                    >
+                      {a.type}
+                    </ClaudeBadge>
                   </div>
+                  <div className="text-claude-ink-2 mt-0.5">{a.narrative}</div>
                 </li>
               ))}
             </ul>

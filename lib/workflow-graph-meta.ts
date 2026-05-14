@@ -99,10 +99,10 @@ export type WorkflowEdge = {
   eventName?: string;
 };
 
-// 1920×720 viewBox — expanded for 22-agent layout with HITL branches.
-export const GRAPH_VIEWBOX = '0 0 1920 720' as const;
-export const GRAPH_WIDTH = 1920 as const;
-export const GRAPH_HEIGHT = 720 as const;
+// 2200×800 viewBox — expanded for 8-column left-to-right divergent tree.
+export const GRAPH_VIEWBOX = '0 0 2200 800' as const;
+export const GRAPH_WIDTH = 2200 as const;
+export const GRAPH_HEIGHT = 800 as const;
 
 // ── NODE_LAYOUT ───────────────────────────────────────────────────────────────
 // Visual positions + icon per node. wsId links each entry to CANONICAL_WORKFLOW.
@@ -118,40 +118,44 @@ type NodeLayout = {
 };
 
 const NODE_LAYOUT: NodeLayout[] = [
-  // ── Trigger (synthetic) ──────────────────────────────────────────────────
-  { id: 'trig',             wsId: 'trig',  x: 60,   y: 100, kind: 'trigger', icon: 'bolt'     },
+  // ── Col 1: START ─────────────────────────────────────────────────────────
+  { id: 'trig',             wsId: 'trig',  x: 100,  y: 400, kind: 'trigger', icon: 'bolt'     },
 
-  // ── Row A: main path ─────────────────────────────────────────────────────
-  { id: 'reqSync',          wsId: '1-1',   x: 220,  y: 100, kind: 'agent',   icon: 'db'       },
-  { id: 'reqAnalyzer',      wsId: '2',     x: 400,  y: 100, kind: 'agent',   icon: 'sparkle'  },
-  { id: 'clarifier',        wsId: '3',     x: 580,  y: 100, kind: 'agent',   icon: 'sparkle'  },
-  { id: 'jdGenerator',      wsId: '4',     x: 760,  y: 100, kind: 'agent',   icon: 'sparkle'  },
-  { id: 'jdReviewer',       wsId: '5',     x: 940,  y: 100, kind: 'hitl',    icon: 'shield'   },
-  { id: 'taskAssigner',     wsId: '6',     x: 1120, y: 100, kind: 'agent',   icon: 'cpu'      },
-  { id: 'publisher',        wsId: '7-1',   x: 1300, y: 100, kind: 'agent',   icon: 'plug'     },
-  { id: 'resumeCollector',  wsId: '8',     x: 1500, y: 100, kind: 'hitl',    icon: 'db'       },  // actor=Human
-  { id: 'resumeParser',     wsId: '9-1',   x: 1700, y: 100, kind: 'agent',   icon: 'cpu'      },
-  { id: 'matcher',          wsId: '10',    x: 1820, y: 100, kind: 'agent',   icon: 'sparkle'  },  // x: 1860→1820 to avoid right-edge overflow
+  // ── Col 2: REQUIREMENT INTAKE ────────────────────────────────────────────
+  { id: 'reqSync',          wsId: '1-1',   x: 320,  y: 100, kind: 'agent',   icon: 'db'       },
+  { id: 'manualEntry',      wsId: '1-2',   x: 320,  y: 220, kind: 'hitl',    icon: 'user'     },
+  { id: 'reqAnalyzer',      wsId: '2',     x: 320,  y: 340, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'clarifier',        wsId: '3',     x: 320,  y: 460, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'reClarifier',      wsId: '3-2',   x: 320,  y: 580, kind: 'hitl',    icon: 'user'     },
 
-  // ── HITL offsets (between A and B) ───────────────────────────────────────
-  // y=280 row: manualEntry(400), reClarifier(580), manualPublish(1300), resumeFixer(1700) — 4 nodes, 200-1120px spacing
-  { id: 'manualEntry',      wsId: '1-2',   x: 400,  y: 280, kind: 'hitl',    icon: 'user'     },  // moved from (580,580): directly below reqAnalyzer(400,100)
-  { id: 'reClarifier',      wsId: '3-2',   x: 580,  y: 280, kind: 'hitl',    icon: 'user'     },  // per canonical JSON
-  { id: 'manualPublish',    wsId: '7-2',   x: 1300, y: 280, kind: 'hitl',    icon: 'user'     },
-  { id: 'resumeFixer',      wsId: '9-2',   x: 1700, y: 280, kind: 'hitl',    icon: 'user'     },
+  // ── Col 3: JD GENERATION ─────────────────────────────────────────────────
+  { id: 'jdGenerator',      wsId: '4',     x: 620,  y: 140, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'jdReviewer',       wsId: '5',     x: 620,  y: 260, kind: 'hitl',    icon: 'shield'   },
+  { id: 'taskAssigner',     wsId: '6',     x: 620,  y: 380, kind: 'agent',   icon: 'cpu'      },
+  { id: 'publisher',        wsId: '7-1',   x: 620,  y: 500, kind: 'agent',   icon: 'plug'     },
+  { id: 'manualPublish',    wsId: '7-2',   x: 620,  y: 620, kind: 'hitl',    icon: 'user'     },
 
-  // ── Row B: post-matching path ─────────────────────────────────────────────
-  // Uniformly spaced ~180px apart; interviewInviter aligned with matcher(1820)
-  { id: 'interviewInviter', wsId: '11-1',  x: 1820, y: 460, kind: 'agent',   icon: 'mail'     },  // moved from (1860,300): top of Row B, aligned with matcher
-  { id: 'aiInterviewer',    wsId: '11-2',  x: 1640, y: 460, kind: 'hitl',    icon: 'sparkle'  },  // actor=Human (candidate self-serve)
-  { id: 'evaluator',        wsId: '12',    x: 1460, y: 460, kind: 'agent',   icon: 'cpu'      },
-  { id: 'resumeRefiner',    wsId: '13',    x: 1280, y: 460, kind: 'agent',   icon: 'sparkle'  },
-  { id: 'packageBuilder',   wsId: '14-1',  x: 1100, y: 460, kind: 'agent',   icon: 'book'     },
-  { id: 'packageReviewer',  wsId: '15',    x: 920,  y: 460, kind: 'hitl',    icon: 'shield'   },
-  { id: 'portalSubmitter',  wsId: '16',    x: 740,  y: 460, kind: 'agent',   icon: 'mail'     },
+  // ── Col 4: RESUME PROCESSING ─────────────────────────────────────────────
+  { id: 'resumeCollector',  wsId: '8',     x: 920,  y: 240, kind: 'hitl',    icon: 'db'       },
+  { id: 'resumeParser',     wsId: '9-1',   x: 920,  y: 400, kind: 'agent',   icon: 'cpu'      },
+  { id: 'resumeFixer',      wsId: '9-2',   x: 920,  y: 560, kind: 'hitl',    icon: 'user'     },
 
-  // ── HITL fallbacks (below B) ──────────────────────────────────────────────
-  { id: 'packageFiller',    wsId: '14-2',  x: 1100, y: 620, kind: 'hitl',    icon: 'user'     },
+  // ── Col 5: MATCHING ──────────────────────────────────────────────────────
+  { id: 'matcher',          wsId: '10',    x: 1220, y: 400, kind: 'agent',   icon: 'sparkle'  },
+
+  // ── Col 6: INTERVIEW & EVAL ──────────────────────────────────────────────
+  { id: 'interviewInviter', wsId: '11-1',  x: 1520, y: 240, kind: 'agent',   icon: 'mail'     },
+  { id: 'aiInterviewer',    wsId: '11-2',  x: 1520, y: 400, kind: 'hitl',    icon: 'sparkle'  },
+  { id: 'evaluator',        wsId: '12',    x: 1520, y: 560, kind: 'agent',   icon: 'cpu'      },
+
+  // ── Col 7: PACKAGE ───────────────────────────────────────────────────────
+  { id: 'resumeRefiner',    wsId: '13',    x: 1820, y: 160, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'packageBuilder',   wsId: '14-1',  x: 1820, y: 320, kind: 'agent',   icon: 'book'     },
+  { id: 'packageFiller',    wsId: '14-2',  x: 1820, y: 480, kind: 'hitl',    icon: 'user'     },
+  { id: 'packageReviewer',  wsId: '15',    x: 1820, y: 640, kind: 'hitl',    icon: 'shield'   },
+
+  // ── Col 8: SUBMIT ────────────────────────────────────────────────────────
+  { id: 'portalSubmitter',  wsId: '16',    x: 2080, y: 400, kind: 'agent',   icon: 'mail'     },
 ];
 
 // ── Build NODES from layout + canonical JSON ──────────────────────────────────

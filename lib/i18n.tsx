@@ -516,6 +516,12 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_batch_clear: "取消选择",
     monitor_batch_confirm: "确认对 {n} 条 run 执行 {action}？",
     monitor_batch_success: "成功 {ok} · 失败 {fail}",
+
+    // Activity filter chips
+    monitor_activity_all: "全部",
+    monitor_activity_events: "事件",
+    monitor_activity_tools: "工具",
+    monitor_activity_errors: "错误",
   },
   en: {
     brand: "Agentic Operator",
@@ -1027,6 +1033,12 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_batch_clear: "Clear",
     monitor_batch_confirm: "Apply {action} to {n} runs?",
     monitor_batch_success: "OK {ok} · Failed {fail}",
+
+    // Activity filter chips
+    monitor_activity_all: "All",
+    monitor_activity_events: "Events",
+    monitor_activity_tools: "Tools",
+    monitor_activity_errors: "Errors",
   },
 };
 

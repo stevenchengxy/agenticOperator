@@ -42,30 +42,33 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
   const [scale, setScale] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
   const dragRef = React.useRef<{ x: number; y: number; pan: typeof pan } | null>(null);
+  const svgRef = React.useRef<SVGSVGElement>(null);
   // Track dragging state for cursor styling
   const [isDragging, setIsDragging] = React.useState(false);
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const factor = e.deltaY > 0 ? 0.9 : 1.1;
-    setScale(prev => Math.max(0.5, Math.min(2.5, prev * factor)));
-  };
+  // Wheel zoom — must use addEventListener with { passive: false } because
+  // React's synthetic onWheel uses passive listeners, which silently ignores
+  // e.preventDefault() and causes the page to scroll instead of zooming.
+  React.useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      setScale(prev => Math.max(0.5, Math.min(2.5, prev * factor)));
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
 
   const onMouseDown = (e: React.MouseEvent) => {
-    const tag = (e.target as Element).tagName.toLowerCase();
-    // Only start drag if clicking the empty SVG background or a group (not a node rect/text)
-    if (tag === 'svg' || tag === 'g' || tag === 'rect' && (e.target as Element).getAttribute('class') === null) {
-      // Check that we're not clicking a node by seeing if the current target is the SVG itself
-      if ((e.currentTarget as Element).tagName.toLowerCase() === 'svg') {
-        const svgEl = e.currentTarget as SVGElement;
-        const svgRect = svgEl.getBoundingClientRect();
-        // Only drag on the SVG element directly (background), not on node children
-        if (e.target === svgEl || (e.target as Element).tagName.toLowerCase() === 'svg') {
-          dragRef.current = { x: e.clientX, y: e.clientY, pan };
-          setIsDragging(true);
-        }
-      }
-    }
+    const t = e.target as Element;
+    // Don't start drag if click is on a node
+    if (t.closest('g[data-node-clickable]')) return;
+    // Don't start drag if click is on an interactive control (zoom buttons)
+    if (t.closest('button')) return;
+    dragRef.current = { x: e.clientX, y: e.clientY, pan };
+    setIsDragging(true);
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
@@ -88,12 +91,12 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
   return (
     <div className="w-full overflow-auto rounded-[12px] border border-claude-line bg-claude-surface relative">
       <svg
+        ref={svgRef}
         viewBox={GRAPH_VIEWBOX}
         width="100%"
         height={graphHeight ?? GRAPH_HEIGHT}
         preserveAspectRatio="xMidYMid meet"
-        style={{ minWidth: GRAPH_WIDTH, cursor: isDragging ? 'grabbing' : 'grab' }}
-        onWheel={onWheel}
+        style={{ minWidth: GRAPH_WIDTH, cursor: isDragging ? 'grabbing' : 'grab', userSelect: 'none' }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}

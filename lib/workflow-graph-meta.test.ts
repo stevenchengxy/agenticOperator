@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { NODES, EDGES, nodeById, GRAPH_VIEWBOX, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, TERMINAL_EVENTS } from './workflow-graph-meta';
 
 describe('workflow-graph-meta', () => {
-  it('viewBox is 1920x720 (expanded real-agent layout)', () => {
-    expect(GRAPH_VIEWBOX).toBe('0 0 1920 720');
-    expect(GRAPH_WIDTH).toBe(1920);
-    expect(GRAPH_HEIGHT).toBe(720);
+  it('viewBox is 2200x800 (8-column left-to-right divergent tree)', () => {
+    expect(GRAPH_VIEWBOX).toBe('0 0 2200 800');
+    expect(GRAPH_WIDTH).toBe(2200);
+    expect(GRAPH_HEIGHT).toBe(800);
   });
 
   it('all edge endpoints resolve to a real node', () => {
@@ -148,9 +148,7 @@ describe('workflow-graph-meta', () => {
     const NODE_W = 154;
     const NODE_H = 64;
     for (const n of NODES) {
-      // The synthetic 'trig' trigger node is intentionally placed near the left edge at x=60.
-      // It is a special pill-style element that renders within its visual bounds; skip strict check.
-      if (n.kind === 'trigger') continue;
+      // All nodes including the trigger are now within bounds in the 2200×800 viewBox.
       expect(n.x - NODE_W / 2, `${n.id} left edge (x=${n.x}) overflows viewBox`).toBeGreaterThanOrEqual(0);
       expect(n.x + NODE_W / 2, `${n.id} right edge (x=${n.x}) overflows viewBox`).toBeLessThanOrEqual(GRAPH_WIDTH);
       expect(n.y - NODE_H / 2, `${n.id} top edge (y=${n.y}) overflows viewBox`).toBeGreaterThanOrEqual(0);
