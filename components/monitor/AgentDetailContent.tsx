@@ -12,6 +12,7 @@ import { nodeById } from "@/lib/workflow-graph-meta";
 import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
 import { useApp } from "@/lib/i18n";
 import type { MonitorAgentDetail, MonitorNodeAgg } from "@/lib/monitor/types";
+import { AgentConfigEditor } from "./AgentConfigEditor";
 
 export function AgentDetailContent({ name }: { name: string }) {
   const { t } = useApp();
@@ -220,30 +221,13 @@ export function AgentDetailContent({ name }: { name: string }) {
         </>
       )}
 
-      {/* ── Config (read-only) ────────────────────────────────── */}
+      {/* ── Config (editable) ─────────────────────────────────── */}
       {tab === 'config' && (
         <ClaudeCard>
-          {!data?.config ? (
-            <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_agent_config_empty')}</div>
-          ) : (
-            <dl className="grid grid-cols-2 gap-y-2 text-[12.5px]">
-              <dt className="text-claude-ink-4">{t('monitor_agent_config_enabled')}</dt>
-              <dd>{data.config.enabled ? 'Yes' : 'No'}</dd>
-              <dt className="text-claude-ink-4">{t('monitor_agent_config_temperature')}</dt>
-              <dd className="tabular-nums">{data.config.temperature ?? '—'}</dd>
-              <dt className="text-claude-ink-4">{t('monitor_agent_config_max_retries')}</dt>
-              <dd className="tabular-nums">{data.config.maxRetries ?? '—'}</dd>
-              <dt className="text-claude-ink-4">{t('monitor_agent_config_tier')}</dt>
-              <dd>{data.config.tier ?? '—'}</dd>
-              <dt className="text-claude-ink-4">{t('monitor_agent_config_max_output')}</dt>
-              <dd className="tabular-nums">{data.config.maxOutputTokens ?? '—'}</dd>
-              <dt className="text-claude-ink-4">{t('monitor_agent_config_prompt_append')}</dt>
-              <dd className="whitespace-pre-wrap">{data.config.promptAppend ?? '—'}</dd>
-            </dl>
-          )}
-          <div className="mt-4 text-claude-ink-4 text-[11px]">
-            {t('monitor_agent_config_readonly')}
-          </div>
+          <AgentConfigEditor
+            agentName={name}
+            initialConfig={data?.config ?? null}
+          />
         </ClaudeCard>
       )}
     </div>

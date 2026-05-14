@@ -445,6 +445,29 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_playback_reset: "重置",
     monitor_playback_speed: "倍速",
     monitor_playback_step_of: "步 / 共",
+
+    // Manage axis — run actions
+    manage_actions_menu: "操作",
+    manage_action_restart: "重新运行",
+    manage_action_cancel: "终止",
+    manage_action_pause: "暂停",
+    manage_action_resume: "恢复",
+    manage_confirm_restart: "重新运行这条 run？将创建新的 run id。",
+    manage_confirm_cancel: "永久终止这条 run？",
+    manage_confirm_pause: "暂停这条 run？",
+    manage_confirm_resume: "恢复这条 run？",
+    manage_reason_placeholder: "理由（可选）",
+    manage_cancel_btn: "取消",
+    manage_confirm_btn: "确认",
+    manage_save: "保存",
+    manage_config_saved: "已保存",
+
+    // Manage axis — agent config editor
+    agent_config_temperature: "温度",
+    agent_config_max_retries: "最大重试",
+    agent_config_tier: "档位",
+    agent_config_max_output_tokens: "输出上限",
+    agent_config_prompt_append: "Prompt 追加",
   },
   en: {
     brand: "Agentic Operator",
@@ -885,6 +908,29 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_playback_reset: "Reset",
     monitor_playback_speed: "Speed",
     monitor_playback_step_of: "of",
+
+    // Manage axis — run actions
+    manage_actions_menu: "Actions",
+    manage_action_restart: "Restart",
+    manage_action_cancel: "Cancel",
+    manage_action_pause: "Pause",
+    manage_action_resume: "Resume",
+    manage_confirm_restart: "Restart this run? A new run id will be assigned.",
+    manage_confirm_cancel: "Cancel this run permanently?",
+    manage_confirm_pause: "Pause this run?",
+    manage_confirm_resume: "Resume this run?",
+    manage_reason_placeholder: "Reason (optional)",
+    manage_cancel_btn: "Cancel",
+    manage_confirm_btn: "Confirm",
+    manage_save: "Save",
+    manage_config_saved: "Saved",
+
+    // Manage axis — agent config editor
+    agent_config_temperature: "Temperature",
+    agent_config_max_retries: "Max retries",
+    agent_config_tier: "Tier",
+    agent_config_max_output_tokens: "Max output tokens",
+    agent_config_prompt_append: "Prompt append",
   },
 };
 

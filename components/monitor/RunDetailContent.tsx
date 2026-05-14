@@ -7,6 +7,7 @@ import { MonitorGraph } from "./MonitorGraph";
 import { ClaudeCard, ClaudeMetric, ClaudeBadge } from "./atoms";
 import { useApp } from "@/lib/i18n";
 import type { MonitorRunDetail } from "@/lib/monitor/types";
+import { RunActionsMenu } from "./RunActionsMenu";
 
 const STATUS_TONE: Record<string, 'accent' | 'ok' | 'err' | 'warn' | 'neutral'> = {
   running:   'accent',
@@ -522,9 +523,18 @@ export function RunDetailContent({ runId }: { runId: string }) {
 
       {/* Run header */}
       <div className="mb-4">
-        <h1 className="text-[24px] font-medium leading-tight">
-          {data?.run.triggerEvent ?? '—'}
-        </h1>
+        <div className="flex items-start justify-between gap-2">
+          <h1 className="text-[24px] font-medium leading-tight">
+            {data?.run.triggerEvent ?? '—'}
+          </h1>
+          {data && (
+            <RunActionsMenu
+              runId={runId}
+              status={data.run.status}
+              onRefresh={() => { /* usePoll auto-refreshes; this is a no-op for now */ }}
+            />
+          )}
+        </div>
         <div className="flex items-center gap-2 mt-1 text-[12.5px] text-claude-ink-3 flex-wrap">
           <code className="tabular-nums">{runId}</code>
           <span>·</span>
