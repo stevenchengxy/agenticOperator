@@ -12,6 +12,7 @@
 // the handler still short-circuits.
 
 import { serve } from 'inngest/next';
+import type { NextRequest } from 'next/server';
 import { inngest } from '@/server/inngest/client';
 import { allFunctions } from '@/server/inngest/functions';
 import { getPausedSlugs } from '@/lib/agent-pause-guard';
@@ -60,17 +61,19 @@ export function invalidateHandlerCache(): void {
   handlerCache.clear();
 }
 
-export async function GET(req: Request): Promise<Response> {
+type RouteContext = { params: Promise<Record<string, string | string[]>> };
+
+export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const h = await pickHandler();
-  return h.GET(req);
+  return h.GET(req, ctx);
 }
 
-export async function POST(req: Request): Promise<Response> {
+export async function POST(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const h = await pickHandler();
-  return h.POST(req);
+  return h.POST(req, ctx);
 }
 
-export async function PUT(req: Request): Promise<Response> {
+export async function PUT(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const h = await pickHandler();
-  return h.PUT(req);
+  return h.PUT(req, ctx);
 }

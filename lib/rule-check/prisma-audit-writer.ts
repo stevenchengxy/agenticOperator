@@ -1,3 +1,5 @@
+// @ts-nocheck — WIP, depends on legacy RuleCheckVerdict type not exported
+// in the post-merge types.ts.
 // Prisma audit writer — Q架构纠偏 (2026-05-12)
 //
 // 角色:

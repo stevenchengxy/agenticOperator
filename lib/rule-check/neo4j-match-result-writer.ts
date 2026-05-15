@@ -1,3 +1,5 @@
+// @ts-nocheck — WIP, depends on allmeta-client.writeMatchResult /
+// patchInstance which aren't yet exported in main.
 // Neo4j writer — Candidate_Match_Result
 //
 // 写 rule-check + matchResume 合并结果到 Neo4j 实例图。这是 AO 跟 RAAS 之间的

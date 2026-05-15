@@ -28,23 +28,57 @@ interface RawRule {
 
 let CACHED_ALL_RULES: Rule[] | null = null;
 
-// 跟 ontology-source.ts:inferSeverityFallback 保持同款正则(逻辑统一)。
-// 调用方在 normalizeRaw 里会拼接 name + criteria + logic 三字段一起扫。
 function inferSeverity(text: string): Severity {
-  if (
-    /(?:立即|直接)?(?:终止|拦截|阻断|拒绝)(?:后续)?(?:匹配|推荐|流程)?|一票否决|不予录用|不予推荐|禁止(?:推荐|跨室)|视为不匹配|标记.{0,8}不匹配/.test(
-      text,
-    )
-  ) {
-    return 'terminal';
-  }
-  if (
-    /立即挂起|暂停|挂起|锁定推荐|待\s?HSM|需\s?HSM|由\s?HSM|发送系统通知|审核提醒|待办任务|人工核查|待确认|招聘专员复核/.test(
-      text,
-    )
-  ) {
-    return 'needs_human';
-  }
+  const TERMINAL = [
+    '立即终止',
+    '立即拦截',
+    '直接终止',
+    '终止匹配流程',
+    '终止后续匹配',
+    '禁止跨室推荐',
+    '判定不予录用',
+    '不予录用',
+    '直接将该候选人标记为"不匹配"并终止',
+    '直接判定为"年龄不匹配"',
+    '直接拒绝',
+    '不提供任何人工审核放行机制',
+    '一票否决',
+    '立即阻断',
+  ];
+  for (const kw of TERMINAL) if (text.includes(kw)) return 'terminal';
+
+  const NEEDS_HUMAN = [
+    '立即挂起',
+    '暂停推荐',
+    '挂起匹配',
+    '挂起该候选人',
+    '暂停该候选人',
+    '暂停后续推荐',
+    '锁定推荐流程',
+    '锁定该候选人',
+    '待HSM确认',
+    '待 HSM 确认',
+    '需HSM判定',
+    '需 HSM 判定',
+    '需 HSM 确认',
+    '需HSM核实',
+    '需 HSM 核实',
+    '由 HSM 判定',
+    '由HSM判定',
+    '仅当HSM',
+    '仅当 HSM',
+    '生成一条',
+    '生成并发送一条',
+    '发送系统通知',
+    '审核提醒',
+    '待办任务',
+    '人工核查',
+    '待确认',
+    '人工核查后决定',
+    '人工核查并备注',
+  ];
+  for (const kw of NEEDS_HUMAN) if (text.includes(kw)) return 'needs_human';
+
   return 'flag_only';
 }
 
@@ -62,10 +96,7 @@ function normalizeRaw(r: RawRule): Rule {
     businessBackgroundReason: r.businessBackgroundReason ?? '',
     ruleSource: r.ruleSource ?? '',
     executor: r.executor,
-    // 扫 name + criteria + logic 三字段(避免漏掉规则名里的"一票否决"等)
-    severity: inferSeverity(
-      `${r.businessLogicRuleName ?? ''}\n${r.submissionCriteria ?? ''}\n${standardizedLogicRule}`,
-    ),
+    severity: inferSeverity(standardizedLogicRule),
   };
 }
 
@@ -115,73 +146,6 @@ export function applyClientFilter(rules: Rule[], dims: OntologyDims): Rule[] {
   return rules.filter((r) => matches(r, dims));
 }
 
-/**
- * 同 applyClientFilter,但额外返回被过滤掉的规则 + 每条的过滤原因。
- * 前端 drawer 用这个证明 "ontology N 条全审视过,M 条因 X 跳过"。
- */
-export function applyClientFilterWithReasons(
-  rules: Rule[],
-  dims: OntologyDims,
-): {
-  kept: Rule[];
-  filtered_out: Array<{
-    rule_id: string;
-    rule_name: string;
-    applicable_client: string;
-    applicable_department: string;
-    executor: string;
-    reason: string;
-  }>;
-} {
-  const kept: Rule[] = [];
-  const filtered_out: Array<{
-    rule_id: string;
-    rule_name: string;
-    applicable_client: string;
-    applicable_department: string;
-    executor: string;
-    reason: string;
-  }> = [];
-
-  for (const r of rules) {
-    if (r.executor !== 'Agent') {
-      filtered_out.push({
-        rule_id: r.id,
-        rule_name: r.businessLogicRuleName,
-        applicable_client: r.applicableClient,
-        applicable_department: r.applicableDepartment,
-        executor: r.executor,
-        reason: `executor="${r.executor}" — 这条规则由人工(${r.executor === 'Human' ? 'HSM/recruiter' : r.executor})执行,不属于 rule-check LLM 范围,跳过`,
-      });
-      continue;
-    }
-    if (r.applicableClient !== '通用' && r.applicableClient !== dims.client_id) {
-      filtered_out.push({
-        rule_id: r.id,
-        rule_name: r.businessLogicRuleName,
-        applicable_client: r.applicableClient,
-        applicable_department: r.applicableDepartment,
-        executor: r.executor,
-        reason: `applicableClient="${r.applicableClient}",本 audit 的 client_id="${dims.client_id ?? '(未知)'}" 不在列,跳过`,
-      });
-      continue;
-    }
-    if (!matchesDepartment(r.applicableDepartment, dims.business_group)) {
-      filtered_out.push({
-        rule_id: r.id,
-        rule_name: r.businessLogicRuleName,
-        applicable_client: r.applicableClient,
-        applicable_department: r.applicableDepartment,
-        executor: r.executor,
-        reason: `applicableDepartment="${r.applicableDepartment}",本 audit 的 business_group="${dims.business_group ?? '(未知)'}" 不在列,跳过`,
-      });
-      continue;
-    }
-    kept.push(r);
-  }
-  return { kept, filtered_out };
-}
-
 function hasDepartmentCondition(r: Rule): boolean {
   const d = r.applicableDepartment.trim();
   return d !== '' && d !== 'N/A' && d !== '通用';
@@ -209,112 +173,42 @@ export function classifyRules(rules: Rule[]): ClassifiedRules {
 }
 
 // ─── client_id / business_group 归一化(来自 RaasRequirement 的扩展字段) ───
-//
-// RAAS getRequirementsAgentView 实际返回的字段(2026-05-12 实测):
-//   client_id: "f592f8ce-..."           ← UUID,推不出客户名
-//   client_name: "腾讯"                  ← 客户中文名,直接用
-//   client_department_id: "654aa45b-..." ← UUID,推不出 BG
-//   first_level_department: "WXG 微信事业群" ← BG 在这里(文本前几个字符)
-//   second_level_department: null        ← studio / 子部门
-//
-// 老 e2e fixtures 用的是 ID 字符串("CLI_TENCENT" / "CLI_TENCENT_IEG_TIANMEI"),
-// 下面的实现保留向后兼容:优先读真实 RAAS 字段,fallback 到老的 ID 字符串解析。
 
-/**
- * 客户标识归一化。优先返回中文客户名:
- *   - "腾讯" / "字节" / "字节跳动" → 原样
- *   - "CLI_TENCENT" / "TENCENT_xxx" → "腾讯"(老 fixture 兼容)
- *   - "CLI_BYTEDANCE" / "BYTE_xxx" → "字节"
- *   - UUID 或未知格式 → 原样返回(rule 过滤会跳客户级规则)
- */
+/** "CLI_TENCENT" → "腾讯", "CLI_BYTEDANCE" → "字节",其余原样。 */
 export function normalizeClientId(id: string): string {
   if (!id) return '';
-  const trimmed = id.trim();
-  // 中文客户名直接放行
-  if (trimmed === '腾讯' || trimmed === '字节' || trimmed === '字节跳动') {
-    return trimmed === '字节跳动' ? '字节' : trimmed;
-  }
-  const upper = trimmed.toUpperCase();
+  const upper = id.toUpperCase();
   if (upper.includes('TENCENT')) return '腾讯';
   if (upper.includes('BYTEDANCE') || upper.includes('BYTE')) return '字节';
-  return trimmed;
+  return id;
 }
 
-const BG_CODES = ['IEG', 'PCG', 'WXG', 'CDG', 'CSIG', 'TEG', 'TIKTOK'] as const;
-
-function bgDisplayName(code: string): string {
-  return code === 'TIKTOK' ? 'TikTok' : code;
-}
-
-/**
- * 在任意字符串里抠 BG 关键字(对应实际 RAAS 字段 `first_level_department`):
- *   "WXG 微信事业群"  → "WXG"
- *   "IEG 互娱事业群"  → "IEG"
- *   "CLI_TENCENT_IEG_TIANMEI" → "IEG"(老 fixture 兼容)
- *
- * 匹配优先级:
- *   1) 以 BG 码开头(允许后跟空格 / 中文)         ← 命中真实 RAAS first_level_department
- *   2) `_BG_` / `_BG` 包裹(老 fixture ID 形式)
- *   3) 全字符串 toUpperCase 后包含 BG token       ← 兜底
- */
-export function deriveBg(text?: string | null): string | null {
-  if (!text) return null;
-  const upper = text.toUpperCase().trim();
-  if (!upper) return null;
-  // ① BG 码开头 — RAAS 风格 "WXG 微信事业群"
-  for (const bg of BG_CODES) {
-    if (upper === bg || upper.startsWith(`${bg} `) || upper.startsWith(`${bg}-`)) {
-      return bgDisplayName(bg);
-    }
-  }
-  // ② `_BG_` / `_BG` 形式 — 老 fixture ID "CLI_TENCENT_IEG_TIANMEI"
-  for (const bg of BG_CODES) {
+/** "CLI_TENCENT_PCG" / "CLI_TENCENT_IEG_TIANMEI" → "PCG" / "IEG"。 */
+export function deriveBgFromDepartmentId(deptId?: string | null): string | null {
+  if (!deptId) return null;
+  const upper = deptId.toUpperCase();
+  for (const bg of ['IEG', 'PCG', 'WXG', 'CDG', 'CSIG', 'TEG', 'TIKTOK']) {
     if (upper.includes(`_${bg}_`) || upper.endsWith(`_${bg}`)) {
-      return bgDisplayName(bg);
+      return bg === 'TIKTOK' ? 'TikTok' : bg;
     }
-  }
-  // ③ 兜底:文本里出现 BG 码作为词边界
-  for (const bg of BG_CODES) {
-    const re = new RegExp(`\\b${bg}\\b`);
-    if (re.test(upper)) return bgDisplayName(bg);
   }
   return null;
 }
 
-/** @deprecated 老接口名,仅 client_department_id 风格 ID 字符串使用。新代码用 `deriveBg`。 */
-export function deriveBgFromDepartmentId(deptId?: string | null): string | null {
-  return deriveBg(deptId);
-}
-
 /** Extract (client × business_group × studio) dims from a RaasRequirement-shaped object. */
 export function extractDims(jr: Record<string, unknown>): OntologyDims {
-  const pickStr = (k: string): string => (typeof jr[k] === 'string' ? (jr[k] as string).trim() : '');
-
-  // ── client_id ─────────────────────────────────────────────────
-  // 优先级: client_name(RAAS 实际字段) > client_id(UUID 或老 fixture ID)
-  const clientName = pickStr('client_name');
-  const clientId = pickStr('client_id');
-  const rawClient = clientName || clientId;
-
-  // ── business_group ────────────────────────────────────────────
-  // 优先级:
-  //   1) client_business_group / business_group(显式字段,partner 后期可能加)
-  //   2) first_level_department(RAAS 实际字段,如 "WXG 微信事业群")
-  //   3) client_department_id 字符串解析(老 fixture 兼容)
-  const explicitBg = pickStr('client_business_group') || pickStr('business_group');
-  const firstLevelDept = pickStr('first_level_department');
-  const deptId = pickStr('client_department_id');
-
-  // ── studio ────────────────────────────────────────────────────
-  // 优先级: client_studio > second_level_department
-  const studio = pickStr('client_studio') || pickStr('second_level_department') || null;
+  const clientId = typeof jr.client_id === 'string' ? jr.client_id : '';
+  const explicitBg =
+    typeof jr.client_business_group === 'string' && jr.client_business_group.trim()
+      ? (jr.client_business_group as string)
+      : null;
+  const deptId = typeof jr.client_department_id === 'string' ? jr.client_department_id : null;
+  const studio =
+    typeof jr.client_studio === 'string' && jr.client_studio.trim() ? (jr.client_studio as string) : null;
 
   return {
-    client_id: normalizeClientId(rawClient),
-    business_group:
-      (explicitBg ? deriveBg(explicitBg) ?? explicitBg : null) ??
-      deriveBg(firstLevelDept) ??
-      deriveBg(deptId),
-    studio: studio || null,
+    client_id: normalizeClientId(clientId),
+    business_group: explicitBg ?? deriveBgFromDepartmentId(deptId),
+    studio,
   };
 }

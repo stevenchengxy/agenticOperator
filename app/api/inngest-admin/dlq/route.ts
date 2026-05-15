@@ -22,7 +22,7 @@ export async function GET(req: Request) {
         status: r.status,
         startedAt: r.startedAt,
         finishedAt: r.finishedAt ?? null,
-        eventId: r.eventID ?? null,
+        eventId: r.eventId ?? null,
         function: r.function,
         durationMs: r.finishedAt
           ? new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()

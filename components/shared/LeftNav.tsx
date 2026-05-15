@@ -71,6 +71,7 @@ export function LeftNav() {
     { type: "item", id: "events",     icon: "bolt",     label: t("nav_events"), href: "/events" },
     { type: "item", id: "triggers",   icon: "clock",    label: t("nav_triggers"), href: "/triggers" },
     { type: "item", id: "correlations", icon: "branch", label: t("nav_correlations"), href: "/correlations" },
+    { type: "item", id: "rule-check", icon: "check",    label: t("nav_rule_check"), href: "/rule-check" },
     { type: "item", id: "alerts",     icon: "alert",    label: t("nav_alerts"),count: "—", href: "/alerts" },
     { type: "group", title: t("nav_group_build") },
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), count: "1", href: "/workflow" },
@@ -78,7 +79,6 @@ export function LeftNav() {
     { type: "group", title: t("nav_group_govern") },
     { type: "item", id: "integrations", icon: "plug",   label: t("nav_integrations"), href: "/datasources" },
     { type: "item", id: "audit",      icon: "book",     label: t("nav_audit"), href: "/audit" },
-    { type: "item", id: "rule-check", icon: "shield",   label: t("nav_rule_check"), href: "/rule-check" },
     { type: "item", id: "permissions",icon: "key",      label: t("nav_permissions"), href: "#" },
     { type: "item", id: "compliance", icon: "shield",   label: t("nav_compliance"), href: "#" },
   ];

@@ -172,3 +172,47 @@ describe('fetchRulesForMatchResume — API path', () => {
     expect(out.api_error).toContain('ECONNREFUSED');
   });
 });
+
+describe('fetchRulesForMatchResume — grouped steps', () => {
+  it('emits steps[] with order, name, description, condition, rules', async () => {
+    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
+    process.env.ONTOLOGY_API_TOKEN = 'tok';
+    mockFetchAction.mockResolvedValueOnce({
+      actionSteps: [
+        {
+          id: '10::s2',
+          name: 'matchHardRequirements',
+          order: '2',
+          description: 'desc 2',
+          condition: 'cond 2',
+          rules: [{ id: '10-5' }, { id: '10-21' }],
+        },
+        {
+          id: '10::s1',
+          name: 'validateRedlineAndBlacklist',
+          order: '1',
+          description: 'desc 1',
+          condition: 'cond 1',
+          rules: [{ id: '10-25' }],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchAction>>);
+
+    const out = await fetchRulesForMatchResume();
+    expect(out.steps).toBeDefined();
+    expect(out.steps).toHaveLength(2);
+    // Ordered by numeric order ascending
+    expect(out.steps![0].name).toBe('validateRedlineAndBlacklist');
+    expect(out.steps![1].name).toBe('matchHardRequirements');
+    expect(out.steps![0].order).toBe(1);
+    expect(out.steps![0].rules.map((r) => r.id)).toEqual(['10-25']);
+    expect(out.steps![1].rules.map((r) => r.id)).toEqual(['10-5', '10-21']);
+  });
+
+  it('omits steps[] when falling back to JSON', async () => {
+    delete process.env.ONTOLOGY_API_BASE; // forces fallback
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('json-fallback');
+    expect(out.steps).toBeUndefined();
+  });
+});

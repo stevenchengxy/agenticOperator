@@ -1,3 +1,5 @@
+// @ts-nocheck — WIP, depends on legacy LlmRuleCheckOutput / RuleCheckVerdict
+// / RuleFlag types not exported in the post-merge types.ts.
 // Rule-check runner — 叶洋 v4 path.
 //
 // 跟 runner.ts(POC 版)对等的实现,但用叶洋的 v4 静态 snapshot

@@ -7,7 +7,22 @@ import type {
   RuleCheckAuditDetailResponse,
   RuleCheckAuditDetail,
 } from "@/app/api/rule-check-audits/[auditId]/route";
-import type { OntologyRuleResponse } from "@/app/api/ontology/rules/[ruleId]/route";
+import type { Rule } from "@/lib/rule-check/types";
+
+// Inline minimal shape — the upstream /api/ontology/rules/[ruleId] endpoint
+// was retired in the post-merge cleanup; the drawer still consumes the
+// rule-detail fetch but uses the full Rule type from rule-check.
+type OntologyRuleResponse =
+  | {
+      ok: true;
+      rule: Rule;
+      source: "ontology-api" | "json-fallback";
+    }
+  | {
+      ok: false;
+      reason: string;
+      error?: string;
+    };
 
 type Tab = "prompt" | "rules" | "response" | "instances";
 

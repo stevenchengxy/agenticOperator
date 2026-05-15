@@ -1,64 +1,57 @@
 // AO-main Inngest function registry.
 //
-// Generates a stub Inngest function for every business agent in AGENT_MAP so
-// that test events (Send Test Event → REQUIREMENT_LOGGED etc.) produce real
-// cascading activity visible in Overview / Fleet / Monitor / Events / Inbox.
+// p4 merge (kenny/steven 2026-05): 原 resume-parser-agent (port 3020) 的
+// 3 个 agent 文件被搬进 server/inngest/agents/。Inngest dev server 至此
+// 只同步一个 SDK 端点，所有 functions 在一个 dashboard 里看见。
 //
-// Each stub:
-//   · registers on the agent's triggersEvents
-//   · writes WorkflowRun + AgentActivity via agent-logger
-//   · handles HITL (creates HumanTask, auto-resolves after STUB_HITL_DELAY_MS)
-//   · emits the agent's next event(s) via em.publish with _runId propagated
+// 主链路（real production agents 3 个）:
+//   REQUIREMENT_LOGGED → createJdAgent       → JD_GENERATED
+//   RESUME_DOWNLOADED  → resumeParserAgent   → RESUME_PROCESSED
+//   RESUME_PROCESSED   → matchResumeAgent    → (RULE_CHECK_* if gated)
+//                                              → MATCH_PASSED_NEED_INTERVIEW
+//
+// 演示用 stub agent（19 个，可选）—— 给 fleet / workflow 可视化页面提供
+// 模拟数据流。Stub 收事件 → 写 AgentActivity → sleep → emit 下游事件 →
+// HITL 节点 5s 后自动 resolve。default OFF for v0_1_010；要开演示设
+// STUB_AGENTS=1。
+//
+// Behavior 轴（2 个）—— Monitor Agent cron 检测异常 + Manager Agent 决策
+// 响应。default OFF for v0_1_010；要开设 BEHAVIOR_AGENTS=1。
 //
 // Env gates:
-//   STUB_AGENTS=0        — disable stubs (e.g. when running real agent runtimes)
-//                          ★ v0_1_010 起默认 = 0(只跑 3 real agent + 0 stub + 0 behavior),
-//                          要恢复 stub 看 fleet/workflow 演示页时再 STUB_AGENTS=1。
-//   STUB_SUCCESS_RATE    — default 0.9  (90 % take the happy path)
-//   STUB_HITL_DELAY_MS   — default 5000 (HITL auto-resolves after 5 s for demo)
-//   STUB_RPA_OWNED=1     — include stubs for RPA-owned wsIds (default OFF)
-//                          Use only in dev/testing isolation; in production the
-//                          real resume-parser-agent handles these events.
-//   BEHAVIOR_AGENTS=0    — disable Monitor + Manager agents (default ON when
-//                          STUB_AGENTS=1, OFF when STUB_AGENTS=0)
+//   STUB_AGENTS=1        — 开启 19 个 stub agents（默认 0，只跑 3 real）
+//   STUB_SUCCESS_RATE    — default 0.9（90% take happy path）
+//   STUB_HITL_DELAY_MS   — default 5000ms（HITL auto-resolve delay）
+//   STUB_RPA_OWNED=1     — 让 stub-factory 也为 wsId 4/9-1/10 生成 stub
+//                          （会跟 real agent 抢同名事件，仅 dev 隔离测试用）
+//   BEHAVIOR_AGENTS=1    — 开启 Monitor + Manager Agent（默认 0）
 
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { createStubAgent } from "./agents/stub-factory";
 import { monitorAgent } from "./agents/monitor-agent";
 import { managerAgent } from "./agents/manager-agent";
 
-// Real production agents (live in resume-parser-agent/). They're authored
-// against RPA's own Inngest client instance (app id "agentic-operator"),
-// but since we serve through AO-main's /api/inngest route, importing them
-// here also exposes them to the Inngest dev server so all 24 functions
-// (19 stub + 2 behavior + 3 real) show up in a single dashboard.
-//
-// IMPORTANT: when RPA is ALSO running as a separate process (port 3020),
-// it serves the same function set under its own /api/inngest route. The
-// Inngest dev server treats them as distinct apps, but both subscribe to
-// the same event names. To avoid double-handling in that scenario, run
-// only one side (or set STUB_AGENTS=0 + disable RPA serve). For local dev
-// where RPA isn't running, this is the only way to see the real handlers.
-import { resumeParserAgent } from "@/resume-parser-agent/lib/inngest/functions/resume-parser-agent";
-import { createJdAgent } from "@/resume-parser-agent/lib/inngest/agents/create-jd-agent";
-import { matchResumeAgent } from "@/resume-parser-agent/lib/inngest/agents/match-resume-agent";
+// Real production agents — 3 functions that actually call RAAS / LLM /
+// MinIO. Live in server/inngest/agents/ after kenny/steven's RPA merge.
+import { resumeParserAgent } from "./agents/resume-parser-agent";
+import { createJdAgent } from "./agents/create-jd-agent";
+import { matchResumeAgent } from "./agents/match-resume-agent";
 
-// wsIds with real Inngest agents in resume-parser-agent (RPA).
-// AO-main must NOT register stubs for these — doing so would cause both the
-// stub AND the real agent to run on the same trigger event (race condition).
+// wsIds owned by the real agents above. Stub-factory MUST skip these to
+// avoid double-handling of trigger events (race condition).
 const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10"]);
 
-// Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation testing).
+// Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation).
 const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
 
-// ★ v0_1_010 default: only run 3 real PRA agents.
-// To restore demo stubs (fleet/workflow visualization), set STUB_AGENTS=1.
+// ★ v0_1_010 defaults: only the 3 real agents register. To restore the
+// fleet / workflow demo flows, set STUB_AGENTS=1 (and BEHAVIOR_AGENTS=1
+// for Monitor + Manager cron / decision agents).
 const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS === "1";
 const BEHAVIOR_AGENTS_ENABLED = process.env.BEHAVIOR_AGENTS === "1";
 
-// Build a stub for every business agent that has at least one trigger event.
+// Build a stub per business agent with at least one trigger event.
 // Chatbot has triggersEvents=[] so it is naturally excluded.
-// RPA-owned wsIds are skipped by default to avoid racing real agents.
 const businessAgents = AGENT_MAP.filter((a) => {
   if (a.short === "Chatbot") return false;
   if (a.triggersEvents.length === 0) return false;
@@ -72,24 +65,23 @@ const stubFunctions = STUB_AGENTS_ENABLED
       .filter((fn): fn is NonNullable<typeof fn> => fn !== null)
   : [];
 
-// Behavior axis agents (Monitor cron + Manager event-driven). Default OFF for v0_1_010.
-const behaviorFunctions = BEHAVIOR_AGENTS_ENABLED ? [monitorAgent, managerAgent] : [];
+const behaviorFunctions = BEHAVIOR_AGENTS_ENABLED
+  ? [monitorAgent, managerAgent]
+  : [];
 
-// Real production agents from resume-parser-agent — the 3 functions that
-// actually call RAAS / LLM / MinIO. Always registered (they ARE the workflow).
 const realFunctions = [resumeParserAgent, createJdAgent, matchResumeAgent];
 
 export const allFunctions = [
+  ...realFunctions,
   ...stubFunctions,
   ...behaviorFunctions,
-  ...realFunctions,
 ];
 
 // Server-side startup log so operators can confirm registration count.
 if (typeof window === "undefined") {
   // eslint-disable-next-line no-console
   console.log(
-    `[inngest] registered ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior + ${realFunctions.length} real agents = ${allFunctions.length} total ` +
+    `[inngest] registered ${realFunctions.length} real + ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior = ${allFunctions.length} total ` +
       `(STUB_AGENTS=${STUB_AGENTS_ENABLED ? "1" : "0"} BEHAVIOR_AGENTS=${BEHAVIOR_AGENTS_ENABLED ? "1" : "0"})`,
   );
 }

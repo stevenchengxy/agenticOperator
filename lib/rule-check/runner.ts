@@ -1,31 +1,77 @@
-// Rule check orchestrator — single entry for matchResumeAgent.
+// Rule check orchestrator — neo4j-aware matchResume evaluation.
 //
-//   buildRuleCheckInput()    -- 组装 5-block input(从 RaasRequirement +
-//                               parsed resume + runtime context)
-//   runRuleCheck()           -- 跑完整 pipeline:dims → 过滤规则 → 投影
-//                               parsed resume(per Kenny §2)→ 渲染 prompt
-//                               → 调 LLM → 折叠成 binary PASS/FAIL verdict
-//                               + 透传 resume_augmentation(per Kenny §3)
-//
-// Binary 折叠规则:
-//   LLM overall_decision="KEEP"  → PASS    (推进 matchResume)
-//   LLM overall_decision="DROP"  → FAIL    (terminal 规则命中,中止)
-//   LLM overall_decision="PAUSE" → FAIL    (需 HSM 复核,暂不推进 matchResume)
-//   LLM 解析失败                 → FAIL    (安全侧,加 parse_error 标记)
+//   buildRuleCheckInput()   -- 5-block input builder (unchanged)
+//   runRuleCheck()          -- full pipeline:
+//     dims → fetch rules → filter → build graph context →
+//     compose prompt → chatComplete (with tools) → fold to MatchResumeCheckResult
 
-import { applyClientFilterWithReasons, classifyRules, extractDims } from './ontology';
-import { runLlm } from './llm';
+import { applyClientFilter, extractDims } from './ontology';
 import { fetchRulesForMatchResume } from './ontology-source';
-import { RULE_CHECK_SYSTEM_PROMPT, composePrompt } from './prompt';
-import { fieldsProjected, projectResume } from './resume-projection';
+import { buildGraphContext, createDispatcher } from './graph-context';
+import {
+  composeMatchResumePrompt,
+  MATCH_RESUME_SYSTEM_PROMPT,
+} from './prompt';
 import type {
-  LlmRuleCheckOutput,
+  MatchResumeCheckResult,
+  MatchResumeCheckStats,
+  MatchResumeStepGroup,
   RuleCheckInput,
   RuleCheckRuntimeContext,
-  RuleCheckVerdict,
-  RuleFlag,
+  RuleExplanation,
+  RuleResult,
+  RuleStatus,
 } from './types';
-import { runRuleCheckYeyang } from './yeyang-runner';
+import { chatComplete } from '@/server/llm/gateway';
+import { ruleCheckLog } from './log';
+
+const TOOL_SCHEMA = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_instance',
+      description: 'Fetch one ontology instance by label + primary key value.',
+      parameters: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          value: { type: 'string' },
+        },
+        required: ['label', 'value'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'list_instances',
+      description: 'List instances of a label filtered by property equality.',
+      parameters: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          filters: { type: 'object', additionalProperties: { type: 'string' } },
+        },
+        required: ['label'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'list_links',
+      description: 'List ontology links by from/to/type filters.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string' },
+          to: { type: 'string' },
+          type: { type: 'string' },
+        },
+      },
+    },
+  },
+];
 
 export interface BuildInputArgs {
   runtime_context: RuleCheckRuntimeContext;
@@ -50,217 +96,338 @@ export function buildRuleCheckInput(args: BuildInputArgs): RuleCheckInput {
   };
 }
 
-function safeIsLlmOutput(x: unknown): x is LlmRuleCheckOutput {
-  if (!x || typeof x !== 'object') return false;
-  const r = x as Record<string, unknown>;
-  // 接受新 binary schema('PASS'/'FAIL') + 老 schema ('KEEP'/'DROP'/'PAUSE')兼容
-  return (
-    r.overall_decision === 'PASS' ||
-    r.overall_decision === 'FAIL' ||
-    r.overall_decision === 'KEEP' ||
-    r.overall_decision === 'DROP' ||
-    r.overall_decision === 'PAUSE'
-  );
-}
 
-function collectHitFlags(out: LlmRuleCheckOutput | null): RuleFlag[] {
-  if (!out || !Array.isArray(out.rule_flags)) return [];
-  // 新 binary:只有 FAIL。老 schema 兼容:REVIEW 也算 hit。
-  return out.rule_flags.filter(
-    (f) =>
-      f.applicable === true &&
-      (f.result === 'FAIL' || (f.result as string) === 'REVIEW'),
-  );
-}
-
-// User spec 2026-05-15: 信息缺失的规则不应触发 FAIL —— 应该自动 NOT_APPLICABLE,
-// 让 RoboHire 决定。即使 LLM 把这种规则错判为 FAIL,这里也强制纠正:
-// 检查 evidence 文本里的关键词("缺", "未提供", "无信息", "无法判定",
-// "MISSING", "UNKNOWN" 等)→ 命中就把 result 翻成 NOT_APPLICABLE。
-// 然后 decision 重新折叠:剩余 FAIL flags 为 0 → PASS。
-const MISSING_INFO_EVIDENCE_RX =
-  /(无信息|缺失|未提供|未列出|未明确|无法判定|无法验证|无法评估|无法确认|未知|不详|空字段|字段为\s*null|MISSING|UNKNOWN|NOT[_ -]?PROVIDED|UNAVAILABLE|INSUFFICIENT|INCOMPLETE|NO[_ -]?DATA|UNDETERMINED|N\/A)/i;
-
-function reconcileMissingInfoFlags(out: LlmRuleCheckOutput | null): {
-  reconciled: LlmRuleCheckOutput | null;
-  reclassifiedCount: number;
-} {
-  if (!out || !Array.isArray(out.rule_flags)) return { reconciled: out, reclassifiedCount: 0 };
-  let count = 0;
-  const reconciledFlags = out.rule_flags.map((f) => {
-    if (
-      (f.result === 'FAIL' || (f.result as string) === 'REVIEW') &&
-      typeof f.evidence === 'string' &&
-      MISSING_INFO_EVIDENCE_RX.test(f.evidence)
-    ) {
-      count++;
-      return {
-        ...f,
-        result: 'NOT_APPLICABLE' as const,
-        applicable: false,
-        evidence: `[auto-reclassified: missing-info → NOT_APPLICABLE] ${f.evidence}`,
-      };
-    }
-    return f;
-  });
+function emptyStats(): MatchResumeCheckStats {
   return {
-    reconciled: { ...out, rule_flags: reconciledFlags },
-    reclassifiedCount: count,
+    total: 0,
+    pass: 0,
+    fail: 0,
+    pending: 0,
+    insufficient_info: 0,
+    not_triggered: 0,
+    not_executed: 0,
   };
 }
 
-function collectFailureReasons(out: LlmRuleCheckOutput | null): string[] {
-  if (!out) return [];
-  const reasons: string[] = [];
-  // 新 schema:failure_reasons 字段
-  if (Array.isArray(out.failure_reasons)) reasons.push(...out.failure_reasons);
-  // 老 schema 兼容:drop_reasons + pause_reasons
-  if (Array.isArray(out.drop_reasons)) reasons.push(...out.drop_reasons);
-  if (Array.isArray(out.pause_reasons)) reasons.push(...out.pause_reasons);
-  return reasons;
+function failSafe(
+  reason: MatchResumeCheckResult['audit']['fail_reason'],
+  base: Partial<MatchResumeCheckResult['audit']> = {},
+  graph_context?: import('./graph-context').GraphContext,
+): MatchResumeCheckResult {
+  return {
+    decision: 'FAIL',
+    stats: emptyStats(),
+    rule_results: [],
+    explanations: [],
+    graph_context,
+    audit: {
+      rules_evaluated: base.rules_evaluated ?? 0,
+      graph_calls: base.graph_calls ?? 0,
+      llm_model: base.llm_model ?? 'unknown',
+      llm_duration_ms: base.llm_duration_ms ?? 0,
+      llm_round_trips: base.llm_round_trips ?? 0,
+      llm_prompt_tokens: base.llm_prompt_tokens,
+      llm_completion_tokens: base.llm_completion_tokens,
+      rule_source: base.rule_source ?? 'json-fallback',
+      fail_reason: reason,
+      raw_llm_text: base.raw_llm_text,
+      llm_finish_reason: base.llm_finish_reason,
+    },
+  };
 }
 
 /**
- * Resume projection 总开关。默认 true(用 partial)。
- * RULE_CHECK_PARTIAL_RESUME=false → 整段 parsed resume 发给 LLM(diagnostic 用)
+ * Strip a leading ```json (or ```) fence and a trailing ``` if present. LLMs
+ * (Gemini especially) often wrap JSON in a markdown code fence even when the
+ * prompt forbids it. This is a single-line tolerance layer.
  */
-function isPartialResumeEnabled(): boolean {
-  return process.env.RULE_CHECK_PARTIAL_RESUME !== 'false';
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  // ```json\n ... \n``` or ```\n ... \n```
+  const m = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (m) return m[1].trim();
+  return trimmed;
 }
 
-/**
- * Pick prompt builder based on env:
- *   RULE_CHECK_PROMPT_SOURCE=yeyang → 叶洋 v4 snapshot (lib/rule-check/yeyang/)
- *   RULE_CHECK_PROMPT_SOURCE=poc (or anything else) → POC composer (default)
- *
- * Read per-invocation (not module-level const) so Inngest cloud toggle 立即生效。
- */
-function getPromptSource(): 'yeyang' | 'poc' {
-  return process.env.RULE_CHECK_PROMPT_SOURCE === 'yeyang' ? 'yeyang' : 'poc';
-}
-
-export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerdict> {
-  if (getPromptSource() === 'yeyang') {
-    return runRuleCheckYeyang(input);
-  }
-
-  const dims = extractDims(input.job_requisition);
-  // Phase 2:rule 列表 source — primary 调 Ontology API,失败 fallback 到 JSON。
-  const sourceResult = await fetchRulesForMatchResume();
-  // (client × business_group) 过滤还是在这边做 — Ontology API 当前不支持
-  // server-side client filter,等 Phase 3 叶洋 v5 + 陈洋 ontology 改动后切换
-  const filterResult = applyClientFilterWithReasons(sourceResult.rules, dims);
-  const filtered = filterResult.kept;
-  const total = sourceResult.rules.length;
-  const classified = classifyRules(filtered);
-
-  // Kenny §2 — partial resume projection。默认开,RULE_CHECK_PARTIAL_RESUME=false
-  // 时退回整段发给 LLM(诊断用,生产不应该用)。
-  //
-  // projectedInput 沿用 input 其他字段(runtime_context / job_requisition /
-  // spec / hsm_feedback),只把 resume 投影成 partial。
-  const projectedResume = isPartialResumeEnabled()
-    ? projectResume(input.resume, filtered)
-    : input.resume;
-  const projectedInput: RuleCheckInput = { ...input, resume: projectedResume };
-  const fieldsUsed = isPartialResumeEnabled() ? fieldsProjected(filtered) : null;
-
-  const userPrompt = composePrompt({ input: projectedInput, classified, dims });
-
-  let llmResult;
+function parseLlmJson(
+  text: string,
+): { decision?: unknown; stats?: unknown; rule_results?: unknown } | null {
+  const cleaned = stripCodeFence(text);
   try {
-    llmResult = await runLlm({
-      system: RULE_CHECK_SYSTEM_PROMPT,
-      user: userPrompt,
-    });
-  } catch (err) {
-    // LLM gateway misconfigured / network error → FAIL-safe(不让 candidate
-    // 偷溜进 matchResume,但保留诊断信息)
-    return {
-      decision: 'FAIL',
-      llm_decision: 'UNKNOWN',
-      failure_reasons: [`llm-call-error:${(err as Error).message.slice(0, 120)}`],
-      hit_flags: [],
-      llm_output: null,
-      audit: {
-        rules_evaluated: filtered.length,
-        rules_total_in_ontology: total,
-        dims,
-        llm_model: 'unknown',
-        llm_duration_ms: 0,
-        raw_text_preview: '',
-        llm_raw_text: '',
-        user_prompt: userPrompt,
-        system_prompt: RULE_CHECK_SYSTEM_PROMPT,
-        parse_error: (err as Error).message,
-        partial_resume_fields: fieldsUsed,
-        rule_source: sourceResult.source,
-        filtered_out_rules: filterResult.filtered_out,
-      },
-    };
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    return parsed as { decision?: unknown; stats?: unknown; rule_results?: unknown };
+  } catch {
+    return null;
   }
+}
 
-  const rawParsed = safeIsLlmOutput(llmResult.parsed_json) ? llmResult.parsed_json : null;
-  const { reconciled: parsed, reclassifiedCount } = reconcileMissingInfoFlags(rawParsed);
-  const llm_decision = parsed?.overall_decision ?? 'UNKNOWN';
-
-  // After reconciliation, re-derive overall_decision from the post-fixup flag set.
-  // If LLM marked overall=FAIL but every "FAIL" flag was actually missing-info
-  // (now NOT_APPLICABLE), the candidate auto-passes → call RoboHire matchResume.
-  let decision: 'PASS' | 'FAIL';
-  if (parsed === null) {
-    decision = 'FAIL';
-  } else {
-    const stillFailing = (parsed.rule_flags ?? []).some(
-      (f) => f.applicable === true && (f.result === 'FAIL' || (f.result as string) === 'REVIEW'),
-    );
-    if (!stillFailing) {
-      decision = 'PASS';
-    } else if (llm_decision === 'PASS' || llm_decision === 'KEEP') {
-      decision = 'PASS';
-    } else {
-      decision = 'FAIL';
+function coerceRuleResults(
+  raw: unknown,
+  steps: MatchResumeStepGroup[],
+): RuleResult[] {
+  // rule_name and step_id are derived server-side from the steps catalog rather
+  // than emitted by the LLM. This saves ~30 tokens per rule entry — critical
+  // when the gateway clamps max_tokens aggressively and we're emitting one
+  // entry per evaluated rule.
+  const lookup = new Map<string, { rule_name: string; step_id: string }>();
+  for (const s of steps) {
+    for (const r of s.rules) {
+      lookup.set(r.id, { rule_name: r.businessLogicRuleName, step_id: s.step_id });
     }
   }
 
-  // Rebuild failure_reasons from POST-reconciliation flags so missing-info
-  // reasons don't leak through.
-  const failure_reasons: string[] =
-    decision === 'FAIL' && parsed
-      ? (parsed.rule_flags ?? [])
-          .filter((f) => f.applicable === true && f.result === 'FAIL')
-          .map((f) => `${f.rule_id}:${f.evidence?.slice(0, 80) ?? 'no evidence'}`)
-      : decision === 'FAIL'
-        ? [`parse-error:${llmResult.parse_error ?? 'no-parsed-json'}`]
-        : [];
+  if (!Array.isArray(raw)) return [];
+  const allowed = new Set<RuleStatus>([
+    'pass',
+    'fail',
+    'pending',
+    'insufficient_info',
+    'not_triggered',
+    'not_executed',
+  ]);
+  const out: RuleResult[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (
+      typeof r.rule_id !== 'string' ||
+      typeof r.status !== 'string' ||
+      !allowed.has(r.status as RuleStatus)
+    ) {
+      continue;
+    }
+    const meta = lookup.get(r.rule_id);
+    if (!meta) continue;
+    const status = r.status as RuleStatus;
+    const reason = typeof r.reason === 'string' ? r.reason : undefined;
+    const reasonRequired = status !== 'pass' && status !== 'not_triggered';
+    if (reasonRequired && !reason) continue;
+    out.push({
+      rule_id: r.rule_id,
+      rule_name: meta.rule_name,
+      step_id: meta.step_id,
+      status,
+      reason,
+    });
+  }
+  return out;
+}
+
+function deriveExplanations(rule_results: RuleResult[]): RuleExplanation[] {
+  return rule_results
+    .filter((r) => r.status !== 'pass' && r.status !== 'not_triggered')
+    .map((r) => ({
+      rule_id: r.rule_id,
+      rule_name: r.rule_name,
+      step_id: r.step_id,
+      status: r.status as RuleExplanation['status'],
+      reason: r.reason ?? '',
+    }));
+}
+
+function statsFromResults(results: RuleResult[]): MatchResumeCheckStats {
+  const s = emptyStats();
+  s.total = results.length;
+  for (const r of results) {
+    if (r.status === 'pass') s.pass++;
+    else if (r.status === 'fail') s.fail++;
+    else if (r.status === 'pending') s.pending++;
+    else if (r.status === 'insufficient_info') s.insufficient_info++;
+    else if (r.status === 'not_triggered') s.not_triggered++;
+    else if (r.status === 'not_executed') s.not_executed++;
+  }
+  return s;
+}
+
+function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['decision'] {
+  if (stats.fail > 0) return 'FAIL';
+  if (stats.pending > 0 || stats.insufficient_info > 0) return 'REVIEW';
+  return 'PASS';
+}
+
+export type RunRuleCheckOptions = {
+  /** Override the gateway's default model for this call only. */
+  model?: string;
+};
+
+export async function runRuleCheck(
+  input: RuleCheckInput,
+  opts: RunRuleCheckOptions = {},
+): Promise<MatchResumeCheckResult> {
+  const dims = extractDims(input.job_requisition);
+  let sourceResult;
+  try {
+    sourceResult = await fetchRulesForMatchResume();
+  } catch (err) {
+    // Defensive: ontology-source today absorbs all errors internally and falls
+    // back to JSON, but the contract isn't enforced. Surface as a fail-safe.
+    return failSafe('llm-call-error', {});
+  }
+  const filtered = applyClientFilter(sourceResult.rules, dims);
+
+  // Build the filtered Set groups by intersecting fetched steps with `filtered`.
+  const filteredIds = new Set(filtered.map((r) => r.id));
+  const filteredSteps: MatchResumeStepGroup[] = (sourceResult.steps ?? [])
+    .map((s) => ({ ...s, rules: s.rules.filter((r) => filteredIds.has(r.id)) }))
+    .filter((s) => s.rules.length > 0);
+  const expectedRuleCount = filteredSteps.reduce(
+    (sum, s) => sum + s.rules.length,
+    0,
+  );
+
+  ruleCheckLog.info('runRuleCheck.start', {
+    candidate_id: input.runtime_context.candidate_id,
+    resume_id: input.runtime_context.resume_id,
+    job_requisition_id: input.job_requisition.job_requisition_id,
+    model_override: opts.model,
+    expected_rule_count: expectedRuleCount,
+    rule_source: sourceResult.source,
+  });
+
+  // Pre-fetch graph context. Surface 401/502 as ontology-graph-unavailable.
+  let graph;
+  try {
+    graph = await buildGraphContext({
+      candidate_id: input.runtime_context.candidate_id,
+      job_requisition_id:
+        (input.job_requisition.job_requisition_id as string | undefined) ?? '',
+    });
+    ruleCheckLog.data('neo4j.graph.fetched', {
+      candidate_id: input.runtime_context.candidate_id,
+      fetch_count: graph.fetch_count,
+      slots: {
+        candidate: graph.candidate,
+        resume: graph.resume,
+        job_requisition: graph.job_requisition,
+        applications: graph.applications,
+        blacklist_hits: graph.blacklist_hits,
+        employment_links: graph.employment_links,
+      },
+    });
+  } catch (err) {
+    ruleCheckLog.error('neo4j.graph.failed', {
+      candidate_id: input.runtime_context.candidate_id,
+      message: (err as Error).message,
+    });
+    return failSafe('ontology-graph-unavailable', {
+      rules_evaluated: expectedRuleCount,
+      rule_source: sourceResult.source,
+    });
+  }
+
+  // resume now lives in graph.resume; the prompt no longer reads input.resume.
+  const userPrompt = composeMatchResumePrompt({
+    input,
+    graph,
+    steps: filteredSteps,
+  });
+
+  const dispatcher = createDispatcher(graph);
+
+  ruleCheckLog.data('llm.request', {
+    model: opts.model ?? null,
+    system_chars: MATCH_RESUME_SYSTEM_PROMPT.length,
+    user_chars: userPrompt.length,
+    user_prompt: userPrompt,
+    rules_in_prompt: expectedRuleCount,
+  });
+
+  let llmResult;
+  try {
+    llmResult = await chatComplete({
+      system: MATCH_RESUME_SYSTEM_PROMPT,
+      user: userPrompt,
+      // Rule check emits one rule_results entry per evaluated rule. With
+      // 20-40 rules surviving the client filter (and each entry carrying a
+      // Chinese-language reason — more bytes per token than English), the
+      // output regularly exceeds 8000 tokens. 16k handles ~40 rules with
+      // headroom; bump to 32k+ if deployments routinely have >60 rules.
+      maxTokens: 16000,
+      model: opts.model,
+      // temperature + extra_body (Kimi thinking-disable) are model-aware in
+      // the gateway; we let chatComplete pick the right defaults so the same
+      // code works for Kimi K2.6 AND Gemini-3-flash-preview without changes.
+      tools: {
+        schema: TOOL_SCHEMA,
+        onToolCall: dispatcher,
+        maxIterations: 5,
+      },
+    });
+  } catch (err) {
+    const msg = (err as Error).message ?? '';
+    const reason: MatchResumeCheckResult['audit']['fail_reason'] = /tool-use loop/.test(msg)
+      ? 'tool-use-loop-exceeded'
+      : 'llm-call-error';
+    ruleCheckLog.error('llm.failed', { reason, message: msg });
+    return failSafe(reason, {
+      rules_evaluated: expectedRuleCount,
+      graph_calls: graph.fetch_count,
+      rule_source: sourceResult.source,
+    });
+  }
+
+  ruleCheckLog.data('llm.response', {
+    model: llmResult.modelUsed,
+    duration_ms: llmResult.durationMs,
+    tool_rounds: llmResult.toolUseIterations,
+    finish_reason: llmResult.finishReason,
+    prompt_tokens: llmResult.usage?.promptTokens,
+    completion_tokens: llmResult.usage?.completionTokens,
+    text: llmResult.text,
+  });
+
+  const parsed = parseLlmJson(llmResult.text);
+  const auditOnError = {
+    rules_evaluated: expectedRuleCount,
+    graph_calls: graph.fetch_count,
+    llm_model: llmResult.modelUsed,
+    llm_duration_ms: llmResult.durationMs,
+    llm_round_trips: llmResult.toolUseIterations,
+    llm_prompt_tokens: llmResult.usage?.promptTokens,
+    llm_completion_tokens: llmResult.usage?.completionTokens,
+    rule_source: sourceResult.source,
+    // Keep up to 50k so the test-suite report can show the full response.
+    raw_llm_text: llmResult.text?.slice(0, 50000),
+    llm_finish_reason: llmResult.finishReason,
+  };
+  if (!parsed) {
+    ruleCheckLog.error('parse.failed', { reason: 'not-json' });
+    return failSafe('parse-error', auditOnError, graph);
+  }
+
+  const ruleResults = coerceRuleResults(parsed.rule_results, filteredSteps);
+  if (ruleResults.length !== expectedRuleCount) {
+    ruleCheckLog.error('parse.count-mismatch', {
+      expected: expectedRuleCount, got: ruleResults.length,
+    });
+    return failSafe('parse-error', auditOnError, graph);
+  }
+
+  const stats = statsFromResults(ruleResults);
+  const explanations = deriveExplanations(ruleResults);
+  const decision = foldDecision(stats);
+  ruleCheckLog.info('runRuleCheck.done', {
+    candidate_id: input.runtime_context.candidate_id,
+    decision, stats, expected_rule_count: expectedRuleCount,
+  });
 
   return {
     decision,
-    llm_decision,
-    failure_reasons,
-    hit_flags: collectHitFlags(parsed),
-    resume_augmentation:
-      typeof parsed?.resume_augmentation === 'string' && parsed.resume_augmentation.trim()
-        ? parsed.resume_augmentation
-        : undefined,
-    llm_output: parsed,
+    stats,
+    rule_results: ruleResults,
+    explanations,
+    graph_context: graph,
     audit: {
-      rules_evaluated: filtered.length,
-      rules_total_in_ontology: total,
-      dims,
-      llm_model: llmResult.model_used,
-      llm_duration_ms: llmResult.duration_ms,
-      llm_prompt_tokens: llmResult.prompt_tokens,
-      llm_completion_tokens: llmResult.completion_tokens,
-      raw_text_preview: llmResult.raw_text.slice(0, 500),
-      llm_raw_text: llmResult.raw_text,
-      user_prompt: userPrompt,
-      system_prompt: RULE_CHECK_SYSTEM_PROMPT,
-      parse_error: llmResult.parse_error,
-      partial_resume_fields: fieldsUsed,
+      rules_evaluated: expectedRuleCount,
+      graph_calls: graph.fetch_count,
+      llm_model: llmResult.modelUsed,
+      llm_duration_ms: llmResult.durationMs,
+      llm_round_trips: llmResult.toolUseIterations,
+      llm_prompt_tokens: llmResult.usage?.promptTokens,
+      llm_completion_tokens: llmResult.usage?.completionTokens,
       rule_source: sourceResult.source,
-      filtered_out_rules: filterResult.filtered_out,
-      missing_info_reclassified_count: reclassifiedCount,
+      llm_finish_reason: llmResult.finishReason,
     },
   };
 }
