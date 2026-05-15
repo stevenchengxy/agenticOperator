@@ -3,10 +3,11 @@ import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeSectionTitle, ClaudeBadge } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { formatTime } from "./i18n-utils";
 import type { MonitorFailureDetailResponse } from "@/lib/monitor/types";
 
 export function FailureDetailContent({ runId }: { runId: string }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const [data, setData] = React.useState<MonitorFailureDetailResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -61,7 +62,7 @@ export function FailureDetailContent({ runId }: { runId: string }) {
               <ul className="text-[12.5px]">
                 {data.retries.map((a: MonitorFailureDetailResponse['retries'][number]) => (
                   <li key={a.id}>
-                    <span className="text-claude-ink-4 tabular-nums mr-2">{new Date(a.createdAt).toLocaleTimeString()}</span>
+                    <span className="text-claude-ink-4 tabular-nums mr-2">{formatTime(a.createdAt, lang)}</span>
                     <span className="text-claude-ink-1">{a.agentName}</span>
                     <span className="text-claude-ink-3 ml-1">{a.type}: {a.narrative}</span>
                   </li>

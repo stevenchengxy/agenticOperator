@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ClaudeCard, ClaudeChip, ClaudeBadge } from "./atoms";
 import { usePoll } from "@/lib/monitor/usePoll";
 import { useApp } from "@/lib/i18n";
+import { queueBucketLabel, statusLabel } from "./i18n-utils";
 import type { MonitorQueueResponse, MonitorQueueEventRow, MonitorQueueDlqRow } from "@/lib/monitor/types";
 
 const BUCKETS = ['accepted', 'pending', 'rejected', 'dlq'] as const;
@@ -38,7 +39,7 @@ function QueueContentInner() {
       <div className="flex items-center gap-2 mb-4">
         {BUCKETS.map(b => (
           <ClaudeChip key={b} active={bucket === b} onClick={() => setBucket(b)}>
-            {b}{data && data.bucket === b ? ` (${data.total})` : ''}
+            {queueBucketLabel(b, t)}{data && data.bucket === b ? ` (${data.total})` : ''}
           </ClaudeChip>
         ))}
       </div>
@@ -55,7 +56,9 @@ function QueueContentInner() {
                 <ClaudeBadge tone="err" size="xs">DLQ</ClaudeBadge>
                 <code className="text-claude-ink-1">{r.eventName}</code>
                 <span className="text-claude-ink-3 truncate">{r.reason}</span>
-                <span className="ml-auto text-claude-ink-4 tabular-nums">retry {r.retries}</span>
+                <span className="ml-auto text-claude-ink-4 tabular-nums">
+                  {t('monitor_queue_retries').replace('{n}', String(r.retries))}
+                </span>
               </li>
             ))}
           </ul>
@@ -64,11 +67,11 @@ function QueueContentInner() {
           <table className="w-full text-[12.5px]">
             <thead className="text-claude-ink-4">
               <tr>
-                <th className="text-left py-1">Event</th>
-                <th className="text-left py-1">Source</th>
-                <th className="text-left py-1">Status</th>
-                <th className="text-left py-1">Rejection</th>
-                <th className="text-right py-1">When</th>
+                <th className="text-left py-1">{t('monitor_queue_col_event')}</th>
+                <th className="text-left py-1">{t('monitor_queue_col_source')}</th>
+                <th className="text-left py-1">{t('monitor_queue_col_status')}</th>
+                <th className="text-left py-1">{t('monitor_queue_col_rejection')}</th>
+                <th className="text-right py-1">{t('monitor_queue_col_when')}</th>
               </tr>
             </thead>
             <tbody>
@@ -77,7 +80,7 @@ function QueueContentInner() {
                   <td className="py-1"><code className="text-claude-ink-1">{r.name}</code></td>
                   <td className="py-1 text-claude-ink-3">{r.source}</td>
                   <td className="py-1">
-                    <ClaudeBadge tone={r.status === 'accepted' ? 'ok' : 'err'} size="xs">{r.status}</ClaudeBadge>
+                    <ClaudeBadge tone={r.status === 'accepted' ? 'ok' : 'err'} size="xs">{statusLabel(r.status, t)}</ClaudeBadge>
                   </td>
                   <td className="py-1 text-claude-ink-3 truncate">{r.rejectionReason ?? '—'}</td>
                   <td className="py-1 text-right text-claude-ink-4 tabular-nums">{new Date(r.ts).toLocaleString()}</td>
@@ -92,11 +95,12 @@ function QueueContentInner() {
 }
 
 export function QueueContent() {
+  const { t } = useApp();
   return (
     <React.Suspense fallback={
       <div className="p-6 max-w-[1200px] mx-auto">
-        <h1 className="text-[24px] font-medium mb-4">Event queue</h1>
-        <p className="text-claude-ink-3 text-[12.5px]">Loading…</p>
+        <h1 className="text-[24px] font-medium mb-4">{t('monitor_queue_title')}</h1>
+        <p className="text-claude-ink-3 text-[12.5px]">{t('monitor_loading')}</p>
       </div>
     }>
       <QueueContentInner />

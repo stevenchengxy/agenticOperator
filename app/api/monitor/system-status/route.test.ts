@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/server/db', () => ({
   prisma: {
     emSystemStatus: { findUnique: vi.fn() },
-    raasMessage: { count: vi.fn(), findFirst: vi.fn() },
   },
 }));
 
@@ -34,13 +33,14 @@ const emPopulated = {
 describe('GET /api/monitor/system-status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     (prisma.emSystemStatus.findUnique as any).mockResolvedValue(emEmpty);
-    (prisma.raasMessage.count as any).mockResolvedValue(0);
-    (prisma.raasMessage.findFirst as any).mockResolvedValue(null);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
   });
 
-  it('empty EmSystemStatus row → all subsystems return unknown or sensible defaults; no crash', async () => {
+  it('empty EmSystemStatus row + no RAAS_API_BASE_URL → all subsystems return unknown or sensible defaults; no crash', async () => {
+    vi.stubEnv('RAAS_API_BASE_URL', '');
+
     const res = await GET();
     expect(res.status).toBe(200);
     const j = await res.json();
@@ -59,7 +59,8 @@ describe('GET /api/monitor/system-status', () => {
     const raas = j.subsystems.find((s: any) => s.id === 'raas');
     expect(raas).toBeDefined();
     expect(raas.state).toBe('unknown');
-    expect(raas.metrics[0].value).toBe('0');
+    expect(raas.metrics.find((m: any) => m.label === 'endpoint').value).toBe('—');
+    expect(raas.metrics.find((m: any) => m.label === 'http status').value).toBe('—');
 
     const inngest = j.subsystems.find((s: any) => s.id === 'inngest');
     expect(inngest).toBeDefined();
@@ -67,15 +68,12 @@ describe('GET /api/monitor/system-status', () => {
     expect(inngest.state).toBe('healthy');
   });
 
-  // ── Test 2: Populated EmSystemStatus row → reflect actual values ──
+  // ── Test 2: Populated EM row + reachable RaaS API → reflect actual values ──
 
-  it('populated EmSystemStatus row → subsystems reflect actual values', async () => {
+  it('populated EmSystemStatus row + reachable RAAS API → subsystems reflect actual values', async () => {
+    vi.stubEnv('RAAS_API_BASE_URL', 'http://raas.example.com:3001');
     (prisma.emSystemStatus.findUnique as any).mockResolvedValue(emPopulated);
-    (prisma.raasMessage.count as any).mockResolvedValue(17);
-    (prisma.raasMessage.findFirst as any).mockResolvedValue({
-      receivedAt: '2026-05-14T10:30:00.000Z',
-      classification: 'matched_valid',
-    });
+    // Inngest + RaaS both probed via fetch; suite default returns 200.
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -96,23 +94,26 @@ describe('GET /api/monitor/system-status', () => {
 
     const raas = j.subsystems.find((s: any) => s.id === 'raas');
     expect(raas.state).toBe('healthy');
-    expect(raas.lastUpdate).toBe('2026-05-14T10:30:00.000Z');
-    expect(raas.metrics.find((m: any) => m.label === '24h received').value).toBe('17');
-    expect(raas.metrics.find((m: any) => m.label === 'recent classification').value).toBe('matched_valid');
+    expect(raas.metrics.find((m: any) => m.label === 'endpoint').value).toBe('raas.example.com:3001');
+    expect(raas.metrics.find((m: any) => m.label === 'http status').value).toBe('200');
   });
 
-  // ── Test 3: Inngest probe failure → inngest.state='down', others OK ─
+  // ── Test 3: RaaS probe failure → raas.state='down', others OK ─
 
-  it('Inngest probe failure → inngest.state=down, other subsystems still return', async () => {
+  it('RAAS API probe failure → raas.state=down, other subsystems still return', async () => {
+    vi.stubEnv('RAAS_API_BASE_URL', 'http://raas.example.com:3001');
     (prisma.emSystemStatus.findUnique as any).mockResolvedValue(emPopulated);
-    (prisma.raasMessage.count as any).mockResolvedValue(5);
-    (prisma.raasMessage.findFirst as any).mockResolvedValue(null);
-    // Stub global fetch to reject (simulating Inngest down)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    // Stub global fetch to reject (simulating both probes down)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
 
     const res = await GET();
     expect(res.status).toBe(200);
     const j = await res.json();
+
+    const raas = j.subsystems.find((s: any) => s.id === 'raas');
+    expect(raas.state).toBe('down');
+    expect(raas.metrics.find((m: any) => m.label === 'endpoint').value).toBe('raas.example.com:3001');
+    expect(raas.metrics.find((m: any) => m.label === 'http status').value).toBe('—');
 
     const inngest = j.subsystems.find((s: any) => s.id === 'inngest');
     expect(inngest.state).toBe('down');

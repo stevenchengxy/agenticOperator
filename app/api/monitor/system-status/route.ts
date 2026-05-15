@@ -70,43 +70,64 @@ async function buildEmHealth(): Promise<SubsystemHealth> {
   }
 }
 
-async function buildRaasHealth(): Promise<SubsystemHealth> {
+async function probeRaasApi(): Promise<SubsystemHealth> {
+  const probeTime = new Date().toISOString();
+  const baseUrl = process.env.RAAS_API_BASE_URL ?? '';
+  const endpointLabel = baseUrl
+    ? baseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+    : '—';
+
+  if (!baseUrl) {
+    return {
+      id: 'raas',
+      label: 'RaaS API',
+      state: 'unknown',
+      lastUpdate: probeTime,
+      metrics: [
+        { label: 'endpoint', value: endpointLabel },
+        { label: 'http status', value: '—' },
+      ],
+      detail: 'RAAS_API_BASE_URL not configured.',
+    };
+  }
+
   try {
-    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-    const [count24h, latestRow] = await Promise.all([
-      prisma.raasMessage.count({
-        where: { receivedAt: { gte: since24h } },
-      }).catch(() => null),
-      prisma.raasMessage.findFirst({
-        orderBy: { receivedAt: 'desc' },
-      }).catch(() => null),
-    ]);
-
-    const state: 'healthy' | 'unknown' = (count24h !== null && count24h > 0) ? 'healthy' : 'unknown';
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), 2_000);
+    let status = 0;
+    try {
+      const res = await fetch(baseUrl, {
+        method: 'HEAD',
+        signal: ac.signal,
+        cache: 'no-store',
+      });
+      status = res.status;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     return {
       id: 'raas',
-      label: 'RaaS Bridge',
-      state,
-      lastUpdate: latestRow?.receivedAt ?? null,
+      label: 'RaaS API',
+      state: status > 0 ? 'healthy' : 'down',
+      lastUpdate: probeTime,
       metrics: [
-        { label: '24h received', value: count24h !== null ? String(count24h) : '—' },
-        { label: 'recent classification', value: latestRow?.classification ?? '—' },
+        { label: 'endpoint', value: endpointLabel },
+        { label: 'http status', value: status > 0 ? String(status) : '—' },
       ],
-      detail: 'External Kafka inbound · classified via gateway filter rules.',
+      detail: 'RAAS API Server reachability probe.',
     };
   } catch {
     return {
       id: 'raas',
-      label: 'RaaS Bridge',
-      state: 'unknown',
-      lastUpdate: null,
+      label: 'RaaS API',
+      state: 'down',
+      lastUpdate: probeTime,
       metrics: [
-        { label: '24h received', value: '—' },
-        { label: 'recent classification', value: '—' },
+        { label: 'endpoint', value: endpointLabel },
+        { label: 'http status', value: '—' },
       ],
-      detail: 'External Kafka inbound · classified via gateway filter rules.',
+      detail: 'RAAS API Server unreachable (network error or timeout).',
     };
   }
 }
@@ -198,7 +219,7 @@ async function probeInngest(): Promise<SubsystemHealth> {
 export async function GET(): Promise<Response> {
   const [em, raas, neo4j, inngest] = await Promise.all([
     buildEmHealth(),
-    buildRaasHealth(),
+    probeRaasApi(),
     buildNeo4jHealth(),
     probeInngest(),
   ]);

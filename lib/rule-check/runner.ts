@@ -1,0 +1,266 @@
+// Rule check orchestrator — single entry for matchResumeAgent.
+//
+//   buildRuleCheckInput()    -- 组装 5-block input(从 RaasRequirement +
+//                               parsed resume + runtime context)
+//   runRuleCheck()           -- 跑完整 pipeline:dims → 过滤规则 → 投影
+//                               parsed resume(per Kenny §2)→ 渲染 prompt
+//                               → 调 LLM → 折叠成 binary PASS/FAIL verdict
+//                               + 透传 resume_augmentation(per Kenny §3)
+//
+// Binary 折叠规则:
+//   LLM overall_decision="KEEP"  → PASS    (推进 matchResume)
+//   LLM overall_decision="DROP"  → FAIL    (terminal 规则命中,中止)
+//   LLM overall_decision="PAUSE" → FAIL    (需 HSM 复核,暂不推进 matchResume)
+//   LLM 解析失败                 → FAIL    (安全侧,加 parse_error 标记)
+
+import { applyClientFilterWithReasons, classifyRules, extractDims } from './ontology';
+import { runLlm } from './llm';
+import { fetchRulesForMatchResume } from './ontology-source';
+import { RULE_CHECK_SYSTEM_PROMPT, composePrompt } from './prompt';
+import { fieldsProjected, projectResume } from './resume-projection';
+import type {
+  LlmRuleCheckOutput,
+  RuleCheckInput,
+  RuleCheckRuntimeContext,
+  RuleCheckVerdict,
+  RuleFlag,
+} from './types';
+import { runRuleCheckYeyang } from './yeyang-runner';
+
+export interface BuildInputArgs {
+  runtime_context: RuleCheckRuntimeContext;
+  parsed_resume: Record<string, unknown> | null | undefined;
+  job_requisition: Record<string, unknown>;
+  job_requisition_specification?: Record<string, unknown> | null;
+  hsm_feedback?: Record<string, unknown> | null;
+}
+
+export function buildRuleCheckInput(args: BuildInputArgs): RuleCheckInput {
+  const jr = args.job_requisition;
+  const jrid =
+    typeof jr.job_requisition_id === 'string' && jr.job_requisition_id.trim()
+      ? (jr.job_requisition_id as string)
+      : '';
+  return {
+    runtime_context: args.runtime_context,
+    resume: args.parsed_resume ?? {},
+    job_requisition: { ...jr, job_requisition_id: jrid },
+    job_requisition_specification: args.job_requisition_specification ?? null,
+    hsm_feedback: args.hsm_feedback ?? null,
+  };
+}
+
+function safeIsLlmOutput(x: unknown): x is LlmRuleCheckOutput {
+  if (!x || typeof x !== 'object') return false;
+  const r = x as Record<string, unknown>;
+  // 接受新 binary schema('PASS'/'FAIL') + 老 schema ('KEEP'/'DROP'/'PAUSE')兼容
+  return (
+    r.overall_decision === 'PASS' ||
+    r.overall_decision === 'FAIL' ||
+    r.overall_decision === 'KEEP' ||
+    r.overall_decision === 'DROP' ||
+    r.overall_decision === 'PAUSE'
+  );
+}
+
+function collectHitFlags(out: LlmRuleCheckOutput | null): RuleFlag[] {
+  if (!out || !Array.isArray(out.rule_flags)) return [];
+  // 新 binary:只有 FAIL。老 schema 兼容:REVIEW 也算 hit。
+  return out.rule_flags.filter(
+    (f) =>
+      f.applicable === true &&
+      (f.result === 'FAIL' || (f.result as string) === 'REVIEW'),
+  );
+}
+
+// User spec 2026-05-15: 信息缺失的规则不应触发 FAIL —— 应该自动 NOT_APPLICABLE,
+// 让 RoboHire 决定。即使 LLM 把这种规则错判为 FAIL,这里也强制纠正:
+// 检查 evidence 文本里的关键词("缺", "未提供", "无信息", "无法判定",
+// "MISSING", "UNKNOWN" 等)→ 命中就把 result 翻成 NOT_APPLICABLE。
+// 然后 decision 重新折叠:剩余 FAIL flags 为 0 → PASS。
+const MISSING_INFO_EVIDENCE_RX =
+  /(无信息|缺失|未提供|未列出|未明确|无法判定|无法验证|无法评估|无法确认|未知|不详|空字段|字段为\s*null|MISSING|UNKNOWN|NOT[_ -]?PROVIDED|UNAVAILABLE|INSUFFICIENT|INCOMPLETE|NO[_ -]?DATA|UNDETERMINED|N\/A)/i;
+
+function reconcileMissingInfoFlags(out: LlmRuleCheckOutput | null): {
+  reconciled: LlmRuleCheckOutput | null;
+  reclassifiedCount: number;
+} {
+  if (!out || !Array.isArray(out.rule_flags)) return { reconciled: out, reclassifiedCount: 0 };
+  let count = 0;
+  const reconciledFlags = out.rule_flags.map((f) => {
+    if (
+      (f.result === 'FAIL' || (f.result as string) === 'REVIEW') &&
+      typeof f.evidence === 'string' &&
+      MISSING_INFO_EVIDENCE_RX.test(f.evidence)
+    ) {
+      count++;
+      return {
+        ...f,
+        result: 'NOT_APPLICABLE' as const,
+        applicable: false,
+        evidence: `[auto-reclassified: missing-info → NOT_APPLICABLE] ${f.evidence}`,
+      };
+    }
+    return f;
+  });
+  return {
+    reconciled: { ...out, rule_flags: reconciledFlags },
+    reclassifiedCount: count,
+  };
+}
+
+function collectFailureReasons(out: LlmRuleCheckOutput | null): string[] {
+  if (!out) return [];
+  const reasons: string[] = [];
+  // 新 schema:failure_reasons 字段
+  if (Array.isArray(out.failure_reasons)) reasons.push(...out.failure_reasons);
+  // 老 schema 兼容:drop_reasons + pause_reasons
+  if (Array.isArray(out.drop_reasons)) reasons.push(...out.drop_reasons);
+  if (Array.isArray(out.pause_reasons)) reasons.push(...out.pause_reasons);
+  return reasons;
+}
+
+/**
+ * Resume projection 总开关。默认 true(用 partial)。
+ * RULE_CHECK_PARTIAL_RESUME=false → 整段 parsed resume 发给 LLM(diagnostic 用)
+ */
+function isPartialResumeEnabled(): boolean {
+  return process.env.RULE_CHECK_PARTIAL_RESUME !== 'false';
+}
+
+/**
+ * Pick prompt builder based on env:
+ *   RULE_CHECK_PROMPT_SOURCE=yeyang → 叶洋 v4 snapshot (lib/rule-check/yeyang/)
+ *   RULE_CHECK_PROMPT_SOURCE=poc (or anything else) → POC composer (default)
+ *
+ * Read per-invocation (not module-level const) so Inngest cloud toggle 立即生效。
+ */
+function getPromptSource(): 'yeyang' | 'poc' {
+  return process.env.RULE_CHECK_PROMPT_SOURCE === 'yeyang' ? 'yeyang' : 'poc';
+}
+
+export async function runRuleCheck(input: RuleCheckInput): Promise<RuleCheckVerdict> {
+  if (getPromptSource() === 'yeyang') {
+    return runRuleCheckYeyang(input);
+  }
+
+  const dims = extractDims(input.job_requisition);
+  // Phase 2:rule 列表 source — primary 调 Ontology API,失败 fallback 到 JSON。
+  const sourceResult = await fetchRulesForMatchResume();
+  // (client × business_group) 过滤还是在这边做 — Ontology API 当前不支持
+  // server-side client filter,等 Phase 3 叶洋 v5 + 陈洋 ontology 改动后切换
+  const filterResult = applyClientFilterWithReasons(sourceResult.rules, dims);
+  const filtered = filterResult.kept;
+  const total = sourceResult.rules.length;
+  const classified = classifyRules(filtered);
+
+  // Kenny §2 — partial resume projection。默认开,RULE_CHECK_PARTIAL_RESUME=false
+  // 时退回整段发给 LLM(诊断用,生产不应该用)。
+  //
+  // projectedInput 沿用 input 其他字段(runtime_context / job_requisition /
+  // spec / hsm_feedback),只把 resume 投影成 partial。
+  const projectedResume = isPartialResumeEnabled()
+    ? projectResume(input.resume, filtered)
+    : input.resume;
+  const projectedInput: RuleCheckInput = { ...input, resume: projectedResume };
+  const fieldsUsed = isPartialResumeEnabled() ? fieldsProjected(filtered) : null;
+
+  const userPrompt = composePrompt({ input: projectedInput, classified, dims });
+
+  let llmResult;
+  try {
+    llmResult = await runLlm({
+      system: RULE_CHECK_SYSTEM_PROMPT,
+      user: userPrompt,
+    });
+  } catch (err) {
+    // LLM gateway misconfigured / network error → FAIL-safe(不让 candidate
+    // 偷溜进 matchResume,但保留诊断信息)
+    return {
+      decision: 'FAIL',
+      llm_decision: 'UNKNOWN',
+      failure_reasons: [`llm-call-error:${(err as Error).message.slice(0, 120)}`],
+      hit_flags: [],
+      llm_output: null,
+      audit: {
+        rules_evaluated: filtered.length,
+        rules_total_in_ontology: total,
+        dims,
+        llm_model: 'unknown',
+        llm_duration_ms: 0,
+        raw_text_preview: '',
+        llm_raw_text: '',
+        user_prompt: userPrompt,
+        system_prompt: RULE_CHECK_SYSTEM_PROMPT,
+        parse_error: (err as Error).message,
+        partial_resume_fields: fieldsUsed,
+        rule_source: sourceResult.source,
+        filtered_out_rules: filterResult.filtered_out,
+      },
+    };
+  }
+
+  const rawParsed = safeIsLlmOutput(llmResult.parsed_json) ? llmResult.parsed_json : null;
+  const { reconciled: parsed, reclassifiedCount } = reconcileMissingInfoFlags(rawParsed);
+  const llm_decision = parsed?.overall_decision ?? 'UNKNOWN';
+
+  // After reconciliation, re-derive overall_decision from the post-fixup flag set.
+  // If LLM marked overall=FAIL but every "FAIL" flag was actually missing-info
+  // (now NOT_APPLICABLE), the candidate auto-passes → call RoboHire matchResume.
+  let decision: 'PASS' | 'FAIL';
+  if (parsed === null) {
+    decision = 'FAIL';
+  } else {
+    const stillFailing = (parsed.rule_flags ?? []).some(
+      (f) => f.applicable === true && (f.result === 'FAIL' || (f.result as string) === 'REVIEW'),
+    );
+    if (!stillFailing) {
+      decision = 'PASS';
+    } else if (llm_decision === 'PASS' || llm_decision === 'KEEP') {
+      decision = 'PASS';
+    } else {
+      decision = 'FAIL';
+    }
+  }
+
+  // Rebuild failure_reasons from POST-reconciliation flags so missing-info
+  // reasons don't leak through.
+  const failure_reasons: string[] =
+    decision === 'FAIL' && parsed
+      ? (parsed.rule_flags ?? [])
+          .filter((f) => f.applicable === true && f.result === 'FAIL')
+          .map((f) => `${f.rule_id}:${f.evidence?.slice(0, 80) ?? 'no evidence'}`)
+      : decision === 'FAIL'
+        ? [`parse-error:${llmResult.parse_error ?? 'no-parsed-json'}`]
+        : [];
+
+  return {
+    decision,
+    llm_decision,
+    failure_reasons,
+    hit_flags: collectHitFlags(parsed),
+    resume_augmentation:
+      typeof parsed?.resume_augmentation === 'string' && parsed.resume_augmentation.trim()
+        ? parsed.resume_augmentation
+        : undefined,
+    llm_output: parsed,
+    audit: {
+      rules_evaluated: filtered.length,
+      rules_total_in_ontology: total,
+      dims,
+      llm_model: llmResult.model_used,
+      llm_duration_ms: llmResult.duration_ms,
+      llm_prompt_tokens: llmResult.prompt_tokens,
+      llm_completion_tokens: llmResult.completion_tokens,
+      raw_text_preview: llmResult.raw_text.slice(0, 500),
+      llm_raw_text: llmResult.raw_text,
+      user_prompt: userPrompt,
+      system_prompt: RULE_CHECK_SYSTEM_PROMPT,
+      parse_error: llmResult.parse_error,
+      partial_resume_fields: fieldsUsed,
+      rule_source: sourceResult.source,
+      filtered_out_rules: filterResult.filtered_out,
+      missing_info_reclassified_count: reclassifiedCount,
+    },
+  };
+}

@@ -105,7 +105,7 @@ export function RunActionsMenu({ runId, status, onRefresh }: Props) {
           </div>
           {(pending === 'restart' || pending === 'replay') && (
             <div className="mb-2 text-[11.5px] text-claude-warn bg-claude-warn/10 rounded px-2 py-1.5">
-              This will re-trigger downstream work. Ensure idempotency or check for duplicate output.
+              {t('monitor_detail_retry_warning')}
             </div>
           )}
           <input

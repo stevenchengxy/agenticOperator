@@ -6,6 +6,7 @@ import { usePoll } from "@/lib/monitor/usePoll";
 import { MonitorGraph } from "./MonitorGraph";
 import { ClaudeCard, ClaudeMetric, ClaudeBadge } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { formatTime, statusLabel } from "./i18n-utils";
 import type { MonitorRunDetail } from "@/lib/monitor/types";
 import { RunActionsMenu } from "./RunActionsMenu";
 
@@ -189,14 +190,10 @@ function TimelineRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { lang } = useApp();
   const chip = getChip(entry.type);
   const canExpand = hasExpandableMetadata(entry);
-  const timeStr = new Date(entry.ts).toLocaleTimeString('en-US', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  const timeStr = formatTime(entry.ts, lang);
 
   return (
     <li
@@ -360,7 +357,7 @@ function RunNotFound({ runId }: { runId: string }) {
 // ── Main component ─────────────────────────────────────────────────
 
 export function RunDetailContent({ runId }: { runId: string }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const { data, error, httpStatus } = usePoll<MonitorRunDetail>(
     `/api/monitor/runs/${encodeURIComponent(runId)}`,
     4_000,
@@ -547,7 +544,7 @@ export function RunDetailContent({ runId }: { runId: string }) {
           <span>·</span>
           {data && (
             <ClaudeBadge tone={STATUS_TONE[data.run.status] ?? 'neutral'}>
-              {data.run.status}
+              {statusLabel(data.run.status, t)}
             </ClaudeBadge>
           )}
           {data?.run.startedAt && (
@@ -647,9 +644,7 @@ export function RunDetailContent({ runId }: { runId: string }) {
                 {totalSteps}
                 {trailSteps[stepIndex]?.enteredAt && (
                   <span className="ml-1 text-claude-ink-4">
-                    · {new Date(trailSteps[stepIndex].enteredAt).toLocaleTimeString('en-US', {
-                        hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
-                      })}
+                    · {formatTime(trailSteps[stepIndex].enteredAt, lang)}
                   </span>
                 )}
               </span>
@@ -721,7 +716,7 @@ export function RunDetailContent({ runId }: { runId: string }) {
                 className="py-2 text-[12.5px]"
               >
                 <span className="text-claude-ink-4 tabular-nums mr-2">
-                  {new Date(e.ts).toLocaleTimeString()}
+                  {formatTime(e.ts, lang)}
                 </span>
                 <code className="text-claude-ink-1">{e.name}</code>
                 <span className="text-claude-ink-4 ml-2">{e.source}</span>
@@ -782,11 +777,11 @@ export function RunDetailContent({ runId }: { runId: string }) {
               {data!.hitl.map(h => (
                 <li key={h.taskId} className="py-2 text-[12.5px] flex items-center gap-2">
                   <ClaudeBadge tone={h.status === 'pending' ? 'warn' : 'ok'} size="xs">
-                    {h.status}
+                    {statusLabel(h.status, t)}
                   </ClaudeBadge>
                   <span className="text-claude-ink-1">{h.title}</span>
                   <span className="text-claude-ink-4 ml-auto">
-                    {new Date(h.createdAt).toLocaleString()}
+                    {formatTime(h.createdAt, lang)}
                   </span>
                 </li>
               ))}

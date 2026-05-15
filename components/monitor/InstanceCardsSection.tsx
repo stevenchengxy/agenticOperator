@@ -4,6 +4,7 @@ import { usePoll } from "@/lib/monitor/usePoll";
 import { InstanceCard } from "./InstanceCard";
 import { ClaudeChip, ClaudeBadge, ClaudeButton } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { formatRelativeTime, statusLabel } from "./i18n-utils";
 import type { InstanceCard as InstanceCardType, MonitorInstancesResponse } from "@/lib/monitor/types";
 
 // ── Batch action types ──────────────────────────────────────────────────────
@@ -28,6 +29,10 @@ function BatchActionButton({
   const [toast, setToast] = React.useState<string | null>(null);
 
   const labelKey = `monitor_batch_${action}_all` as const;
+  const actionLabel =
+    action === "cancel" ? t("manage_action_cancel")
+    : action === "pause" ? t("manage_action_pause")
+    : t("manage_action_resume");
 
   const handleConfirm = async () => {
     setLoading(true);
@@ -77,7 +82,7 @@ function BatchActionButton({
             <p className="text-[14px] text-claude-ink-1 font-medium mb-3">
               {t("monitor_batch_confirm")
                 .replace("{n}", String(runIds.length))
-                .replace("{action}", action)}
+                .replace("{action}", actionLabel)}
             </p>
             <input
               type="text"
@@ -114,6 +119,7 @@ const STATUS_ORDER = ['running', 'paused', 'suspended', 'failed', 'completed'];
 function groupItems(
   items: InstanceCardType[],
   groupBy: GroupBy,
+  t: (key: string) => string,
 ): Array<{ label: string; cards: InstanceCardType[] }> {
   const map = new Map<string, InstanceCardType[]>();
 
@@ -121,9 +127,9 @@ function groupItems(
     let key: string;
     if (groupBy === 'status') key = card.status;
     else if (groupBy === 'trigger') key = card.triggerEvent;
-    else if (groupBy === 'candidate') key = card.candidateName ?? card.candidateId ?? 'Unknown';
-    else if (groupBy === 'jd') key = card.jdTitle ?? card.jdId ?? 'Unknown';
-    else key = card.client ?? 'Unknown';
+    else if (groupBy === 'candidate') key = card.candidateName ?? card.candidateId ?? t('status_unknown');
+    else if (groupBy === 'jd') key = card.jdTitle ?? card.jdId ?? t('status_unknown');
+    else key = card.client ?? t('status_unknown');
 
     const list = map.get(key) ?? [];
     list.push(card);
@@ -143,7 +149,7 @@ function groupItems(
   }
 
   return keys.map((k) => ({
-    label: k,
+    label: groupBy === 'status' ? statusLabel(k, t) : k,
     cards: map.get(k)!,
   }));
 }
@@ -164,15 +170,6 @@ function groupLatestActivity(cards: InstanceCardType[]): string | null {
   return latest;
 }
 
-function relTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h`;
-}
-
 // ── Component ──────────────────────────────────────────────────────
 
 export function InstanceCardsSection({
@@ -185,7 +182,7 @@ export function InstanceCardsSection({
   /** When true, shows top cards in a horizontal scroll strip instead of the full 3-col grid. */
   compact?: boolean;
 }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const [scope, setScope] = React.useState<'live' | 'recent'>('live');
   const [groupBy, setGroupBy] = React.useState<GroupBy>('status');
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
@@ -228,7 +225,7 @@ export function InstanceCardsSection({
   // In compact mode: flatten all items, take top 6, show as horizontal scroll
   const compactItems = React.useMemo(() => filteredItems.slice(0, 6), [filteredItems]);
 
-  const groups = React.useMemo(() => groupItems(filteredItems, groupBy), [filteredItems, groupBy]);
+  const groups = React.useMemo(() => groupItems(filteredItems, groupBy, t), [filteredItems, groupBy, t]);
   const total = data?.total ?? 0;
   const isFiltered = searchQuery.trim().length > 0;
 
@@ -249,11 +246,11 @@ export function InstanceCardsSection({
           )}
         </div>
         {error && (
-          <p className="text-claude-err text-[11px] mb-1 flex-shrink-0">Error</p>
+          <p className="text-claude-err text-[11px] mb-1 flex-shrink-0">{t('monitor_polling_error')} {error}</p>
         )}
         {compactItems.length === 0 ? (
           <div className="text-claude-ink-4 text-[12px] py-4 text-center flex-1">
-            {scope === 'live' ? 'No live instances.' : 'No recent runs.'}
+            {scope === 'live' ? t('monitor_empty_live_instances') : t('monitor_empty_recent_runs')}
           </div>
         ) : (
           <div className="flex gap-2 overflow-x-auto flex-1 pb-1">
@@ -296,7 +293,7 @@ export function InstanceCardsSection({
         <button
           type="button"
           onClick={refresh}
-          title="Refresh now"
+          title={t('monitor_refresh_now')}
           className="text-claude-ink-4 hover:text-claude-ink-2 transition-colors text-[14px] leading-none"
         >
           ↺
@@ -349,7 +346,7 @@ export function InstanceCardsSection({
 
       {error && (
         <p className="text-claude-err text-[12px] mb-3">
-          Polling error: {error}
+          {t('monitor_polling_error')} {error}
         </p>
       )}
 
@@ -357,15 +354,15 @@ export function InstanceCardsSection({
       {allItems.length === 0 && !error && (
         <div className="text-claude-ink-4 text-[13px] py-8 text-center border border-dashed border-claude-line rounded-[10px]">
           {scope === 'live'
-            ? 'No live instances. Click Send Test Event to trigger one.'
-            : 'No recently completed runs in the last hour.'}
+            ? t('monitor_empty_live_instances_cta')
+            : t('monitor_empty_recent_runs_hour')}
         </div>
       )}
 
       {/* Filtered empty state */}
       {allItems.length > 0 && filteredItems.length === 0 && (
         <div className="text-claude-ink-4 text-[13px] py-8 text-center border border-dashed border-claude-line rounded-[10px]">
-          No instances match &ldquo;{searchQuery}&rdquo;.
+          {t('monitor_empty_no_match').replace('{q}', searchQuery)}
         </div>
       )}
 
@@ -385,7 +382,7 @@ export function InstanceCardsSection({
                     {group.cards.length} {t("monitor_instances_in_flight")}
                   </ClaudeBadge>
                   {latestAt && (
-                    <span className="text-[10.5px] text-claude-ink-4">{relTime(latestAt)}</span>
+                    <span className="text-[10.5px] text-claude-ink-4">{formatRelativeTime(latestAt, lang, false)}</span>
                   )}
                   {triggers.map(ev => (
                     <ClaudeBadge key={ev} tone="neutral" size="xs">{ev}</ClaudeBadge>

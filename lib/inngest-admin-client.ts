@@ -1,0 +1,385 @@
+// Inngest dev server admin client.
+//
+// Talks to the local Inngest dev server (default :8288). Used by /api/inngest/*
+// proxy routes for the monitoring UI to:
+//   - list registered functions
+//   - list recent runs (filterable by function)
+//   - look up a single run's history (step trace)
+//   - list events
+//   - retry a failed run
+//   - pause / resume a function (where supported)
+//
+// In prod this would point at Inngest Cloud's REST API instead; the env var
+// `INNGEST_ADMIN_URL` controls the base URL.
+
+const BASE = process.env.INNGEST_ADMIN_URL ?? 'http://localhost:8288';
+
+// ★ Monitoring scope filter:
+//   AO 的监控页面只关心 agentic-operator-main app 的 functions,
+//   不监控 raas-backend / 其他第三方 app(他们由各自团队负责)。
+//
+//   过滤在 listFunctions / listRecentRuns 等核心 client 函数里统一应用,
+//   所有下游 API endpoint(functions / runs / dlq / flows / agents/[slug])
+//   自然继承这个 scope。运维 / 调试可设 `MONITORED_APP_PREFIX=` 关闭过滤。
+const MONITORED_APP_PREFIX =
+  process.env.MONITORED_APP_PREFIX ?? 'agentic-operator-main';
+
+function isMonitoredSlug(slug: string | undefined): boolean {
+  if (!MONITORED_APP_PREFIX) return true; // empty prefix = monitor all
+  if (!slug) return false;
+  return slug.startsWith(MONITORED_APP_PREFIX);
+}
+
+// ─────────────────────────────────────────────────────────────
+// REST: events
+// ─────────────────────────────────────────────────────────────
+
+export type InngestEvent = {
+  id: string;
+  internal_id?: string;
+  name: string;
+  data: unknown;
+  ts?: number;
+  received_at?: string;
+};
+
+export type InngestRun = {
+  run_id: string;
+  run_started_at?: string;
+  ended_at?: string | null;
+  status: 'Running' | 'Completed' | 'Failed' | 'Cancelled';
+  output?: unknown;
+  function_id?: string;
+  event_id?: string;
+};
+
+async function restGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const url = `${BASE}${path}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(`Inngest REST ${res.status} ${path}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function listEvents(limit = 50): Promise<InngestEvent[]> {
+  const body = await restGet<{ data: InngestEvent[] }>(`/v1/events?limit=${limit}`);
+  return body.data ?? [];
+}
+
+export async function getEventRuns(eventId: string): Promise<InngestRun[]> {
+  const body = await restGet<{ data: InngestRun[] }>(`/v1/events/${encodeURIComponent(eventId)}/runs`);
+  return body.data ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────
+// GraphQL: function list + run history (only available on /v0/gql)
+// ─────────────────────────────────────────────────────────────
+
+async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`${BASE}/v0/gql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables }),
+  });
+  const body = await res.json();
+  if (body.errors) {
+    throw new Error(`Inngest GraphQL: ${JSON.stringify(body.errors)}`);
+  }
+  return body.data as T;
+}
+
+export type InngestFunction = {
+  id: string;
+  name: string;
+  slug: string;
+  concurrency?: number;
+  triggers: Array<{ type: string; value: string }>;
+  url?: string;
+  appID?: string;
+};
+
+export async function listFunctions(): Promise<InngestFunction[]> {
+  const data = await gql<{ apps: Array<{ name?: string; functions: InngestFunction[] }> }>(`
+    { apps { name functions { id name slug concurrency triggers { type value } url appID } } }
+  `);
+  const all = data.apps?.flatMap((a) => a.functions ?? []) ?? [];
+  // ★ Filter to monitored app prefix only (default: agentic-operator-main).
+  return all.filter((f) => isMonitoredSlug(f.slug));
+}
+
+export async function listRecentRuns(opts: { limit?: number; functionSlug?: string; sinceHours?: number } = {}): Promise<
+  Array<{
+    id: string;
+    status: string;
+    startedAt: string;
+    finishedAt?: string;
+    function: { name: string; slug: string };
+    eventName?: string;
+    /** Triggering event id — used by the Runs list "↺ rerun" button to call the replay endpoint. */
+    eventId?: string;
+  }>
+> {
+  const limit = opts.limit ?? 50;
+  const sinceHours = opts.sinceHours ?? 24;
+  const now = new Date();
+  const from = new Date(now.getTime() - sinceHours * 3600_000);
+  const fromIso = from.toISOString();
+  const untilIso = now.toISOString();
+  // Inngest v1.19+ uses runs(filter:, orderBy:) with V2 RunsConnection.
+  const data = await gql<{ runs: { edges: Array<{ node: unknown }> } }>(`
+    {
+      runs(
+        first: ${limit},
+        orderBy: [{ field: STARTED_AT, direction: DESC }],
+        filter: { from: "${fromIso}", until: "${untilIso}", timeField: STARTED_AT }
+      ) {
+        edges {
+          node {
+            id status startedAt endedAt eventName
+            triggerIDs
+            function { name slug }
+          }
+        }
+      }
+    }
+  `);
+  const runs = (data.runs?.edges ?? []).map((e) => e.node) as Array<{
+    id: string;
+    status: string;
+    startedAt: string;
+    endedAt?: string | null;
+    eventName?: string;
+    triggerIDs?: string[] | null;
+    function: { name: string; slug: string };
+  }>;
+  // ★ Scope filter: monitored app prefix only (drops raas-backend etc.).
+  const monitored = runs.filter((r) => isMonitoredSlug(r.function?.slug));
+  const filtered = opts.functionSlug
+    ? monitored.filter((r) => r.function?.slug === opts.functionSlug)
+    : monitored;
+  // Normalize status (v2 returns COMPLETED uppercase) → match REST API casing.
+  return filtered.map((r) => ({
+    id: r.id,
+    status: titleCase(r.status),
+    startedAt: r.startedAt,
+    finishedAt: r.endedAt ?? undefined,
+    function: r.function,
+    eventName: r.eventName,
+    // FunctionRunV2.triggerIDs holds the event id(s) that triggered this run.
+    // For single-event runs (the common case) it's a 1-element array; for
+    // batched runs there can be N. We use the first one for the "rerun"
+    // button — re-emitting any trigger event re-fires the function.
+    eventId: Array.isArray(r.triggerIDs) && r.triggerIDs.length > 0 ? r.triggerIDs[0] : undefined,
+  }));
+}
+
+function titleCase(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+export async function getRunHistory(runId: string): Promise<{
+  id: string;
+  status: string;
+  startedAt: string;
+  finishedAt?: string;
+  output?: unknown;
+  function: { name: string; slug: string };
+  event?: { id: string; name: string; payload: string; createdAt: string };
+  history: Array<{
+    type: string;
+    stepName?: string | null;
+    attempt: number;
+    createdAt: string;
+  }>;
+}> {
+  const data = await gql<{ functionRun: unknown }>(`
+    {
+      functionRun(query: { functionRunId: "${runId}" }) {
+        id status startedAt finishedAt output
+        function { name slug }
+        event { id name payload createdAt }
+        history { type stepName attempt createdAt }
+      }
+    }
+  `);
+  return data.functionRun as never;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Flow grouping (Level 4 — per-candidate × per-JD process trace)
+// ─────────────────────────────────────────────────────────────
+
+export type FlowGroupKey = {
+  upload_id?: string;
+  job_requisition_id?: string;
+  candidate_id?: string;
+};
+
+/** Derive a stable flow id from event payload. Returns:
+ *   - `upload:<upload_id>`  if upload_id present (resume side)
+ *   - `jr:<job_req_id>`     if only JR id present (JD side)
+ *   - `evt:<event_id>`      fallback when neither (each event is its own "flow")
+ */
+export function deriveFlowId(eventPayload: Record<string, unknown> | null, eventId: string): string {
+  if (eventPayload) {
+    const uploadId =
+      (eventPayload.upload_id as string | undefined) ||
+      ((eventPayload.payload as Record<string, unknown> | undefined)?.upload_id as
+        | string
+        | undefined);
+    if (uploadId) return `upload:${uploadId}`;
+    const jrId =
+      (eventPayload.job_requisition_id as string | undefined) ||
+      (eventPayload.entity_id as string | undefined) ||
+      ((eventPayload.payload as Record<string, unknown> | undefined)?.job_requisition_id as
+        | string
+        | undefined);
+    if (jrId) return `jr:${jrId}`;
+  }
+  return `evt:${eventId}`;
+}
+
+/** Pull a friendly label from the event payload (candidate name, JR title, etc.) */
+export function flowLabel(eventPayload: Record<string, unknown> | null): {
+  candidateName?: string;
+  jdTitle?: string;
+  candidateId?: string;
+  jrId?: string;
+} {
+  if (!eventPayload) return {};
+  const parsed = (eventPayload.parsed as Record<string, unknown> | undefined)?.data as
+    | Record<string, unknown>
+    | undefined;
+  const candidateName = (parsed?.name as string | undefined) ?? undefined;
+  const payload = eventPayload.payload as Record<string, unknown> | undefined;
+  const raw = payload?.raw_input_data as Record<string, unknown> | undefined;
+  const jdTitle =
+    (raw?.prompt as string | undefined)?.slice(0, 40) ??
+    ((payload?.client_job_title as string) ?? undefined);
+  const candidateId =
+    (eventPayload.candidate_id as string | undefined) ??
+    (payload?.candidate_id as string | undefined);
+  const jrId =
+    (eventPayload.job_requisition_id as string | undefined) ??
+    (eventPayload.entity_id as string | undefined) ??
+    (payload?.job_requisition_id as string | undefined);
+  return { candidateName, jdTitle, candidateId, jrId };
+}
+
+/** List runs for a function with their event payload parsed. */
+export async function listRunsWithEvents(
+  functionSlug: string,
+  opts: { limit?: number; sinceHours?: number } = {},
+): Promise<
+  Array<{
+    runId: string;
+    status: string;
+    startedAt: string;
+    finishedAt?: string;
+    durationMs: number | null;
+    eventName: string;
+    eventId: string;
+    eventPayload: Record<string, unknown> | null;
+    flowId: string;
+    label: ReturnType<typeof flowLabel>;
+  }>
+> {
+  const runs = await listRecentRuns({ limit: opts.limit ?? 100, functionSlug, sinceHours: opts.sinceHours });
+  // For each run we need event payload — fetch via GraphQL
+  const enriched = await Promise.all(
+    runs.map(async (r) => {
+      let eventPayload: Record<string, unknown> | null = null;
+      let eventId = '';
+      let eventName = r.eventName ?? '';
+      try {
+        const data = await gql<{ functionRun: { event: { id: string; name: string; payload: string } | null } }>(`
+          { functionRun(query: { functionRunId: "${r.id}" }) { event { id name payload } } }
+        `);
+        const ev = data.functionRun?.event;
+        if (ev) {
+          eventId = ev.id;
+          eventName = ev.name;
+          try {
+            eventPayload = JSON.parse(ev.payload) as Record<string, unknown>;
+          } catch {
+            eventPayload = null;
+          }
+        }
+      } catch {
+        // soft fail
+      }
+      const flowId = deriveFlowId(eventPayload, eventId || r.id);
+      return {
+        runId: r.id,
+        status: r.status,
+        startedAt: r.startedAt,
+        finishedAt: r.finishedAt,
+        durationMs:
+          r.finishedAt && r.startedAt
+            ? new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()
+            : null,
+        eventName,
+        eventId,
+        eventPayload,
+        flowId,
+        label: flowLabel(eventPayload),
+      };
+    }),
+  );
+  return enriched;
+}
+
+/** Group runs by flowId, sorted by latest activity. */
+export function groupRunsByFlow<T extends { flowId: string; startedAt: string }>(
+  runs: T[],
+): Array<{ flowId: string; runs: T[]; latestStartedAt: string }> {
+  const groups = new Map<string, T[]>();
+  for (const r of runs) {
+    const arr = groups.get(r.flowId) ?? [];
+    arr.push(r);
+    groups.set(r.flowId, arr);
+  }
+  return Array.from(groups.entries())
+    .map(([flowId, arr]) => ({
+      flowId,
+      runs: arr.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()),
+      latestStartedAt: arr[0].startedAt,
+    }))
+    .sort((a, b) => new Date(b.latestStartedAt).getTime() - new Date(a.latestStartedAt).getTime());
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mutations
+// ─────────────────────────────────────────────────────────────
+
+/** Re-emit the same event payload to trigger a fresh run. */
+export async function replayEvent(eventId: string): Promise<{ newEventId: string }> {
+  // Inngest doesn't have a "replay" REST endpoint in dev server; the cleanest
+  // way is to fetch the original event payload and re-send it via /e/test.
+  const evRes = await fetch(`${BASE}/v1/events/${encodeURIComponent(eventId)}`);
+  if (!evRes.ok) throw new Error(`event ${eventId} not found`);
+  const evBody = (await evRes.json()) as { data: InngestEvent };
+  const orig = evBody.data;
+  const sendRes = await fetch(`${BASE}/e/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: orig.name, data: orig.data, replay_of: eventId }),
+  });
+  const sendBody = (await sendRes.json()) as { ids?: string[] };
+  return { newEventId: sendBody.ids?.[0] ?? '' };
+}
+
+/** Send a fresh event with arbitrary payload (used by /events page "Send Test"). */
+export async function sendEvent(name: string, data: unknown): Promise<{ id: string }> {
+  const res = await fetch(`${BASE}/e/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, data }),
+  });
+  const body = (await res.json()) as { ids?: string[] };
+  return { id: body.ids?.[0] ?? '' };
+}
+
+/** Dev server doesn't have pause/resume API; we track agent state in our own DB. */

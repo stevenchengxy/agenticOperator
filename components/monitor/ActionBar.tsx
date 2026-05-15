@@ -50,9 +50,15 @@ export function ActionBar({
     setSending(label);
     try {
       const r = await fetch(ep, { method: "POST" });
-      setToast(r.ok ? `Sent ${label}` : `Failed: ${label} (HTTP ${r.status})`);
+      setToast(
+        r.ok
+          ? t("monitor_action_toast_sent").replace("{label}", label)
+          : t("monitor_action_toast_failed")
+              .replace("{label}", label)
+              .replace("{status}", String(r.status)),
+      );
     } catch (e) {
-      setToast(`Failed: ${label} — ${(e as Error).message}`);
+      setToast(`${t("monitor_send_event_failed").replace("{message}", label)} — ${(e as Error).message}`);
     } finally {
       setSending(null);
       setMenuOpen(false);

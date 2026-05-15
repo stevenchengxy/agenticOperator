@@ -1,0 +1,36 @@
+{
+  "id": "JD-106",
+  "title": "AI 算法工程师 (大模型方向)",
+  "company": "MiniMax",
+  "department": "基础模型 - Foundation Model",
+  "location": "上海市闵行区紫星路999号",
+  "salary": "50K-90K · 16薪",
+  "type": "全职",
+  "experience": "3-6年",
+  "education": "硕士及以上",
+  "headcount": 4,
+  "urgency": "紧急",
+  "description": "参与万亿参数大模型预训练、对齐 (RLHF/DPO)、推理优化全链路工作。",
+  "responsibilities": [
+    "大模型预训练数据构造、清洗、采样策略",
+    "RLHF / DPO / Constitutional AI 等对齐算法实现与优化",
+    "推理侧的 KV-cache / 量化 / 投机解码 等性能优化",
+    "前沿论文跟踪与复现,在内部基线模型上做迭代"
+  ],
+  "requirements": [
+    "硕士及以上,CS / 数学 / 物理 / 统计相关专业",
+    "熟悉 PyTorch,有 Transformer / GPT 系列模型实战经验",
+    "ICLR / NeurIPS / ACL / EMNLP 一作论文 1 篇以上",
+    "熟悉分布式训练 (DeepSpeed / Megatron / FSDP)"
+  ],
+  "nice_to_have": [
+    "开源模型 / 数据集贡献者",
+    "ACM / Kaggle 获奖经历"
+  ],
+  "benefits": [
+    "六险一金",
+    "16 薪 + 期权",
+    "GPU 算力无限制",
+    "顶会差旅全包"
+  ]
+}

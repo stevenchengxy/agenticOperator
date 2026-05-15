@@ -3,6 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeBadge } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { stageLabel, statusLabel } from "./i18n-utils";
 import type { InstanceCard as InstanceCardType } from "@/lib/monitor/types";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ export function InstanceCard({
   const tone = STATUS_TONE[card.status] ?? 'neutral';
   const dotColor = STATUS_DOT_COLOR[card.status] ?? 'bg-claude-ink-4';
   const elapsed = elapsedLabel(card.startedAt);
-  const stageChip = card.currentStage ? (STAGE_LABELS[card.currentStage] ?? card.currentStage.toUpperCase()) : null;
+  const stageChip = stageLabel(card.currentStage, t) ?? (card.currentStage ? (STAGE_LABELS[card.currentStage] ?? card.currentStage.toUpperCase()) : null);
 
   return (
     <Link
@@ -117,7 +118,7 @@ export function InstanceCard({
             type="button"
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); onToggleSelect(); }}
             className="absolute top-2 left-2 w-4 h-4 rounded border border-claude-line bg-claude-surface flex items-center justify-center text-claude-accent"
-            aria-label="Select"
+            aria-label={t("monitor_batch_selected").replace("{n}", "1")}
           >
             {selected && (
               <svg width="10" height="10" viewBox="0 0 10 10">
@@ -136,7 +137,7 @@ export function InstanceCard({
           </span>
           {/* Status pill */}
           <ClaudeBadge tone={tone} size="xs">
-            {card.status}
+            {statusLabel(card.status, t)}
           </ClaudeBadge>
         </div>
 
@@ -192,7 +193,7 @@ export function InstanceCard({
             {card.hasFailure && (
               <span className="text-[11px] text-claude-err font-medium">⛔ {t("monitor_card_failure")}</span>
             )}
-            <span className="ml-auto text-claude-ink-4 text-[13px] font-medium">Open →</span>
+            <span className="ml-auto text-claude-ink-4 text-[13px] font-medium">{t("monitor_open")}</span>
           </div>
         ) : (
           <div className="flex justify-end">

@@ -96,7 +96,20 @@ export const createJdAgent = inngest.createFunction(
       { event: 'JD_REJECTED' },
     ],
   },
-  async ({ event, step, logger }) => {
+  async ({ event, step, logger, runId }) => {
+    // ── Evidence capture context (real flowId built per-step from requisitionId below)
+    const SLUG = 'agentic-operator-main-create-jd-agent';
+
+    // v0_1_010: pause guard — operator can toggle via /workflow-agents UI.
+    const paused = await step.run('check-pause', async () => {
+      const { isAgentPaused } = await import('../../../../lib/agent-pause-guard');
+      return isAgentPaused('agentic-operator-main-create-jd-agent');
+    });
+    if (paused) {
+      logger.info(`[${AGENT_NAME}] paused — short-circuit (no-op)`);
+      return { ok: true, paused: true };
+    }
+
     if (!isRaasApiConfigured()) {
       throw new NonRetriableError(
         `[${AGENT_NAME}] RAAS_API_BASE_URL / AGENT_API_KEY env 未配置`,
@@ -119,8 +132,17 @@ export const createJdAgent = inngest.createFunction(
 
     // ── 2. 调 GET /api/v1/requirements/:id 拉完整需求详情 ──
     const detail = await step.run(`fetch-requirement-${sanitize(requisitionId)}`, async () => {
+      const { captureRaasCall } = await import('../../../../lib/agent-step-evidence');
       try {
-        const r = await getRequirementDetail(requisitionId, { traceId });
+        const r = await captureRaasCall({
+          runId,
+          functionSlug: SLUG,
+          flowId: `jr:${requisitionId}`,
+          stepName: `fetch-requirement-${sanitize(requisitionId)}`,
+          externalCall: `RAAS GET /api/v1/requirements/${requisitionId}`,
+          input: { job_requisition_id: requisitionId, traceId },
+          fn: () => getRequirementDetail(requisitionId, { traceId }),
+        });
         logger.info(
           `[${AGENT_NAME}] requirements/:id OK · jrid=${requisitionId} ` +
             `title="${r.requirement.client_job_title ?? '?'}" ` +
@@ -162,18 +184,25 @@ export const createJdAgent = inngest.createFunction(
 
     // ── 4. 调 RAAS API: POST /api/v1/generate-jd ──
     const generated = await step.run(`generate-${sanitize(requisitionId)}`, async () => {
+      const { captureRaasCall } = await import('../../../../lib/agent-step-evidence');
+      const generateInput = {
+        prompt,
+        language: 'zh' as const,
+        // 用 requirement 详情里的 sd_org_name (客户部门) 当 companyName/department 上下文。
+        // 没有就交给 RAAS 自己解析。
+        companyName: pickStringField(requirement, ['sd_org_name', 'client_name']),
+        department: pickStringField(requirement, ['client_department_id', 'department']),
+      };
       try {
-        const r = await generateJd(
-          {
-            prompt,
-            language: 'zh',
-            // 用 requirement 详情里的 sd_org_name (客户部门) 当 companyName/department 上下文。
-            // 没有就交给 RAAS 自己解析。
-            companyName: pickStringField(requirement, ['sd_org_name', 'client_name']),
-            department: pickStringField(requirement, ['client_department_id', 'department']),
-          },
-          { traceId },
-        );
+        const r = await captureRaasCall({
+          runId,
+          functionSlug: SLUG,
+          flowId: `jr:${requisitionId}`,
+          stepName: `generate-${sanitize(requisitionId)}`,
+          externalCall: 'RAAS POST /api/v1/generate-jd',
+          input: generateInput,
+          fn: () => generateJd(generateInput, { traceId }),
+        });
         logger.info(
           `[${AGENT_NAME}] RAAS generate-jd OK · title="${r.data.title ?? '?'}" ` +
             `parse=${r.meta?.stages?.parse} generate=${r.meta?.stages?.generate} ` +
@@ -200,6 +229,7 @@ export const createJdAgent = inngest.createFunction(
     // 再加上 requirement 详情里 raas snake_case 的增强字段（must-have /
     // nice-to-have / 学历 / 年限 / 面试形式等，generate-jd 不给的）。
     await step.run(`sync-jd-${sanitize(requisitionId)}`, async () => {
+      const { captureRaasCall } = await import('../../../../lib/agent-step-evidence');
       const input: SyncJdInput = {
         job_requisition_id: requisitionId,
         client_id: clientId,
@@ -223,7 +253,15 @@ export const createJdAgent = inngest.createFunction(
         city: pickCityFromBoth(requirement, jdData),
       };
       try {
-        const r = await syncJdGenerated(input, { traceId });
+        const r = await captureRaasCall({
+          runId,
+          functionSlug: SLUG,
+          flowId: `jr:${requisitionId}`,
+          stepName: `sync-jd-${sanitize(requisitionId)}`,
+          externalCall: 'RAAS POST /api/v1/jd/sync-generated',
+          input,
+          fn: () => syncJdGenerated(input, { traceId }),
+        });
         logger.info(
           `[${AGENT_NAME}] sync-generated OK · synced=${r.synced} job_posting_id=${r.job_posting_id}`,
         );
@@ -343,6 +381,24 @@ export const createJdAgent = inngest.createFunction(
       },
     };
 
+    // ── 7. Allmeta write Job_Requisition (v0_1_010 DataObject) ──
+    // After RAAS sync persists JobRequisition + JobPosting, we mirror the
+    // canonical 39-field Job_Requisition projection into the ontology so
+    // Match Resume Agent can read it as a single source of truth.
+    await step.run(`write-allmeta-job-requisition-${sanitize(requisitionId)}`, async () => {
+      const { writeAllmetaWithEvidence } = await import('../../../../lib/agent-step-evidence');
+      const { toAllmetaJobRequisition } = await import('../../mappers/ao-to-allmeta');
+      const payload = toAllmetaJobRequisition(requirement);
+      return writeAllmetaWithEvidence({
+        label: 'Job_Requisition',
+        payload,
+        runId,
+        functionSlug: SLUG,
+        flowId: `jr:${requisitionId}`,
+        stepName: `write-allmeta-job-requisition-${sanitize(requisitionId)}`,
+      });
+    });
+
     // Publish through AO-main's EM for EventInstance audit trail.
     // TODO: remove this bridge call once RPA merges into AO-main and can
     //       call em.publish() directly without HTTP round-trip.
@@ -353,13 +409,7 @@ export const createJdAgent = inngest.createFunction(
       });
     });
 
-    // Keep the original inngest send for backward compat — downstream
-    // chain depends on this send. The em-bridge call above is additive.
-    await step.sendEvent(`emit-jd-generated-${sanitize(requisitionId)}`, {
-      name: 'JD_GENERATED',
-      data: outboundEnvelope,
-    });
-
+    // (removed step.sendEvent — em.publish above already dispatches to Inngest)
     logger.info(
       `[${AGENT_NAME}] ✅ emitted JD_GENERATED · jd_id=${jdId} requisition=${requisitionId}`,
     );

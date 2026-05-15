@@ -6,7 +6,7 @@ import { useApp } from "@/lib/i18n";
 import type { MonitorHitlRow } from "@/lib/monitor/types";
 
 export function HitlFeed({ rows }: { rows: MonitorHitlRow[] }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   return (
     <ClaudeCard className="h-full">
       <ClaudeSectionTitle>{t("monitor_hitl_title")}</ClaudeSectionTitle>
@@ -24,7 +24,7 @@ export function HitlFeed({ rows }: { rows: MonitorHitlRow[] }) {
                 <span className="text-claude-ink-1 truncate">{r.title}</span>
                 {r.deadline && (
                   <span className="ml-auto text-claude-ink-4 tabular-nums">
-                    due {new Date(r.deadline).toLocaleTimeString()}
+                    {t("monitor_due")} {new Date(r.deadline).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-US", { hour12: false })}
                   </span>
                 )}
               </Link>

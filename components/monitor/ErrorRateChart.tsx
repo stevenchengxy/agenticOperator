@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import type { MonitorAgentDetail } from "@/lib/monitor/types";
 
 const W = 720;
@@ -7,6 +8,7 @@ const H = 160;
 const PAD = { top: 20, right: 20, bottom: 28, left: 48 };
 
 export function ErrorRateChart({ data }: { data: MonitorAgentDetail['errorRate'] }) {
+  const { t } = useApp();
   const peak = Math.max(1, ...data.map(d => d.total));
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
@@ -28,7 +30,7 @@ export function ErrorRateChart({ data }: { data: MonitorAgentDetail['errorRate']
           textAnchor="middle"
           fill="var(--c-claude-ink-4)"
         >
-          No errors in window
+          {t("monitor_agent_no_errors")}
         </text>
       )}
       {/* Bars */}
@@ -63,9 +65,9 @@ export function ErrorRateChart({ data }: { data: MonitorAgentDetail['errorRate']
       {/* Legend */}
       <g transform={`translate(${PAD.left}, ${H - 10})`}>
         <rect x={0} y={-7} width={8} height={8} fill="var(--c-claude-panel)" />
-        <text x={12} y={0} fontSize={10} fill="var(--c-claude-ink-3)">Total</text>
+        <text x={12} y={0} fontSize={10} fill="var(--c-claude-ink-3)">{t("monitor_run_col_total")}</text>
         <rect x={48} y={-7} width={8} height={8} fill="var(--c-claude-err)" />
-        <text x={60} y={0} fontSize={10} fill="var(--c-claude-ink-3)">Failed</text>
+        <text x={60} y={0} fontSize={10} fill="var(--c-claude-ink-3)">{t("monitor_filter_failed")}</text>
       </g>
     </svg>
   );

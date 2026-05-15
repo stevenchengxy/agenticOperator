@@ -3,6 +3,7 @@ import React from "react";
 import { useSearchParams } from "next/navigation";
 import { ClaudeCard, ClaudeBadge, ClaudeButton, ClaudeChip } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { formatRelativeTime, formatTime } from "./i18n-utils";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,28 +56,10 @@ function actionTone(action: string): "accent" | "warn" | "neutral" {
 
 // ── Time formatting helpers ────────────────────────────────────────────────
 
-function fmtHhMmSs(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function relTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return `${h}h ago`;
-}
-
 // ── Row expansion ──────────────────────────────────────────────────────────
 
 function PayloadExpansion({ payload }: { payload: unknown }) {
+  const { t } = useApp();
   const parsed: Record<string, unknown> | null = React.useMemo(() => {
     if (typeof payload === "string") {
       try { return JSON.parse(payload) as Record<string, unknown>; }
@@ -107,13 +90,13 @@ function PayloadExpansion({ payload }: { payload: unknown }) {
       {hasDiff ? (
         <div className="flex gap-4">
           <div className="flex-1 min-w-0">
-            <div className="text-[10.5px] uppercase tracking-wide text-claude-ink-4 font-medium mb-1">Before</div>
+            <div className="text-[10.5px] uppercase tracking-wide text-claude-ink-4 font-medium mb-1">{t("monitor_detail_before")}</div>
             <pre className="text-[11px] text-claude-ink-2 whitespace-pre-wrap break-all">
               {JSON.stringify(before ?? null, null, 2)}
             </pre>
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[10.5px] uppercase tracking-wide text-claude-ink-4 font-medium mb-1">After</div>
+            <div className="text-[10.5px] uppercase tracking-wide text-claude-ink-4 font-medium mb-1">{t("monitor_detail_after")}</div>
             <pre className="text-[11px] text-claude-ink-2 whitespace-pre-wrap break-all">
               {JSON.stringify(after ?? null, null, 2)}
             </pre>
@@ -131,7 +114,7 @@ function PayloadExpansion({ payload }: { payload: unknown }) {
 // ── Main component ─────────────────────────────────────────────────────────
 
 export function AuditContent() {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const searchParams = useSearchParams();
 
   // Pre-populate traceId filter from URL param
@@ -239,7 +222,7 @@ export function AuditContent() {
             onChange={(e) => { setAction(e.target.value); setOffset(0); }}
             className="text-[12px] border border-claude-line rounded-[6px] px-2 py-1 bg-claude-surface text-claude-ink-2 focus:outline-none"
           >
-            <option value="">All</option>
+            <option value="">{t("monitor_audit_all")}</option>
             {ALL_ACTIONS.map((a) => (
               <option key={a} value={a}>{a}</option>
             ))}
@@ -270,11 +253,11 @@ export function AuditContent() {
             value={traceInput}
             onChange={(e) => setTraceInput(e.target.value)}
             onKeyDown={onTraceKeyDown}
-            placeholder="run id or trace id…"
+            placeholder={t("monitor_audit_trace_placeholder")}
             className="text-[12px] border border-claude-line rounded-[6px] px-2 py-1 bg-claude-surface text-claude-ink-2 focus:outline-none w-[200px]"
           />
           <ClaudeButton size="sm" onClick={applyTrace}>
-            Search
+            {t("search")}
           </ClaudeButton>
           {traceFilter && (
             <ClaudeButton
@@ -305,7 +288,7 @@ export function AuditContent() {
       {/* Error */}
       {error && (
         <div className="mb-3 text-[12.5px] text-claude-err">
-          Error: {error}
+          {t("monitor_audit_error")} {error}
         </div>
       )}
 
@@ -345,7 +328,7 @@ export function AuditContent() {
             {loading && rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="py-12 text-center text-claude-ink-4 text-[13px]">
-                  Loading…
+                  {t("monitor_loading")}
                 </td>
               </tr>
             )}
@@ -375,8 +358,8 @@ export function AuditContent() {
                   >
                     {/* Time */}
                     <td className="py-2.5 px-4 align-top">
-                      <div className="text-[12px] text-claude-ink-2 tabular-nums">{fmtHhMmSs(row.createdAt)}</div>
-                      <div className="text-[10.5px] text-claude-ink-4">{relTime(row.createdAt)}</div>
+                      <div className="text-[12px] text-claude-ink-2 tabular-nums">{formatTime(row.createdAt, lang)}</div>
+                      <div className="text-[10.5px] text-claude-ink-4">{formatRelativeTime(row.createdAt, lang)}</div>
                     </td>
 
                     {/* Action badge */}

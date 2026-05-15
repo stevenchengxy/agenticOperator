@@ -1,21 +1,23 @@
 "use client";
 import React from "react";
 import { NODES } from "@/lib/workflow-graph-meta";
+import { useApp } from "@/lib/i18n";
 
 // Column x-coordinate → human-readable stage label.
 // Each column is defined by the shared x value of all nodes in that column.
-const COLUMN_LABELS: Record<number, string> = {
-  100:  'START',
-  320:  'REQUIREMENT INTAKE',
-  620:  'JD GENERATION',
-  920:  'RESUME PROCESSING',
-  1220: 'MATCHING',
-  1520: 'INTERVIEW & EVAL',
-  1820: 'PACKAGE',
-  2080: 'SUBMIT',
+const COLUMN_LABEL_KEYS: Record<number, string> = {
+  100:  'monitor_stage_start',
+  320:  'monitor_stage_requirement_intake',
+  620:  'monitor_stage_jd_generation',
+  920:  'monitor_stage_resume_processing',
+  1220: 'monitor_stage_matching',
+  1520: 'monitor_stage_interview_eval',
+  1820: 'monitor_stage_package',
+  2080: 'monitor_stage_submit_col',
 };
 
 export function StageBackdrop() {
+  const { t } = useApp();
   // Derive unique x values in ascending order so labels render left-to-right.
   const columnXs = React.useMemo(
     () => [...new Set(NODES.map(n => n.x))].sort((a, b) => a - b),
@@ -25,8 +27,8 @@ export function StageBackdrop() {
   return (
     <g>
       {columnXs.map(x => {
-        const label = COLUMN_LABELS[x];
-        if (!label) return null;
+        const labelKey = COLUMN_LABEL_KEYS[x];
+        if (!labelKey) return null;
         return (
           <text
             key={x}
@@ -38,7 +40,7 @@ export function StageBackdrop() {
             fill="var(--c-claude-ink-4)"
             fontWeight={500}
           >
-            {label}
+            {t(labelKey)}
           </text>
         );
       })}

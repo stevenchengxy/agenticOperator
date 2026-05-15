@@ -28,6 +28,11 @@ type HoveredEdgeInfo = {
   y: number;
 };
 
+type InngestLiveMap = Map<
+  string,
+  { paused: boolean; total: number; completed: number; failed: number; running: number }
+>;
+
 type Props = {
   nodeAggs?: MonitorNodeAgg[];
   edgeAggs?: MonitorEdgeAgg[];
@@ -41,9 +46,11 @@ type Props = {
   selectedNodeId?: string | null;
   /** Override the SVG rendered height (defaults to GRAPH_HEIGHT). */
   graphHeight?: number;
+  /** ★ Inngest live overlay: wsId → run state. Drives LIVE/PAUSED badges on deployed nodes. */
+  inngestLiveByWsId?: InngestLiveMap;
 };
 
-export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail, selectedNodeId, graphHeight }: Props) {
+export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, onHitlClick, onQueueClick, trail, selectedNodeId, graphHeight, inngestLiveByWsId }: Props) {
   const aggByName = new Map((nodeAggs ?? []).map(a => [a.name, a]));
   const edgeAggByKey = new Map((edgeAggs ?? []).map(e => [`${e.from}->${e.to}`, e]));
   const isTrailMode = trail != null;
@@ -60,16 +67,22 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
   // Edge hover popover state
   const [hoveredEdge, setHoveredEdge] = React.useState<HoveredEdgeInfo | null>(null);
 
-  // Measure container size with ResizeObserver so MiniMap viewport rect stays accurate
+  // Measure container size with ResizeObserver so MiniMap viewport rect stays accurate.
+  // The ResizeObserver callback fires async — the wrapper element can be detached
+  // (HMR remount, route change) between when we observe() and when update() runs,
+  // so re-check `current` inside the callback instead of trusting the effect-time guard.
   React.useEffect(() => {
-    if (!svgWrapperRef.current) return;
+    const el = svgWrapperRef.current;
+    if (!el) return;
     const update = () => {
-      const r = svgWrapperRef.current!.getBoundingClientRect();
+      const node = svgWrapperRef.current;
+      if (!node) return;
+      const r = node.getBoundingClientRect();
       setContainerSize({ width: r.width, height: r.height });
     };
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(svgWrapperRef.current);
+    ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
@@ -193,6 +206,7 @@ export function MonitorGraph({ nodeAggs, edgeAggs, onNodeClick, onRunningClick, 
               trailEntry={trail?.get(n.id)}
               isTrailMode={isTrailMode}
               selected={n.id === selectedNodeId}
+              inngestLive={inngestLiveByWsId?.get(n.wsId)}
             />
           ))}
         </g>

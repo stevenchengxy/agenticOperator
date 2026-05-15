@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import type { MonitorAgentDetail } from "@/lib/monitor/types";
 
 const W = 720;
@@ -7,6 +8,7 @@ const H = 180;
 const PAD = { top: 20, right: 20, bottom: 28, left: 48 };
 
 export function TokenChart({ data }: { data: MonitorAgentDetail['tokenSpend'] }) {
+  const { t } = useApp();
   const peak = Math.max(1, ...data.map(d => Math.max(d.prompt, d.completion)));
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
@@ -50,9 +52,9 @@ export function TokenChart({ data }: { data: MonitorAgentDetail['tokenSpend'] })
       {/* Legend */}
       <g transform={`translate(${PAD.left}, ${H - 10})`}>
         <circle r={3} cx={4} cy={-3} fill="var(--c-claude-accent)" />
-        <text x={12} y={0} fontSize={10} fill="var(--c-claude-ink-3)">Prompt</text>
+        <text x={12} y={0} fontSize={10} fill="var(--c-claude-ink-3)">{t("monitor_run_col_prompt")}</text>
         <circle r={3} cx={70} cy={-3} fill="var(--c-claude-ok)" />
-        <text x={78} y={0} fontSize={10} fill="var(--c-claude-ink-3)">Completion</text>
+        <text x={78} y={0} fontSize={10} fill="var(--c-claude-ink-3)">{t("monitor_run_col_completion")}</text>
       </g>
     </svg>
   );

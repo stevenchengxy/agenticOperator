@@ -20,7 +20,7 @@
 
 services:
   inngest:
-    image: inngest/inngest:v1.4.0
+    image: inngest/inngest:latest
     container_name: ao-inngest
     restart: unless-stopped
     command:

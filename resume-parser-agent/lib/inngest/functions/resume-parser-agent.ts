@@ -38,7 +38,17 @@ export const resumeParserAgent = inngest.createFunction(
     retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
     triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
-  async ({ event, step, logger }) => {
+  async ({ event, step, logger, runId }) => {
+    // v0_1_010: pause guard — operator can toggle via /workflow-agents UI.
+    const paused = await step.run('check-pause', async () => {
+      const { isAgentPaused } = await import('../../../../lib/agent-pause-guard');
+      return isAgentPaused('agentic-operator-main-resume-parser-agent');
+    });
+    if (paused) {
+      logger.info('[resume-parser-agent] paused — short-circuit (no-op)');
+      return { ok: true, paused: true };
+    }
+
     // RESUME_DOWNLOADED 兼容两种 shape:
     //   A) RAAS canonical envelope —
     //      { entity_id, entity_type, event_id, payload: { ... }, trace }
@@ -154,6 +164,9 @@ export const resumeParserAgent = inngest.createFunction(
       typeof eventEtag === 'string' && eventEtag.trim() ? eventEtag.trim() : computedEtag;
 
     // ── 调 RAAS API: POST /api/v1/candidates ──
+    const SLUG = 'agentic-operator-main-resume-parser-agent';
+    const flowId = `upload:${upload_id}`;
+
     const saveResult = await step.run('save-candidate', async () => {
       const input: SaveCandidateInput = {
         upload_id: String(upload_id),
@@ -172,8 +185,17 @@ export const resumeParserAgent = inngest.createFunction(
           robohireRequestId ?? raw.robohire_request_id ?? raw.parser_request_id ?? undefined,
       };
 
+      const { captureRaasCall } = await import('../../../../lib/agent-step-evidence');
       try {
-        const r = await saveCandidate(input, { traceId });
+        const r = await captureRaasCall({
+          runId,
+          functionSlug: SLUG,
+          flowId,
+          stepName: 'save-candidate',
+          externalCall: 'RAAS POST /api/v1/candidates',
+          input,
+          fn: () => saveCandidate(input, { traceId }),
+        });
         logger.info(
           `[resume-persist] ✅ saveCandidate OK · candidate_id=${r.candidate_id} ` +
             `resume_id=${r.resume_id ?? '—'} is_new_candidate=${r.is_new_candidate ?? '?'} ` +
@@ -182,14 +204,80 @@ export const resumeParserAgent = inngest.createFunction(
         return r;
       } catch (e) {
         if (e instanceof RaasApiError && e.isClientError) {
-          // 4xx (除 429) → agent payload 问题，不重试
           throw new NonRetriableError(
             `RAAS saveCandidate 4xx: ${e.code} ${e.message}`,
           );
         }
-        // 5xx / 429 / 网络 → 让 Inngest step.run 重试
         throw e;
       }
+    });
+
+    // ── ★ v0_1_010: Write 3 Allmeta DataObject instances (Candidate / Resume / Expectation) ──
+    // Each write is its own step.run for clear Inngest trace + evidence row.
+    // PRIMARY KEY = saveCandidate's returned candidate_id / resume_id (RAAS-owned).
+    await step.run('write-allmeta-candidate', async () => {
+      const { mapRobohireToRaas } = await import('../../mappers/robohire-to-raas');
+      const { toAllmetaCandidate } = await import('../../mappers/ao-to-allmeta');
+      const { writeAllmetaWithEvidence } = await import('../../../../lib/agent-step-evidence');
+      const nested = mapRobohireToRaas(parsed as unknown as Parameters<typeof mapRobohireToRaas>[0]);
+      const payload = toAllmetaCandidate(nested.candidate, saveResult.candidate_id, {
+        employee_id: employeeId,
+      });
+      const result = await writeAllmetaWithEvidence({
+        label: 'Candidate',
+        payload,
+        runId,
+        functionSlug: SLUG,
+        flowId,
+        stepName: 'write-allmeta-candidate',
+      });
+      logger.info(`[resume-persist] Allmeta :Candidate · ok=${result.ok} pk=${saveResult.candidate_id}`);
+      return result;
+    });
+
+    await step.run('write-allmeta-expectation', async () => {
+      const { mapRobohireToRaas } = await import('../../mappers/robohire-to-raas');
+      const { toAllmetaCandidateExpectation } = await import('../../mappers/ao-to-allmeta');
+      const { writeAllmetaWithEvidence } = await import('../../../../lib/agent-step-evidence');
+      const nested = mapRobohireToRaas(parsed as unknown as Parameters<typeof mapRobohireToRaas>[0]);
+      const payload = toAllmetaCandidateExpectation(
+        nested.candidate_expectation,
+        saveResult.candidate_id,
+      );
+      const result = await writeAllmetaWithEvidence({
+        label: 'Candidate_Expectation',
+        payload,
+        runId,
+        functionSlug: SLUG,
+        flowId,
+        stepName: 'write-allmeta-expectation',
+      });
+      logger.info(`[resume-persist] Allmeta :Candidate_Expectation · ok=${result.ok}`);
+      return result;
+    });
+
+    await step.run('write-allmeta-resume', async () => {
+      const { mapRobohireToRaas } = await import('../../mappers/robohire-to-raas');
+      const { toAllmetaResume } = await import('../../mappers/ao-to-allmeta');
+      const { writeAllmetaWithEvidence } = await import('../../../../lib/agent-step-evidence');
+      const nested = mapRobohireToRaas(parsed as unknown as Parameters<typeof mapRobohireToRaas>[0]);
+      const payload = toAllmetaResume(nested.resume, {
+        resume_id: saveResult.resume_id ?? `r_${saveResult.candidate_id}`,
+        candidate_id: saveResult.candidate_id,
+        job_requisition_id: job_requisition_id ?? null,
+        file_path: typeof object_key === 'string' ? object_key : undefined,
+        employee_id: employeeId,
+      });
+      const result = await writeAllmetaWithEvidence({
+        label: 'Resume',
+        payload,
+        runId,
+        functionSlug: SLUG,
+        flowId,
+        stepName: 'write-allmeta-resume',
+      });
+      logger.info(`[resume-persist] Allmeta :Resume · ok=${result.ok}`);
+      return result;
     });
 
     // ── emit RESUME_PROCESSED 触发下游 matcher ──
@@ -231,6 +319,10 @@ export const resumeParserAgent = inngest.createFunction(
     // Publish through AO-main's EM for EventInstance audit trail.
     // TODO: remove this bridge call once RPA merges into AO-main and can
     //       call em.publish() directly without HTTP round-trip.
+    // Single emit path: em.publish handles BOTH audit (EventInstance row) AND
+    // dispatching the event into Inngest. The earlier double-emit (step.sendEvent
+    // + em.publish) caused downstream agents to fire twice per upstream event,
+    // doubling RoboHire LLM cost. Keep this one only.
     await step.run('em-audit-resume-processed', async () => {
       await emPublish('RESUME_PROCESSED', processedPayload, {
         source: 'rpa.resumeParserAgent',
@@ -238,14 +330,7 @@ export const resumeParserAgent = inngest.createFunction(
       });
     });
 
-    // Keep the original inngest send for backward compat — RPA's downstream
-    // chain (match-resume-agent) depends on this send. The em-bridge call
-    // above is additive (audit only).
-    await step.sendEvent('emit-resume-processed', {
-      name: 'RESUME_PROCESSED',
-      data: processedPayload,
-    });
-
+    // (removed step.sendEvent — em.publish above already dispatches to Inngest)
     logger.info(
       `[resume-persist] ✅ emitted RESUME_PROCESSED · upload_id=${upload_id} ` +
         `candidate_id=${saveResult.candidate_id}`,

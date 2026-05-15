@@ -31,7 +31,7 @@ export function MonitorHeader({
           {t("monitor_hero_subtitle")}
         </div>
         <h1 className="text-[44px] font-medium leading-[1.05] text-claude-ink-1">
-          Monitor
+          {t("monitor_title")}
         </h1>
       </div>
       <div className="flex items-center gap-8">

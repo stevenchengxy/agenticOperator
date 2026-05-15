@@ -43,7 +43,17 @@ export const matchResumeAgent = inngest.createFunction(
     retries: 2,
     triggers: [{ event: 'RESUME_PROCESSED' }],
   },
-  async ({ event, step, logger }) => {
+  async ({ event, step, logger, runId }) => {
+    // v0_1_010: pause guard — operator can toggle via /workflow-agents UI.
+    const paused = await step.run('check-pause', async () => {
+      const { isAgentPaused } = await import('../../../../lib/agent-pause-guard');
+      return isAgentPaused('agentic-operator-main-match-resume-agent');
+    });
+    if (paused) {
+      logger.info(`[${AGENT_NAME}] paused — short-circuit (no-op)`);
+      return { ok: true, paused: true };
+    }
+
     const data = unwrapResumeProcessedEvent(event.data);
     const traceId = getTraceId(event.data);
 
@@ -196,6 +206,207 @@ export const matchResumeAgent = inngest.createFunction(
       }
 
       const stepKey = sanitizeStepKey(jrid);
+      const ruleCheckFlowId = uploadId ? `upload:${uploadId}` : `jr:${jrid}`;
+      const SLUG_MRA = 'agentic-operator-main-match-resume-agent';
+
+      // 4a-pre: Rule check (Ontology binary PASS/FAIL gate).
+      //
+      // Runs the 5-block rule-check pipeline against the candidate × this JR.
+      // - PASS  → proceed to /match-resume (RoboHire LLM)
+      // - FAIL  → skip RoboHire for this JR (saves LLM cost) + emit MATCH_FAILED
+      //           later via the saveMatchResult skip path. Audit written to
+      //           Prisma RuleCheckAudit either way so the rule-check UI shows it.
+      const ruleVerdict = await step.run(`rule-check-${stepKey}`, async () => {
+        const startedAt = Date.now();
+        const { buildRuleCheckInput, runRuleCheck } = await import('@/lib/rule-check/runner');
+        const { writeRuleCheckAuditPrisma } = await import('@/lib/rule-check/prisma-audit-writer');
+        const { captureStepEvidence } = await import('../../../../lib/agent-step-evidence');
+
+        const parsedResume = ((data as Record<string, unknown>).parsed as
+          | { data?: Record<string, unknown> }
+          | undefined)?.data ?? null;
+
+        const input = buildRuleCheckInput({
+          runtime_context: {
+            upload_id: uploadId ?? '',
+            candidate_id: candidateId ?? '',
+            resume_id:
+              typeof (data as Record<string, unknown>).resume_id === 'string'
+                ? ((data as Record<string, unknown>).resume_id as string)
+                : '',
+            employee_id: employeeId,
+            trace_id: traceId,
+          },
+          parsed_resume: parsedResume,
+          job_requisition: req as unknown as Record<string, unknown>,
+          job_requisition_specification: null,
+        });
+
+        let verdict;
+        try {
+          verdict = await runRuleCheck(input);
+        } catch (e) {
+          // Soft fail: rule-check should never block the chain. Treat as PASS
+          // and surface the error in evidence so it's visible in the monitor.
+          await captureStepEvidence({
+            runId,
+            functionSlug: SLUG_MRA,
+            flowId: ruleCheckFlowId,
+            stepName: `rule-check-${stepKey}`,
+            stepKind: 'subsystem',
+            externalCall: 'rule-check pipeline (5-block)',
+            input: { job_requisition_id: jrid, candidate_id: candidateId },
+            error: `rule-check threw: ${(e as Error).message}`,
+            durationMs: Date.now() - startedAt,
+          });
+          return { decision: 'PASS' as const, llm_decision: 'UNKNOWN', failure_reasons: [], resume_augmentation: '' };
+        }
+
+        // Persist audit row to Prisma (RuleCheckAudit + RuleCheckFlag).
+        try {
+          await writeRuleCheckAuditPrisma({
+            verdict,
+            context: {
+              run_id: runId,
+              trace_id: traceId,
+              upload_id: uploadId ?? '',
+              candidate_id: candidateId ?? '',
+              resume_id:
+                typeof (data as Record<string, unknown>).resume_id === 'string'
+                  ? ((data as Record<string, unknown>).resume_id as string)
+                  : '',
+              job_requisition_id: jrid,
+              parsed_resume: parsedResume,
+              job_requisition: req as unknown as Record<string, unknown>,
+            },
+          });
+        } catch (e) {
+          logger.warn(`[${AGENT_NAME}] rule-check audit persist failed: ${(e as Error).message}`);
+        }
+
+        // Capture as agent step evidence — RICH payload so the monitor's
+        // rule-check panel can render: every rule_flag (rule_id / rule_name /
+        // severity / applicable / result / evidence), the LLM's full raw text
+        // and parsed JSON (the "reason" / explanation per rule), the system
+        // prompt, the user prompt, original rule definitions etc.
+        const allFlags = verdict.llm_output?.rule_flags ?? [];
+        const passedFlags = allFlags.filter((f) => f.result === 'PASS');
+        const failedFlags = allFlags.filter((f) => f.result === 'FAIL');
+        const naFlags = allFlags.filter((f) => f.result === 'NOT_APPLICABLE');
+
+        await captureStepEvidence({
+          runId,
+          functionSlug: SLUG_MRA,
+          flowId: ruleCheckFlowId,
+          stepName: `rule-check-${stepKey}`,
+          stepKind: 'subsystem',
+          externalCall: 'rule-check pipeline (ontology rules + LLM)',
+          input: {
+            job_requisition_id: jrid,
+            candidate_id: candidateId,
+            rule_source: verdict.audit?.rule_source,
+            rules_evaluated: verdict.audit?.rules_evaluated,
+            rules_total_in_ontology: verdict.audit?.rules_total_in_ontology,
+            partial_resume_fields: verdict.audit?.partial_resume_fields,
+            filtered_out_rules: verdict.audit?.filtered_out_rules,
+            // Prompts (large — useful for debugging why LLM decided what it did)
+            system_prompt: verdict.audit?.system_prompt,
+            user_prompt: verdict.audit?.user_prompt,
+            dims: verdict.audit?.dims,
+          },
+          output: {
+            decision: verdict.decision,
+            llm_decision: verdict.llm_decision,
+            counts: {
+              total: allFlags.length,
+              pass: passedFlags.length,
+              fail: failedFlags.length,
+              not_applicable: naFlags.length,
+              missing_info_reclassified: verdict.audit?.missing_info_reclassified_count ?? 0,
+            },
+            failure_reasons: verdict.failure_reasons,
+            // Every flag with full original rule data — UI renders as a table.
+            rule_flags: allFlags.map((f) => ({
+              rule_id: f.rule_id,
+              rule_name: f.rule_name,
+              severity: f.severity,
+              applicable: f.applicable,
+              applicable_client: f.applicable_client,
+              result: f.result,
+              evidence: f.evidence,
+              next_action: f.next_action,
+            })),
+            resume_augmentation: verdict.resume_augmentation ?? '',
+            llm: {
+              model: verdict.audit?.llm_model,
+              duration_ms: verdict.audit?.llm_duration_ms,
+              prompt_tokens: verdict.audit?.llm_prompt_tokens,
+              completion_tokens: verdict.audit?.llm_completion_tokens,
+              raw_text: verdict.audit?.llm_raw_text,
+              parse_error: verdict.audit?.parse_error,
+            },
+          },
+          durationMs: Date.now() - startedAt,
+        });
+
+        return {
+          decision: verdict.decision,
+          llm_decision: verdict.llm_decision,
+          failure_reasons: verdict.failure_reasons,
+          resume_augmentation: verdict.resume_augmentation ?? '',
+        };
+      });
+
+      // Rule-check gate (user spec 2026-05-15):
+      //
+      // runner.ts already auto-reclassifies FAIL-due-to-missing-info flags
+      // into NOT_APPLICABLE before computing decision. So by the time we get
+      // here:
+      //   verdict.decision === 'FAIL'  ⇔  a real client rule was violated
+      //                                   (the candidate is definitively
+      //                                    disqualified, e.g. SALARY_MISMATCH).
+      //   verdict.decision === 'PASS'  ⇔  every applicable rule passed, OR
+      //                                   the only "failing" rules were
+      //                                   missing-info (auto-reclassified to
+      //                                   NOT_APPLICABLE). → call RoboHire.
+      //
+      // So only the client-rule FAIL branch needs special handling; missing-
+      // info already shows up here as decision=PASS and falls through.
+      if (ruleVerdict.decision === 'FAIL') {
+        logger.info(
+          `[${AGENT_NAME}] rule-check FAIL (client-rule violation) · job_req=${jrid} ` +
+            `reasons=${ruleVerdict.failure_reasons.join(',')} — emitting MATCH_FAILED, skipping RoboHire`,
+        );
+
+        // Emit MATCH_FAILED so partner sees a final verdict for this JR.
+        // Shape mirrors MATCH_PASSED_NEED_INTERVIEW so partner consumers can
+        // reuse the same handler. `error` carries the rule-check reasons.
+        const matchFailedPayload = {
+          upload_id: uploadId ?? '',
+          job_requisition_id: jrid,
+          candidate_id: candidateId ?? '',
+          success: false,
+          error: `rule-check client-rule FAIL: ${ruleVerdict.failure_reasons.join('; ')}`,
+          data: {
+            source: 'rule-check',
+            rule_failure_reasons: ruleVerdict.failure_reasons,
+            overallFit: { verdict: 'Disqualified by client rule', hiringRecommendation: 'Reject' },
+            overallMatchScore: { score: 0, grade: 'F', confidence: 'High' },
+          },
+        };
+        await step.run(`em-audit-match-failed-${stepKey}`, async () => {
+          await emPublish('MATCH_FAILED', matchFailedPayload, {
+            source: 'rpa.matchResumeAgent.ruleCheck',
+            causedBy: { eventId: event.id ?? '', name: event.name },
+          });
+        });
+        summaries.push({
+          job_requisition_id: jrid,
+          ok: false,
+          error: `rule-check client-rule FAIL: ${ruleVerdict.failure_reasons.join('; ') || '(no reasons)'}`,
+        });
+        continue;
+      }
 
       // 4a. 调 RAAS /api/v1/match-resume (透传 RoboHire)
       const matchResult = await step.run(
@@ -208,11 +419,18 @@ export const matchResumeAgent = inngest.createFunction(
           logger.info(
             `[${AGENT_NAME}] calling RAAS /match-resume · job_req=${jrid} jd_chars=${jdText.length}`,
           );
+          const { captureRaasCall } = await import('../../../../lib/agent-step-evidence');
+          const matchInput = { resume: resumeText, jd: jdText };
           try {
-            const r = await matchResume(
-              { resume: resumeText, jd: jdText },
-              { traceId },
-            );
+            const r = await captureRaasCall({
+              runId,
+              functionSlug: 'agentic-operator-main-match-resume-agent',
+              flowId: uploadId ? `upload:${uploadId}` : `jr:${jrid}`,
+              stepName: `match-${stepKey}`,
+              externalCall: 'RAAS POST /api/v1/match-resume (→ RoboHire)',
+              input: matchInput,
+              fn: () => matchResume(matchInput, { traceId }),
+            });
             // v0_1_010: RoboHire `data.matchScore` / `data.recommendation` 顶级字段实测永远 === null,
             // 真实评分在 data.overallMatchScore.score / data.overallFit.verdict。
             const overallScore = (r.data as { overallMatchScore?: { score?: number } } | undefined)
@@ -248,33 +466,31 @@ export const matchResumeAgent = inngest.createFunction(
       }
 
       // 4b. 调 RAAS /api/v1/match-results 持久化 (source="need_interview")
-      //
-      // doc §4.6 sync-generated 同样的 spread 写法 — RoboHire /match-resume
-      // 实际返回 20+ 字段 (overallMatchScore / skillMatch / experienceMatch /
-      // jdAnalysis / candidatePotential / suggestedInterviewQuestions / ...).
-      // 直接 ...matchResult.data 整段透传, 让 RAAS 端按 schema 挑字段写库.
-      // 不要 cherry-pick (之前漏了 14+ 字段 → match_analysis 列空着的根因).
-      await step.run(`save-match-${stepKey}`, async () => {
+      const SLUG = 'agentic-operator-main-match-resume-agent';
+      const flowId = uploadId ? `upload:${uploadId}` : `jr:${jrid}`;
+
+      const saveMatchResult = await step.run(`save-match-${stepKey}`, async () => {
+        const saveInput = {
+          ...(matchResult.data as Record<string, unknown>),
+          source: 'need_interview' as const,
+          candidate_id: candidateId ?? undefined,
+          upload_id: uploadId ?? undefined,
+          job_requisition_id: jrid,
+          client_id: pickClientId(req),
+          robohire_request_id: matchResult.requestId,
+          savedAs: matchResult.savedAs,
+        };
+        const { captureRaasCall } = await import('../../../../lib/agent-step-evidence');
         try {
-          const r = await saveMatchResults(
-            {
-              // a) RoboHire /match-resume data 整段 spread (camelCase 全字段)
-              //    必须放在最前面 — IDs 之类的 anchor 在后面 override,
-              //    防 RoboHire 未来加同名字段 (例如 candidate_id) 把
-              //    我们的 anchor 覆盖.
-              ...(matchResult.data as Record<string, unknown>),
-              // b) raas 关联 (必带, 永远以这里为准)
-              source: 'need_interview',
-              candidate_id: candidateId ?? undefined,
-              upload_id: uploadId ?? undefined,
-              job_requisition_id: jrid,
-              client_id: pickClientId(req),
-              // c) 跨服务 trace 透传
-              robohire_request_id: matchResult.requestId,
-              savedAs: matchResult.savedAs,
-            },
-            { traceId },
-          );
+          const r = await captureRaasCall({
+            runId,
+            functionSlug: SLUG,
+            flowId,
+            stepName: `save-match-${stepKey}`,
+            externalCall: 'RAAS POST /api/v1/match-results',
+            input: saveInput,
+            fn: () => saveMatchResults(saveInput, { traceId }),
+          });
           logger.info(
             `[${AGENT_NAME}] saveMatchResults OK · job_req=${jrid} ` +
               `result=${JSON.stringify(r).slice(0, 120)}`,
@@ -288,6 +504,32 @@ export const matchResumeAgent = inngest.createFunction(
           }
           throw e;
         }
+      });
+
+      // ── ★ v0_1_010: Write :Candidate_Match_Result to Allmeta ──
+      await step.run(`write-allmeta-match-${stepKey}`, async () => {
+        const { toAllmetaMatchResult } = await import('../../mappers/ao-to-allmeta');
+        const { writeAllmetaWithEvidence } = await import('../../../../lib/agent-step-evidence');
+        // Use returned match_result_id (if any) or synthesize one
+        const cmrId =
+          (saveMatchResult as { candidate_match_result_id?: string })?.candidate_match_result_id ??
+          `cmr_${candidateId}_${jrid}_${Date.now()}`;
+        const payload = toAllmetaMatchResult(matchResult.data as never, {
+          candidate_match_result_id: cmrId,
+          candidate_id: candidateId ?? '',
+          client_id: pickClientId(req) ?? '',
+          job_requisition_id: jrid,
+        });
+        const result = await writeAllmetaWithEvidence({
+          label: 'Candidate_Match_Result',
+          payload,
+          runId,
+          functionSlug: SLUG,
+          flowId,
+          stepName: `write-allmeta-match-${stepKey}`,
+        });
+        logger.info(`[${AGENT_NAME}] Allmeta :Candidate_Match_Result · ok=${result.ok} pk=${cmrId}`);
+        return result;
       });
 
       // 4c. emit MATCH_PASSED_NEED_INTERVIEW (cascade)
@@ -309,12 +551,7 @@ export const matchResumeAgent = inngest.createFunction(
         });
       });
 
-      // Keep the original inngest send for backward compat — downstream
-      // chain depends on this send. The em-bridge call above is additive.
-      await step.sendEvent(`emit-match-${stepKey}`, {
-        name: 'MATCH_PASSED_NEED_INTERVIEW',
-        data: payload,
-      });
+      // (removed step.sendEvent — em.publish above already dispatches to Inngest)
 
       summaries.push({
         job_requisition_id: jrid,

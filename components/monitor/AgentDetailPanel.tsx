@@ -102,7 +102,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
               </h2>
               {activity.length > 0 && (
                 <span className="text-[11px] bg-claude-panel text-claude-ink-3 rounded-full px-2 py-0.5 tabular-nums">
-                  {activity.length} activities
+                  {t("monitor_activity_count").replace("{n}", String(activity.length))}
                 </span>
               )}
             </div>
@@ -141,7 +141,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
                   ))}
                 </ul>
               ) : (
-                <Empty>none</Empty>
+                <Empty>{t("monitor_agent_none")}</Empty>
               )}
             </Section>
 
@@ -184,7 +184,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
                   ))}
                 </ul>
               ) : (
-                <Empty>none</Empty>
+                <Empty>{t("monitor_agent_none")}</Empty>
               )}
             </Section>
 
@@ -201,7 +201,9 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
                 {meta.kind}
               </ClaudeBadge>
               <span className="text-[12px] text-claude-ink-3 ml-2">
-                owned by {meta.ownerTeam} · {meta.version}
+                {t("monitor_agent_owned_by")
+                  .replace("{team}", meta.ownerTeam)
+                  .replace("{version}", meta.version)}
               </span>
             </Section>
           </>
@@ -230,7 +232,7 @@ export function AgentDetailPanel({ nodeId, onClose }: Props) {
             ))}
           </div>
           {filteredActivity.length === 0 ? (
-            <Empty>{activity.length === 0 ? 'No recent activity.' : 'No matching activity.'}</Empty>
+            <Empty>{activity.length === 0 ? t("monitor_activity_empty") : t("monitor_activity_no_match")}</Empty>
           ) : (
             <ul className="space-y-1.5 text-[12px]">
               {filteredActivity.map((a, i) => (

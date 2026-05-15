@@ -1,0 +1,174 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/ontology-gen', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/ontology-gen')>(
+    '@/lib/ontology-gen',
+  );
+  return {
+    ...actual,
+    fetchAction: vi.fn(),
+  };
+});
+
+import { fetchAction, OntologyContractError } from '@/lib/ontology-gen';
+import { fetchRulesForMatchResume } from './ontology-source';
+
+const mockFetchAction = vi.mocked(fetchAction);
+
+const ORIGINAL_BASE = process.env.ONTOLOGY_API_BASE;
+const ORIGINAL_TOKEN = process.env.ONTOLOGY_API_TOKEN;
+
+afterEach(() => {
+  mockFetchAction.mockReset();
+  if (ORIGINAL_BASE === undefined) delete process.env.ONTOLOGY_API_BASE;
+  else process.env.ONTOLOGY_API_BASE = ORIGINAL_BASE;
+  if (ORIGINAL_TOKEN === undefined) delete process.env.ONTOLOGY_API_TOKEN;
+  else process.env.ONTOLOGY_API_TOKEN = ORIGINAL_TOKEN;
+});
+
+describe('fetchRulesForMatchResume — env gating', () => {
+  it('no ONTOLOGY_API_BASE → JSON fallback, no API call', async () => {
+    delete process.env.ONTOLOGY_API_BASE;
+    process.env.ONTOLOGY_API_TOKEN = 'tok';
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('json-fallback');
+    expect(out.rules.length).toBeGreaterThan(0);
+    expect(mockFetchAction).not.toHaveBeenCalled();
+  });
+
+  it('no ONTOLOGY_API_TOKEN → JSON fallback, no API call', async () => {
+    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
+    delete process.env.ONTOLOGY_API_TOKEN;
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('json-fallback');
+    expect(mockFetchAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchRulesForMatchResume — API path', () => {
+  beforeEach(() => {
+    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
+    process.env.ONTOLOGY_API_TOKEN = 'tok';
+  });
+
+  it('API success + rule_ids match JSON → source=ontology-api, no drift', async () => {
+    // 用 rules.json 的真实 rule_id 集合做 mock,确保 drift 为空
+    const { loadAllRules } = await import('./ontology');
+    const allJsonIds = loadAllRules().map((r) => r.id);
+    mockFetchAction.mockResolvedValueOnce({
+      id: '10',
+      name: 'matchResume',
+      description: '',
+      submissionCriteria: '',
+      objectType: 'action',
+      category: '',
+      actor: [],
+      trigger: [],
+      targetObjects: [],
+      inputs: [],
+      outputs: [],
+      sideEffects: { dataChanges: [], notifications: [] },
+      triggeredEvents: [],
+      actionSteps: [
+        {
+          order: 1,
+          name: 'step1',
+          description: '',
+          objectType: 'logic',
+          rules: allJsonIds.map((id) => ({
+            id,
+            submissionCriteria: '',
+            description: '',
+            severity: 'advisory',
+          })),
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    });
+
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('ontology-api');
+    expect(out.drift).toBeUndefined();
+    expect(out.rules.length).toBe(allJsonIds.length);
+  });
+
+  it('API returns extra rule_id not in JSON → drift.only_in_api recorded', async () => {
+    mockFetchAction.mockResolvedValueOnce({
+      id: '10',
+      name: 'matchResume',
+      description: '',
+      submissionCriteria: '',
+      objectType: 'action',
+      category: '',
+      actor: [],
+      trigger: [],
+      targetObjects: [],
+      inputs: [],
+      outputs: [],
+      sideEffects: { dataChanges: [], notifications: [] },
+      triggeredEvents: [],
+      actionSteps: [
+        {
+          order: 1,
+          name: 'step1',
+          description: '',
+          objectType: 'logic',
+          rules: [
+            { id: '10-5', submissionCriteria: '', description: '', severity: 'blocker' },
+            { id: '10-9999-future', submissionCriteria: '', description: '', severity: 'advisory' },
+          ],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    });
+
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('ontology-api');
+    expect(out.drift?.only_in_api).toContain('10-9999-future');
+    // 10-5 在 JSON 里有,所以 returned rules 应该只有 1 个(去掉 only_in_api 那条没 metadata 的)
+    expect(out.rules.map((r) => r.id)).toContain('10-5');
+    expect(out.rules.map((r) => r.id)).not.toContain('10-9999-future');
+  });
+
+  it('API returns 0 rules → fallback to JSON with api_error marker', async () => {
+    mockFetchAction.mockResolvedValueOnce({
+      id: '10',
+      name: 'matchResume',
+      description: '',
+      submissionCriteria: '',
+      objectType: 'action',
+      category: '',
+      actor: [],
+      trigger: [],
+      targetObjects: [],
+      inputs: [],
+      outputs: [],
+      sideEffects: { dataChanges: [], notifications: [] },
+      triggeredEvents: [],
+      actionSteps: [],
+    });
+
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('json-fallback');
+    expect(out.api_error).toBe('API returned 0 rules');
+  });
+
+  it('API throws OntologyContractError → fallback with error summary', async () => {
+    mockFetchAction.mockRejectedValueOnce(
+      new OntologyContractError('schema mismatch', { reason: 'test' }),
+    );
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('json-fallback');
+    expect(out.api_error).toContain('OntologyContractError');
+    expect(out.api_error).toContain('schema mismatch');
+  });
+
+  it('API throws network error → fallback', async () => {
+    mockFetchAction.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const out = await fetchRulesForMatchResume();
+    expect(out.source).toBe('json-fallback');
+    expect(out.api_error).toContain('ECONNREFUSED');
+  });
+});

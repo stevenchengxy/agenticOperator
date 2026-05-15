@@ -118,9 +118,9 @@ export function AgentConfigEditor({ agentName, initialConfig, onSaved }: Props) 
         )}
       </div>
       <div className="text-[11px] text-claude-ink-4 mt-1">
-        Changes take effect on the next run. In-flight runs use the previous config.
+        {t('monitor_agent_config_hint_line1')}
         <br />
-        tier and maxOutputTokens are stored but require a deployment to fully take effect.
+        {t('monitor_agent_config_hint_line2')}
       </div>
     </div>
   );

@@ -11,11 +11,12 @@ import { InternalFlowDiagram } from "./InternalFlowDiagram";
 import { nodeById } from "@/lib/workflow-graph-meta";
 import { getAgentDescriptionFull } from "@/lib/monitor/agent-descriptions";
 import { useApp } from "@/lib/i18n";
+import { formatTime } from "./i18n-utils";
 import type { MonitorAgentDetail, MonitorNodeAgg } from "@/lib/monitor/types";
 import { AgentConfigEditor } from "./AgentConfigEditor";
 
 export function AgentDetailContent({ name }: { name: string }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const router = useRouter();
   const { data, error } = usePoll<MonitorAgentDetail>(
     `/api/monitor/agents/${encodeURIComponent(name)}`,
@@ -172,7 +173,7 @@ export function AgentDetailContent({ name }: { name: string }) {
                     <td className="py-1 text-right tabular-nums">{e.tokenUsage.total.toLocaleString()}</td>
                     <td className="py-1 text-right tabular-nums">{e.judgeScore?.toFixed(2) ?? '—'}</td>
                     <td className="py-1 pl-3 text-claude-ink-3">{e.modelUsed ?? '—'}</td>
-                    <td className="py-1 pl-3 text-claude-ink-3 tabular-nums">{new Date(e.createdAt).toLocaleTimeString()}</td>
+                    <td className="py-1 pl-3 text-claude-ink-3 tabular-nums">{formatTime(e.createdAt, lang)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -208,10 +209,10 @@ export function AgentDetailContent({ name }: { name: string }) {
                       href={`/monitor/runs/${encodeURIComponent(e.runId)}`}
                       className="text-claude-ink-1 no-underline hover:underline"
                     >
-                      <ClaudeBadge tone="err" size="xs">error</ClaudeBadge>
+                      <ClaudeBadge tone="err" size="xs">{t('monitor_timeline_filter_errors')}</ClaudeBadge>
                       <span className="ml-2 text-claude-ink-3">{e.narrative}</span>
                       <span className="ml-2 text-claude-ink-4 tabular-nums">
-                        {new Date(e.ts).toLocaleTimeString()}
+                        {formatTime(e.ts, lang)}
                       </span>
                     </Link>
                   </li>
@@ -264,14 +265,14 @@ export function AgentDetailContent({ name }: { name: string }) {
                   )}
                   <span className="text-claude-ink-3 flex-1 truncate">{ev.narrative}</span>
                   <span className="text-claude-ink-4 tabular-nums text-[10.5px]">
-                    {new Date(ev.ts).toLocaleTimeString()}
+                    {formatTime(ev.ts, lang)}
                   </span>
                   {ev.runId && (
                     <Link
                       href={`/monitor/runs/${encodeURIComponent(ev.runId)}`}
                       className="text-claude-accent text-[11px] no-underline hover:underline"
                     >
-                      run →
+                      {t('monitor_agent_col_run')} →
                     </Link>
                   )}
                 </li>

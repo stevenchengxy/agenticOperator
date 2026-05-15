@@ -2,6 +2,8 @@
 import React from "react";
 import Link from "next/link";
 import { ClaudeCard, ClaudeSectionTitle, ClaudeBadge } from "./atoms";
+import { useApp } from "@/lib/i18n";
+import { statusLabel } from "./i18n-utils";
 import type { MonitorRunRow } from "@/lib/monitor/types";
 
 const STATUS_TONE = {
@@ -13,12 +15,13 @@ const STATUS_TONE = {
 } as const;
 
 export function RecentRunsStrip({ rows }: { rows: MonitorRunRow[] }) {
+  const { t } = useApp();
   return (
     <ClaudeCard className="h-full">
-      <ClaudeSectionTitle>Recent runs</ClaudeSectionTitle>
+      <ClaudeSectionTitle>{t("monitor_instances_recent")}</ClaudeSectionTitle>
       <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
         {rows.length === 0 ? (
-          <div className="text-claude-ink-4 text-[12.5px]">No runs.</div>
+          <div className="text-claude-ink-4 text-[12.5px]">{t("monitor_empty_recent_runs")}</div>
         ) : (
           rows.map((r) => (
             <Link
@@ -28,7 +31,7 @@ export function RecentRunsStrip({ rows }: { rows: MonitorRunRow[] }) {
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="text-claude-ink-1 text-[12.5px] font-medium truncate">{r.triggerEvent}</span>
-                <ClaudeBadge tone={STATUS_TONE[r.status] ?? 'neutral'} size="xs">{r.status}</ClaudeBadge>
+                <ClaudeBadge tone={STATUS_TONE[r.status] ?? 'neutral'} size="xs">{statusLabel(r.status, t)}</ClaudeBadge>
               </div>
               <div className="text-claude-ink-3 text-[11.5px] truncate">{r.clientLabel ?? '—'}</div>
               <div className="text-claude-ink-4 text-[11px] mt-1 tabular-nums">{r.id.slice(0, 12)}…</div>

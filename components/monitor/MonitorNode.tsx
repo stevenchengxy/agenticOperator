@@ -5,6 +5,7 @@ import type { WorkflowNode } from "@/lib/workflow-graph-meta";
 import type { MonitorNodeAgg, NodeStatus } from "@/lib/monitor/types";
 import { getAgentDescription } from "@/lib/monitor/agent-descriptions";
 import { useApp } from "@/lib/i18n";
+import { trailResultLabel } from "./i18n-utils";
 
 const STATUS_FILL: Record<NodeStatus, string> = {
   idle:     "var(--c-claude-panel)",
@@ -37,6 +38,14 @@ const TRAIL_STROKE = {
 
 type TrailEntry = { result: 'success' | 'failure' | 'pending' | 'skipped'; current: boolean };
 
+type InngestLive = {
+  paused: boolean;
+  total: number;
+  completed: number;
+  failed: number;
+  running: number;
+};
+
 type Props = {
   node: WorkflowNode;
   agg?: MonitorNodeAgg;
@@ -50,9 +59,11 @@ type Props = {
   isTrailMode?: boolean;
   /** When true, this node's detail panel is open — render with stronger accent outline. */
   selected?: boolean;
+  /** ★ Inngest live state for the 3 real PRA agents (wsId 4/9-1/10). */
+  inngestLive?: InngestLive;
 };
 
-export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, onQueueClick, trailEntry, isTrailMode, selected }: Props) {
+export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, onQueueClick, trailEntry, isTrailMode, selected, inngestLive }: Props) {
   const { t } = useApp();
   const status = agg?.status ?? "idle";
   const running = agg?.running ?? 0;
@@ -141,13 +152,56 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
           rx={11}
         />
       )}
-      {/* Deployed indicator: green dot + LIVE badge at top-right corner */}
+      {/* ★ Deployment badge — when Inngest live data is available, show LIVE/PAUSED with run count;
+              otherwise fall back to static 已部 badge. */}
       {deployment === 'deployed' && (
-        <g transform={`translate(${NODE_W - 38}, -6)`}>
-          <rect width={34} height={14} rx={7} fill="var(--c-claude-ok)" opacity={0.9} />
-          <circle cx={7} cy={7} r={3} fill="white" />
-          <text x={13} y={10.5} fontSize={8.5} fontWeight={700} fill="white" letterSpacing={0.5}>
-            {t('monitor_node_deployment_deployed')}
+        inngestLive ? (
+          inngestLive.paused ? (
+            <g transform={`translate(${NODE_W - 50}, -6)`}>
+              <rect width={46} height={14} rx={7} fill="var(--c-claude-warn)" opacity={0.92} />
+              <text x={23} y={10.5} fontSize={8.5} fontWeight={700} fill="white" textAnchor="middle" letterSpacing={0.4}>
+                ⏸ {t('monitor_agent_card_paused')}
+              </text>
+            </g>
+          ) : (
+            <g transform={`translate(${NODE_W - 50}, -6)`}>
+              <rect width={46} height={14} rx={7} fill="var(--c-claude-ok)" opacity={0.92} />
+              <circle cx={6} cy={7} r={2.5} fill="white">
+                {inngestLive.running > 0 && (
+                  <animate attributeName="opacity" values="1;0.3;1" dur="1.5s" repeatCount="indefinite" />
+                )}
+              </circle>
+              <text x={13} y={10.5} fontSize={8.5} fontWeight={700} fill="white" letterSpacing={0.3}>
+                {t('monitor_agent_card_live')}
+              </text>
+              {inngestLive.total > 0 && (
+                <text x={42} y={10.5} fontSize={8.5} fontWeight={600} fill="white" textAnchor="end">
+                  {inngestLive.total}
+                </text>
+              )}
+            </g>
+          )
+        ) : (
+          <g transform={`translate(${NODE_W - 38}, -6)`}>
+            <rect width={34} height={14} rx={7} fill="var(--c-claude-ok)" opacity={0.9} />
+            <circle cx={7} cy={7} r={3} fill="white" />
+            <text x={13} y={10.5} fontSize={8.5} fontWeight={700} fill="white" letterSpacing={0.5}>
+              {t('monitor_node_deployment_deployed')}
+            </text>
+          </g>
+        )
+      )}
+      {/* ★ Per-agent run stats(bottom-right corner)— only when Inngest live data has runs. */}
+      {inngestLive && inngestLive.total > 0 && !isTrailMode && (
+        <g transform={`translate(${NODE_W - 8}, ${NODE_H - 6})`}>
+          <text fontSize={9.5} fontWeight={600} textAnchor="end" fill="var(--c-claude-ink-2)">
+            <tspan fill="var(--c-claude-ok)">{inngestLive.completed}✓</tspan>
+            {inngestLive.failed > 0 && (
+              <tspan fill="var(--c-claude-err)" dx="4"> {inngestLive.failed}✗</tspan>
+            )}
+            {inngestLive.running > 0 && (
+              <tspan fill="var(--c-claude-warn)" dx="4"> {inngestLive.running}●</tspan>
+            )}
           </text>
         </g>
       )}
@@ -197,14 +251,14 @@ export function MonitorNode({ node, agg, onClick, onRunningClick, onHitlClick, o
       {/* Trail mode: show result indicator text below the title */}
       {isTrailMode && trailEntry && (
         <text x={10} y={50} fontSize={10.5} fill={TRAIL_STROKE[trailEntry.result]} opacity={0.9}>
-          {trailEntry.result}{trailEntry.current ? " (running)" : ""}
+          {trailResultLabel(trailEntry.result, trailEntry.current, t)}
         </text>
       )}
       {/* Human actor badge: bottom-right corner of conceptual (actor=Human) nodes */}
       {deployment === 'conceptual' && (
         <g transform={`translate(${NODE_W - 38}, ${NODE_H - 14})`}>
           <rect width={34} height={11} rx={5} fill="var(--c-claude-panel)" stroke="var(--c-claude-line)" strokeWidth={0.5} />
-          <text x={17} y={8} fontSize={8} textAnchor="middle" fill="var(--c-claude-ink-3)" letterSpacing="0.06em">HUMAN</text>
+          <text x={17} y={8} fontSize={8} textAnchor="middle" fill="var(--c-claude-ink-3)" letterSpacing="0.06em">{t('monitor_node_deployment_conceptual')}</text>
         </g>
       )}
     </g>

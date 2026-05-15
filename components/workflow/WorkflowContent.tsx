@@ -15,6 +15,9 @@ import { NeighborhoodPanel } from "./NeighborhoodPanel";
 import { RecentEntitiesPanel } from "./RecentEntitiesPanel";
 import { AgentChatbot } from "./AgentChatbot";
 import { NODES, EDGES, type WorkflowNode } from "@/lib/workflow-graph-meta";
+import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
+import { LiveAgentPanel } from "./LiveAgentPanel";
+import Link from "next/link";
 
 export function WorkflowContent() {
   const { t } = useApp();
@@ -41,6 +44,11 @@ export function WorkflowContent() {
   // Replaces the legacy /api/workflow/active poll AND the hardcoded
   // status field on each NodeDef.
   const health = useAgentsHealth(4_000);
+
+  // ★ v0_1_010: Inngest live overlay — for the 3 real PRA agents only.
+  // wsId "4" (JDGenerator) / "9-1" (ResumeParser) / "10" (Matcher) become "live".
+  // All other nodes are static blueprints (stub agents, not deployed).
+  const liveOverlay = useInngestLiveOverlay();
 
   // Aggregate counts for the sub-header summary. `nodes` is a stable
   // literal in this component body — the only thing that changes between
@@ -72,6 +80,18 @@ export function WorkflowContent() {
         </div>
         <HeaderHealthSummary summary={summary} />
         <Badge variant="info">{WORKFLOW_META.version} · {WORKFLOW_META.status}</Badge>
+        <div className="w-px h-5 bg-line" />
+        <Link
+          href="/monitor"
+          className="text-[12px] text-accent hover:underline flex items-center gap-1"
+          title="切到运行监控 dashboard 看 agent 实时状态 / runs / DLQ"
+        >
+          <Ic.pulse /> 实时监控
+        </Link>
+        <div className="text-[11px] text-ink-3 mono">
+          <span className="text-ok font-semibold">{liveOverlay.byWsId.size}</span> live ·{" "}
+          <span className="text-ink-4">{nodes.filter(n => n.kind === "agent").length - liveOverlay.byWsId.size}</span> 蓝图
+        </div>
         <div className="w-px h-5 bg-line" />
         <AgenticToggle />
         <div className="w-px h-5 bg-line" />
@@ -178,16 +198,20 @@ export function WorkflowContent() {
             </circle>
 
             {nodes.map((n) => {
-              // Resolve agent shortname so WFNode can pull live health from
-              // the polled snapshot. Non-agent nodes pass undefined and
-              // keep their static visuals.
               const short = n.kind === "agent" ? nodeAgentShort(n) : null;
               const liveHealth = short ? health.byShort.get(short) ?? null : null;
+              // ★ Inngest live overlay — only 3 nodes match (wsId 4/9-1/10).
+              // Others get rendered as "蓝图 / blueprint" (dimmed).
+              const liveAgent = liveOverlay.byWsId.get(n.wsId) ?? null;
+              const isBlueprintStub =
+                n.kind === "agent" && !liveAgent;
               return (
                 <WFNode
                   key={n.id}
                   node={n}
                   liveHealth={liveHealth}
+                  liveAgent={liveAgent}
+                  isBlueprintStub={isBlueprintStub}
                   selected={n.id === selectedId}
                   onSelect={() => setSelectedId(n.id)}
                 />
@@ -224,6 +248,8 @@ export function WorkflowContent() {
                 ? health.byShort.get(nodeAgentShort(sel) ?? "") ?? null
                 : null
             }
+            liveAgent={liveOverlay.byWsId.get(sel.wsId) ?? null}
+            isBlueprintStub={sel.kind === "agent" && !liveOverlay.byWsId.get(sel.wsId)}
             onJumpToAgent={jumpToAgent}
           />
         </aside>
@@ -279,16 +305,23 @@ const HEALTH_TONE: Record<AgentHealthStatus, { color: string; label: string; pul
 function WFNode({
   node,
   liveHealth,
+  liveAgent,
+  isBlueprintStub,
   selected,
   onSelect,
 }: {
   node: WorkflowNode;
   liveHealth: AgentHealth | null;
+  liveAgent: LiveAgentState | null;
+  isBlueprintStub: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
   const w = 140;
   const h = 68;
+  // Dim blueprint stubs visually — they're not deployed, so don't pretend
+  // they have status.
+  const stubOpacity = isBlueprintStub ? 0.55 : 1;
   const style = (() => {
     switch (node.kind) {
       case "trigger": return { fill: "var(--c-accent-bg)", stroke: "var(--c-accent-line)", accent: "var(--c-accent)" };
@@ -299,17 +332,35 @@ function WFNode({
       default: return { fill: "var(--c-surface)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-1)" };
     }
   })();
-  // Live health drives the dot. For agent nodes we show even idle as a
-  // muted dot so the user can tell "no recent activity" apart from "no
-  // status info". Non-agent nodes (HITL / guard / branch / done) keep
-  // their static styling — they're not run by an AgentActivity author.
+  // ★ Live overlay tone takes priority over the legacy /api/agents/health.
+  // - Paused → warn (yellow)
+  // - Has failed runs → err (red, pulse)
+  // - Has running → ok (green, pulse)
+  // - Has completed only → ok (green, steady)
+  // - No runs → muted dot (idle blue-grey)
+  const liveTone: { color: string; label: string; pulse: boolean } | null = liveAgent
+    ? liveAgent.paused
+      ? { color: "var(--c-warn)", label: "paused", pulse: false }
+      : liveAgent.running > 0
+      ? { color: "var(--c-ok)", label: `${liveAgent.running} running`, pulse: true }
+      : liveAgent.failed > 0
+      ? { color: "var(--c-err)", label: `${liveAgent.failed} failed`, pulse: true }
+      : liveAgent.completed > 0
+      ? { color: "var(--c-ok)", label: `${liveAgent.completed} ok`, pulse: false }
+      : { color: "var(--c-ink-4)", label: "idle", pulse: false }
+    : null;
   const tone =
-    node.kind === "agent" && liveHealth ? HEALTH_TONE[liveHealth.status] : null;
+    liveTone ??
+    (node.kind === "agent" && liveHealth ? HEALTH_TONE[liveHealth.status] : null);
   const statusDot = tone?.color ?? null;
   const statusPulse = tone?.pulse ?? false;
   const Icon = Ic[node.icon];
   return (
-    <g transform={`translate(${node.x} ${node.y})`} style={{ cursor: "pointer" }} onClick={onSelect}>
+    <g
+      transform={`translate(${node.x} ${node.y})`}
+      style={{ cursor: "pointer", opacity: stubOpacity }}
+      onClick={onSelect}
+    >
       {selected && (
         <rect x="-5" y="-5" width={w + 10} height={h + 10} rx="11" fill="none" stroke="var(--c-accent)" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.8" />
       )}
@@ -325,6 +376,39 @@ function WFNode({
       </foreignObject>
       <text x="36" y="24" fontSize="12" fontWeight="600" fill="var(--c-ink-1)" style={{ fontFamily: "var(--f-sans)" }}>{node.title}</text>
       <text x="36" y="40" fontSize="10.5" fill="var(--c-ink-3)" style={{ fontFamily: "var(--f-sans)" }}>{node.sub}</text>
+
+      {/* ★ LIVE badge (top-right corner) for the 3 real PRA agents */}
+      {liveAgent && !liveAgent.paused && (
+        <g transform={`translate(${w - 36} 5)`}>
+          <rect width="32" height="14" rx="3" fill="var(--c-ok-bg)" stroke="var(--c-ok)" strokeWidth="0.8" />
+          <text x="16" y="10" textAnchor="middle" fontSize="8.5" fontWeight="700"
+                fill="var(--c-ok)" style={{ fontFamily: "var(--f-mono)" }}>● LIVE</text>
+        </g>
+      )}
+      {liveAgent?.paused && (
+        <g transform={`translate(${w - 44} 5)`}>
+          <rect width="40" height="14" rx="3" fill="var(--c-warn-bg)" stroke="var(--c-warn)" strokeWidth="0.8" />
+          <text x="20" y="10" textAnchor="middle" fontSize="8.5" fontWeight="700"
+                fill="var(--c-warn)" style={{ fontFamily: "var(--f-mono)" }}>⏸ PAUSED</text>
+        </g>
+      )}
+
+      {/* ★ Blueprint badge (top-right corner) for 20 stub agents */}
+      {isBlueprintStub && (
+        <g transform={`translate(${w - 36} 5)`}>
+          <rect width="32" height="14" rx="3" fill="var(--c-panel)" stroke="var(--c-line)" strokeWidth="0.8" />
+          <text x="16" y="10" textAnchor="middle" fontSize="8" fontWeight="600"
+                fill="var(--c-ink-4)" style={{ fontFamily: "var(--f-mono)" }}>蓝图</text>
+        </g>
+      )}
+
+      {/* ★ Run count strip (bottom of live nodes) */}
+      {liveAgent && liveAgent.total > 0 && (
+        <text x={w - 8} y="63" textAnchor="end" fontSize="9.5" fontWeight="600"
+              fill="var(--c-ink-2)" style={{ fontFamily: "var(--f-mono)" }}>
+          {liveAgent.completed}✓ {liveAgent.failed > 0 && `${liveAgent.failed}✗`} {liveAgent.running > 0 && `${liveAgent.running}●`}
+        </text>
+      )}
       {statusDot && (
         <>
           <circle cx={w - 12} cy="14" r="4" fill={statusDot} opacity="0.2" />
@@ -369,10 +453,14 @@ function WFNode({
 function Inspector({
   node,
   liveHealth,
+  liveAgent,
+  isBlueprintStub,
   onJumpToAgent,
 }: {
   node: WorkflowNode;
   liveHealth: AgentHealth | null;
+  liveAgent: LiveAgentState | null;
+  isBlueprintStub: boolean;
   onJumpToAgent: (short: string) => void;
 }) {
   const { t } = useApp();
@@ -389,12 +477,43 @@ function Inspector({
             <Icon />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] font-semibold">{node.title}</div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[13px] font-semibold">{node.title}</span>
+              {liveAgent && !liveAgent.paused && (
+                <span className="text-[9px] mono font-bold px-1.5 py-0.5 rounded bg-ok-bg text-ok">● LIVE</span>
+              )}
+              {liveAgent?.paused && (
+                <span className="text-[9px] mono font-bold px-1.5 py-0.5 rounded bg-warn-bg text-warn">⏸ PAUSED</span>
+              )}
+              {isBlueprintStub && (
+                <span className="text-[9px] mono font-medium px-1.5 py-0.5 rounded border border-line text-ink-4">蓝图(未部署)</span>
+              )}
+            </div>
             <div className="text-ink-3 text-[11px]">{node.sub}</div>
           </div>
           <Btn size="sm" variant="ghost" style={{ padding: "0 6px" }}><Ic.dots /></Btn>
         </div>
       </div>
+
+      {/* ★ Live agent panel — only shown for the 3 real PRA agents */}
+      {liveAgent && <LiveAgentPanel liveAgent={liveAgent} />}
+
+      {/* ★ Blueprint warning — shown for non-deployed stub agents */}
+      {isBlueprintStub && (
+        <div className="border-b border-line mx-3 my-3 p-3 rounded-md bg-panel">
+          <div className="text-[11px] text-ink-3 leading-relaxed">
+            ⚠ 此节点是 <strong>蓝图设计</strong> — 实际 Inngest 上 <strong>未部署</strong>。
+            <br />
+            它定义了完整工作流的位置 / 触发事件 / 下游连接,作为 v0_1_010 实施路线图的参考。
+            <br />
+            <br />
+            当前部署的实际 agent:JDGenerator · ResumeParser · Matcher。
+            <Link href="/workflow-agents" className="text-accent hover:underline ml-1">
+              → 完整 list 视图
+            </Link>
+          </div>
+        </div>
+      )}
       <div className="overflow-auto py-1.5">
         <NeighborhoodPanel short={agentShort} onJump={onJumpToAgent} />
         {agentShort && liveHealth !== undefined && (

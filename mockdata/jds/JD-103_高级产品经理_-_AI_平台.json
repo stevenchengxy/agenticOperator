@@ -1,0 +1,36 @@
+{
+  "id": "JD-103",
+  "title": "高级产品经理 - AI 平台",
+  "company": "腾讯",
+  "department": "CSIG · AI Lab",
+  "location": "深圳市南山区滨海大道",
+  "salary": "45K-70K · 14薪",
+  "type": "全职",
+  "experience": "5-10年",
+  "education": "硕士及以上",
+  "headcount": 1,
+  "urgency": "中",
+  "description": "负责 AI Agent 平台产品规划,从 0 到 1 定义企业级 Agent 编排引擎的产品形态、商业模式与生态合作。",
+  "responsibilities": [
+    "调研全球 AI Agent / Workflow 平台,沉淀竞品矩阵和差异化策略",
+    "牵头产品定义、功能拆解、迭代节奏,推动跨 BG 合作 (To B 销售/服务/合规)",
+    "管理产品全生命周期 KPI:留存、付费转化、生态合作伙伴接入数",
+    "对接客户成功团队,沉淀客户案例反哺产品"
+  ],
+  "requirements": [
+    "5 年以上 B 端 SaaS 或 PaaS 产品经验",
+    "熟悉 LLM 应用场景,有 RAG / Agent / Workflow 类产品落地经验",
+    "强逻辑、强写作、强 Owner 意识,能独立 push 跨团队协作",
+    "英文工作语言能力 (会有海外客户沟通)"
+  ],
+  "nice_to_have": [
+    "计算机/人工智能背景,有过算法/工程一线经历",
+    "MBA 或顶级咨询公司 (MBB) 背景"
+  ],
+  "benefits": [
+    "六险二金",
+    "14 薪 + 年终",
+    "股票期权",
+    "免费班车 + 三餐"
+  ]
+}

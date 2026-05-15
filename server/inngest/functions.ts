@@ -12,11 +12,15 @@
 //
 // Env gates:
 //   STUB_AGENTS=0        — disable stubs (e.g. when running real agent runtimes)
+//                          ★ v0_1_010 起默认 = 0(只跑 3 real agent + 0 stub + 0 behavior),
+//                          要恢复 stub 看 fleet/workflow 演示页时再 STUB_AGENTS=1。
 //   STUB_SUCCESS_RATE    — default 0.9  (90 % take the happy path)
 //   STUB_HITL_DELAY_MS   — default 5000 (HITL auto-resolves after 5 s for demo)
 //   STUB_RPA_OWNED=1     — include stubs for RPA-owned wsIds (default OFF)
 //                          Use only in dev/testing isolation; in production the
 //                          real resume-parser-agent handles these events.
+//   BEHAVIOR_AGENTS=0    — disable Monitor + Manager agents (default ON when
+//                          STUB_AGENTS=1, OFF when STUB_AGENTS=0)
 
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { createStubAgent } from "./agents/stub-factory";
@@ -47,6 +51,11 @@ const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10"]);
 // Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation testing).
 const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
 
+// ★ v0_1_010 default: only run 3 real PRA agents.
+// To restore demo stubs (fleet/workflow visualization), set STUB_AGENTS=1.
+const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS === "1";
+const BEHAVIOR_AGENTS_ENABLED = process.env.BEHAVIOR_AGENTS === "1";
+
 // Build a stub for every business agent that has at least one trigger event.
 // Chatbot has triggersEvents=[] so it is naturally excluded.
 // RPA-owned wsIds are skipped by default to avoid racing real agents.
@@ -57,16 +66,17 @@ const businessAgents = AGENT_MAP.filter((a) => {
   return true;
 });
 
-const stubFunctions = businessAgents
-  .map(createStubAgent)
-  .filter((fn): fn is NonNullable<typeof fn> => fn !== null);
+const stubFunctions = STUB_AGENTS_ENABLED
+  ? businessAgents
+      .map(createStubAgent)
+      .filter((fn): fn is NonNullable<typeof fn> => fn !== null)
+  : [];
 
-// Behavior axis agents (Phase 1): Monitor Agent (cron) + Manager Agent (event-driven)
-const behaviorFunctions = [monitorAgent, managerAgent];
+// Behavior axis agents (Monitor cron + Manager event-driven). Default OFF for v0_1_010.
+const behaviorFunctions = BEHAVIOR_AGENTS_ENABLED ? [monitorAgent, managerAgent] : [];
 
 // Real production agents from resume-parser-agent — the 3 functions that
-// actually call RAAS / LLM / MinIO. Their wsIds (4, 9-1, 10) are excluded
-// from stub generation above so they don't double-handle events.
+// actually call RAAS / LLM / MinIO. Always registered (they ARE the workflow).
 const realFunctions = [resumeParserAgent, createJdAgent, matchResumeAgent];
 
 export const allFunctions = [
@@ -79,6 +89,7 @@ export const allFunctions = [
 if (typeof window === "undefined") {
   // eslint-disable-next-line no-console
   console.log(
-    `[inngest] registered ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior + ${realFunctions.length} real agents = ${allFunctions.length} total`,
+    `[inngest] registered ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior + ${realFunctions.length} real agents = ${allFunctions.length} total ` +
+      `(STUB_AGENTS=${STUB_AGENTS_ENABLED ? "1" : "0"} BEHAVIOR_AGENTS=${BEHAVIOR_AGENTS_ENABLED ? "1" : "0"})`,
   );
 }
