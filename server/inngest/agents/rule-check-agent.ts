@@ -14,7 +14,7 @@ import {
   inngest,
   type RuleCheckRequestedData,
   type RuleCheckPassedData,
-  type RuleCheckFailedData,
+  type MatchEventData,
   type RuleCheckAuditMeta,
 } from '@/server/inngest/client';
 
@@ -89,24 +89,31 @@ export async function ruleCheckAgentHandler({
     return { ok: true, decision: 'PASS' as const, job_requisition_id: data.job_requisition_id };
   }
 
-  // FAIL or REVIEW
-  const failedPayload: RuleCheckFailedData = {
-    upload_id: data.upload_id,
-    candidate_id: data.candidate_id,
-    resume_id: data.resume_id,
+  // Plan B (2026-05-19): rule-check FAIL/REVIEW → emit MATCH_FAILED directly
+  // (统一三事件家族,partner dispatcher 消费同样 payload 形状).
+  const failedPayload: MatchEventData = {
     job_requisition_id: data.job_requisition_id,
-    client_id: data.client_id ?? '',
-    decision: result.decision,
-    failed_rules: result.explanations.map((e) => ({
-      rule_id: e.rule_id,
-      rule_name: e.rule_name,
-      step_id: e.step_id,
-      status: e.status,
-      reason: e.reason,
-    })),
-    audit,
+    candidate_id: data.candidate_id || null,
+    matching_score: null,  // rule-check 阶段无 score
+    upload_id: data.upload_id || null,
+    success: false,
+    data: {
+      rule_check_decision: result.decision,  // 'FAIL' | 'REVIEW'
+      failed_rules: result.explanations.map((e) => ({
+        rule_id: e.rule_id,
+        rule_name: e.rule_name,
+        step_id: e.step_id,
+        status: e.status,
+        reason: e.reason,
+      })),
+      audit,
+    },
+    error: `rule-check-${result.decision.toLowerCase()}`,
   };
-  await step.sendEvent(`emit-failed-${stepKey}`, { name: 'RULE_CHECK_FAILED', data: failedPayload });
+  await step.sendEvent(`emit-match-failed-${stepKey}`, {
+    name: 'MATCH_FAILED',
+    data: failedPayload,
+  });
   return { ok: true, decision: result.decision, job_requisition_id: data.job_requisition_id };
 }
 

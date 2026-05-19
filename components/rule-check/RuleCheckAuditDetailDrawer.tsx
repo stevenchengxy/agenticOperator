@@ -1084,7 +1084,7 @@ function buildImpactSentence(args: {
   if (blocks) {
     // 阻断:底线 + FAIL,这条规则就是整体 FAIL 的原因
     const cause = isFailureCause ? "★ 命中 failure_reasons" : "★ 底线规则失败";
-    return `${cause}:${name} 在 ${jrTitle} 上不满足底线 — ${ev}。触发整体 FAIL → emit RULE_CHECK_FAILED,跳过 matchResume,不进 Robohire 打分。`;
+    return `${cause}:${name} 在 ${jrTitle} 上不满足底线 — ${ev}。触发整体 FAIL → emit MATCH_FAILED(含 rule_check_decision=FAIL),跳过 matchResume,不进 Robohire 打分。`;
   }
   if (isFail) {
     // flag_only FAIL — 仅 augmentation 标注

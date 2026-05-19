@@ -37,7 +37,11 @@ export const AGENT_MAP: AgentMeta[] = [
   { short: 'ResumeCollector',  wsId: '8',       stage: 'resume',      kind: 'hybrid', ownerTeam: '招聘运营', version: 'v3.0.1', triggersEvents: ['CHANNEL_PUBLISHED'],                              emitsEvents: ['RESUME_DOWNLOADED'],                                                        terminal: false },
   { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false },
   { short: 'ResumeFixer',      wsId: '9-2',     stage: 'resume',      kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['RESUME_PARSE_ERROR'],                             emitsEvents: ['RESUME_PROCESSED'],                                                         terminal: false },
-  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.3.1', triggersEvents: ['RESUME_PROCESSED'],               emitsEvents: ['MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false },
+  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.3.1', triggersEvents: ['RESUME_PROCESSED', 'RULE_CHECK_PASSED'], emitsEvents: ['RULE_CHECK_REQUESTED', 'MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false },
+  // RuleCheck (wsId 10-5) — independent Inngest function (PR-4, 2026-05-19).
+  // Sits between Matcher 1st seg (emits RULE_CHECK_REQUESTED) and Matcher 2nd seg
+  // (subscribes RULE_CHECK_PASSED). See docs/workflow-agents-inngest-spec.md §5.
+  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v1.0.0', triggersEvents: ['RULE_CHECK_REQUESTED'],                          emitsEvents: ['RULE_CHECK_PASSED', 'MATCH_FAILED'],                                        terminal: false },
   // MatchReviewer (wsId 10-HITL) removed: not in authoritative workflow JSON.
   // MATCH_FAILED is terminal in the canonical workflow spec.
   { short: 'InterviewInviter', wsId: '11-1',    stage: 'interview',   kind: 'auto',   ownerTeam: '技术招聘', version: 'v0.7.2', triggersEvents: ['MATCH_PASSED_NEED_INTERVIEW'],                    emitsEvents: ['INTERVIEW_INVITATION_SENT'],                                                terminal: true  },
@@ -62,4 +66,19 @@ export function byShort(s: string): AgentMeta | undefined {
 
 export function byWsId(id: string): AgentMeta | undefined {
   return AGENT_MAP.find((a) => a.wsId === id);
+}
+
+// Agents that have a real Inngest function registered in
+// server/inngest/functions.ts (production runtime in AO-main :3002).
+// All other AGENT_MAP entries are blueprint / stub.
+// See docs/workflow-agents-inngest-spec.md §10.
+export const INNGEST_REAL_SHORTS: ReadonlySet<string> = new Set([
+  'JDGenerator',   // create-jd-agent       (workflow #4)
+  'ResumeParser',  // resume-parser-agent   (workflow #9)
+  'Matcher',       // match-resume-agent    (workflow #10, dual-trigger)
+  'RuleCheck',     // rule-check-agent      (workflow #10.5)
+]);
+
+export function isReal(short: string): boolean {
+  return INNGEST_REAL_SHORTS.has(short);
 }

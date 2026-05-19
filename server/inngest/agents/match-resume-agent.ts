@@ -32,7 +32,7 @@ import {
 import { matchResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import {
   inngest,
-  type MatchPassedNeedInterviewData,
+  type MatchEventData,
   type ResumeProcessedData,
   type RuleCheckPassedData,
   type RuleCheckRequestedData,
@@ -325,6 +325,18 @@ async function handleRuleCheckPassed({ event, step, logger }: any) {
   });
 
   if (!matchResult.ok) {
+    // RoboHire match call failed (4xx → NonRetriable already thrown, here is "skip" path).
+    // Emit MATCH_FAILED so partner dispatcher consumes the failure.
+    const failedPayload: MatchEventData = {
+      job_requisition_id: data.job_requisition_id,
+      candidate_id: candidateId || null,
+      matching_score: null,
+      upload_id: uploadId || null,
+      success: false,
+      data: { error_kind: 'robohire-match-call-failed' },
+      error: matchResult.error,
+    };
+    await step.sendEvent(`emit-match-failed-${stepKey}`, { name: 'MATCH_FAILED', data: failedPayload });
     return { ok: false, job_requisition_id: data.job_requisition_id, error: matchResult.error };
   }
 
@@ -354,19 +366,30 @@ async function handleRuleCheckPassed({ event, step, logger }: any) {
     }
   });
 
-  // 4c. emit MATCH_PASSED_NEED_INTERVIEW
-  const payload: MatchPassedNeedInterviewData = {
-    upload_id: uploadId,
+  // F3 (2026-05-19): score-threshold dispatch + top-level flatten
+  const matching_score = extractMatchingScore(matchResult.data);
+  const eventName = decideMatchEvent(matching_score);
+
+  const payload: MatchEventData = {
     job_requisition_id: data.job_requisition_id,
+    candidate_id: candidateId || null,
+    matching_score,
+    upload_id: uploadId || null,
+    job_posting_id:
+      typeof (req as any).job_posting_id === 'string' && (req as any).job_posting_id.trim()
+        ? ((req as any).job_posting_id as string).trim()
+        : null,
     success: true,
     data: matchResult.data as unknown as Record<string, unknown>,
     requestId: matchResult.requestId,
     savedAs: matchResult.savedAs,
   };
-  await step.sendEvent(`emit-match-${stepKey}`, { name: 'MATCH_PASSED_NEED_INTERVIEW', data: payload });
+  await step.sendEvent(`emit-match-${stepKey}`, { name: eventName, data: payload });
 
-  logger.info(`[${AGENT_NAME}] ✅ emitted MATCH_PASSED_NEED_INTERVIEW · jr=${data.job_requisition_id}`);
-  return { ok: true, job_requisition_id: data.job_requisition_id, requestId: matchResult.requestId };
+  logger.info(
+    `[${AGENT_NAME}] ✅ emitted ${eventName} · jr=${data.job_requisition_id} score=${matching_score}`,
+  );
+  return { ok: true, job_requisition_id: data.job_requisition_id, requestId: matchResult.requestId, eventName, matching_score };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -451,6 +474,35 @@ function isRecruitingStatus(req: RequirementsAgentViewItem): boolean {
 }
 function sanitizeStepKey(s: string): string {
   return s.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 80) || 'unknown';
+}
+
+/**
+ * Extract matching score from RoboHire /match-resume response.
+ * Tries multiple field positions; returns null if not found.
+ * Never throws.
+ */
+function extractMatchingScore(robohireData: unknown): number | null {
+  if (!robohireData || typeof robohireData !== 'object') return null;
+  const d = robohireData as Record<string, unknown>;
+  if (typeof d.matchScore === 'number') return d.matchScore;
+  if (typeof d.overallMatchScore === 'number') return d.overallMatchScore;
+  return null;
+}
+
+/**
+ * F3 score → event-name dispatch.
+ *   score > 90       → MATCH_PASSED_NO_INTERVIEW
+ *   50 ≤ score ≤ 90  → MATCH_PASSED_NEED_INTERVIEW
+ *   score < 50       → MATCH_FAILED
+ *   null             → MATCH_PASSED_NEED_INTERVIEW (conservative when score missing)
+ */
+function decideMatchEvent(
+  score: number | null,
+): 'MATCH_PASSED_NO_INTERVIEW' | 'MATCH_PASSED_NEED_INTERVIEW' | 'MATCH_FAILED' {
+  if (score === null) return 'MATCH_PASSED_NEED_INTERVIEW';
+  if (score > 90) return 'MATCH_PASSED_NO_INTERVIEW';
+  if (score >= 50) return 'MATCH_PASSED_NEED_INTERVIEW';
+  return 'MATCH_FAILED';
 }
 function getTraceId(eventData: unknown): string | undefined {
   if (!eventData || typeof eventData !== 'object') return undefined;

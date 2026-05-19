@@ -8,8 +8,8 @@
 //   REQUIREMENT_LOGGED   → createJdAgent       → JD_GENERATED
 //   RESUME_DOWNLOADED    → resumeParserAgent   → RESUME_PROCESSED
 //   RESUME_PROCESSED     → matchResumeAgent (1st) → RULE_CHECK_REQUESTED
-//   RULE_CHECK_REQUESTED → ruleCheckAgent   → RULE_CHECK_PASSED / RULE_CHECK_FAILED
-//   RULE_CHECK_PASSED    → matchResumeAgent (2nd) → MATCH_PASSED_NEED_INTERVIEW
+//   RULE_CHECK_REQUESTED → ruleCheckAgent   → RULE_CHECK_PASSED / MATCH_FAILED
+//   RULE_CHECK_PASSED    → matchResumeAgent (2nd) → MATCH_PASSED_NO_INTERVIEW / MATCH_PASSED_NEED_INTERVIEW / MATCH_FAILED
 //
 // 演示用 stub agent（19 个，可选）—— 给 fleet / workflow 可视化页面提供
 // 模拟数据流。Stub 收事件 → 写 AgentActivity → sleep → emit 下游事件 →

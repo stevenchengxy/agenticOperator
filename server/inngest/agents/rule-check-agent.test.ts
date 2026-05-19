@@ -104,7 +104,7 @@ describe('ruleCheckAgent', () => {
     expect(step.sent[0].data.parsed_resume).toEqual({ name: 'John' });
   });
 
-  it('emits RULE_CHECK_FAILED when runRuleCheck returns FAIL', async () => {
+  it('emits MATCH_FAILED when runRuleCheck returns FAIL', async () => {
     mockRunRuleCheck.mockResolvedValue({
       decision: 'FAIL',
       stats: { total: 5, pass: 4, fail: 1, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
@@ -126,12 +126,17 @@ describe('ruleCheckAgent', () => {
     await ruleCheckAgentHandler({ event: evt() as any, step: step as any, logger: mockLogger as any });
 
     expect(step.sent).toHaveLength(1);
-    expect(step.sent[0].name).toBe('RULE_CHECK_FAILED');
-    expect(step.sent[0].data.decision).toBe('FAIL');
-    expect(step.sent[0].data.failed_rules).toHaveLength(1);
+    expect(step.sent[0].name).toBe('MATCH_FAILED');
+    expect(step.sent[0].data.success).toBe(false);
+    expect(step.sent[0].data.matching_score).toBeNull();
+    expect(step.sent[0].data.job_requisition_id).toBe('JR1');
+    expect(step.sent[0].data.candidate_id).toBe('C1');
+    expect(step.sent[0].data.upload_id).toBe('U1');
+    expect(step.sent[0].data.data.rule_check_decision).toBe('FAIL');
+    expect(step.sent[0].data.data.failed_rules).toHaveLength(1);
   });
 
-  it('emits RULE_CHECK_FAILED with decision=REVIEW when REVIEW returned', async () => {
+  it('emits MATCH_FAILED with rule_check_decision=REVIEW when REVIEW returned', async () => {
     mockRunRuleCheck.mockResolvedValue({
       decision: 'REVIEW',
       stats: { total: 5, pass: 4, fail: 0, pending: 1, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
@@ -152,7 +157,7 @@ describe('ruleCheckAgent', () => {
     const step = mockStep();
     await ruleCheckAgentHandler({ event: evt() as any, step: step as any, logger: mockLogger as any });
 
-    expect(step.sent[0].name).toBe('RULE_CHECK_FAILED');
-    expect(step.sent[0].data.decision).toBe('REVIEW');
+    expect(step.sent[0].name).toBe('MATCH_FAILED');
+    expect(step.sent[0].data.data.rule_check_decision).toBe('REVIEW');
   });
 });

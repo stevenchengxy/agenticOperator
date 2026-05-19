@@ -114,19 +114,38 @@ export type ResumeProcessedData = {
 };
 
 // ─── §3.3 匹配输出事件 ─────────────────────────────────────
-export type MatchPassedNeedInterviewData = {
-  /** 来自 RESUME_PROCESSED 的 upload_id —— RAAS 用它反查 candidate_id。 */
-  upload_id: string;
-  /** 当前轮匹配的需求 ID —— RAAS 用它定位是哪条需求的得分。 */
-  job_requisition_id: string;
+//
+// F3 (2026-05-19): 三个 MATCH_* 事件 payload 统一契约。关键字段都在顶层,
+// 缺失统一用 null(禁止空串)。Partner auto-invitation dispatcher 读顶层
+// candidate_id / matching_score / upload_id 决定是否发邀约。
+//
+// 见 docs/superpowers/specs/2026-05-19-raas-integration-divergence-fixes-design.md §4
 
-  // ── 以下字段由 RoboHire /match-resume 响应直接平铺 ──
+export type MatchEventData = {
+  /** ★ 路径 A/B 收敛后的具体岗位 ID(必填) */
+  job_requisition_id: string;
+  /** ★ 候选人 ID;无显式 null */
+  candidate_id: string | null;
+  /** ★ 匹配分;取不到显式 null,不要省略字段 */
+  matching_score: number | null;
+  /** ★ upload_id;缺失统一 null,禁止空串 */
+  upload_id: string | null;
+  /** 关联 posting,有则带 */
+  job_posting_id?: string | null;
+
+  // ── envelope 保留字段(RoboHire 风格,供 consumer cherry-pick)──
   success?: boolean;
+  /** 原始 RoboHire match 分析数据;FAIL 时塞 { rule_check_decision, failed_rules, audit }
+   *  等结构化错误信息 */
   data?: Record<string, unknown>;
   requestId?: string;
   savedAs?: string;
   error?: string;
 };
+
+export type MatchPassedNeedInterviewData = MatchEventData;
+export type MatchPassedNoInterviewData = MatchEventData;
+export type MatchFailedData = MatchEventData;
 
 // ─── §3.5 Rule check 事件(matchResumeAgent 在调 RAAS /match-resume 之前
 // 跑一次 LLM 预筛,决定是否推进。PASS/FAIL/REVIEW,见 lib/rule-check/) ───
@@ -190,23 +209,6 @@ export type RuleCheckPassedData = {
   runtime_context?: RuleCheckRequestedData['runtime_context'];
   /** employee_id 给第二段 saveMatchResults 用。 */
   employee_id?: string;
-};
-
-export type RuleCheckFailedData = {
-  upload_id: string;
-  candidate_id?: string;
-  resume_id?: string;
-  job_requisition_id: string;
-  client_id: string;
-  decision: 'FAIL' | 'REVIEW';
-  failed_rules: Array<{
-    rule_id: string;
-    rule_name: string;
-    step_id: string;
-    status: 'fail' | 'pending' | 'insufficient_info' | 'not_executed';
-    reason: string;
-  }>;
-  audit: RuleCheckAuditMeta;
 };
 
 // ─── §3.4 JD 生成相关事件 ─────────────────────────────────

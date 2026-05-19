@@ -82,16 +82,17 @@ const JD_GENERATED_v1 = envelope(
 );
 
 // MATCH_PASSED_NEED_INTERVIEW / MATCH_PASSED_NO_INTERVIEW / MATCH_FAILED
-// share the same shape — a flattened RoboHire response payload. We mirror
-// what server/ws/agents/match-resume.ts emits today.
+// share the same shape — F3 (2026-05-19): top-level candidate_id / matching_score /
+// upload_id with explicit nulls. Partner auto-invitation dispatcher reads these
+// from top level.
 const MATCH_PAYLOAD_v1 = z
   .object({
-    upload_id: z.string().optional(),
-    job_requisition_id: z.string().optional(),
+    job_requisition_id: z.string(),
+    candidate_id: z.string().nullable(),
+    matching_score: z.number().nullable(),
+    upload_id: z.string().nullable(),
+    job_posting_id: z.string().nullable().optional(),
     jd_id: z.string().optional(),
-    score: z.number().optional(),
-    decision: z.string().optional(),
-    reason: z.string().optional(),
   })
   .passthrough();
 
