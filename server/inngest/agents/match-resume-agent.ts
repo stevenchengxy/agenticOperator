@@ -1,19 +1,23 @@
-// matchResume agent — Workflow node 10.
+// matchResume agent — Workflow node 10 (PR-4 2026-05-19 双段订阅版).
 //
-// Subscribes RESUME_PROCESSED → 通过 RAAS API Server 取需求列表 → 循环调
-// /api/v1/match-resume → 持久化到 RAAS DB (POST /api/v1/match-results) →
-// emit MATCH_PASSED_NEED_INTERVIEW (cascade trigger).
+// 订阅两类事件,根据 event.name 分支:
 //
-// 跟之前版本的差别 (Workflow A, 2026-05-08):
-//   ❌ 不再调 RoboHire /match-resume 直连 (lib/robohire.ts 退役)
-//   ❌ 不再调 lib/raas-internal.ts (老 internal API path 退役)
-//   ✅ 通过 raas-api-client 调:
-//        - getRequirementsAgentView (列需求)
-//        - matchResume               (打分)
-//        - saveMatchResults          (持久化, source="need_interview")
+// 1. RESUME_PROCESSED (第一段)
+//    - 通过 RAAS API Server 拉招聘人员名下在招 JR 列表
+//    - 对每条 JR emit RULE_CHECK_REQUESTED → ruleCheckAgent
+//    - 不再内嵌 runRuleCheck(已抽到 ruleCheckAgent)
+//    - 不再调 matchResume(等 ruleCheckAgent 回信 RULE_CHECK_PASSED)
 //
-// Inbound:  RESUME_PROCESSED { upload_id, candidate_id, employee_id, parsed, ... }
-// Outbound: MATCH_PASSED_NEED_INTERVIEW (一条/JD)
+// 2. RULE_CHECK_PASSED (第二段)
+//    - 直连 RoboHire POST /match-resume (不再走 RAAS proxy)
+//    - 持久化:RAAS POST /match-results (写 Postgres,保留)
+//    - emit MATCH_PASSED_NEED_INTERVIEW
+//
+// 改动 vs PR-4 前:
+//   ❌ 删除 RULE_CHECK_ENABLED env gate + step 4.0 inline rule-check
+//   ✅ 双段订阅 — RESUME_PROCESSED + RULE_CHECK_PASSED
+//   ✅ matchResume 切换 RoboHire 直连
+//   ✅ POST /match-results 保留(RAAS dual-write 契约,见 memory)
 
 import { NonRetriableError } from 'inngest';
 import {
@@ -21,441 +25,263 @@ import {
   getRequirementDetail,
   getRequirementsAgentView,
   isRaasApiConfigured,
-  matchResume,
   saveMatchResults,
-  type RaasMatchResumeData,
   type RequirementsAgentViewItem,
 } from '@/lib/raas-api-client';
-import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
-import { extractDims as extractDimsForAudit } from '@/lib/rule-check/ontology';
+import { matchResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import {
   inngest,
   type MatchPassedNeedInterviewData,
   type ResumeProcessedData,
-  type RuleCheckAuditMeta,
-  type RuleCheckFailedData,
   type RuleCheckPassedData,
+  type RuleCheckRequestedData,
 } from '@/server/inngest/client';
 
 const AGENT_ID = 'match-resume-agent';
 const AGENT_NAME = 'matchResume';
-
-// Rule-check LLM 预筛 gate 开关。默认关闭(env 不设或非 "true")— RAAS partner
-// 走原来的 RESUME_PROCESSED → matchResume 链路,不被 LLM 预筛干扰。
-// 把环境变量设成 RULE_CHECK_ENABLED=true 即重新启用 gate。
-//
-// 必须用 function 而不是模块顶层 const,否则 Inngest worker 启动时读一次就
-// cache 住,后面改 Inngest cloud 的 env 不会生效(直到 worker restart)。
-// 函数形式 → 每次 invocation 实时读 process.env,toggle 立即生效。
-function isRuleCheckEnabled(): boolean {
-  return process.env.RULE_CHECK_ENABLED === 'true';
-}
 
 export const matchResumeAgent = inngest.createFunction(
   {
     id: AGENT_ID,
     name: 'Match Resume Agent (workflow node 10)',
     retries: 2,
-    triggers: [{ event: 'RESUME_PROCESSED' }],
+    triggers: [
+      { event: 'RESUME_PROCESSED' },
+      { event: 'RULE_CHECK_PASSED' },
+    ],
   },
   async ({ event, step, logger }) => {
-    const data = unwrapResumeProcessedEvent(event.data);
-    const traceId = getTraceId(event.data);
-
-    // ── 1. 抽取必要 anchor ─────────────────────────────────
-    const uploadId = pickUploadId(data);
-    const candidateId = pickCandidateId(data);
-    const employeeId = pickEmployeeId(data);
-
-    if (!uploadId && !candidateId) {
-      throw new NonRetriableError(
-        `[${AGENT_NAME}] RESUME_PROCESSED 缺 upload_id 和 candidate_id — 至少需要其一才能调 saveMatchResults。data keys=${Object.keys(data).join(',')}`,
-      );
+    if (event.name === 'RESUME_PROCESSED') {
+      return await handleResumeProcessed({ event, step, logger });
     }
-    if (!employeeId) {
-      throw new NonRetriableError(
-        `[${AGENT_NAME}] RESUME_PROCESSED 缺 employee_id / claimer_employee_id — 无法定位招聘人员名下的需求`,
-      );
+    if (event.name === 'RULE_CHECK_PASSED') {
+      return await handleRuleCheckPassed({ event, step, logger });
     }
-    if (!isRaasApiConfigured()) {
-      throw new NonRetriableError(
-        `[${AGENT_NAME}] RAAS_API_BASE_URL / AGENT_API_KEY env 未配置`,
-      );
-    }
+    logger.warn(`[${AGENT_NAME}] unexpected event name: ${event.name}`);
+    return { ok: true, skipped: true };
+  },
+);
 
-    logger.info(
-      `[${AGENT_NAME}] received RESUME_PROCESSED · upload_id=${uploadId ?? '—'} ` +
-        `candidate_id=${candidateId ?? '—'} employee_id=${employeeId}`,
-    );
+// ──────────────────────────────────────────────────────────────────────
+// 第一段:RESUME_PROCESSED → emit RULE_CHECK_REQUESTED 一条/JR
+// ──────────────────────────────────────────────────────────────────────
 
-    // ── 2. 构造 resume 文本 (喂给 match-resume) ─────────────
-    const resumeText = await step.run('build-resume-text', async () => {
-      const text = buildResumeText(data);
-      logger.info(`[${AGENT_NAME}] built resume text · ${text.length} chars`);
-      return text;
-    });
+async function handleResumeProcessed({ event, step, logger }: any) {
+  const data = unwrapResumeProcessedEvent(event.data);
+  const traceId = getTraceId(event.data);
+  const uploadId = pickUploadId(data);
+  const candidateId = pickCandidateId(data);
+  const employeeId = pickEmployeeId(data);
+  const resumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
 
-    if (!resumeText.trim()) {
-      throw new NonRetriableError(
-        `[${AGENT_NAME}] resume text empty — payload.parsed.data 没有可用内容`,
-      );
-    }
+  if (!uploadId && !candidateId) {
+    throw new NonRetriableError(`[${AGENT_NAME}] RESUME_PROCESSED 缺 upload_id 和 candidate_id`);
+  }
+  if (!employeeId) {
+    throw new NonRetriableError(`[${AGENT_NAME}] RESUME_PROCESSED 缺 employee_id`);
+  }
+  if (!isRaasApiConfigured()) {
+    throw new NonRetriableError(`[${AGENT_NAME}] RAAS_API_BASE_URL / AGENT_API_KEY env 未配置`);
+  }
 
-    // ── 3. 调 RAAS API 拿招聘人员的在招需求列表 ──────────────
-    //
-    // 双路径:
-    //   A) RESUME_PROCESSED.payload.job_requisition_id 有值
-    //        → 上传时用户在 raas 前端弹框选了"关联岗位"
-    //        → 调 GET /api/v1/requirements/:id 单岗位精准匹配
-    //   B) job_requisition_id 为空
-    //        → 调 GET /api/v1/requirements/agent-view?claimer_employee_id=...
-    //        → 拉 claimer 名下所有 recruiting JD 全扫描 (现状)
-    const linkedJrId =
-      typeof data.job_requisition_id === 'string' &&
-      data.job_requisition_id.trim().length > 0
-        ? data.job_requisition_id.trim()
-        : null;
+  logger.info(
+    `[${AGENT_NAME}] received RESUME_PROCESSED · upload_id=${uploadId ?? '—'} ` +
+      `candidate_id=${candidateId ?? '—'} employee_id=${employeeId}`,
+  );
 
-    const requirements = await step.run('list-requirements', async () => {
-      // 路径 A: 单岗位精准匹配
-      if (linkedJrId) {
-        try {
-          const detail = await getRequirementDetail(linkedJrId, { traceId });
-          // 把 RaasRequirement 当成 RequirementsAgentViewItem 用 —
-          // flattenRequirementForMatch / pickRequisitionId / hasMatchableContent
-          // 都走的是宽松属性取值，字段名（job_requisition_id /
-          // job_responsibility / must_have_skills / ...）在两个类型间一致。
-          const merged = {
-            ...(detail.specification ?? {}),
-            ...(detail.requirement ?? {}),
-          } as unknown as RequirementsAgentViewItem;
-          // 单岗位路径不再做 isRecruitingStatus 兜底过滤 — 用户明确选了这个
-          // 岗位关联，即使该岗位状态变更（暂停/关闭），匹配结果对人工后续
-          // 判断仍有价值。但仍要求至少有可匹配内容，否则无意义。
-          if (!hasMatchableContent(merged)) {
-            logger.warn(
-              `[${AGENT_NAME}] linked job_requisition_id=${linkedJrId} 内容空 ` +
-                `(无 responsibility / requirement / must_have_skills)，跳过匹配`,
-            );
-            return [];
-          }
-          logger.info(
-            `[${AGENT_NAME}] linked job_requisition_id=${linkedJrId} → 单岗位精准匹配`,
-          );
-          return [merged];
-        } catch (e) {
-          if (e instanceof RaasApiError && e.isClientError) {
-            throw new NonRetriableError(
-              `RAAS getRequirementDetail 4xx for linked jr=${linkedJrId}: ${e.code} ${e.message}`,
-            );
-          }
-          throw e;
-        }
-      }
+  const linkedJrId =
+    typeof data.job_requisition_id === 'string' && data.job_requisition_id.trim().length > 0
+      ? data.job_requisition_id.trim()
+      : null;
 
-      // 路径 B: 未关联岗位 → agent-view 扫描所有 claimer 名下 recruiting JD (现状)
+  const requirements = await step.run('list-requirements', async () => {
+    if (linkedJrId) {
       try {
-        const r = await getRequirementsAgentView(
-          { claimer_employee_id: employeeId },
-          { traceId },
-        );
-        const total = r.items?.length ?? 0;
-        // 双层过滤:
-        //   1) isRecruitingStatus — 只跑招聘中 JD (兜底, 防 partner 返回非 recruiting)
-        //   2) hasMatchableContent — 必须有 job_responsibility / job_requirement / must_have_skills
-        const recruiting = (r.items ?? []).filter(isRecruitingStatus);
-        const matchable = recruiting.filter(hasMatchableContent);
-        logger.info(
-          `[${AGENT_NAME}] RAAS returned ${total} requirement(s); ` +
-            `${recruiting.length} recruiting; ${matchable.length} matchable`,
-        );
-        return matchable;
+        const detail = await getRequirementDetail(linkedJrId, { traceId });
+        const merged = {
+          ...(detail.specification ?? {}),
+          ...(detail.requirement ?? {}),
+        } as unknown as RequirementsAgentViewItem;
+        if (!hasMatchableContent(merged)) {
+          logger.warn(`[${AGENT_NAME}] linked JR ${linkedJrId} 内容空,跳过`);
+          return [];
+        }
+        return [merged];
       } catch (e) {
         if (e instanceof RaasApiError && e.isClientError) {
-          throw new NonRetriableError(
-            `RAAS getRequirementsAgentView 4xx: ${e.code} ${e.message}`,
-          );
+          throw new NonRetriableError(`getRequirementDetail 4xx for ${linkedJrId}: ${e.code} ${e.message}`);
         }
         throw e;
       }
-    });
-
-    if (requirements.length === 0) {
-      logger.warn(
-        `[${AGENT_NAME}] employee_id=${employeeId} 名下 0 条 matchable 需求，不 emit`,
-      );
-      return {
-        ok: true,
-        upload_id: uploadId,
-        candidate_id: candidateId,
-        employee_id: employeeId,
-        matched_count: 0,
-        emitted_count: 0,
-        reason: 'no-matchable-requirements',
-      };
     }
-
-    // ── 4. 循环每条需求做匹配 + 持久化 + emit ──────────────
-    const summaries: Array<{
-      job_requisition_id: string;
-      ok: boolean;
-      requestId?: string;
-      error?: string;
-    }> = [];
-
-    for (const req of requirements) {
-      const jrid = pickRequisitionId(req);
-      if (!jrid) {
-        logger.warn(`[${AGENT_NAME}] requirement 没有 job_requisition_id，跳过`);
-        continue;
-      }
-
-      const stepKey = sanitizeStepKey(jrid);
-
-      // ── 4.0 NEW: rule-check LLM 预筛 (PASS/FAIL/REVIEW gate) ───────────
-      //
-      // 默认关闭(RULE_CHECK_ENABLED env 不设或非 "true")— RAAS partner 走
-      // 原来的 RESUME_PROCESSED → matchResume 链路。set RULE_CHECK_ENABLED=true
-      // 即启用 gate:跑一次 LLM 评判,决定本条 JD 是否值得推进到 RAAS /match-resume:
-      //   - decision="PASS"              → 继续 4a
-      //   - decision="FAIL" / "REVIEW"   → emit RULE_CHECK_FAILED 并跳过
-      //   - LLM 调用 / 解析失败            → FAIL-safe(不偷溜进 matchResume)
-      // (rule-check 实现见 lib/rule-check/)
-      if (isRuleCheckEnabled()) {
-        const ruleCheck = await step.run(`rule-check-${stepKey}`, async () => {
-          const dataResumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
-          const dataFilename = typeof data.filename === 'string' ? data.filename : undefined;
-          const dataReceivedAt = typeof data.receivedAt === 'string' ? data.receivedAt : undefined;
-          const parsedData =
-            data.parsed && typeof data.parsed === 'object'
-              ? ((data.parsed as Record<string, unknown>).data as
-                  | Record<string, unknown>
-                  | undefined)
-              : undefined;
-
-          const ruleCheckInput = buildRuleCheckInput({
-            runtime_context: {
-              upload_id: uploadId ?? '',
-              candidate_id: candidateId ?? '',
-              resume_id: dataResumeId,
-              employee_id: employeeId,
-              filename: dataFilename,
-              received_at: dataReceivedAt,
-              trace_id: traceId ?? null,
-            },
-            parsed_resume: parsedData ?? null,
-            job_requisition: req as unknown as Record<string, unknown>,
-          });
-          const ruleCheck = await runRuleCheck(ruleCheckInput);
-          logger.info(
-            `[${AGENT_NAME}] rule-check · job_req=${jrid} decision=${ruleCheck.decision} ` +
-              `stats=pass:${ruleCheck.stats.pass}/fail:${ruleCheck.stats.fail}/pending:${ruleCheck.stats.pending}/info:${ruleCheck.stats.insufficient_info} ` +
-              `rules=${ruleCheck.audit.rules_evaluated} graph_calls=${ruleCheck.audit.graph_calls} ` +
-              `model=${ruleCheck.audit.llm_model} latency_ms=${ruleCheck.audit.llm_duration_ms} ` +
-              `tool_rounds=${ruleCheck.audit.llm_round_trips}` +
-              (ruleCheck.audit.fail_reason ? ` fail_reason=${ruleCheck.audit.fail_reason}` : ''),
-          );
-          return ruleCheck;
-        });
-
-        const dims = extractDimsForAudit(req as unknown as Record<string, unknown>);
-        const ruleCheckAuditMeta: RuleCheckAuditMeta = {
-          rules_evaluated: ruleCheck.audit.rules_evaluated,
-          graph_calls: ruleCheck.audit.graph_calls,
-          client_id: dims.client_id,
-          business_group: dims.business_group,
-          studio: dims.studio,
-          llm_model: ruleCheck.audit.llm_model,
-          llm_duration_ms: ruleCheck.audit.llm_duration_ms,
-          llm_round_trips: ruleCheck.audit.llm_round_trips,
-          llm_prompt_tokens: ruleCheck.audit.llm_prompt_tokens,
-          llm_completion_tokens: ruleCheck.audit.llm_completion_tokens,
-          rule_source: ruleCheck.audit.rule_source,
-          fail_reason: ruleCheck.audit.fail_reason,
-        };
-
-        const resumeIdForEvents = typeof data.resume_id === 'string' ? data.resume_id : undefined;
-
-        if (ruleCheck.decision !== 'PASS') {
-          const failedPayload: RuleCheckFailedData = {
-            upload_id: uploadId ?? '',
-            candidate_id: candidateId ?? undefined,
-            resume_id: resumeIdForEvents,
-            job_requisition_id: jrid,
-            client_id: pickClientId(req) ?? '',
-            decision: ruleCheck.decision,
-            failed_rules: ruleCheck.explanations.map((e) => ({
-              rule_id: e.rule_id,
-              rule_name: e.rule_name,
-              step_id: e.step_id,
-              status: e.status,
-              reason: e.reason,
-            })),
-            audit: ruleCheckAuditMeta,
-          };
-          await step.sendEvent(`emit-rule-check-failed-${stepKey}`, {
-            name: 'RULE_CHECK_FAILED',
-            data: failedPayload,
-          });
-          const reasonSummary = ruleCheck.explanations
-            .filter((e) => e.status === 'fail' || e.status === 'pending')
-            .map((e) => `${e.rule_id}:${e.status}`)
-            .join(',');
-          logger.info(
-            `[${AGENT_NAME}] ⛔ RULE_CHECK_FAILED · job_req=${jrid} ` +
-              `decision=${ruleCheck.decision} reasons=${reasonSummary || '(none)'} — skip matchResume`,
-          );
-          summaries.push({
-            job_requisition_id: jrid,
-            ok: false,
-            error: `rule-check-${ruleCheck.decision.toLowerCase()}: ${reasonSummary || ruleCheck.audit.fail_reason || ''}`,
-          });
-          continue;
-        }
-
-        const passedPayload: RuleCheckPassedData = {
-          upload_id: uploadId ?? '',
-          candidate_id: candidateId ?? undefined,
-          resume_id: resumeIdForEvents,
-          job_requisition_id: jrid,
-          client_id: pickClientId(req) ?? '',
-          audit: ruleCheckAuditMeta,
-        };
-        await step.sendEvent(`emit-rule-check-passed-${stepKey}`, {
-          name: 'RULE_CHECK_PASSED',
-          data: passedPayload,
-        });
-        logger.info(
-          `[${AGENT_NAME}] ✓ RULE_CHECK_PASSED · job_req=${jrid} — proceed to matchResume`,
-        );
-
-      } // end if (isRuleCheckEnabled())
-
-      // 4a. 调 RAAS /api/v1/match-resume (透传 RoboHire)
-      const matchResult = await step.run(
-        `match-${stepKey}`,
-        async (): Promise<
-          | { ok: true; data: RaasMatchResumeData; requestId?: string; savedAs?: string }
-          | { ok: false; error: string }
-        > => {
-          const jdText = flattenRequirementForMatch(req);
-          logger.info(
-            `[${AGENT_NAME}] calling RAAS /match-resume · job_req=${jrid} ` +
-              `jd_chars=${jdText.length} resume_chars=${resumeText.length}`,
-          );
-          try {
-            const r = await matchResume(
-              { resume: resumeText, jd: jdText },
-              { traceId },
-            );
-            logger.info(
-              `[${AGENT_NAME}] RAAS match OK · job_req=${jrid} score=${r.data?.matchScore} rec=${r.data?.recommendation} requestId=${r.requestId}`,
-            );
-            return {
-              ok: true as const,
-              data: r.data,
-              requestId: r.requestId,
-              savedAs: r.savedAs,
-            };
-          } catch (e) {
-            if (e instanceof RaasApiError && e.isClientError) {
-              // 4xx (除 429) → 跳过这条需求，不影响其他 JD
-              logger.error(
-                `[${AGENT_NAME}] RAAS match 4xx · job_req=${jrid} code=${e.code} — skipping`,
-              );
-              return { ok: false as const, error: `${e.code}: ${e.message}` };
-            }
-            // 5xx / 429 / 网络 → 让 step.run 重试
-            throw e;
-          }
-        },
-      );
-
-      if (!matchResult.ok) {
-        summaries.push({ job_requisition_id: jrid, ok: false, error: matchResult.error });
-        continue;
-      }
-
-      // 4b. 调 RAAS /api/v1/match-results 持久化 (source="need_interview")
-      //
-      // doc §4.6 sync-generated 同样的 spread 写法 — RoboHire /match-resume
-      // 实际返回 20+ 字段 (overallMatchScore / skillMatch / experienceMatch /
-      // jdAnalysis / candidatePotential / suggestedInterviewQuestions / ...).
-      // 直接 ...matchResult.data 整段透传, 让 RAAS 端按 schema 挑字段写库.
-      // 不要 cherry-pick (之前漏了 14+ 字段 → match_analysis 列空着的根因).
-      await step.run(`save-match-${stepKey}`, async () => {
-        try {
-          const r = await saveMatchResults(
-            {
-              // a) RoboHire /match-resume data 整段 spread (camelCase 全字段)
-              //    必须放在最前面 — IDs 之类的 anchor 在后面 override,
-              //    防 RoboHire 未来加同名字段 (例如 candidate_id) 把
-              //    我们的 anchor 覆盖.
-              ...(matchResult.data as Record<string, unknown>),
-              // b) raas 关联 (必带, 永远以这里为准)
-              source: 'need_interview',
-              candidate_id: candidateId ?? undefined,
-              upload_id: uploadId ?? undefined,
-              job_requisition_id: jrid,
-              client_id: pickClientId(req),
-              // c) 跨服务 trace 透传
-              robohire_request_id: matchResult.requestId,
-              savedAs: matchResult.savedAs,
-            },
-            { traceId },
-          );
-          logger.info(
-            `[${AGENT_NAME}] saveMatchResults OK · job_req=${jrid} ` +
-              `result=${JSON.stringify(r).slice(0, 120)}`,
-          );
-          return r;
-        } catch (e) {
-          if (e instanceof RaasApiError && e.isClientError) {
-            throw new NonRetriableError(
-              `RAAS saveMatchResults 4xx: ${e.code} ${e.message}`,
-            );
-          }
-          throw e;
-        }
-      });
-
-      // 4c. emit MATCH_PASSED_NEED_INTERVIEW (cascade)
-      const payload: MatchPassedNeedInterviewData = {
-        upload_id: uploadId ?? '',
-        job_requisition_id: jrid,
-        success: true,
-        data: matchResult.data as unknown as Record<string, unknown>,
-        requestId: matchResult.requestId,
-        savedAs: matchResult.savedAs,
-      };
-      await step.sendEvent(`emit-match-${stepKey}`, {
-        name: 'MATCH_PASSED_NEED_INTERVIEW',
-        data: payload,
-      });
-
-      summaries.push({
-        job_requisition_id: jrid,
-        ok: true,
-        requestId: matchResult.requestId,
-      });
-
+    try {
+      const r = await getRequirementsAgentView({ claimer_employee_id: employeeId }, { traceId });
+      const recruiting = (r.items ?? []).filter(isRecruitingStatus);
+      const matchable = recruiting.filter(hasMatchableContent);
       logger.info(
-        `[${AGENT_NAME}] ✅ emitted MATCH_PASSED_NEED_INTERVIEW · upload_id=${uploadId} job_req=${jrid}`,
+        `[${AGENT_NAME}] RAAS returned ${r.items?.length ?? 0} requirement(s); ` +
+          `${recruiting.length} recruiting; ${matchable.length} matchable`,
       );
+      return matchable;
+    } catch (e) {
+      if (e instanceof RaasApiError && e.isClientError) {
+        throw new NonRetriableError(`getRequirementsAgentView 4xx: ${e.code} ${e.message}`);
+      }
+      throw e;
     }
+  });
 
-    const emitted = summaries.filter((s) => s.ok).length;
+  if (requirements.length === 0) {
     return {
       ok: true,
       upload_id: uploadId,
       candidate_id: candidateId,
       employee_id: employeeId,
-      matched_count: requirements.length,
-      emitted_count: emitted,
-      summaries,
+      requested_count: 0,
+      reason: 'no-matchable-requirements',
     };
-  },
-);
+  }
+
+  // 对每条 JR emit RULE_CHECK_REQUESTED
+  const parsedData =
+    data.parsed && typeof data.parsed === 'object'
+      ? ((data.parsed as Record<string, unknown>).data as Record<string, unknown> | undefined)
+      : undefined;
+
+  let requested = 0;
+  for (const req of requirements) {
+    const jrid = pickRequisitionId(req);
+    if (!jrid) continue;
+    const stepKey = sanitizeStepKey(jrid);
+
+    const payload: RuleCheckRequestedData = {
+      upload_id: uploadId ?? '',
+      candidate_id: candidateId ?? '',
+      resume_id: resumeId,
+      employee_id: employeeId,
+      job_requisition_id: jrid,
+      client_id: pickClientId(req),
+      job_requisition: req as unknown as Record<string, unknown>,
+      parsed_resume: parsedData ?? null,
+      runtime_context: {
+        upload_id: uploadId ?? '',
+        candidate_id: candidateId ?? '',
+        resume_id: resumeId,
+        employee_id: employeeId,
+        filename: typeof data.filename === 'string' ? data.filename : undefined,
+        received_at: typeof data.receivedAt === 'string' ? data.receivedAt : undefined,
+        trace_id: traceId ?? null,
+      },
+      trace_id: traceId ?? null,
+    };
+    await step.sendEvent(`emit-rule-check-requested-${stepKey}`, {
+      name: 'RULE_CHECK_REQUESTED',
+      data: payload,
+    });
+    logger.info(`[${AGENT_NAME}] ✓ emitted RULE_CHECK_REQUESTED for JR=${jrid}`);
+    requested += 1;
+  }
+
+  return {
+    ok: true,
+    upload_id: uploadId,
+    candidate_id: candidateId,
+    employee_id: employeeId,
+    requested_count: requested,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 第二段:RULE_CHECK_PASSED → RoboHire match → saveMatchResults → emit
+// ──────────────────────────────────────────────────────────────────────
+
+async function handleRuleCheckPassed({ event, step, logger }: any) {
+  const data = event.data as RuleCheckPassedData;
+  const traceId = data.runtime_context?.trace_id ?? undefined;
+  const stepKey = sanitizeStepKey(data.job_requisition_id);
+  const req = (data.job_requisition ?? {}) as RequirementsAgentViewItem;
+  const candidateId = data.candidate_id ?? '';
+  const uploadId = data.upload_id ?? '';
+
+  if (!data.job_requisition || !data.parsed_resume) {
+    logger.warn(
+      `[${AGENT_NAME}] RULE_CHECK_PASSED missing job_requisition or parsed_resume for JR=${data.job_requisition_id} — cannot match`,
+    );
+    return { ok: false, job_requisition_id: data.job_requisition_id, error: 'missing-job-requisition-or-parsed-resume' };
+  }
+
+  const resumeText = buildResumeTextFromParsed(data.parsed_resume);
+  const jdText = flattenRequirementForMatch(req);
+
+  if (!resumeText.trim()) {
+    throw new NonRetriableError(`[${AGENT_NAME}] resume text empty for JR ${data.job_requisition_id}`);
+  }
+
+  // 4a. 直连 RoboHire
+  const matchResult = await step.run(`match-${stepKey}`, async () => {
+    logger.info(
+      `[${AGENT_NAME}] calling RoboHire /match-resume · jr=${data.job_requisition_id} ` +
+        `jd_chars=${jdText.length} resume_chars=${resumeText.length}`,
+    );
+    try {
+      const r = await matchResumeDirect({ resume: resumeText, jd: jdText }, { traceId: traceId ?? undefined });
+      logger.info(
+        `[${AGENT_NAME}] RoboHire match OK · score=${r.data.matchScore} rec=${r.data.recommendation} requestId=${r.requestId}`,
+      );
+      return { ok: true as const, data: r.data, requestId: r.requestId, savedAs: r.savedAs };
+    } catch (e) {
+      if (e instanceof RobohireApiError && e.isClientError) {
+        logger.error(`[${AGENT_NAME}] RoboHire match 4xx · ${e.code} — skipping JR`);
+        return { ok: false as const, error: `${e.code}: ${e.message}` };
+      }
+      throw e;
+    }
+  });
+
+  if (!matchResult.ok) {
+    return { ok: false, job_requisition_id: data.job_requisition_id, error: matchResult.error };
+  }
+
+  // 4b. RAAS POST /match-results 持久化(保留)
+  await step.run(`save-match-${stepKey}`, async () => {
+    try {
+      const r = await saveMatchResults(
+        {
+          ...(matchResult.data as Record<string, unknown>),
+          source: 'need_interview',
+          candidate_id: candidateId || undefined,
+          upload_id: uploadId || undefined,
+          job_requisition_id: data.job_requisition_id,
+          client_id: pickClientId(req),
+          robohire_request_id: matchResult.requestId,
+          savedAs: matchResult.savedAs,
+        },
+        { traceId },
+      );
+      logger.info(`[${AGENT_NAME}] saveMatchResults OK · jr=${data.job_requisition_id}`);
+      return r;
+    } catch (e) {
+      if (e instanceof RaasApiError && e.isClientError) {
+        throw new NonRetriableError(`saveMatchResults 4xx: ${e.code} ${e.message}`);
+      }
+      throw e;
+    }
+  });
+
+  // 4c. emit MATCH_PASSED_NEED_INTERVIEW
+  const payload: MatchPassedNeedInterviewData = {
+    upload_id: uploadId,
+    job_requisition_id: data.job_requisition_id,
+    success: true,
+    data: matchResult.data as unknown as Record<string, unknown>,
+    requestId: matchResult.requestId,
+    savedAs: matchResult.savedAs,
+  };
+  await step.sendEvent(`emit-match-${stepKey}`, { name: 'MATCH_PASSED_NEED_INTERVIEW', data: payload });
+
+  logger.info(`[${AGENT_NAME}] ✅ emitted MATCH_PASSED_NEED_INTERVIEW · jr=${data.job_requisition_id}`);
+  return { ok: true, job_requisition_id: data.job_requisition_id, requestId: matchResult.requestId };
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Helpers
@@ -465,107 +291,47 @@ function unwrapResumeProcessedEvent(raw: unknown): ResumeProcessedData & Record<
   if (!raw || typeof raw !== 'object') return raw as ResumeProcessedData;
   const r = raw as Record<string, unknown>;
   if (r.payload && typeof r.payload === 'object' && !Array.isArray(r.payload)) {
-    return {
-      ...(r.payload as Record<string, unknown>),
-      _envelope_entity_id: r.entity_id,
-      _envelope_entity_type: r.entity_type,
-      _envelope_event_id: r.event_id,
-      _envelope_trace: r.trace,
-    } as unknown as ResumeProcessedData;
+    return { ...(r.payload as Record<string, unknown>) } as unknown as ResumeProcessedData;
   }
   return raw as ResumeProcessedData;
 }
 
-function pickUploadId(
-  data: ResumeProcessedData & { uploadId?: string; object_key?: string; objectKey?: string },
-): string | null {
-  const candidates: Array<string | null | undefined> = [
-    data.upload_id,
-    data.uploadId,
-    data.etag,
-    data.object_key,
-    data.objectKey,
-  ];
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim().length > 0) return c.trim();
+function pickUploadId(data: any): string | null {
+  for (const c of [data.upload_id, data.uploadId, data.etag, data.object_key, data.objectKey]) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
   }
   return null;
 }
-
-function pickCandidateId(data: ResumeProcessedData): string | null {
-  if (typeof data.candidate_id === 'string' && data.candidate_id.trim()) {
-    return data.candidate_id.trim();
+function pickCandidateId(data: any): string | null {
+  if (typeof data.candidate_id === 'string' && data.candidate_id.trim()) return data.candidate_id.trim();
+  return null;
+}
+function pickEmployeeId(data: any): string | null {
+  for (const c of [data.claimer_employee_id, data.employee_id, data.employeeId, data.operator_id, process.env.RAAS_DEFAULT_EMPLOYEE_ID]) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
   }
   return null;
 }
-
-function pickEmployeeId(
-  data: ResumeProcessedData & {
-    claimer_employee_id?: string | null;
-    operator_id?: string | null;
-  },
-): string | null {
-  const candidates: Array<string | null | undefined> = [
-    data.claimer_employee_id,
-    data.employee_id,
-    data.employeeId,
-    data.operator_id,
-    process.env.RAAS_DEFAULT_EMPLOYEE_ID,
-  ];
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim().length > 0) return c.trim();
-  }
-  return null;
-}
-
 function pickRequisitionId(req: RequirementsAgentViewItem): string | null {
-  const cands: unknown[] = [
-    (req as any).job_requisition_id,
-    (req as any).requisition_id,
-    (req as any).job_id,
-    (req as any).id,
-  ];
-  for (const c of cands) {
-    if (typeof c === 'string' && c.trim().length > 0) return c.trim();
+  for (const c of [(req as any).job_requisition_id, (req as any).requisition_id, (req as any).job_id, (req as any).id]) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
   }
   return null;
 }
-
 function pickClientId(req: RequirementsAgentViewItem): string | undefined {
-  const cands: unknown[] = [(req as any).client_id, (req as any).clientId];
-  for (const c of cands) {
-    if (typeof c === 'string' && c.trim().length > 0) return c.trim();
+  for (const c of [(req as any).client_id, (req as any).clientId]) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
   }
   return undefined;
 }
-
-/**
- * Build resume text for /match-resume input.
- * Priority: parsed.data (stringify) > parsed (stringify) > "" (empty)
- */
-function buildResumeText(data: ResumeProcessedData): string {
-  const parsed = data.parsed;
-  if (parsed && typeof parsed === 'object') {
-    if (parsed.data !== undefined) {
-      return typeof parsed.data === 'string'
-        ? parsed.data
-        : JSON.stringify(parsed.data, null, 2);
-    }
-    return JSON.stringify(parsed, null, 2);
-  }
-  return '';
+function buildResumeTextFromParsed(parsed: Record<string, unknown> | null | undefined): string {
+  if (!parsed) return '';
+  return typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
 }
-
-/**
- * Flatten a RAAS requirement view item into JD text for /match-resume.
- * RequirementsAgentViewItem 字段不固定 (RAAS 可能演进)，用宽松取字段策略。
- */
 function flattenRequirementForMatch(req: RequirementsAgentViewItem): string {
   const r = req as Record<string, any>;
   const lines: string[] = [];
-  if (r.client_job_title || r.title) {
-    lines.push(`职位: ${r.client_job_title ?? r.title}`);
-  }
+  if (r.client_job_title || r.title) lines.push(`职位: ${r.client_job_title ?? r.title}`);
   if (r.expected_level) lines.push(`期望级别: ${r.expected_level}`);
   if (r.work_city || r.city) lines.push(`工作城市: ${r.work_city ?? r.city}`);
   if (r.salary_range) lines.push(`薪资范围: ${r.salary_range}`);
@@ -575,73 +341,35 @@ function flattenRequirementForMatch(req: RequirementsAgentViewItem): string {
   if (r.degree_requirement) lines.push(`学历要求: ${r.degree_requirement}`);
   if (r.education_requirement) lines.push(`专业要求: ${r.education_requirement}`);
   if (r.language_requirements) lines.push(`语言要求: ${r.language_requirements}`);
-  if (Array.isArray(r.must_have_skills) && r.must_have_skills.length) {
-    lines.push(`\n必备技能:\n  - ${r.must_have_skills.join('\n  - ')}`);
-  }
-  if (Array.isArray(r.nice_to_have_skills) && r.nice_to_have_skills.length) {
-    lines.push(`\n加分技能:\n  - ${r.nice_to_have_skills.join('\n  - ')}`);
-  }
-  if (r.negative_requirement && r.negative_requirement !== '无') {
-    lines.push(`\n排除条件:\n${r.negative_requirement}`);
-  }
+  if (Array.isArray(r.must_have_skills) && r.must_have_skills.length) lines.push(`\n必备技能:\n  - ${r.must_have_skills.join('\n  - ')}`);
+  if (Array.isArray(r.nice_to_have_skills) && r.nice_to_have_skills.length) lines.push(`\n加分技能:\n  - ${r.nice_to_have_skills.join('\n  - ')}`);
+  if (r.negative_requirement && r.negative_requirement !== '无') lines.push(`\n排除条件:\n${r.negative_requirement}`);
   if (r.job_responsibility) lines.push(`\n岗位职责:\n${r.job_responsibility}`);
   if (r.job_requirement) lines.push(`\n任职要求:\n${r.job_requirement}`);
   return lines.join('\n');
 }
-
 function hasMatchableContent(req: RequirementsAgentViewItem): boolean {
   const r = req as Record<string, any>;
-  const hasResp = !!(r.job_responsibility && String(r.job_responsibility).trim());
-  const hasReq = !!(r.job_requirement && String(r.job_requirement).trim());
-  const hasMustHave = Array.isArray(r.must_have_skills) && r.must_have_skills.length > 0;
-  return hasResp || hasReq || hasMustHave;
+  return !!(r.job_responsibility?.toString().trim() || r.job_requirement?.toString().trim() ||
+    (Array.isArray(r.must_have_skills) && r.must_have_skills.length > 0));
 }
-
-/**
- * 只对"招聘中"状态的 JD 跑 match.
- *
- * agent-view 新签名 (claimer_employee_id 单参数) 把过滤逻辑收回 partner
- * 内部, 我们仍加一道客户端兜底过滤 — 万一 partner 那边返回了非 recruiting
- * 状态的 JD (草稿 / 待发布 / 已关闭), 不浪费 RoboHire match 配额.
- *
- * 状态字段名 partner 文档没明说, 这里覆盖几个常见位:
- *   status / hc_status / requisition_status / spec_status / job_requisition_status
- *
- * 如果 item 完全没有 status 字段 → 默认 include (信任 agent-view 已 curated).
- * 有 status 字段时, 仅 recruiting / 招聘中 / active 才 include.
- */
 function isRecruitingStatus(req: RequirementsAgentViewItem): boolean {
   const r = req as Record<string, any>;
-  const candidates = [
-    r.status,
-    r.hc_status,
-    r.requisition_status,
-    r.spec_status,
-    r.job_requisition_status,
-  ];
-  // 找第一个有值的 status 字段; 全都缺 → 默认 include
   let raw: unknown = undefined;
-  for (const c of candidates) {
-    if (c != null && String(c).trim() !== '') {
-      raw = c;
-      break;
-    }
+  for (const c of [r.status, r.hc_status, r.requisition_status, r.spec_status, r.job_requisition_status]) {
+    if (c != null && String(c).trim() !== '') { raw = c; break; }
   }
   if (raw === undefined) return true;
   const s = String(raw).toLowerCase().trim();
   return s === 'recruiting' || s === '招聘中' || s === 'active' || s === 'open';
 }
-
 function sanitizeStepKey(s: string): string {
   return s.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 80) || 'unknown';
 }
-
 function getTraceId(eventData: unknown): string | undefined {
   if (!eventData || typeof eventData !== 'object') return undefined;
   const r = eventData as Record<string, any>;
   const t = r.trace;
-  if (t && typeof t === 'object' && typeof t.trace_id === 'string' && t.trace_id) {
-    return t.trace_id;
-  }
+  if (t && typeof t === 'object' && typeof t.trace_id === 'string' && t.trace_id) return t.trace_id;
   return undefined;
 }
