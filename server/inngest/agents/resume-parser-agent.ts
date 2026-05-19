@@ -4,9 +4,9 @@
 //   1. RESUME_DOWNLOADED 事件 payload 只带 transport 元数据
 //      (upload_id / bucket / object_key / etag / filename / operator_*).
 //      raas **不**预先 parse — parse 是 agent 的职责.
-//   2. agent → GET /api/v1/resumes/uploads/<upload_id>/raw  (PDF bytes)
-//   3. agent → POST /api/v1/parse-resume   (multipart, file=PDF blob)
-//   4. agent → POST /api/v1/candidates     (parsed + transport context)
+//   2. agent → GET /api/v1/resumes/uploads/<upload_id>/raw  (PDF bytes, RAAS MinIO)
+//   3. agent → POST {RoboHire}/api/v1/parse-resume   (multipart — 直连 RoboHire, 不走 RAAS proxy)
+//   4. agent → POST /api/v1/candidates     (parsed + transport context, 仍走 RAAS, 写 Postgres)
 //   5. raas 自动按规则发 RESUME_PROCESSED 给下游 matcher (我们这边
 //      也 emit 一份做 dual-track 兜底 — RAAS 那边某些路径还没接 emit).
 //
@@ -22,12 +22,12 @@ import { createHash } from 'node:crypto';
 import { NonRetriableError } from 'inngest';
 import {
   downloadResumeRaw,
-  parseResume,
   saveCandidate,
   RaasApiError,
   type RaasParseResumeData,
   type SaveCandidateInput,
 } from '@/lib/raas-api-client';
+import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
 
 export const resumeParserAgent = inngest.createFunction(
@@ -114,21 +114,21 @@ export const resumeParserAgent = inngest.createFunction(
             `filename="${downloaded.filename ?? filename ?? '—'}"`,
         );
 
-        // 2) POST /api/v1/parse-resume (multipart)
+        // 2) POST /api/v1/parse-resume (multipart) — 直连 RoboHire (绕过 RAAS proxy)
         const pdfFilename = downloaded.filename ?? (filename as string | undefined) ?? 'resume.pdf';
         let parseRes;
         try {
-          parseRes = await parseResume(pdfBuffer, pdfFilename, { traceId });
+          parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId });
         } catch (e) {
-          if (e instanceof RaasApiError && e.isClientError) {
+          if (e instanceof RobohireApiError && e.isClientError) {
             throw new NonRetriableError(
-              `RAAS POST /parse-resume 4xx: ${e.code} ${e.message}`,
+              `RoboHire POST /parse-resume 4xx: ${e.httpStatus} ${e.code} ${e.message}`,
             );
           }
           throw e;
         }
         logger.info(
-          `[resume-persist] parse-resume OK · cached=${parseRes.cached} ` +
+          `[resume-persist] RoboHire parse-resume OK · cached=${parseRes.cached} ` +
             `name="${parseRes.data?.name ?? '?'}" requestId=${parseRes.requestId}`,
         );
 
@@ -137,7 +137,10 @@ export const resumeParserAgent = inngest.createFunction(
         const md5 = createHash('md5').update(pdfBuffer).digest('hex');
 
         return {
-          parsed: parseRes.data,
+          // RobohireParseResumeData 与 RaasParseResumeData 形状 1:1 (RAAS 是
+          // RoboHire 的 proxy), 但二者 TypeScript 类型不同源 — 这里 cast 一次,
+          // 让下游 saveCandidate(SaveCandidateInput.parsed) 类型对齐.
+          parsed: parseRes.data as unknown as RaasParseResumeData,
           robohire_request_id: parseRes.requestId,
           computed_etag: md5,
           cached: parseRes.cached,
