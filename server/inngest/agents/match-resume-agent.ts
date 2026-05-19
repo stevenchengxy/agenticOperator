@@ -148,11 +148,58 @@ async function handleResumeProcessed({ event, step, logger }: any) {
       ? ((data.parsed as Record<string, unknown>).data as Record<string, unknown> | undefined)
       : undefined;
 
+  const bypass = process.env.RULE_CHECK_BYPASS === 'true';
+
   let requested = 0;
   for (const req of requirements) {
     const jrid = pickRequisitionId(req);
     if (!jrid) continue;
     const stepKey = sanitizeStepKey(jrid);
+
+    if (bypass) {
+      // RULE_CHECK_BYPASS=true: skip ruleCheckAgent, emit RULE_CHECK_PASSED directly.
+      // matchResumeAgent's 2nd segment will pick it up and call RoboHire match.
+      const bypassPayload: RuleCheckPassedData = {
+        upload_id: uploadId ?? '',
+        candidate_id: candidateId ?? '',
+        resume_id: resumeId,
+        job_requisition_id: jrid,
+        client_id: pickClientId(req) ?? '',
+        audit: {
+          rules_evaluated: 0,
+          graph_calls: 0,
+          client_id: pickClientId(req) ?? '',
+          business_group: null,
+          studio: null,
+          llm_model: 'bypass',
+          llm_duration_ms: 0,
+          llm_round_trips: 0,
+          rule_source: 'json-fallback',
+          fail_reason: 'bypassed',
+        },
+        job_requisition: req as unknown as Record<string, unknown>,
+        parsed_resume: parsedData ?? null,
+        runtime_context: {
+          upload_id: uploadId ?? '',
+          candidate_id: candidateId ?? '',
+          resume_id: resumeId,
+          employee_id: employeeId,
+          filename: typeof data.filename === 'string' ? data.filename : undefined,
+          received_at: typeof data.receivedAt === 'string' ? data.receivedAt : undefined,
+          trace_id: traceId ?? null,
+        },
+        employee_id: employeeId,
+      };
+      await step.sendEvent(`emit-bypass-passed-${stepKey}`, {
+        name: 'RULE_CHECK_PASSED',
+        data: bypassPayload,
+      });
+      logger.info(
+        `[${AGENT_NAME}] ⏭ RULE_CHECK_BYPASS=true · directly emit RULE_CHECK_PASSED for JR=${jrid}`,
+      );
+      requested += 1;
+      continue;
+    }
 
     const payload: RuleCheckRequestedData = {
       upload_id: uploadId ?? '',
