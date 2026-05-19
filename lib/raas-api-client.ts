@@ -236,62 +236,9 @@ export async function matchResume(
 }
 
 // ─── 4.3 generate-jd ────────────────────────────────────────────────
-
-/**
- * RoboHire-shape generated JD. Numeric-or-string fields (headcount,
- * salaryMin/Max) need defensive parsing on the consumer side per doc.
- */
-export type RaasGenerateJdData = {
-  title?: string;
-  companyName?: string;
-  department?: string;
-  location?: string;
-  workType?: string;
-  employmentType?: string;
-  experienceLevel?: string;
-  education?: string;
-  headcount?: number | string;
-  salaryMin?: number | string;
-  salaryMax?: number | string;
-  salaryCurrency?: string;
-  salaryPeriod?: string;
-  salaryText?: string;
-  description?: string;
-  qualifications?: string;
-  hardRequirements?: string;
-  niceToHave?: string;
-  benefits?: string;
-  interviewRequirements?: string;
-  evaluationRules?: string;
-  [k: string]: unknown;
-};
-
-export type GenerateJdInput = {
-  prompt: string;                           // 4-4000 chars
-  language?: 'en' | 'zh' | 'zh-TW' | 'ja' | 'es' | 'fr' | 'pt' | 'de';
-  companyName?: string;
-  department?: string;
-};
-
-export type GenerateJdResponse = RaasResponse & {
-  data: RaasGenerateJdData;
-  meta?: {
-    stages?: { parse: 'success' | 'failed'; generate: 'success' | 'failed' };
-  };
-};
-
-export async function generateJd(
-  input: GenerateJdInput,
-  opts: CommonOpts = {},
-): Promise<GenerateJdResponse> {
-  const body = await doJsonRequest('POST', '/api/v1/generate-jd', input, opts);
-  return {
-    data: body.data,
-    meta: body.meta,
-    requestId: body.requestId,
-    traceId: body._traceId,
-  };
-}
+// (Migrated 2026-05-19 PR-4 to lib/robohire-client.ts:generateJdDirect.
+//  RAAS API Server's /generate-jd was a transparent proxy to RoboHire;
+//  AO now calls RoboHire /api/v1/jobs/generate-jd directly.)
 
 // ─── 4.8 resumes/uploads/:upload_id/raw — 拉原始 PDF 字节 ──────────
 //

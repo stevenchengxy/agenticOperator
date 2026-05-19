@@ -4,10 +4,12 @@
 // /api/v1/generate-jd → 调 /api/v1/jd/sync-generated 持久化 → emit
 // JD_GENERATED 事件供下游 cascade.
 //
-// Workflow A (per agentic-operator-onboarding(3).md, 2026-05-08):
+// Workflow A (per agentic-operator-onboarding(3).md, 2026-05-08;
+//   F4 direct-RoboHire migration 2026-05-19):
 //   ❌ 不再调 OpenAI/LLM gateway 直连 (lib/llm/jd-generator.ts 退役)
 //   ❌ 不再自己组装 partner-canonical 15 字段 payload (RAAS 处理)
-//   ✅ 调 raas-api-client.generateJd (RAAS 透传 RoboHire /generate-jd)
+//   ❌ 不再走 RAAS /api/v1/generate-jd 透传 (PR-4 删除)
+//   ✅ 调 robohire-client.generateJdDirect (直连 RoboHire /api/v1/jobs/generate-jd)
 //   ✅ 调 raas-api-client.syncJdGenerated 持久化到 RAAS DB (写 JobPosting +
 //       回填 JobRequisition + 推进 spec.status → pending_publish)
 //
@@ -18,15 +20,18 @@ import { randomUUID } from 'node:crypto';
 import { NonRetriableError } from 'inngest';
 import {
   RaasApiError,
-  generateJd,
   getRequirementDetail,
   isRaasApiConfigured,
   syncJdGenerated,
-  type RaasGenerateJdData,
   type RaasRequirement,
   type RaasRequirementSpecification,
   type SyncJdInput,
 } from '@/lib/raas-api-client';
+import {
+  generateJdDirect,
+  RobohireApiError,
+  type RobohireGenerateJdData,
+} from '@/lib/robohire-client';
 import { inngest, type JdGeneratedEnvelope } from '@/server/inngest/client';
 
 const AGENT_ID = 'create-jd-agent';
@@ -159,30 +164,30 @@ export const createJdAgent = inngest.createFunction(
         `client_id=${clientId} prompt_len=${prompt.length}`,
     );
 
-    // ── 4. 调 RAAS API: POST /api/v1/generate-jd ──
+    // ── 4. 调 RoboHire: POST /api/v1/jobs/generate-jd (direct, F4) ──
     const generated = await step.run(`generate-${sanitize(requisitionId)}`, async () => {
       try {
-        const r = await generateJd(
+        const r = await generateJdDirect(
           {
             prompt,
             language: 'zh',
             // 用 requirement 详情里的 sd_org_name (客户部门) 当 companyName/department 上下文。
-            // 没有就交给 RAAS 自己解析。
+            // 没有就交给 RoboHire 自己解析。
             companyName: pickStringField(requirement, ['sd_org_name', 'client_name']),
             department: pickStringField(requirement, ['client_department_id', 'department']),
           },
           { traceId },
         );
         logger.info(
-          `[${AGENT_NAME}] RAAS generate-jd OK · title="${r.data.title ?? '?'}" ` +
+          `[${AGENT_NAME}] RoboHire jobs/generate-jd OK · title="${r.data.title ?? '?'}" ` +
             `parse=${r.meta?.stages?.parse} generate=${r.meta?.stages?.generate} ` +
             `requestId=${r.requestId}`,
         );
         return r;
       } catch (e) {
-        if (e instanceof RaasApiError && e.isClientError) {
+        if (e instanceof RobohireApiError && e.isClientError) {
           throw new NonRetriableError(
-            `RAAS generate-jd 4xx: ${e.code} ${e.message}`,
+            `RoboHire jobs/generate-jd 4xx: ${e.httpStatus} ${e.code} ${e.message}`,
           );
         }
         throw e;
@@ -331,7 +336,7 @@ export const createJdAgent = inngest.createFunction(
         quality_suggestions: qualitySuggestions,
         market_competitiveness: marketCompetitiveness,
         generator_version: GENERATOR_VERSION,
-        generator_model: 'raas-api/generate-jd',
+        generator_model: 'robohire/jobs/generate-jd',
         generated_at: new Date().toISOString(),
       },
       trace: envelope.trace ?? {
@@ -357,7 +362,7 @@ export const createJdAgent = inngest.createFunction(
       requisition_id: requisitionId,
       client_id: clientId,
       title: typeof jdData.title === 'string' ? jdData.title : null,
-      raas_request_id: generated.requestId,
+      robohire_request_id: generated.requestId,
     };
   },
 );
@@ -393,37 +398,125 @@ function pickRequisitionIdFromEnvelope(
 
 /**
  * 从 GET /requirements/:id 返回的 requirement + specification 拼一段
- * RAAS /generate-jd 期望的 free-text prompt (4-4000 chars).
+ * RoboHire /api/v1/jobs/generate-jd 期望的 free-text prompt (4-4000 chars).
+ *
+ * F4 spec (2026-05-19): 40+ 字段，重要日期语义校正:
+ *   - s.deadline 之前误标 "截止日期" → 应作为 "期望到岗日期" 的 fallback
+ *     (primary: r.required_arrival_date)
+ *   - s.start_date 之前误标 "期望到岗" → 应作为 "服务开始日期" (HRO contract)
+ *   - 新增 "发布日期" = pick(r.client_published_at, r.open_date)
  */
 function buildPromptFromRequirement(
   requirement: RaasRequirement,
   specification: RaasRequirementSpecification | null,
 ): string {
-  const r = requirement;
+  const r = requirement as Record<string, any>;
   const s: Partial<RaasRequirementSpecification> = specification ?? {};
   const lines: string[] = [];
-  // 客户/岗位基础
-  if (typeof r.client_job_title === 'string') lines.push(`岗位: ${r.client_job_title}`);
-  const jobType = pickStringField(r, ['client_job_type']);
-  if (jobType) lines.push(`岗位类型: ${jobType}`);
-  if (typeof r.recruitment_type === 'string') lines.push(`招聘类型: ${r.recruitment_type}`);
-  if (typeof r.expected_level === 'string') lines.push(`期望级别: ${r.expected_level}`);
-  if (typeof r.city === 'string') lines.push(`工作城市: ${r.city}`);
-  if (typeof r.headcount === 'number') lines.push(`招聘人数: ${r.headcount}`);
-  if (typeof r.salary_range === 'string') lines.push(`薪资范围: ${r.salary_range}`);
-  if (typeof r.work_years === 'number') lines.push(`工作年限: ${r.work_years} 年以上`);
-  if (typeof r.degree_requirement === 'string') lines.push(`学历要求: ${r.degree_requirement}`);
-  if (typeof r.education_requirement === 'string')
-    lines.push(`专业要求: ${r.education_requirement}`);
-  if (typeof r.language_requirements === 'string')
-    lines.push(`语言要求: ${r.language_requirements}`);
-  if (typeof r.interview_mode === 'string') lines.push(`面试形式: ${r.interview_mode}`);
-  // Spec 上的时间线
-  if (typeof s.priority === 'string') lines.push(`优先级: ${s.priority}`);
-  if (typeof s.deadline === 'string') lines.push(`截止日期: ${s.deadline}`);
-  if (typeof s.start_date === 'string') lines.push(`期望到岗: ${s.start_date}`);
-  if (s.is_exclusive) lines.push('独家委托: 是');
-  // 长文本
+
+  const push = (label: string, value: unknown): void => {
+    if (value == null) return;
+    const v = typeof value === 'string' ? value.trim() : String(value);
+    if (!v) return;
+    lines.push(`${label}: ${v}`);
+  };
+  const pick = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = r[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return undefined;
+  };
+  const formatDate = (value: unknown): string | null => {
+    if (!value) return null;
+    const d = new Date(String(value));
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  };
+  const formatWorkAddress = (value: unknown): string | null => {
+    if (!value) return null;
+    if (typeof value === 'string') return value.trim() || null;
+    if (Array.isArray(value)) {
+      const parts = value.filter(Boolean).map(String).filter((p) => p.trim());
+      return parts.length ? parts.join(' / ') : null;
+    }
+    if (typeof value === 'object') {
+      const v = value as Record<string, unknown>;
+      const parts = [v.city, v.district, v.address]
+        .filter(Boolean)
+        .map(String)
+        .filter((p) => p.trim());
+      return parts.length ? parts.join(' ') : null;
+    }
+    return null;
+  };
+
+  // ── 基础信息 ──
+  push('岗位', r.client_job_title);
+  push('岗位类型', r.client_job_type);
+  push('所属部门', pick('first_level_department', 'oa_department', 'sd_org_name'));
+  push('服务BG', r.service_bg);
+  push('需求类型', r.demand_type);
+  push('招聘类型', r.recruitment_type);
+  push('期望级别', r.expected_level);
+  if (typeof r.headcount === 'number') push('招聘人数', String(r.headcount));
+  push('工作城市', r.city);
+  push('工作地点', formatWorkAddress(r.work_address));
+  push('薪资范围', r.salary_range);
+  if (typeof r.work_years === 'number') push('工作年限', `${r.work_years} 年以上`);
+  push('学历要求', r.degree_requirement);
+  push('专业要求', r.education_requirement);
+  push('语言要求', r.language_requirements);
+
+  // ── 候选人偏好 ──
+  const gender = r.gender;
+  if (typeof gender === 'string' && gender.trim() && gender.trim() !== '不限') {
+    push('性别要求', gender);
+  }
+  push('年龄要求', r.age_range);
+  if (r.require_foreigner === true) push('接收外籍', '是');
+  push('排班类型', r.work_schedule_type);
+
+  // ── 面试 ──
+  push('面试形式', r.interview_mode);
+  const firstFmt = r.first_interview_format;
+  const finalFmt = r.final_interview_format;
+  if (
+    (typeof firstFmt === 'string' && firstFmt.trim()) ||
+    (typeof finalFmt === 'string' && finalFmt.trim())
+  ) {
+    push('初/复试形式', `${firstFmt ?? '—'} / ${finalFmt ?? '—'}`);
+  }
+  const firstInt = r.first_interviewer_name;
+  const finalInt = r.final_interviewer_name;
+  if (
+    (typeof firstInt === 'string' && firstInt.trim()) ||
+    (typeof finalInt === 'string' && finalInt.trim())
+  ) {
+    push('初/复试官', `${firstInt ?? '—'} / ${finalInt ?? '—'}`);
+  }
+  push('面试流程', r.interview_process);
+
+  // ── 优先级 / 紧急度 / 难度 ──
+  if (typeof s.priority === 'string') push('优先级', s.priority);
+  push('紧急度', r.urgency_level);
+  push('填充难度', r.fill_difficulty);
+
+  // ── 三个日期(F4 关键校正点)──
+  push(
+    '发布日期',
+    formatDate(r.client_published_at) ?? formatDate(r.open_date),
+  );
+  push(
+    '期望到岗日期',
+    formatDate(r.required_arrival_date) ?? formatDate((s as any).deadline),
+  );
+  push('服务开始日期', formatDate((s as any).start_date));
+
+  if (s.is_exclusive) push('独家委托', '是');
+  push('招聘策略', r.recruitment_strategies);
+
+  // ── 技能 / 排除 / 原始文本 ──
   if (Array.isArray(r.must_have_skills) && r.must_have_skills.length) {
     lines.push(`\n必备技能:\n  - ${(r.must_have_skills as string[]).join('\n  - ')}`);
   }
@@ -434,11 +527,12 @@ function buildPromptFromRequirement(
     lines.push(`\n排除条件: ${r.negative_requirement}`);
   }
   if (typeof r.job_responsibility === 'string' && r.job_responsibility.trim()) {
-    lines.push(`\n岗位职责（原始）:\n${r.job_responsibility}`);
+    lines.push(`\n岗位职责(原始):\n${r.job_responsibility}`);
   }
   if (typeof r.job_requirement === 'string' && r.job_requirement.trim()) {
-    lines.push(`\n任职要求（原始）:\n${r.job_requirement}`);
+    lines.push(`\n任职要求(原始):\n${r.job_requirement}`);
   }
+
   return lines.join('\n').slice(0, 4000);
 }
 
@@ -466,7 +560,7 @@ function sanitize(s: string): string {
  */
 function pickCityFromBoth(
   requirement: RaasRequirement,
-  jdData: RaasGenerateJdData,
+  jdData: RobohireGenerateJdData,
 ): string[] | undefined {
   const reqCity = stringOrUndefined(requirement.city);
   if (reqCity) return [reqCity];

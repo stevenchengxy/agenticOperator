@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   parseResumeDirect,
   matchResumeDirect,
+  generateJdDirect,
   RobohireApiError,
 } from './robohire-client';
 
@@ -102,6 +103,54 @@ describe('matchResumeDirect', () => {
     await matchResumeDirect({ resume: 'R', jd: 'J' });
     const body = JSON.parse(((fetchSpy.mock.calls[0][1]?.body as string) ?? '{}'));
     expect(body).toEqual({ resume: 'R', jd: 'J' });
+  });
+});
+
+describe('generateJdDirect', () => {
+  it('returns generate-jd data on 200', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            title: 'Senior FE',
+            description: '...',
+            qualifications: '...',
+            hardRequirements: '...',
+            salaryMin: '30',
+            salaryMax: '50',
+            salaryText: '30-50K',
+          },
+          meta: { stages: { parse: 'success', generate: 'success' } },
+          requestId: 'req_jd_xyz',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await generateJdDirect({ prompt: 'Senior Frontend, React, 5 years, Shenzhen' });
+    expect(r.data.title).toBe('Senior FE');
+    expect(r.meta?.stages?.parse).toBe('success');
+    expect(r.requestId).toBe('req_jd_xyz');
+  });
+
+  it('throws RobohireApiError on 400', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ success: false, error: 'prompt too short', requestId: 'req_x' }), { status: 400 }),
+    );
+    await expect(generateJdDirect({ prompt: 'x' })).rejects.toMatchObject({ httpStatus: 400, code: 'CLIENT' });
+  });
+
+  it('passes X-Trace-Id header', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ success: true, data: {}, requestId: 'r' }),
+        ),
+      );
+    await generateJdDirect({ prompt: 'test prompt that is long enough to be valid' }, { traceId: 'trace-jd' });
+    const init = (fetchSpy.mock.calls[0][1] ?? {}) as RequestInit;
+    expect((init.headers as Record<string, string>)['X-Trace-Id']).toBe('trace-jd');
   });
 });
 

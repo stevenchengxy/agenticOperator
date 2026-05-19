@@ -155,6 +155,77 @@ export async function matchResumeDirect(
   return handleJsonResponse<RobohireMatchResumeResponse>(res, 'match-resume');
 }
 
+// ─── jobs/generate-jd ───────────────────────────────────────────
+
+export type RobohireGenerateJdInput = {
+  /** Free-text prompt 4-4000 chars per RoboHire spec */
+  prompt: string;
+  language?: 'en' | 'zh' | 'zh-TW' | 'ja' | 'es' | 'fr' | 'pt' | 'de';
+  companyName?: string;
+  department?: string;
+};
+
+/**
+ * RoboHire generate-jd 响应 — combined parse+generate one-call.
+ * Response field set verified by live probe 2026-05-19.
+ */
+export type RobohireGenerateJdData = {
+  title?: string;
+  companyName?: string;
+  department?: string;
+  location?: string;
+  workType?: string;
+  employmentType?: string;
+  experienceLevel?: string;
+  education?: string;
+  headcount?: number | string;
+  qualifications?: string;
+  hardRequirements?: string;
+  niceToHave?: string;
+  description?: string;
+  benefits?: string;
+  interviewRequirements?: string;
+  evaluationRules?: string;
+  salaryMin?: string | number;
+  salaryMax?: string | number;
+  salaryCurrency?: string;
+  salaryPeriod?: string;
+  salaryText?: string;
+  [k: string]: unknown;
+};
+
+export type RobohireGenerateJdResponse = {
+  data: RobohireGenerateJdData;
+  meta?: { stages?: { parse?: string; generate?: string } };
+  requestId: string;
+};
+
+export async function generateJdDirect(
+  input: RobohireGenerateJdInput,
+  opts: CommonOpts = {},
+): Promise<RobohireGenerateJdResponse> {
+  const { baseUrl, apiKey, timeoutMs } = config();
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
+  if (opts.traceId) headers['X-Trace-Id'] = opts.traceId;
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/v1/jobs/generate-jd`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
+    });
+  } catch (e) {
+    throw new RobohireApiError(0, 'NETWORK', `jobs/generate-jd fetch failed: ${(e as Error).message}`);
+  }
+
+  return handleJsonResponse<RobohireGenerateJdResponse>(res, 'jobs/generate-jd');
+}
+
 // ─── shared response handler ────────────────────────────────────
 
 async function handleJsonResponse<T>(res: Response, op: string): Promise<T> {
