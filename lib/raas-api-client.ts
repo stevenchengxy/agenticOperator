@@ -781,25 +781,19 @@ export async function getRequirementDetail(
 export type RequirementsAgentViewItem = Record<string, unknown>;
 
 export type GetRequirementsQuery = {
+  /** ★ 必传 — 招聘人员 employee_id (per partner 2026-05-08 接口约定:
+   *   `GET /api/v1/requirements/agent-view?claimer_employee_id=EMP001`) */
+  claimer_employee_id: string;
   /**
-   * 必传 — 招聘人员 employee_id (per partner 2026-05-08 接口约定:
-   *   `GET /api/v1/requirements/agent-view?claimer_employee_id=EMP001`)
+   * F2 (2026-05-19): 原始简历文件名(可选)— RAAS 端用文件名内 `【岗位】` 模糊收敛
+   * 该 claimer 的在招岗位列表。
+   *
+   * - 不传 → RAAS 退回返回全量岗位(零回归)
+   * - 文件名解析失败 / 0 命中 → RAAS 也退回全量
+   *
+   * AO 端**不解析文件名**,原样透传。
    */
-  claimer_employee_id?: string;
-
-  // ── 以下字段在新版 agent-view 签名里**不再使用**, 由 partner 端
-  // 内部按 agent-view 语义决定. 类型保留只为旧调用点向前兼容,
-  // 实际 query 不应该再传. ──
-  /** @deprecated partner 内部决定, 不再接受 query 参数 */
-  scope?: 'claimed' | 'watched' | 'mine';
-  /** @deprecated partner 内部决定 */
-  status?: string;
-  /** @deprecated partner 内部决定 */
-  client_id?: string;
-  /** @deprecated partner 内部决定 */
-  page?: number;
-  /** @deprecated partner 内部决定 */
-  page_size?: number;
+  resume_filename?: string;
 };
 
 export type GetRequirementsResponse = RaasResponse & {

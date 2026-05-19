@@ -116,7 +116,17 @@ async function handleResumeProcessed({ event, step, logger }: any) {
       }
     }
     try {
-      const r = await getRequirementsAgentView({ claimer_employee_id: employeeId }, { traceId });
+      const resumeFilenameRaw =
+        typeof data.filename === 'string' && data.filename.trim()
+          ? data.filename.trim()
+          : undefined;
+      if (resumeFilenameRaw) {
+        logger.info(`[${AGENT_NAME}] path-B agent-view with resume_filename="${resumeFilenameRaw}"`);
+      }
+      const r = await getRequirementsAgentView(
+        { claimer_employee_id: employeeId, resume_filename: resumeFilenameRaw },
+        { traceId },
+      );
       const recruiting = (r.items ?? []).filter(isRecruitingStatus);
       const matchable = recruiting.filter(hasMatchableContent);
       logger.info(
