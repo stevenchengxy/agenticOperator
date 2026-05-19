@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeMatchResumePrompt, MATCH_RESUME_SYSTEM_PROMPT } from './prompt';
+import { composeMatchResumePrompt, MATCH_RESUME_SYSTEM_PROMPT, renderRuleBlock } from './prompt';
 import type { GraphContext } from './graph-context';
 import type { MatchResumeStepGroup, RuleCheckInput } from './types';
 
@@ -47,6 +47,8 @@ const baseSteps: MatchResumeStepGroup[] = [
         businessBackgroundReason: '',
         ruleSource: '',
         executor: 'Agent',
+        enforcementLevel: 'optional',
+        failurePolicy: 'warn',
         severity: 'terminal',
       },
     ],
@@ -70,6 +72,8 @@ const baseSteps: MatchResumeStepGroup[] = [
         businessBackgroundReason: '',
         ruleSource: '',
         executor: 'Agent',
+        enforcementLevel: 'optional',
+        failurePolicy: 'warn',
         severity: 'terminal',
       },
     ],
@@ -201,6 +205,28 @@ describe('composeMatchResumePrompt', () => {
     expect(out).toContain('每条规则都必须有一条对应的');
     expect(out).toContain('rule_results');
     expect(out).toContain('按 Set 顺序、Set 内列出顺序输出');
+  });
+
+  it('renders enforcement + failure policy in rule block header', () => {
+    const rule = {
+      id: '10-5',
+      businessLogicRuleName: 'degree-check',
+      applicableClient: '通用',
+      applicableDepartment: 'N/A',
+      submissionCriteria: '',
+      standardizedLogicRule: 'check degree',
+      relatedEntities: [],
+      businessBackgroundReason: '',
+      ruleSource: '',
+      executor: 'Agent',
+      enforcementLevel: 'mandatory',
+      failurePolicy: 'block',
+      severity: 'terminal',
+    } as const;
+    const out = renderRuleBlock(rule as any);
+    expect(out).toContain('enforcement=mandatory');
+    expect(out).toContain('onFail=block');
+    expect(out).not.toContain('severity=');
   });
 });
 

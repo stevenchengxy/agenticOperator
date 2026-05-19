@@ -72,6 +72,8 @@ function mockRulesFourRules(): void {
     businessBackgroundReason: '',
     ruleSource: '',
     executor: 'Agent' as const,
+    enforcementLevel: 'optional' as const,
+    failurePolicy: 'warn' as const,
     severity: 'terminal' as const,
   });
   const rules = ['10-1', '10-2', '10-3', '10-4'].map(ruleShape);
@@ -104,6 +106,8 @@ function mockRulesFiveRules(): void {
     businessBackgroundReason: '',
     ruleSource: '',
     executor: 'Agent' as const,
+    enforcementLevel: 'optional' as const,
+    failurePolicy: 'warn' as const,
     severity: 'terminal' as const,
   });
   const rules = ['10-1', '10-2', '10-3', '10-4', '10-5'].map(ruleShape);
@@ -138,6 +142,8 @@ function mockRulesOneStepOneRule(): void {
         businessBackgroundReason: '',
         ruleSource: '',
         executor: 'Agent',
+        enforcementLevel: 'optional',
+        failurePolicy: 'warn',
         severity: 'terminal',
       },
     ],

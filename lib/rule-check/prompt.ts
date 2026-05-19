@@ -71,9 +71,11 @@ function renderGraphSection(graph: GraphContext): string {
   ].join('\n');
 }
 
-function renderRuleBlock(r: Rule): string {
+export function renderRuleBlock(r: Rule): string {
+  const enforcement = r.enforcementLevel ?? 'optional';
+  const onFail = r.failurePolicy ?? 'warn';
   return [
-    `#### Rule ${r.id}: ${r.businessLogicRuleName}  [applicableClient=${r.applicableClient}, severity=${r.severity}]`,
+    `#### Rule ${r.id}: ${r.businessLogicRuleName}  [applicableClient=${r.applicableClient}, enforcement=${enforcement}, onFail=${onFail}]`,
     `- submissionCriteria: ${r.submissionCriteria || 'N/A'}`,
     `- logic: ${r.standardizedLogicRule}`,
   ].join('\n');
