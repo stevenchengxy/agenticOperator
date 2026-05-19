@@ -19,8 +19,12 @@ export interface Rule {
   ruleSource: string;
   executor: 'Agent' | 'Human';
 
-  /** 由 severity-infer 注入(ontology 暂无显式 gating_severity 字段)。 */
-  severity: Severity;
+  /** New v0.1.002: 是否强制执行。`mandatory` 不可跳过,`optional` 可由 HSM 跳过。 */
+  enforcementLevel?: 'mandatory' | 'optional';
+  /** New v0.1.002: 失败时如何处理。`block` 立即终止 matchResume,`warn` 仅记录不中断。 */
+  failurePolicy?: 'block' | 'warn';
+  /** @deprecated v0.1.002 后从 enforcementLevel + failurePolicy derive。保留一个 release 防止 UI 编译失败。 */
+  severity?: Severity;
 }
 
 export interface OntologyDims {
