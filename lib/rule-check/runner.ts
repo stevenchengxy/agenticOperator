@@ -241,8 +241,12 @@ function statsFromResults(results: RuleResult[]): MatchResumeCheckStats {
 }
 
 function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['decision'] {
+  // Only REAL rule violations (status='fail') block matching. Missing data
+  // (status='insufficient_info') folds to PASS — we shouldn't penalize the
+  // candidate for incomplete graph context. Only `pending` (rule triggered
+  // and explicitly needs HSM judgment) still goes to REVIEW.
   if (stats.fail > 0) return 'FAIL';
-  if (stats.pending > 0 || stats.insufficient_info > 0) return 'REVIEW';
+  if (stats.pending > 0) return 'REVIEW';
   return 'PASS';
 }
 

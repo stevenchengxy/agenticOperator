@@ -240,6 +240,30 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(out.stats.pending).toBe(1);
   });
 
+  it('PASS: insufficient_info does NOT block match (folds to PASS, not REVIEW)', async () => {
+    // Per partner contract: missing data shouldn't penalize the candidate.
+    // Only REAL rule violations (status='fail') block.
+    mockRulesOneStepOneRule();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        rule_results: [
+          { rule_id: '10-25', rule_name: '华为荣耀', step_id: '10::s1', status: 'insufficient_info', reason: '缺出生日期,无法验证年龄' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 30,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.decision).toBe('PASS');
+    expect(out.stats.insufficient_info).toBe(1);
+    expect(out.stats.fail).toBe(0);
+    // explanations still surface the insufficient_info entry for audit visibility
+    expect(out.explanations).toHaveLength(1);
+    expect(out.explanations[0].status).toBe('insufficient_info');
+  });
+
   it('fail-safe FAIL when LLM returns invalid JSON', async () => {
     mockRulesOneStepOneRule();
     mockGraphEmpty();
