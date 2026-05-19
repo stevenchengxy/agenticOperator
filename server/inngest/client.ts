@@ -145,6 +145,35 @@ export type RuleCheckAuditMeta = {
   fail_reason?: string;
 };
 
+/**
+ * Rule check 请求事件 — matchResumeAgent 第一段对每条 JR emit 一条,
+ * 触发 ruleCheckAgent 跑 LLM 评估。
+ *
+ * 新增 in PR-4 (2026-05-19)。之前 rule-check 内嵌在 matchResumeAgent step 4.0。
+ */
+export type RuleCheckRequestedData = {
+  upload_id: string;
+  candidate_id: string;
+  resume_id: string;
+  employee_id: string;
+  job_requisition_id: string;
+  client_id?: string;
+  // 完整 JR 对象 + parsed resume — 给 ruleCheckAgent 用,避免再去拉 RAAS
+  job_requisition: Record<string, unknown>;
+  parsed_resume: Record<string, unknown> | null;
+  // runtime_context 由 ruleCheckAgent 转给 buildRuleCheckInput
+  runtime_context: {
+    upload_id: string;
+    candidate_id: string;
+    resume_id: string;
+    employee_id: string;
+    filename?: string;
+    received_at?: string;
+    trace_id?: string | null;
+  };
+  trace_id?: string | null;
+};
+
 export type RuleCheckPassedData = {
   upload_id: string;
   candidate_id?: string;
@@ -152,6 +181,15 @@ export type RuleCheckPassedData = {
   job_requisition_id: string;
   client_id: string;
   audit: RuleCheckAuditMeta;
+  // ── NEW in PR-4: 透传给 matchResumeAgent 第二段(订阅 RULE_CHECK_PASSED) ──
+  /** Full JR object — 第二段调 matchResumeDirect 时拼 jd text。 */
+  job_requisition?: Record<string, unknown>;
+  /** Parsed resume(可能为 null,如果 RoboHire parse 之后没拿到)。 */
+  parsed_resume?: Record<string, unknown> | null;
+  /** runtime_context 透传(主要 traceId)。 */
+  runtime_context?: RuleCheckRequestedData['runtime_context'];
+  /** employee_id 给第二段 saveMatchResults 用。 */
+  employee_id?: string;
 };
 
 export type RuleCheckFailedData = {
