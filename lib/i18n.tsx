@@ -732,6 +732,10 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_dlq_title: "死信队列（DLQ）",
     monitor_dlq_empty: "无失败的 run",
     monitor_dlq_hint: "点击条目查看 step trace · 重试按钮在 drawer 内",
+    rc_enforcement_mandatory: "强制",
+    rc_enforcement_optional: "可选",
+    rc_on_fail_block: "阻断",
+    rc_on_fail_warn: "警告",
   },
   en: {
     brand: "Agentic Operator",
@@ -1459,6 +1463,10 @@ export const I18N: Record<Lang, Record<string, string>> = {
     monitor_dlq_title: "Dead letter queue (DLQ)",
     monitor_dlq_empty: "No failed runs",
     monitor_dlq_hint: "Click an item to inspect the step trace. Retry is available inside the drawer.",
+    rc_enforcement_mandatory: "mandatory",
+    rc_enforcement_optional: "optional",
+    rc_on_fail_block: "block",
+    rc_on_fail_warn: "warn",
   },
 };
 

@@ -3,6 +3,7 @@ import React from "react";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import { fetchJson } from "@/lib/api/client";
+import { useApp } from "@/lib/i18n";
 import type {
   RuleCheckAuditDetailResponse,
   RuleCheckAuditDetail,
@@ -1612,6 +1613,9 @@ function RuleDefinitionBody({
   rule: import("@/lib/rule-check/types").Rule;
   source: "ontology-api" | "json-fallback";
 }) {
+  const { t } = useApp();
+  const enforcement = rule.enforcementLevel ?? "optional";
+  const failurePolicy = rule.failurePolicy ?? "warn";
   return (
     <div className="flex flex-col" style={{ gap: 10 }}>
       <div className="flex items-center" style={{ gap: 6, flexWrap: "wrap" }}>
@@ -1624,6 +1628,12 @@ function RuleDefinitionBody({
           }
         >
           severity={rule.severity}
+        </Badge>
+        <Badge variant={enforcement === "mandatory" ? "err" : "default"}>
+          {t(`rc_enforcement_${enforcement}`)}
+        </Badge>
+        <Badge variant={failurePolicy === "block" ? "err" : "default"}>
+          {t(`rc_on_fail_${failurePolicy}`)}
         </Badge>
         <Badge variant="default">executor={rule.executor}</Badge>
         <Badge variant="default">
