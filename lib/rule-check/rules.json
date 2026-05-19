@@ -2,8 +2,8 @@
   "metadata": {
     "project_name": "外包招聘本体知识库",
     "document_type": "本体规则定义",
-    "version": "0.1",
-    "last_updated": "2026-03-24",
+    "version": "0.2",
+    "last_updated": "2026-05-15",
     "description": "本文档是人力资源外包招聘业务的本体规则定义。"
   },
   "rules": [
@@ -24,7 +24,9 @@
       ],
       "businessBackgroundReason": "消除人工搬运时差与错误，保障SLA响应速度。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "1-1-2",
@@ -43,7 +45,9 @@
       ],
       "businessBackgroundReason": "防止“垃圾进垃圾出”，确保下游匹配算法有效性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "1-2-1",
@@ -61,7 +65,9 @@
       ],
       "businessBackgroundReason": "在需求公开发布前提前获取机会",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "1-2-2",
@@ -79,7 +85,9 @@
       ],
       "businessBackgroundReason": "在需求公开发布前提前获取机会",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-1",
@@ -97,7 +105,9 @@
       ],
       "businessBackgroundReason": "确保“需求分析”作为一个独立的业务动作被充分执行。通过深度解构原始需求，明确“我们要招什么样的人”以及“这个价格能不能招到人”，为后续的澄清工作奠定坚实的数据基础。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-2",
@@ -115,7 +125,9 @@
       ],
       "businessBackgroundReason": "满足客户对候选人“出身背景”与“思维模式”的隐性要求（如指定要字节的快节奏、不要ToB的慢思维），通过系统自动化筛选提升简历推荐的“对味率”与转化率。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-3",
@@ -133,7 +145,9 @@
       ],
       "businessBackgroundReason": "确保“需求分析”作为一个独立的业务动作被充分执行。通过深度解构原始需求，明确“我们要招什么样的人”以及“这个价格能不能招到人”，为后续的澄清工作奠定坚实的数据基础。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-4",
@@ -152,7 +166,9 @@
       ],
       "businessBackgroundReason": "确保招聘职位类别符合合同要求，否则后续流程无法进行",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "2-5",
@@ -171,7 +187,9 @@
       ],
       "businessBackgroundReason": "确保招聘职位类别符合合同要求，否则后续流程无法进行",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "2-6",
@@ -190,7 +208,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户性别要求",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-10",
@@ -208,7 +228,9 @@
       ],
       "businessBackgroundReason": "业务原因：识别是否为“替补需求”，利用离职员工或历史标杆的画像实现精准匹配，减少对客户的重复无效沟通。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-11",
@@ -226,7 +248,9 @@
       ],
       "businessBackgroundReason": "动态校准人才画像，避免方向性寻访浪费。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "2-13",
@@ -244,7 +268,9 @@
       ],
       "businessBackgroundReason": "基于结构化的硬性要求、加分项与负向特征，生成清晰的目标候选人画像，为简历匹配环节提供精准的人才寻访方向，提升简历推荐的匹配度与转化率。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "3-1",
@@ -262,7 +288,9 @@
       ],
       "businessBackgroundReason": "需针对需求分析阶段识别出的“不清楚/缺失/矛盾点”进行逐一确认，并依据“Ready 标准”（含硬性条件、市场匹配度、历史复用及产出物）最终校验该需求是否具备启动招聘的资格，防止无效或模糊需求导致的人力浪费。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "3-2",
@@ -280,7 +308,9 @@
       ],
       "businessBackgroundReason": "需针对需求分析阶段识别出的“不清楚/缺失/矛盾点”进行逐一确认，并依据“Ready 标准”（含硬性条件、市场匹配度、历史复用及产出物）最终校验该需求是否具备启动招聘的资格，防止无效或模糊需求导致的人力浪费。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "3-3",
@@ -299,7 +329,9 @@
       ],
       "businessBackgroundReason": "提升人岗匹配度与沟通合规。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "3-4",
@@ -317,7 +349,9 @@
       ],
       "businessBackgroundReason": "避免因仅有模糊的“英语良好”描述而忽略了客户具体的“硬性分数指标”（如CET-4>500），导致推荐后因缺少凭证或分数不达标被客户秒退，浪费交付资源。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "4-1",
@@ -336,7 +370,9 @@
       ],
       "businessBackgroundReason": "提高渠道运营效率，通过聚合相似需求（如发布一个“Java专家”覆盖5个客户相似的需求）集中获客，再通过后端逻辑实现精准的人岗匹配与流量分发。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "4-2",
@@ -356,7 +392,9 @@
       ],
       "businessBackgroundReason": "防止违反客户的供应商管理规定及法律法规。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "4-3",
@@ -376,7 +414,9 @@
       ],
       "businessBackgroundReason": "防止违反客户的供应商管理规定及法律法规。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "4-4",
@@ -398,7 +438,9 @@
       ],
       "businessBackgroundReason": "利用第三方平台算法机制，最大限度提升“系统推荐牛人”的人岗匹配精度，减少无效简历筛选成本。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "4-5",
@@ -417,7 +459,9 @@
       ],
       "businessBackgroundReason": "防止因随意叠加澄清记录导致JD内容冗余、前后冲突（如既写专科又写本科）或新旧标准混杂，确保对外发布的JD始终精准反映客户当前的真实意图。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "6-1",
@@ -434,7 +478,9 @@
       ],
       "businessBackgroundReason": "均衡团队负载，确保高难度需求由资深人员承接。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "7-1",
@@ -451,7 +497,9 @@
       ],
       "businessBackgroundReason": "提升高并发场景下的职位曝光效率。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "7-2",
@@ -468,7 +516,9 @@
       ],
       "businessBackgroundReason": "突破平台反爬限制，兼顾发布效率与合规性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-1",
@@ -488,7 +538,9 @@
       ],
       "businessBackgroundReason": "明确岗位语言具体需求，确保招聘满足客户需求的候选人",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-2",
@@ -507,7 +559,9 @@
       ],
       "businessBackgroundReason": "基于系统唯一键约束的抢单策略，确保“先录入先锁定”的竞争优势。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-3",
@@ -528,7 +582,9 @@
       ],
       "businessBackgroundReason": "基于系统唯一键约束的抢单策略，确保“先录入先锁定”的竞争优势。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "8-4",
@@ -548,7 +604,9 @@
       ],
       "businessBackgroundReason": "既要通过透明化告知规避“欺诈招聘”的法律风险，又要通过“结束后的转岗推荐承诺”来消除候选人的不安全感，平衡合规性与交付成功率",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-7",
@@ -567,7 +625,9 @@
       ],
       "businessBackgroundReason": "基于用工成本与团队稳定性考量，防止因短期内发生婚育变动导致的人力成本激增。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-8",
@@ -586,7 +646,9 @@
       ],
       "businessBackgroundReason": "避免因未前置确认工作制问题，导致后续面试通过后候选人因无法接受排班/出差而拒接Offer，或入职后短期内因适应问题离职，造成严重的招聘资源浪费。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-9",
@@ -605,7 +667,9 @@
       ],
       "businessBackgroundReason": "记录原岗位信息，用于后续匹配判断、定级使用。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-10",
@@ -623,7 +687,9 @@
       ],
       "businessBackgroundReason": "防止职业空白期过长、平均每段工作经历太短或求职动机不纯的候选人进入流程，降低客户面试时的质疑率，确保推荐人选的稳定性。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-11",
@@ -641,7 +707,9 @@
       ],
       "businessBackgroundReason": "基于用工成本与团队稳定性考量，防止因短期内发生婚育变动导致的人力成本激增。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-12",
@@ -663,7 +731,9 @@
       ],
       "businessBackgroundReason": "规避因“意向不坚定”导致的闪辞（短期离场）风险，以及因“履历造假”带来的合规隐患，确保人选的稳定性与真实性。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "8-13",
@@ -685,7 +755,9 @@
       ],
       "businessBackgroundReason": "规避因“意向不坚定”导致的闪辞（短期离场）风险，以及因“履历造假”带来的合规隐患，确保人选的稳定性与真实性。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-15",
@@ -706,7 +778,9 @@
       ],
       "businessBackgroundReason": "确保所有推荐人选均具备合法的全职用工资格，规避因候选人个人意愿导致面试通过却无法签约的交付事故。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-16",
@@ -722,7 +796,9 @@
       ],
       "businessBackgroundReason": "准确界定“全职工作年限”的起算点，既防止将全日制读书期间误算为工龄，也防止漏算“先工作后提升学历”人员的实际经验时长，确保定级准确。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "8-17",
@@ -743,7 +819,9 @@
       ],
       "businessBackgroundReason": "规避因前员工涉及“红线违规、竞业协议或回流冷冻期”未满而导致的推荐事故，确保回流合规性。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "9-2",
@@ -762,7 +840,9 @@
       ],
       "businessBackgroundReason": "基于系统唯一键约束的抢单策略，确保“先录入先锁定”的竞争优势。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "9-3",
@@ -781,7 +861,9 @@
       ],
       "businessBackgroundReason": "在系统解析候选人简历时，必须对简历核心字段进行全量完整性核查，校验范围包含：姓名、手机号、教育经历、工作经历及项目经验。若上述任意核心信息存在缺失、模糊或逻辑断层，系统需提示负责的招聘专员；专员必须联系候选人补齐信息，并将信息补充到简历源文件中重新上传，以供系统再次解析。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-4",
@@ -800,7 +882,9 @@
       ],
       "businessBackgroundReason": "在系统解析候选人简历时，必须对简历核心字段进行全量完整性核查，校验范围包含：姓名、手机号、教育经历、工作经历及项目经验。若上述任意核心信息存在缺失、模糊或逻辑断层，系统需提示负责的招聘专员；专员必须联系候选人补齐信息，并将信息补充到简历源文件中重新上传，以供系统再次解析。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-5",
@@ -821,7 +905,9 @@
       ],
       "businessBackgroundReason": "明确内推奖金的有效核算周期，避免推荐归属无限期挂载。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-6",
@@ -842,7 +928,9 @@
       ],
       "businessBackgroundReason": "确保锁定期内资源的排他性，同时避免底层状态机死锁，保障原归属人的主动释放权及系统的自动回收机制正常运行。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-7",
@@ -861,7 +949,9 @@
       ],
       "businessBackgroundReason": "消除静态文本匹配带来的系统性误判。通过精准识别推荐人是否处于“招聘决策链”或掌握“全局数据资源”，实现利益冲突的动态隔离，保障内推制度的绝对公平。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-8",
@@ -879,7 +969,9 @@
       ],
       "businessBackgroundReason": "明确实习生岗位的拉新不计入奖励范围，同时防范通过推荐短期回流前员工套取奖金，确保内推资源聚焦于真实的外部增量人才。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-11",
@@ -897,7 +989,9 @@
       ],
       "businessBackgroundReason": "业务原因：针对技术岗（测试/前端）高发的培训班包装现象，通过识别“项目拼凑感”和“文案雷同度”，降低后续面试欺诈风险。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-12",
@@ -915,7 +1009,9 @@
       ],
       "businessBackgroundReason": "严控交付质量红线，维护供应商评级与信誉。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-13",
@@ -933,7 +1029,9 @@
       ],
       "businessBackgroundReason": "业务原因：针对技术岗（测试/前端）高发的培训班包装现象，通过识别“项目拼凑感”和“文案雷同度”，降低后续面试欺诈风险。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "9-14",
@@ -949,7 +1047,9 @@
       ],
       "businessBackgroundReason": "彻底消除原降级认定规则在校招/实习生场景下造成的严重反例（P1缺陷）。通过底层实体属性的双轨分离，既防范社招合规风险，又确保应届生能在校招初筛中被正确召回。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-1",
@@ -970,7 +1070,9 @@
       ],
       "businessBackgroundReason": "通过盘活“沉睡资源”和复用“历史背书”，实现新需求的零时差响应",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-2",
@@ -991,7 +1093,9 @@
       ],
       "businessBackgroundReason": "通过盘活“沉睡资源”和复用“历史背书”，实现新需求的零时差响应",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-3",
@@ -1015,7 +1119,9 @@
       ],
       "businessBackgroundReason": "前面的面试官看上人选，但是又被推走了",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-4",
@@ -1039,7 +1145,9 @@
       ],
       "businessBackgroundReason": "前面的面试官看上人选，但是又被推走了",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-5",
@@ -1059,7 +1167,9 @@
       ],
       "businessBackgroundReason": "在系统执行简历匹配阶段进行严格的预筛选，确保推荐人选绝对合规且精准匹配，避免因硬性要求不匹配导致浪费宝贵的推荐名额",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-6",
@@ -1079,7 +1189,9 @@
       ],
       "businessBackgroundReason": "在系统执行简历匹配阶段进行严格的预筛选，确保推荐人选绝对合规且精准匹配，避免因硬性要求不匹配导致浪费宝贵的推荐名额",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-7",
@@ -1099,7 +1211,9 @@
       ],
       "businessBackgroundReason": "提高约面效率，减少无效人力。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-8",
@@ -1118,7 +1232,9 @@
       ],
       "businessBackgroundReason": "提高约面效率，减少无效人力。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-9",
@@ -1136,7 +1252,9 @@
       ],
       "businessBackgroundReason": "防止职业空白期过长、平均每段工作经历太短或求职动机不纯的候选人进入流程，降低客户面试时的质疑率，确保推荐人选的稳定性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-10",
@@ -1154,7 +1272,9 @@
       ],
       "businessBackgroundReason": "降低人员外派后的退场/换人风险（稳定性管控）。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-11",
@@ -1175,7 +1295,9 @@
       ],
       "businessBackgroundReason": "确保所有推荐人选均具备合法的全职用工资格，规避因候选人个人意愿导致面试通过却无法签约的交付事故。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-12",
@@ -1193,7 +1315,9 @@
       ],
       "businessBackgroundReason": "验证简历时间线的真实性与逻辑自洽性，防止年龄造假、学历造假或录入错误。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-13",
@@ -1211,7 +1335,9 @@
       ],
       "businessBackgroundReason": "验证简历时间线的真实性与逻辑自洽性，防止年龄造假、学历造假或录入错误。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-14",
@@ -1231,7 +1357,9 @@
       ],
       "businessBackgroundReason": "判断岗位语言具体需求满足情况，确保招聘满足客户需求的候选人",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-15",
@@ -1249,11 +1377,13 @@
       ],
       "businessBackgroundReason": "避免因未前置确认工作制问题，导致后续面试通过后候选人因无法接受排班/出差而拒接Offer，或入职后短期内因适应问题离职，造成严重的招聘资源浪费。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-16",
-      "specificScenarioStage": "简历匹配",
+      "specificScenarioStage": "offer合规审批",
       "businessLogicRuleName": "通用黑名单检验规则-被动释放人员",
       "applicableClient": "通用",
       "applicableDepartment": "N/A",
@@ -1271,16 +1401,18 @@
       ],
       "businessBackgroundReason": "识别并拦截高风险回流人员。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-17",
-      "specificScenarioStage": "简历匹配",
+      "specificScenarioStage": "offer合规审批",
       "businessLogicRuleName": "通用黑名单检验规则-高风险回流人员",
       "applicableClient": "通用",
       "applicableDepartment": "N/A",
       "submissionCriteria": "候选人有华腾或中软国际历史工作经历。",
-      "standardizedLogicRule": "系统在简历匹配环节，自动检索候选人的历史任职记录。若识别到候选人曾为华腾或中软国际员工且离职原因为以下高风险类型之一：A15劳动纠纷及诉讼（YCH）、B8有犯罪记录（YCH）、B7-1协商解除劳动合同（YCH）——有补偿金、B3(1)合同到期终止(技能不达标)——有补偿金(YCH)、B3(2)合同到期终止(劳动态度)——有补偿金(YCH)\n），系统自动判定该候选人为不予录用，立即终止匹配流程。",
+      "standardizedLogicRule": "系统在简历匹配环节，自动检索候选人的历史任职记录。若识别到候选人曾为华腾或中软国际员工且离职原因为以下高风险类型之一：A15劳动纠纷及诉讼（YCH）、B8有犯罪记录（YCH）、B3(1)合同到期终止(技能不达标)——有补偿金(YCH)、B3(2)合同到期终止(劳动态度)——有补偿金(YCH)\n），系统自动判定该候选人为不予录用，立即终止匹配流程。",
       "relatedEntities": [
         "职位投递申请 (Application)",
         "审批申请单 (Approval_Request)",
@@ -1293,11 +1425,13 @@
       ],
       "businessBackgroundReason": "识别并拦截高风险回流人员。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-18",
-      "specificScenarioStage": "简历匹配",
+      "specificScenarioStage": "offer合规审批",
       "businessLogicRuleName": "通用黑名单检验规则-EHS风险回流人员。",
       "applicableClient": "通用",
       "applicableDepartment": "N/A",
@@ -1315,7 +1449,9 @@
       ],
       "businessBackgroundReason": "识别并拦截高风险回流人员。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-19",
@@ -1337,7 +1473,9 @@
       ],
       "businessBackgroundReason": "识别并拦截高风险回流人员。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-20",
@@ -1359,7 +1497,9 @@
       ],
       "businessBackgroundReason": "识别并拦截高风险回流人员。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-21",
@@ -1380,7 +1520,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户年龄要求",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-22",
@@ -1401,7 +1543,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户年龄要求",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-24",
@@ -1421,7 +1565,9 @@
       ],
       "businessBackgroundReason": "第三方平台账号发布岗位数量有限，需要合并发布，然后简历匹配回原始需求",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-25",
@@ -1443,7 +1589,9 @@
       ],
       "businessBackgroundReason": "遵守客户互不挖角协议，防止投诉。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-26",
@@ -1465,7 +1613,9 @@
       ],
       "businessBackgroundReason": "遵守客户互不挖角协议，防止投诉。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-27",
@@ -1488,7 +1638,9 @@
       ],
       "businessBackgroundReason": "防止利益冲突与舞弊风险。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-28",
@@ -1511,7 +1663,9 @@
       ],
       "businessBackgroundReason": "防止利益冲突与舞弊风险。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-29",
@@ -1530,7 +1684,9 @@
       ],
       "businessBackgroundReason": "防止短期恶意跳槽与流程合规。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-30",
@@ -1549,7 +1705,9 @@
       ],
       "businessBackgroundReason": "建立统一的学历资格筛查机制，在保障常规人才快速通行的同时，确保特殊学历背景在合规的前提下实现准入，满足多样化的交付需求。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-31",
@@ -1569,7 +1727,9 @@
       ],
       "businessBackgroundReason": "建立统一的学历资格筛查机制，在保障常规人才快速通行的同时，确保特殊学历背景在合规的前提下实现准入，满足多样化的交付需求。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-32",
@@ -1590,7 +1750,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户要求筛选或面试不通过的人选3个月内容同一岗位不能推荐",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-33",
@@ -1610,7 +1772,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户规定，非BPO业务如果之前是友商候选人，离场6个月内被推荐，仍然属于友商资源",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-34",
@@ -1630,7 +1794,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户规定，非BPO业务如果之前是友商候选人，离场6个月内被推荐，仍然属于友商资源",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-35",
@@ -1652,7 +1818,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-36",
@@ -1672,7 +1840,9 @@
       ],
       "businessBackgroundReason": "基于用工成本与团队稳定性考量，防止因短期内发生婚育变动导致的人力成本激增。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-37",
@@ -1692,7 +1862,9 @@
       ],
       "businessBackgroundReason": "基于用工成本与团队稳定性考量，防止因短期内发生婚育变动导致的人力成本激增。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-38",
@@ -1713,7 +1885,9 @@
       ],
       "businessBackgroundReason": "风险红线隔离前置识别：Agent无法直接从简历文本准确推测真实的离场原因，需通过系统任务流转交HSM进行人工前置核实。",
       "ruleSource": "客户SOP与系统边界适配",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-39",
@@ -1734,7 +1908,9 @@
       ],
       "businessBackgroundReason": "闭环处理人工核实结果，严格执行客户红线政策，严禁淘汰人员再次进入腾讯项目。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-40",
@@ -1756,7 +1932,9 @@
       ],
       "businessBackgroundReason": "严格遵守腾讯供应商“回流红线”政策（合规性）。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-42",
@@ -1778,7 +1956,9 @@
       ],
       "businessBackgroundReason": "部门严控：执行CDG特定的硬性人才准入红线。确保从腾讯离职的候选人必须严格履行完整的6个月冷冻期，防止通过短期挂靠其他公司规避回流限制政策。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-43",
@@ -1798,7 +1978,9 @@
       ],
       "businessBackgroundReason": "内部协议保护：通过系统逻辑自动履行IEG内部的人才竞争规避协议。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-45",
@@ -1820,7 +2002,9 @@
       ],
       "businessBackgroundReason": "身份转换合规：确保从正式转外包的流程符合腾讯内部的合规要求。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-46",
@@ -1842,7 +2026,9 @@
       ],
       "businessBackgroundReason": "身份转换合规：确保从正式转外包的流程符合腾讯内部的合规要求。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-47",
@@ -1862,7 +2048,9 @@
       ],
       "businessBackgroundReason": "基于用工成本与团队稳定性考量，防止因短期内发生婚育变动导致的人力成本激增。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-49",
@@ -1883,7 +2071,9 @@
       ],
       "businessBackgroundReason": "规避因前员工涉及“红线违规、竞业协议或回流冷冻期”未满而导致的推荐事故，确保回流合规性。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-50",
@@ -1904,7 +2094,9 @@
       ],
       "businessBackgroundReason": "规避因前员工涉及“红线违规、竞业协议或回流冷冻期”未满而导致的推荐事故，确保回流合规性。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-51",
@@ -1925,7 +2117,9 @@
       ],
       "businessBackgroundReason": "规避因前员工涉及“红线违规、竞业协议或回流冷冻期”未满而导致的推荐事故，确保回流合规性。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "10-52",
@@ -1947,7 +2141,9 @@
       ],
       "businessBackgroundReason": "保障交付质量与供应商口碑。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-53",
@@ -1969,7 +2165,9 @@
       ],
       "businessBackgroundReason": "保障交付质量与供应商口碑。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-54",
@@ -1989,7 +2187,9 @@
       ],
       "businessBackgroundReason": "满足客户对候选人“出身背景”与“思维模式”的隐性要求（如指定要字节的快节奏、不要ToB的慢思维），通过系统自动化筛选提升简历推荐的“对味率”与转化率。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "10-56",
@@ -2010,7 +2210,9 @@
       ],
       "businessBackgroundReason": "子公司特定红线：确保子公司独立的人才准入政策得到硬性执行。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "11-1",
@@ -2028,7 +2230,9 @@
       ],
       "businessBackgroundReason": "保证面试公正性。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "13-1",
@@ -2050,7 +2254,9 @@
       ],
       "businessBackgroundReason": "规范内部面试标准，确保推荐给客户的候选人在“硬技能”和“软意愿”上双重达标；同时通过优劣势分析为后续的“面试辅导”环节提供输入素材。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "13-2",
@@ -2072,7 +2278,9 @@
       ],
       "businessBackgroundReason": "规范内部面试标准，确保推荐给客户的候选人在“硬技能”和“软意愿”上双重达标；同时通过优劣势分析为后续的“面试辅导”环节提供输入素材。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "14-1",
@@ -2090,7 +2298,9 @@
       ],
       "businessBackgroundReason": "确保交付给不同客户的简历符合其特定的阅读习惯与格式规范（如腾讯与字节模板不同）；通过高亮关键词，帮助客户面试官在 3 秒内捕捉候选人亮点，提升简历通过率。内部流程必须执行否",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-1",
@@ -2109,7 +2319,9 @@
       ],
       "businessBackgroundReason": "不支持 HSM 直接在线修改推荐包文本内容，仅支持 HSM 在系统内针对推荐包输出结构化修改意见，随后由 Agent 根据该意见重新执行简历重组与合规优化，生成新版推荐包。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-2",
@@ -2128,7 +2340,9 @@
       ],
       "businessBackgroundReason": "不支持 HSM 直接在线修改推荐包文本内容，仅支持 HSM 在系统内针对推荐包输出结构化修改意见，随后由 Agent 根据该意见重新执行简历重组与合规优化，生成新版推荐包。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-3",
@@ -2147,7 +2361,9 @@
       ],
       "businessBackgroundReason": "不支持 HSM 直接在线修改推荐包文本内容，仅支持 HSM 在系统内针对推荐包输出结构化修改意见，随后由 Agent 根据该意见重新执行简历重组与合规优化，生成新版推荐包。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-4",
@@ -2168,7 +2384,9 @@
       ],
       "businessBackgroundReason": "统一推荐包的输出标准，通过多维度（简历、视频、作品集、评估）展示候选人能力，提升客户端的筛选效率与面试转化率。同时确保特定岗位的交付材料完整性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-5",
@@ -2189,7 +2407,9 @@
       ],
       "businessBackgroundReason": "统一推荐包的输出标准，通过多维度（简历、视频、作品集、评估）展示候选人能力，提升客户端的筛选效率与面试转化率。同时确保特定岗位的交付材料完整性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-6",
@@ -2209,7 +2429,9 @@
       ],
       "businessBackgroundReason": "在系统执行简历匹配阶段进行严格的预筛选，确保推荐人选绝对合规且精准匹配，避免因硬性要求不匹配导致浪费宝贵的推荐名额",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-8",
@@ -2225,7 +2447,9 @@
       ],
       "businessBackgroundReason": "准确界定“全职工作年限”的起算点，既防止将全日制读书期间误算为工龄，也防止漏算“先工作后提升学历”人员的实际经验时长，确保定级准确。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-9",
@@ -2247,7 +2471,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-10",
@@ -2271,7 +2497,9 @@
       ],
       "businessBackgroundReason": "规范白名单申请的字段完整性，明确系统录入时的“留白”规则（Level字段），确保特殊回流人员能顺利绕过系统拦截。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-11",
@@ -2295,7 +2523,9 @@
       ],
       "businessBackgroundReason": "规范白名单申请的字段完整性，明确系统录入时的“留白”规则（Level字段），确保特殊回流人员能顺利绕过系统拦截。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-12",
@@ -2319,7 +2549,9 @@
       ],
       "businessBackgroundReason": "规范白名单申请的字段完整性，明确系统录入时的“留白”规则（Level字段），确保特殊回流人员能顺利绕过系统拦截。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-13",
@@ -2343,7 +2575,9 @@
       ],
       "businessBackgroundReason": "规范白名单申请的字段完整性，明确系统录入时的“留白”规则（Level字段），确保特殊回流人员能顺利绕过系统拦截。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-14",
@@ -2365,7 +2599,9 @@
       ],
       "businessBackgroundReason": "规范工作年限",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-16",
@@ -2387,7 +2623,9 @@
       ],
       "businessBackgroundReason": "规范工作年限",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-17",
@@ -2407,7 +2645,9 @@
       ],
       "businessBackgroundReason": "业务原因：信息必须完整才能提交简历，尽早占坑",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-18",
@@ -2430,7 +2670,9 @@
       ],
       "businessBackgroundReason": "杜绝无效信息，确保客户面试官在第一时间能获取候选人技术匹配度的专业判断，提升筛选效率。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-19",
@@ -2453,7 +2695,9 @@
       ],
       "businessBackgroundReason": "设计类岗位必须依据作品评估能力",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-20",
@@ -2476,7 +2720,9 @@
       ],
       "businessBackgroundReason": "增加招聘灵活性，避免错失优秀特殊人才",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-21",
@@ -2499,7 +2745,9 @@
       ],
       "businessBackgroundReason": "增加招聘灵活性，避免错失优秀特殊人才",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-22",
@@ -2522,7 +2770,9 @@
       ],
       "businessBackgroundReason": "增加招聘灵活性，避免错失优秀特殊人才",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-23",
@@ -2542,7 +2792,9 @@
       ],
       "businessBackgroundReason": "避免后续定级需要提高级别时不能再提高",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-24",
@@ -2563,7 +2815,9 @@
       ],
       "businessBackgroundReason": "业务原因：辅助定级，统一标准，减少人为偏差。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-25",
@@ -2584,7 +2838,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-26",
@@ -2605,7 +2861,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-27",
@@ -2626,7 +2884,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-28",
@@ -2647,7 +2907,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-29",
@@ -2668,7 +2930,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-30",
@@ -2692,7 +2956,9 @@
       ],
       "businessBackgroundReason": "部门差异化审批：实现PCG部门针对急需人才的特殊合规豁免机制。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-31",
@@ -2717,7 +2983,9 @@
       ],
       "businessBackgroundReason": "通过严格的分级管控维护整体薪酬体系的公平性，防止回流人员不合理涨薪；同时通过强制报备和材料审核（如WXG），确保流程合规，规避潜在的用工风险。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-32",
@@ -2742,7 +3010,9 @@
       ],
       "businessBackgroundReason": "通过严格的分级管控维护整体薪酬体系的公平性，防止回流人员不合理涨薪；同时通过强制报备和材料审核（如WXG），确保流程合规，规避潜在的用工风险。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-33",
@@ -2767,7 +3037,9 @@
       ],
       "businessBackgroundReason": "通过严格的分级管控维护整体薪酬体系的公平性，防止回流人员不合理涨薪；同时通过强制报备和材料审核（如WXG），确保流程合规，规避潜在的用工风险。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-34",
@@ -2784,7 +3056,9 @@
       ],
       "businessBackgroundReason": "回流人员按规则设定职级",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-35",
@@ -2801,7 +3075,9 @@
       ],
       "businessBackgroundReason": "回流人员按规则设定职级",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-36",
@@ -2818,7 +3094,9 @@
       ],
       "businessBackgroundReason": "回流人员按规则设定职级",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-37",
@@ -2836,7 +3114,9 @@
       ],
       "businessBackgroundReason": "防止职业空白期过长、平均每段工作经历太短或求职动机不纯的候选人进入流程，降低客户面试时的质疑率，确保推荐人选的稳定性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-38",
@@ -2855,7 +3135,9 @@
       ],
       "businessBackgroundReason": "避免将“在读”性质的在读学历误认为已获资质，导致入职材料审核时因无法提供双证（毕业证/学位证）而造成严重的合规违约或退工风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-39",
@@ -2874,7 +3156,9 @@
       ],
       "businessBackgroundReason": "避免将“在读”性质的在读学历误认为已获资质，导致入职材料审核时因无法提供双证（毕业证/学位证）而造成严重的合规违约或退工风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-40",
@@ -2894,7 +3178,9 @@
       ],
       "businessBackgroundReason": "数据准确性与流程合规防私联。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "15-41",
@@ -2916,7 +3202,9 @@
       ],
       "businessBackgroundReason": "并利用过往的验证结果提升客户的筛选信心",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-42",
@@ -2939,7 +3227,9 @@
       ],
       "businessBackgroundReason": "薪资敏感问题",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-43",
@@ -2959,7 +3249,9 @@
       ],
       "businessBackgroundReason": "管理候选人期望，降低面试“跳票”率和失败率。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "15-44",
@@ -2980,7 +3272,9 @@
       ],
       "businessBackgroundReason": "前置对齐大厂工作强度（996/大小周），防止“入职即离职”。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-1",
@@ -3002,7 +3296,9 @@
       ],
       "businessBackgroundReason": "通过对客户系统的反馈第一时间识别冲突，并在首选岗位撞单后，候选人能迅速进入备选岗位筛选匹配，保障人才利用最大化。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-2",
@@ -3024,7 +3320,9 @@
       ],
       "businessBackgroundReason": "通过对客户系统的反馈第一时间识别冲突，并在首选岗位撞单后，候选人能迅速进入备选岗位筛选匹配，保障人才利用最大化。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "17-3",
@@ -3047,7 +3345,9 @@
       ],
       "businessBackgroundReason": "设计类岗位必须依据作品评估能力",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-4",
@@ -3070,7 +3370,9 @@
       ],
       "businessBackgroundReason": "增加招聘灵活性，避免错失优秀特殊人才",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "17-5",
@@ -3090,7 +3392,9 @@
       ],
       "businessBackgroundReason": "在需求公开发布前提前获取机会，发布后更新信息",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-6",
@@ -3111,7 +3415,9 @@
       ],
       "businessBackgroundReason": "在需求公开发布前提前获取机会，发布后更新信息",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-7",
@@ -3129,7 +3435,9 @@
       ],
       "businessBackgroundReason": "业务原因：不满足客户岗位条件的简历尽早推荐别的岗位",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-8",
@@ -3147,7 +3455,9 @@
       ],
       "businessBackgroundReason": "业务原因：不满足客户岗位条件的简历尽早推荐别的岗位",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-9",
@@ -3169,7 +3479,9 @@
       ],
       "businessBackgroundReason": "撞单处理逻辑",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-10",
@@ -3191,7 +3503,9 @@
       ],
       "businessBackgroundReason": "业务原因：进入客户黑名单的候选人，尽早推荐别的客户",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "17-11",
@@ -3212,7 +3526,9 @@
       ],
       "businessBackgroundReason": "业务原因：腾讯系统底层限制，操作即锁死，必须在客户筛选前利用“废弃”功能进行纠错。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "17-12",
@@ -3234,7 +3550,9 @@
       ],
       "businessBackgroundReason": "防止供应商通过“人海战术”海投简历挤占系统资源，强制要求供应商对前4位候选人进行精挑细选（因为推错了就卡住流程了），同时保障面试官在单位时间内处理量的可控性。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "18-1",
@@ -3254,7 +3572,9 @@
       ],
       "businessBackgroundReason": "业务原因：在岗位释放前推荐新的岗位，避免浪费资源",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "18-2",
@@ -3274,7 +3594,9 @@
       ],
       "businessBackgroundReason": "业务原因：在岗位释放前推荐新的岗位，避免浪费资源",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "19-1",
@@ -3293,7 +3615,9 @@
       ],
       "businessBackgroundReason": "降低因候选人失约（放鸽子）造成的面试官时间浪费，维护招聘团队在客户面前的专业度与信誉。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "19-2",
@@ -3312,7 +3636,9 @@
       ],
       "businessBackgroundReason": "降低因候选人失约（放鸽子）造成的面试官时间浪费，维护招聘团队在客户面前的专业度与信誉。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "19-3",
@@ -3335,7 +3661,9 @@
       ],
       "businessBackgroundReason": "针对流动性大或对诚信要求高的BG（如WXG），通过惩罚失信行为，规避反复推荐“鸽子型”候选人带来的资源浪费。",
       "ruleSource": "需求跟进表",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "20-1",
@@ -3358,7 +3686,9 @@
       ],
       "businessBackgroundReason": "通用素质对齐：通过 HSM 的综合宣导，确保候选人在沟通表达、公司背景及流程熟悉度上达到入场标准",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "20-2",
@@ -3381,7 +3711,9 @@
       ],
       "businessBackgroundReason": "通用素质对齐：通过 HSM 的综合宣导，确保候选人在沟通表达、公司背景及流程熟悉度上达到入场标准",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "20-3",
@@ -3403,7 +3735,9 @@
       ],
       "businessBackgroundReason": "业务原因：提高面试通过率",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "20-4",
@@ -3425,7 +3759,9 @@
       ],
       "businessBackgroundReason": "业务原因：提高面试通过率",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "20-5",
@@ -3447,7 +3783,9 @@
       ],
       "businessBackgroundReason": "业务原因：提高面试通过率",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "20-6",
@@ -3468,7 +3806,9 @@
       ],
       "businessBackgroundReason": "保障交付质量与供应商口碑。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-1",
@@ -3486,7 +3826,9 @@
       ],
       "businessBackgroundReason": "业务原因：面试官迟到提醒，避免面试取消",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-2",
@@ -3506,7 +3848,9 @@
       ],
       "businessBackgroundReason": "确保面试安排能及时通知到面试官及外管助理（特别是IEG的非工作时间段），避免因通知滞后导致面试官缺席或客诉。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-3",
@@ -3526,7 +3870,9 @@
       ],
       "businessBackgroundReason": "确保面试安排能及时通知到面试官及外管助理（特别是IEG的非工作时间段），避免因通知滞后导致面试官缺席或客诉。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-4",
@@ -3546,7 +3892,9 @@
       ],
       "businessBackgroundReason": "确保面试安排能及时通知到面试官及外管助理（特别是IEG的非工作时间段），避免因通知滞后导致面试官缺席或客诉。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-5",
@@ -3567,7 +3915,9 @@
       ],
       "businessBackgroundReason": "确保面试安排能及时通知到面试官及外管助理（特别是IEG的非工作时间段），避免因通知滞后导致面试官缺席或客诉。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-6",
@@ -3588,7 +3938,9 @@
       ],
       "businessBackgroundReason": "确保面试安排能及时通知到面试官及外管助理（特别是IEG的非工作时间段），避免因通知滞后导致面试官缺席或客诉。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "21-7",
@@ -3607,7 +3959,9 @@
       ],
       "businessBackgroundReason": "业务原因：保障面试流程顺畅，减少因设备问题导致的时间浪费。",
       "ruleSource": "需求跟进表",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-1",
@@ -3628,7 +3982,9 @@
       ],
       "businessBackgroundReason": "监控协作效率，及时纠偏。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-2",
@@ -3649,7 +4005,9 @@
       ],
       "businessBackgroundReason": "监控协作效率，及时纠偏。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-3",
@@ -3667,7 +4025,9 @@
       ],
       "businessBackgroundReason": "业务背景：基于客户实际操作习惯记录面试反馈结果",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-4",
@@ -3688,7 +4048,9 @@
       ],
       "businessBackgroundReason": "确保面试安排能及时通知到面试官及外管助理（特别是IEG的非工作时间段），避免因通知滞后导致面试官缺席或客诉。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-5",
@@ -3710,7 +4072,9 @@
       ],
       "businessBackgroundReason": "保证招聘流程时效性，避免笔试环节积压；规范供应商交付动作，防止因拖延导致流程超时被系统自动关闭。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-6",
@@ -3732,7 +4096,9 @@
       ],
       "businessBackgroundReason": "保证招聘流程时效性，避免笔试环节积压；规范供应商交付动作，防止因拖延导致流程超时被系统自动关闭。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-7",
@@ -3754,7 +4120,9 @@
       ],
       "businessBackgroundReason": "保证招聘流程时效性，避免笔试环节积压；规范供应商交付动作，防止因拖延导致流程超时被系统自动关闭。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-8",
@@ -3776,7 +4144,9 @@
       ],
       "businessBackgroundReason": "保证招聘流程时效性，避免笔试环节积压；规范供应商交付动作，防止因拖延导致流程超时被系统自动关闭。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-9",
@@ -3798,7 +4168,9 @@
       ],
       "businessBackgroundReason": "保证招聘流程时效性，避免笔试环节积压；规范供应商交付动作，防止因拖延导致流程超时被系统自动关闭。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-10",
@@ -3819,7 +4191,9 @@
       ],
       "businessBackgroundReason": "业务原因：剔除候选人的主观误判，通过识别面试官的“时间投入”和“推销/锁定行为”来精准预测面试结果。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-11",
@@ -3840,7 +4214,9 @@
       ],
       "businessBackgroundReason": "业务原因：剔除候选人的主观误判，通过识别面试官的“时间投入”和“推销/锁定行为”来精准预测面试结果。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "22-12",
@@ -3861,7 +4237,9 @@
       ],
       "businessBackgroundReason": "业务原因：剔除候选人的主观误判，通过识别面试官的“时间投入”和“推销/锁定行为”来精准预测面试结果。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "23-1",
@@ -3880,7 +4258,9 @@
       ],
       "businessBackgroundReason": "回流人员职级规则",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "23-2",
@@ -3899,7 +4279,9 @@
       ],
       "businessBackgroundReason": "回流人员职级规则",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "23-3",
@@ -3920,7 +4302,9 @@
       ],
       "businessBackgroundReason": "外管组要求",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "24-1",
@@ -3942,7 +4326,9 @@
       ],
       "businessBackgroundReason": "控制项目健康盈利，防止异常亏损。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "24-2",
@@ -3964,7 +4350,9 @@
       ],
       "businessBackgroundReason": "控制项目健康盈利，防止异常亏损。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "24-3",
@@ -3987,7 +4375,9 @@
       ],
       "businessBackgroundReason": "维持薪酬体系统一性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-1",
@@ -4010,7 +4400,9 @@
       ],
       "businessBackgroundReason": "维持薪酬体系统一性。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-2",
@@ -4029,7 +4421,9 @@
       ],
       "businessBackgroundReason": "辅助HR掌握谈判主动权。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-3",
@@ -4048,7 +4442,9 @@
       ],
       "businessBackgroundReason": "辅助HR掌握谈判主动权。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-4",
@@ -4065,7 +4461,9 @@
       ],
       "businessBackgroundReason": "业务原因：规避劳动法风险，防止口头/书面承诺引发的薪资法律纠纷。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-5",
@@ -4084,7 +4482,9 @@
       ],
       "businessBackgroundReason": "因各BG及工作室预算管理制度不同，需严格对应结算逻辑，避免薪酬计算错误导致的劳动纠纷或成本超支。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-6",
@@ -4103,7 +4503,9 @@
       ],
       "businessBackgroundReason": "因各BG及工作室预算管理制度不同，需严格对应结算逻辑，避免薪酬计算错误导致的劳动纠纷或成本超支。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-7",
@@ -4122,7 +4524,9 @@
       ],
       "businessBackgroundReason": "因各BG及工作室预算管理制度不同，需严格对应结算逻辑，避免薪酬计算错误导致的劳动纠纷或成本超支。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "25-8",
@@ -4139,7 +4543,9 @@
       ],
       "businessBackgroundReason": "因各BG及工作室预算管理制度不同，需严格对应结算逻辑，避免薪酬计算错误导致的劳动纠纷或成本超支。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "26-1",
@@ -4157,7 +4563,9 @@
       ],
       "businessBackgroundReason": "零容忍严重诚信问题。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-2",
@@ -4175,7 +4583,9 @@
       ],
       "businessBackgroundReason": "零容忍严重诚信问题。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-3",
@@ -4193,7 +4603,9 @@
       ],
       "businessBackgroundReason": "零容忍严重诚信问题。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-4",
@@ -4211,7 +4623,9 @@
       ],
       "businessBackgroundReason": "零容忍严重诚信问题。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-5",
@@ -4229,7 +4643,9 @@
       ],
       "businessBackgroundReason": "业务原因：客户风险排查",
       "ruleSource": "业务规则与规范",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-6",
@@ -4249,7 +4665,9 @@
       ],
       "businessBackgroundReason": "进一步规范外包\n人员的准入、明确背景调查的底线事项、细化特定情形的处理标准，以确保人员引入的合规性",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-7",
@@ -4269,7 +4687,9 @@
       ],
       "businessBackgroundReason": "进一步规范外包\n人员的准入、明确背景调查的底线事项、细化特定情形的处理标准，以确保人员引入的合规性",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "26-8",
@@ -4289,7 +4709,9 @@
       ],
       "businessBackgroundReason": "进一步规范外包\n人员的准入、明确背景调查的底线事项、细化特定情形的处理标准，以确保人员引入的合规性",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "27-1",
@@ -4308,7 +4730,9 @@
       ],
       "businessBackgroundReason": "防止短期恶意跳槽与流程合规。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "27-2",
@@ -4327,7 +4751,9 @@
       ],
       "businessBackgroundReason": "防止短期恶意跳槽与流程合规。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "27-3",
@@ -4346,7 +4772,9 @@
       ],
       "businessBackgroundReason": "防范“恶意刷薪”与内部用工道德风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "27-4",
@@ -4366,7 +4794,9 @@
       ],
       "businessBackgroundReason": "业务原因：防止流程状态不同步（如客户系统未通过），客户回收HC等情况，导致的违规发录用函。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "28-1",
@@ -4384,7 +4814,9 @@
       ],
       "businessBackgroundReason": "防止违规发放Offer。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "28-2",
@@ -4402,7 +4834,9 @@
       ],
       "businessBackgroundReason": "防止违规发放Offer。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "28-3",
@@ -4422,7 +4856,9 @@
       ],
       "businessBackgroundReason": "业务原因：防止流程状态不同步（如客户系统未通过），客户回收HC等情况，导致的违规发录用函。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "28-4",
@@ -4441,7 +4877,9 @@
       ],
       "businessBackgroundReason": "业务原因：防止流程状态不同步（如客户系统未通过），客户回收HC等情况，导致的违规发录用函。",
       "ruleSource": "访谈沟通",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "28-5",
@@ -4460,7 +4898,9 @@
       ],
       "businessBackgroundReason": "业务原因：防止流程状态不同步（如客户系统未通过），客户回收HC等情况，导致的违规发录用函。",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "29-1",
@@ -4480,7 +4920,9 @@
       ],
       "businessBackgroundReason": "规避双重用工风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "29-2",
@@ -4500,7 +4942,9 @@
       ],
       "businessBackgroundReason": "业务原因：确保外包员工入场前知悉客户的安全与合规规范。",
       "ruleSource": "需求跟进表",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
     },
     {
       "id": "29-3",
@@ -4520,7 +4964,9 @@
       ],
       "businessBackgroundReason": "业务原因：确保外包员工入场前知悉客户的安全与合规规范。",
       "ruleSource": "需求跟进表",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "29-11",
@@ -4541,7 +4987,9 @@
       ],
       "businessBackgroundReason": "外管组要求",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "29-12",
@@ -4559,7 +5007,9 @@
       ],
       "businessBackgroundReason": "业务原因：确保外包员工在接触客户业务与数据前，已完全知悉并掌握安全合规规范",
       "ruleSource": "需求跟进表",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "29-16",
@@ -4580,7 +5030,9 @@
       ],
       "businessBackgroundReason": "业务原因：在推荐给客户前过滤无法清退的商业风险，确保推荐名单的绝对合规性，避免后期流程作废。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "29-17",
@@ -4603,7 +5055,9 @@
       ],
       "businessBackgroundReason": "业务原因：通过前置核实确保经历真实，并利用“沟通留痕”平衡候选人隐私保护与交付安全，防止履历造假。",
       "ruleSource": "内部流程",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-1",
@@ -4622,7 +5076,9 @@
       ],
       "businessBackgroundReason": "识别并拦截高风险回流人员。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-2",
@@ -4644,7 +5100,9 @@
       ],
       "businessBackgroundReason": "心理测评极低分硬性拦截，分级管控风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-3",
@@ -4666,7 +5124,9 @@
       ],
       "businessBackgroundReason": "心理测评极低分硬性拦截，分级管控风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-4",
@@ -4688,7 +5148,9 @@
       ],
       "businessBackgroundReason": "心理测评极低分硬性拦截，分级管控风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-5",
@@ -4710,7 +5172,9 @@
       ],
       "businessBackgroundReason": "心理测评极低分硬性拦截，分级管控风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-6",
@@ -4732,7 +5196,9 @@
       ],
       "businessBackgroundReason": "心理测评极低分硬性拦截，分级管控风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-7",
@@ -4752,7 +5218,9 @@
       ],
       "businessBackgroundReason": "规避双重用工风险。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-8",
@@ -4770,7 +5238,9 @@
       ],
       "businessBackgroundReason": "确保入职时间变更获授权。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "30-9",
@@ -4788,7 +5258,9 @@
       ],
       "businessBackgroundReason": "确保入职时间变更获授权。",
       "ruleSource": "内部流程",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-1",
@@ -4807,7 +5279,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-2",
@@ -4826,7 +5300,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-3",
@@ -4845,7 +5321,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-4",
@@ -4865,7 +5343,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-5",
@@ -4885,7 +5365,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-6",
@@ -4905,7 +5387,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-7",
@@ -4925,7 +5409,9 @@
       ],
       "businessBackgroundReason": "避免商业冲突",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-8",
@@ -4943,7 +5429,9 @@
       ],
       "businessBackgroundReason": "满足安防系统识别与品牌形象统一。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-9",
@@ -4961,7 +5449,9 @@
       ],
       "businessBackgroundReason": "满足安防系统识别与品牌形象统一。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-10",
@@ -4979,7 +5469,9 @@
       ],
       "businessBackgroundReason": "满足安防系统识别与品牌形象统一。",
       "ruleSource": "客户SOP",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-11",
@@ -4999,7 +5491,9 @@
       ],
       "businessBackgroundReason": "业务原因：预留足够入场流程时间",
       "ruleSource": "访谈沟通",
-      "executor": "Agent"
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     },
     {
       "id": "31-12",
@@ -5018,7 +5512,9 @@
       ],
       "businessBackgroundReason": "针对“已开户但未入场”的特殊场景进行闭环管理，防止残留有效的废弃账号造成安全隐患。",
       "ruleSource": "客户SOP",
-      "executor": "Human"
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
     }
   ]
 }
