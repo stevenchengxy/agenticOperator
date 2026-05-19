@@ -24,65 +24,23 @@ interface RawRule {
   businessBackgroundReason?: string;
   ruleSource?: string;
   executor: 'Agent' | 'Human';
+  enforcementLevel?: 'mandatory' | 'optional';
+  failurePolicy?: 'block' | 'warn';
 }
 
 let CACHED_ALL_RULES: Rule[] | null = null;
 
-function inferSeverity(text: string): Severity {
-  const TERMINAL = [
-    '立即终止',
-    '立即拦截',
-    '直接终止',
-    '终止匹配流程',
-    '终止后续匹配',
-    '禁止跨室推荐',
-    '判定不予录用',
-    '不予录用',
-    '直接将该候选人标记为"不匹配"并终止',
-    '直接判定为"年龄不匹配"',
-    '直接拒绝',
-    '不提供任何人工审核放行机制',
-    '一票否决',
-    '立即阻断',
-  ];
-  for (const kw of TERMINAL) if (text.includes(kw)) return 'terminal';
-
-  const NEEDS_HUMAN = [
-    '立即挂起',
-    '暂停推荐',
-    '挂起匹配',
-    '挂起该候选人',
-    '暂停该候选人',
-    '暂停后续推荐',
-    '锁定推荐流程',
-    '锁定该候选人',
-    '待HSM确认',
-    '待 HSM 确认',
-    '需HSM判定',
-    '需 HSM 判定',
-    '需 HSM 确认',
-    '需HSM核实',
-    '需 HSM 核实',
-    '由 HSM 判定',
-    '由HSM判定',
-    '仅当HSM',
-    '仅当 HSM',
-    '生成一条',
-    '生成并发送一条',
-    '发送系统通知',
-    '审核提醒',
-    '待办任务',
-    '人工核查',
-    '待确认',
-    '人工核查后决定',
-    '人工核查并备注',
-  ];
-  for (const kw of NEEDS_HUMAN) if (text.includes(kw)) return 'needs_human';
-
-  return 'flag_only';
+function deriveLegacySeverity(
+  enforcementLevel: 'mandatory' | 'optional' | undefined,
+  failurePolicy: 'block' | 'warn' | undefined,
+): Severity {
+  if (enforcementLevel === 'mandatory' && failurePolicy === 'block') return 'terminal';
+  if (enforcementLevel === 'optional' && failurePolicy === 'warn') return 'flag_only';
+  if (enforcementLevel === undefined || failurePolicy === undefined) return 'flag_only';
+  return 'needs_human';
 }
 
-function normalizeRaw(r: RawRule): Rule {
+export function normalizeRawRule(r: RawRule): Rule {
   const standardizedLogicRule = r.standardizedLogicRule ?? '';
   return {
     id: r.id,
@@ -96,7 +54,9 @@ function normalizeRaw(r: RawRule): Rule {
     businessBackgroundReason: r.businessBackgroundReason ?? '',
     ruleSource: r.ruleSource ?? '',
     executor: r.executor,
-    severity: inferSeverity(standardizedLogicRule),
+    enforcementLevel: r.enforcementLevel,
+    failurePolicy: r.failurePolicy,
+    severity: deriveLegacySeverity(r.enforcementLevel, r.failurePolicy),
   };
 }
 
@@ -105,7 +65,7 @@ export function loadAllRules(): Rule[] {
   if (CACHED_ALL_RULES) return CACHED_ALL_RULES;
   const data = rulesData as { rules: RawRule[] };
   const matchResumeRaw = data.rules.filter((r) => r.id.startsWith('10-'));
-  CACHED_ALL_RULES = matchResumeRaw.map(normalizeRaw);
+  CACHED_ALL_RULES = matchResumeRaw.map(normalizeRawRule);
   return CACHED_ALL_RULES;
 }
 
