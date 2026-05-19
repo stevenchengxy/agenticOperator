@@ -156,6 +156,48 @@ export async function parseResume(
   };
 }
 
+// ─── 4.X candidates/:id/resumes/:rid/parsed — thin event back-pull (F1, 2026-05-19) ───
+//
+// Partner sends thin RESUME_PROCESSED events (no parsed.data inline).
+// Agent calls this to fetch the parsed resume body from RAAS DB when needed.
+// See: docs/superpowers/specs/2026-05-19-raas-integration-divergence-fixes-design.md §2
+
+export type ParsedResumeResponse = {
+  candidate_id: string;
+  resume_id: string;
+  /** RoboHire-shape parsed data: name, email, experience, education, skills, etc. */
+  data: Record<string, unknown>;
+  candidate_snapshot?: Record<string, unknown>;
+  resume_meta?: Record<string, unknown>;
+  requestId?: string;
+  traceId?: string;
+};
+
+export async function getParsedResume(
+  candidateId: string,
+  resumeId: string,
+  opts: CommonOpts = {},
+): Promise<ParsedResumeResponse> {
+  if (!candidateId?.trim()) {
+    throw new RaasApiError(0, 'CLIENT', 'getParsedResume: candidateId required');
+  }
+  if (!resumeId?.trim()) {
+    throw new RaasApiError(0, 'CLIENT', 'getParsedResume: resumeId required');
+  }
+  const path = `/api/v1/candidates/${encodeURIComponent(candidateId.trim())}/resumes/${encodeURIComponent(resumeId.trim())}/parsed`;
+  const body = await doRequest('GET', path, {}, opts);
+  // Response is top-level direct (not wrapped in { success, data })
+  return {
+    candidate_id: typeof body.candidate_id === 'string' ? body.candidate_id : candidateId,
+    resume_id: typeof body.resume_id === 'string' ? body.resume_id : resumeId,
+    data: (body.data && typeof body.data === 'object') ? (body.data as Record<string, unknown>) : {},
+    candidate_snapshot: body.candidate_snapshot,
+    resume_meta: body.resume_meta,
+    requestId: body.requestId,
+    traceId: body._traceId,
+  };
+}
+
 // ─── 4.2 match-resume ───────────────────────────────────────────────
 
 export type RaasMatchResumeData = {

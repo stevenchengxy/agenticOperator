@@ -24,6 +24,7 @@ import {
   RaasApiError,
   getRequirementDetail,
   getRequirementsAgentView,
+  getParsedResume,
   isRaasApiConfigured,
   saveMatchResults,
   type RequirementsAgentViewItem,
@@ -143,10 +144,38 @@ async function handleResumeProcessed({ event, step, logger }: any) {
   }
 
   // 对每条 JR emit RULE_CHECK_REQUESTED
-  const parsedData =
+  // F1 (2026-05-19): RESUME_PROCESSED is now a thin event — no parsed.data inline.
+  // If event payload doesn't have parsed.data, back-pull from RAAS.
+  let parsedData: Record<string, unknown> | null =
     data.parsed && typeof data.parsed === 'object'
-      ? ((data.parsed as Record<string, unknown>).data as Record<string, unknown> | undefined)
-      : undefined;
+      ? ((data.parsed as Record<string, unknown>).data as Record<string, unknown> | undefined) ?? null
+      : null;
+
+  if (!parsedData) {
+    // thin event path: back-pull parsed body from RAAS
+    if (!candidateId || !resumeId) {
+      throw new NonRetriableError(
+        `[${AGENT_NAME}] thin RESUME_PROCESSED missing candidate_id or resume_id — cannot back-pull parsed`,
+      );
+    }
+    parsedData = await step.run('fetch-parsed-resume', async () => {
+      try {
+        const r = await getParsedResume(candidateId, resumeId, { traceId });
+        logger.info(
+          `[${AGENT_NAME}] thin-event back-pull OK · candidate_id=${candidateId} ` +
+            `resume_id=${resumeId} data_keys=${Object.keys(r.data ?? {}).length}`,
+        );
+        return r.data ?? {};
+      } catch (e) {
+        if (e instanceof RaasApiError && e.isClientError) {
+          throw new NonRetriableError(
+            `RAAS GET /candidates/${candidateId}/resumes/${resumeId}/parsed 4xx: ${e.code} ${e.message}`,
+          );
+        }
+        throw e;
+      }
+    });
+  }
 
   const bypass = process.env.RULE_CHECK_BYPASS === 'true';
 
