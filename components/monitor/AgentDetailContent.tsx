@@ -156,25 +156,18 @@ export function AgentDetailContent({ name }: { name: string }) {
                   <th className="text-right py-1">{t('monitor_agent_col_score')}</th>
                   <th className="text-left py-1 pl-3">{t('monitor_agent_col_model')}</th>
                   <th className="text-left py-1 pl-3">{t('monitor_agent_col_when')}</th>
+                  <th className="text-right py-1 pl-3 w-[60px]">↺</th>
                 </tr>
               </thead>
               <tbody>
                 {data!.recentEpisodes.map(e => (
-                  <tr
+                  <EpisodeRow
                     key={e.id}
-                    className="border-t border-claude-line cursor-pointer hover:bg-claude-panel"
-                    onClick={() => router.push(`/monitor/runs/${encodeURIComponent(e.runId)}`)}
-                  >
-                    <td className="py-1">
-                      <span className="text-claude-accent">{e.runId.slice(0, 8)}…</span>
-                    </td>
-                    <td className="py-1">{e.clientId ?? '—'}</td>
-                    <td className="py-1 text-right tabular-nums">{e.durationMs}ms</td>
-                    <td className="py-1 text-right tabular-nums">{e.tokenUsage.total.toLocaleString()}</td>
-                    <td className="py-1 text-right tabular-nums">{e.judgeScore?.toFixed(2) ?? '—'}</td>
-                    <td className="py-1 pl-3 text-claude-ink-3">{e.modelUsed ?? '—'}</td>
-                    <td className="py-1 pl-3 text-claude-ink-3 tabular-nums">{formatTime(e.createdAt, lang)}</td>
-                  </tr>
+                    episode={e}
+                    lang={lang}
+                    onOpen={() => router.push(`/monitor/runs/${encodeURIComponent(e.runId)}`)}
+                    t={t}
+                  />
                 ))}
               </tbody>
             </table>
@@ -282,5 +275,80 @@ export function AgentDetailContent({ name }: { name: string }) {
         </ClaudeCard>
       )}
     </div>
+  );
+}
+
+// ── Episode row with inline rerun (重新触发) ───────────────────────────
+// Episodes 表里每行加 ↺ 重跑按钮.  AgentEpisode.runId 是 Inngest run id;
+// 没有 eventId,所以 click → fetch /api/inngest-admin/runs/{runId} 拿 event.id
+// → POST /api/inngest-admin/replay.
+function EpisodeRow({
+  episode,
+  lang,
+  onOpen,
+  t,
+}: {
+  episode: MonitorAgentDetail['recentEpisodes'][number];
+  lang: 'zh' | 'en';
+  onOpen: () => void;
+  t: (k: string) => string;
+}) {
+  const [rerunning, setRerunning] = React.useState(false);
+
+  async function rerun(e: React.MouseEvent) {
+    e.stopPropagation();
+    setRerunning(true);
+    try {
+      const r1 = await fetch(`/api/inngest-admin/runs/${encodeURIComponent(episode.runId)}`);
+      const d = await r1.json();
+      const eventId = d?.event?.id as string | undefined;
+      if (!eventId) {
+        alert(t('monitor_detail_retry_failed').replace('{message}', 'no eventId on this run — cannot rerun'));
+        return;
+      }
+      const r2 = await fetch('/api/inngest-admin/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId }),
+      });
+      const b = await r2.json();
+      alert(
+        b.ok
+          ? t('monitor_detail_retry_success').replace('{id}', b.new_event_id)
+          : t('monitor_detail_retry_failed').replace('{message}', b.message ?? b.error),
+      );
+    } catch (err) {
+      alert(t('monitor_detail_retry_failed').replace('{message}', (err as Error).message));
+    } finally {
+      setRerunning(false);
+    }
+  }
+
+  return (
+    <tr
+      className="border-t border-claude-line cursor-pointer hover:bg-claude-panel"
+      onClick={onOpen}
+    >
+      <td className="py-1">
+        <span className="text-claude-accent">{episode.runId.slice(0, 8)}…</span>
+      </td>
+      <td className="py-1">{episode.clientId ?? '—'}</td>
+      <td className="py-1 text-right tabular-nums">{episode.durationMs}ms</td>
+      <td className="py-1 text-right tabular-nums">{episode.tokenUsage.total.toLocaleString()}</td>
+      <td className="py-1 text-right tabular-nums">{episode.judgeScore?.toFixed(2) ?? '—'}</td>
+      <td className="py-1 pl-3 text-claude-ink-3">{episode.modelUsed ?? '—'}</td>
+      <td className="py-1 pl-3 text-claude-ink-3 tabular-nums">{formatTime(episode.createdAt, lang)}</td>
+      <td className="py-1 pl-3 text-right">
+        <button
+          type="button"
+          onClick={rerun}
+          disabled={rerunning}
+          title={`↺ 重新触发(run ${episode.runId.slice(0, 8)}…)`}
+          className="text-[11px] px-1.5 py-0.5 rounded border border-claude-accent text-claude-accent hover:bg-claude-accent-bg disabled:opacity-40 disabled:cursor-not-allowed leading-none"
+        >
+          {rerunning ? '⏳' : '↺'}
+        </button>
+      </td>
+    </tr>
   );
 }

@@ -277,6 +277,7 @@ function FlowCard({
   flow: AgentDetail['flows'][0];
 }) {
   const { t, lang } = useApp();
+  const [rerunning, setRerunning] = useState(false);
   const statusColor =
     flow.status === 'Completed'
       ? 'bg-ok'
@@ -291,6 +292,32 @@ function FlowCard({
     : flow.flowId.startsWith('jr:')
     ? 'jr'
     : 'evt';
+
+  async function rerun(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!flow.eventId) {
+      alert(t('monitor_detail_retry_failed').replace('{message}', 'no eventId on this flow — cannot rerun'));
+      return;
+    }
+    setRerunning(true);
+    try {
+      const r = await fetch('/api/inngest-admin/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: flow.eventId }),
+      });
+      const b = await r.json();
+      alert(
+        b.ok
+          ? t('monitor_detail_retry_success').replace('{id}', b.new_event_id)
+          : t('monitor_detail_retry_failed').replace('{message}', b.message ?? b.error),
+      );
+    } finally {
+      setRerunning(false);
+    }
+  }
+
   return (
     <Link
       href={`/monitor/flows/${encodeURIComponent(flow.flowId)}`}
@@ -320,17 +347,28 @@ function FlowCard({
             {flow.durationMs != null && ` · ${flow.durationMs}ms`}
           </div>
         </div>
-        <span
-          className={`text-[10px] mono font-medium ${
-            flow.status === 'Completed'
-              ? 'text-ok'
-              : flow.status === 'Failed'
-              ? 'text-err'
-              : 'text-warn'
-          }`}
-        >
-          {statusLabel(flow.status, t)}
-        </span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span
+            className={`text-[10px] mono font-medium ${
+              flow.status === 'Completed'
+                ? 'text-ok'
+                : flow.status === 'Failed'
+                ? 'text-err'
+                : 'text-warn'
+            }`}
+          >
+            {statusLabel(flow.status, t)}
+          </span>
+          <button
+            type="button"
+            onClick={rerun}
+            disabled={rerunning || !flow.eventId}
+            title={flow.eventId ? `↺ 重新触发(event ${flow.eventId})` : '无 eventId,无法重跑'}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed leading-none"
+          >
+            {rerunning ? '⏳' : '↺ 重跑'}
+          </button>
+        </div>
       </div>
     </Link>
   );
