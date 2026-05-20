@@ -284,7 +284,10 @@ export async function ruleCheckAgentHandler({
             client_name: dims.client_id || null,
             business_group: dims.business_group ?? null,
             studio: dims.studio ?? null,
-            decision: result.decision === 'PASS' ? 'PASS' : 'FAIL',
+            // Policy 2026-05-20: 信息缺失/REVIEW 都放行,只有真违反才 FAIL。
+            // foldDecision 已经把 insufficient_info 折成 PASS;REVIEW 表示需要
+            // HSM 人工复核,但流程不阻断 — audit decision 仍记 'PASS' 让 UI 不显失败。
+            decision: result.decision === 'FAIL' ? 'FAIL' : 'PASS',
             llm_decision: result.decision,
             failure_reasons: JSON.stringify(
               result.explanations
@@ -323,15 +326,24 @@ export async function ruleCheckAgentHandler({
     //   Soft-fail: write errors don't block emit downstream.
     await step.run(`write-cmr-${stepKey}`, async () => {
       const cmrId = `cmr_${candidateId || 'unknown'}_${jrid}`;
-      const ruleCheckResult = result.decision === 'PASS' ? '通过' : '未通过';
+      // Only true violations (decision='FAIL') get 未通过. REVIEW (rules
+      // explicitly need HSM judgment) folds to 通过 with a note in reason —
+      // the workflow continues, human reviews via /rule-check UI.
+      const ruleCheckResult = result.decision === 'FAIL' ? '未通过' : '通过';
       const ruleCheckReason =
-        result.decision === 'PASS'
-          ? ''
-          : result.explanations
+        result.decision === 'FAIL'
+          ? result.explanations
               .filter((e) => e.status === 'fail')
               .map((e) => `[${e.rule_id}] ${e.rule_name}: ${e.reason ?? ''}`)
               .join(' | ')
-              .slice(0, 1000);
+              .slice(0, 1000)
+          : result.decision === 'REVIEW'
+            ? '待人工复核:' + result.explanations
+                .filter((e) => e.status === 'pending')
+                .map((e) => `[${e.rule_id}] ${e.rule_name}`)
+                .join(', ')
+                .slice(0, 1000)
+            : '';
       try {
         await writeInstance('Candidate_Match_Result', {
           candidate_match_result_id: cmrId,
@@ -353,7 +365,11 @@ export async function ruleCheckAgentHandler({
       }
     });
 
-    if (result.decision === 'PASS') {
+    // Policy 2026-05-20: 信息缺失放行,只有违反才 FAIL。
+    // PASS + REVIEW 都进 MATCH_RULE_CHECK_PASSED 路径 — 流程继续,REVIEW
+    // 案例通过 /rule-check UI + Candidate_Match_Result.rule_check_reason
+    // 给到 HSM 复核。
+    if (result.decision !== 'FAIL') {
       const payload: MatchRuleCheckPassedData = {
         upload_id: uploadId ?? null,
         candidate_id: candidateId ?? null,

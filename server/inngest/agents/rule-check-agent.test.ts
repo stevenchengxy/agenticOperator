@@ -254,7 +254,9 @@ describe('ruleCheckAgent — decision branches', () => {
     expect(step.sent[0].data.data.failed_rules).toHaveLength(1);
   });
 
-  it('emits MATCH_RULE_CHECK_FAILED with rule_check_decision=REVIEW on REVIEW', async () => {
+  it('emits MATCH_RULE_CHECK_PASSED on REVIEW (放行 policy 2026-05-20)', async () => {
+    // Policy: REVIEW (rules need HSM review but no actual violation) folds
+    // to PASS event so workflow continues; HSM reviews via /rule-check UI.
     mockGetRequirementDetail.mockResolvedValue({ requirement: sampleReq, specification: {} });
     mockGetParsedResume.mockResolvedValue({ data: { name: 'John' } });
     mockRunRuleCheck.mockResolvedValue({
@@ -274,8 +276,7 @@ describe('ruleCheckAgent — decision branches', () => {
       logger: mockLogger as any,
     });
 
-    expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_FAILED');
-    expect(step.sent[0].data.data.rule_check_decision).toBe('REVIEW');
+    expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_PASSED');
   });
 });
 
