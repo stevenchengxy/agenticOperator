@@ -179,6 +179,36 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
+// ─────────────────────────────────────────────────────────────
+// Run detail — V2 `run(runID:)` + `trace.childrenSpans` +
+// `runTraceSpanOutputByID(outputID:)` second-hop for per-step IO.
+//
+// V1 `functionRun.history` only exposes {type, stepName, attempt, createdAt},
+// which is why the run drawer used to show empty step cards with no JSON
+// body. V2 gives per-step duration + outputID; the outputID then resolves
+// to `{ data, input, error }` so each step gets its real output JSON.
+//
+// Top-level run `output` is also more reliable on V2 (V1 sometimes returns
+// null for multi-step functions even when the function did return a value).
+//
+// V2 doesn't expose the triggering event payload directly — we keep a
+// secondary V1 `functionRun.event` call for that (soft-fail).
+// ─────────────────────────────────────────────────────────────
+
+export type RunStepDetail = {
+  name: string;
+  status: string;
+  durationMs: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  stepOp: string | null;
+  stepID: string | null;
+  attempts: number | null;
+  output: unknown;
+  input: unknown;
+  error: { name: string; message: string; stack?: string } | null;
+};
+
 export async function getRunHistory(runId: string): Promise<{
   id: string;
   status: string;
@@ -187,24 +217,123 @@ export async function getRunHistory(runId: string): Promise<{
   output?: unknown;
   function: { name: string; slug: string };
   event?: { id: string; name: string; payload: string; createdAt: string };
-  history: Array<{
-    type: string;
-    stepName?: string | null;
-    attempt: number;
-    createdAt: string;
-  }>;
+  steps: RunStepDetail[];
 }> {
-  const data = await gql<{ functionRun: unknown }>(`
-    {
-      functionRun(query: { functionRunId: "${runId}" }) {
-        id status startedAt finishedAt output
-        function { name slug }
-        event { id name payload createdAt }
-        history { type stepName attempt createdAt }
+  // 1) V2 root + trace tree (one round-trip)
+  const v2 = await gql<{
+    run: {
+      id: string;
+      status: string;
+      startedAt: string | null;
+      endedAt: string | null;
+      output: string | null;
+      function: { name: string; slug: string };
+      trace: {
+        childrenSpans: Array<{
+          name: string;
+          status: string;
+          duration: number | null;
+          startedAt: string | null;
+          endedAt: string | null;
+          outputID: string | null;
+          stepOp: string | null;
+          stepID: string | null;
+          attempts: number | null;
+        }>;
+      } | null;
+    } | null;
+  }>(`{
+    run(runID: "${runId}") {
+      id status startedAt endedAt output
+      function { name slug }
+      trace {
+        childrenSpans {
+          name status duration startedAt endedAt outputID stepOp stepID attempts
+        }
       }
     }
-  `);
-  return data.functionRun as never;
+  }`);
+
+  if (!v2.run) throw new Error(`Run not found: ${runId}`);
+
+  // 2) V1 event lookup (V2 has no `event` field on FunctionRunV2)
+  let event: { id: string; name: string; payload: string; createdAt: string } | undefined;
+  try {
+    const v1 = await gql<{ functionRun: { event?: { id: string; name: string; payload: string; createdAt: string } } | null }>(`
+      { functionRun(query: { functionRunId: "${runId}" }) { event { id name payload createdAt } } }
+    `);
+    if (v1.functionRun?.event) event = v1.functionRun.event;
+  } catch {
+    /* soft — event payload is best-effort */
+  }
+
+  // 3) Fan out outputID lookups per child span (typical: 1–5 spans).
+  //    Sequential calls would be N round-trips; Promise.all keeps it 1
+  //    wall-clock round-trip from the API route's perspective.
+  const spans = v2.run.trace?.childrenSpans ?? [];
+  const steps: RunStepDetail[] = await Promise.all(
+    spans.map(async (sp) => {
+      let output: unknown = null;
+      let input: unknown = null;
+      let error: RunStepDetail['error'] = null;
+      if (sp.outputID) {
+        try {
+          const out = await gql<{
+            runTraceSpanOutputByID: {
+              data: string | null;
+              input: string | null;
+              error: { name: string; message: string; stack?: string } | null;
+            } | null;
+          }>(`{
+            runTraceSpanOutputByID(outputID: "${sp.outputID}") {
+              data input error { name message stack }
+            }
+          }`);
+          const r = out.runTraceSpanOutputByID;
+          if (r) {
+            output = parseMaybeJson(r.data);
+            input = parseMaybeJson(r.input);
+            error = r.error;
+          }
+        } catch {
+          /* soft — keep span without IO if lookup fails */
+        }
+      }
+      return {
+        name: sp.name,
+        status: sp.status,
+        durationMs: sp.duration ?? null,
+        startedAt: sp.startedAt,
+        endedAt: sp.endedAt,
+        stepOp: sp.stepOp,
+        stepID: sp.stepID,
+        attempts: sp.attempts ?? null,
+        output,
+        input,
+        error,
+      };
+    }),
+  );
+
+  return {
+    id: v2.run.id,
+    status: titleCase(v2.run.status),
+    startedAt: v2.run.startedAt ?? '',
+    finishedAt: v2.run.endedAt ?? undefined,
+    output: parseMaybeJson(v2.run.output),
+    function: v2.run.function,
+    event,
+    steps,
+  };
+}
+
+function parseMaybeJson(raw: string | null): unknown {
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -2,21 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import { useApp } from '@/lib/i18n';
-import { formatDateTime, formatTime, statusLabel } from '@/components/monitor/i18n-utils';
+import { formatDateTime, statusLabel } from '@/components/monitor/i18n-utils';
 import { EvidenceTrail } from '@/components/monitor/EvidenceTrail';
 
-type StepOutput = {
-  spanID: string;
+type StepDetail = {
   name: string;
-  stepOp: string | null;
-  status: string | null;
-  attempts: number | null;
+  status: string;
   durationMs: number | null;
-  queuedAt: string | null;
   startedAt: string | null;
   endedAt: string | null;
-  output: string | null;
-  outputError: string | null;
+  stepOp: string | null;
+  stepID: string | null;
+  attempts: number | null;
+  output: unknown;
+  input: unknown;
+  error: { name: string; message: string; stack?: string } | null;
 };
 
 type RunDetail = {
@@ -26,12 +26,7 @@ type RunDetail = {
   finishedAt: string | null;
   output: unknown;
   function: { name: string; slug: string };
-  history: Array<{ type: string; stepName: string | null; attempt: number; createdAt: string }>;
-  steps: Array<{
-    stepName: string;
-    states: Array<{ type: string; attempt: number; createdAt: string }>;
-  }>;
-  stepOutputs?: StepOutput[];
+  steps: StepDetail[];
   event?: { id: string; name: string; payload?: string; createdAt?: string } | null;
   tokenUsage?: { prompt: number; completion: number; total: number };
 };
@@ -158,34 +153,28 @@ export function RunDetailDrawer({
                 {retrying ? t('monitor_run_retrying') : `↺ ${t('monitor_detail_retry_replay')}`}
               </button>
 
-              {/* Steps timeline */}
+              {/* Steps · per-step output JSON (from V2 trace + outputID) */}
               <div>
-                <h3 className="text-[12px] font-medium text-ink-2 mb-2">{t('monitor_detail_step_trace')}</h3>
-                <div className="space-y-2">
-                  {detail.history?.map((h, i) => (
-                    <HistoryItem key={i} item={h} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Per-step output (Inngest V2 trace API). Each row is one
-                  step.run/step.sendEvent leaf with its return value — same
-                  data the Inngest dev UI surfaces under each step, so users
-                  don't have to context-switch to localhost:8288. */}
-              {detail.stepOutputs && detail.stepOutputs.length > 0 && (
-                <div>
-                  <h3 className="text-[12px] font-medium text-ink-2 mb-2">
-                    步骤输出 ({detail.stepOutputs.length})
-                  </h3>
+                <h3 className="text-[12px] font-medium text-ink-2 mb-2">
+                  {t('monitor_detail_step_trace')}
+                  {detail.steps.length > 0 && (
+                    <span className="text-ink-4 ml-1">· {detail.steps.length}</span>
+                  )}
+                </h3>
+                {detail.steps.length === 0 ? (
+                  <div className="text-[11px] text-ink-4 italic">
+                    {t('monitor_loading')}
+                  </div>
+                ) : (
                   <div className="space-y-2">
-                    {detail.stepOutputs.map((s) => (
-                      <StepOutputBlock key={s.spanID} step={s} />
+                    {detail.steps.map((s, i) => (
+                      <StepCard key={`${s.stepID ?? s.name}-${i}`} step={s} />
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Output */}
+              {/* Output — top-level function return value */}
               {detail.output != null && (
                 <div>
                   <h3 className="text-[12px] font-medium text-ink-2 mb-2">{t('monitor_detail_output')}</h3>
@@ -216,88 +205,81 @@ function Field({ label, value, highlight }: { label: string; value: string; high
   );
 }
 
-function StepOutputBlock({ step }: { step: StepOutput }) {
-  const [expanded, setExpanded] = useState(false);
-  const statusTone =
-    step.status === 'COMPLETED'
-      ? 'text-ok'
-      : step.status === 'FAILED'
-        ? 'text-err'
-        : step.status === 'RUNNING'
-          ? 'text-warn'
-          : 'text-ink-3';
-  // Pretty-print if it's valid JSON; otherwise show raw.
-  let pretty = step.output ?? '';
-  if (step.output) {
-    try {
-      pretty = JSON.stringify(JSON.parse(step.output), null, 2);
-    } catch {
-      pretty = step.output;
-    }
-  }
+function StepCard({ step }: { step: StepDetail }) {
+  const { t } = useApp();
+  const [expanded, setExpanded] = useState(true);
+
+  const statusUpper = step.status.toUpperCase();
+  const dotColor =
+    statusUpper === 'COMPLETED' ? 'bg-ok'
+    : statusUpper === 'FAILED' || statusUpper === 'CANCELLED' ? 'bg-err'
+    : statusUpper === 'RUNNING' || statusUpper === 'WAITING' ? 'bg-warn'
+    : 'bg-ink-4';
+  const statusText =
+    statusUpper === 'COMPLETED' ? 'text-ok'
+    : statusUpper === 'FAILED' || statusUpper === 'CANCELLED' ? 'text-err'
+    : statusUpper === 'RUNNING' || statusUpper === 'WAITING' ? 'text-warn'
+    : 'text-ink-4';
+
+  const hasBody = step.output != null || step.input != null || step.error != null;
+
   return (
-    <div className="border border-line rounded text-[11px]">
+    <div className="border border-line rounded bg-surface overflow-hidden">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-surface/60 text-left"
+        onClick={() => hasBody && setExpanded(!expanded)}
+        className={`w-full flex items-center gap-2 px-2.5 py-1.5 ${hasBody ? 'hover:bg-surface-hover cursor-pointer' : 'cursor-default'}`}
       >
-        <span className="text-ink-4 mono text-[10px]">{expanded ? '▾' : '▸'}</span>
-        <span className="flex-1 min-w-0 truncate text-ink-2">{step.name}</span>
-        {step.stepOp && <span className="text-ink-4 mono text-[10px]">{step.stepOp}</span>}
-        {step.durationMs != null && (
-          <span className="text-ink-4 mono text-[10px]">{step.durationMs}ms</span>
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColor} shrink-0`} />
+        {step.stepOp && (
+          <span className="text-[9px] mono px-1 py-px rounded-sm border border-line text-ink-4 uppercase shrink-0">
+            {step.stepOp.toLowerCase()}
+          </span>
         )}
-        <span className={`${statusTone} mono text-[10px]`}>{step.status ?? '—'}</span>
+        <span className="text-[11px] mono text-ink-1 truncate flex-1 text-left">{step.name}</span>
+        {step.attempts != null && step.attempts > 1 && (
+          <span className="text-[10px] mono text-warn shrink-0">
+            · {t('monitor_timeline_retry')} {step.attempts}
+          </span>
+        )}
+        {step.durationMs != null && (
+          <span className="text-[10px] mono text-ink-4 tabular-nums shrink-0">{step.durationMs}ms</span>
+        )}
+        <span className={`text-[10px] mono font-medium shrink-0 ${statusText}`}>{statusUpper}</span>
+        {hasBody && (
+          <span className={`text-[9px] text-ink-4 shrink-0 transition-transform ${expanded ? 'rotate-180 inline-block' : ''}`}>▾</span>
+        )}
       </button>
-      {expanded && (
-        <div className="px-2 pb-2 pt-1 border-t border-line bg-surface/40">
-          {step.outputError ? (
-            <div className="text-err text-[11px]">output 拉取失败: {step.outputError}</div>
-          ) : step.output == null ? (
-            <div className="text-ink-3 text-[11px] italic">
-              {step.stepOp === 'INVOKE' || step.stepOp === 'WAIT_FOR_EVENT'
-                ? '此 step 类型无 output'
-                : '(无 output)'}
+
+      {expanded && hasBody && (
+        <div className="border-t border-line bg-panel/40">
+          {step.error && (
+            <div className="text-[10.5px] mono text-err px-2.5 py-1.5 bg-err-bg/30 border-b border-line">
+              <span className="font-medium">{step.error.name}:</span> {step.error.message}
+              {step.error.stack && (
+                <pre className="mt-1 text-[10px] opacity-80 whitespace-pre-wrap break-words">
+                  {step.error.stack}
+                </pre>
+              )}
             </div>
-          ) : (
-            <pre className="text-[10.5px] mono whitespace-pre-wrap break-words text-ink-2 max-h-[280px] overflow-auto">
-              {pretty}
+          )}
+          {step.input != null && (
+            <details className="border-b border-line">
+              <summary className="text-[10px] mono text-ink-4 px-2.5 py-1 cursor-pointer hover:bg-surface-hover">
+                input
+              </summary>
+              <pre className="text-[10px] mono px-2.5 py-1.5 overflow-x-auto whitespace-pre-wrap break-words">
+                {JSON.stringify(step.input, null, 2)}
+              </pre>
+            </details>
+          )}
+          {step.output != null && (
+            <pre className="text-[10.5px] mono px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-words">
+              {typeof step.output === 'string' ? step.output : JSON.stringify(step.output, null, 2)}
             </pre>
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function HistoryItem({
-  item,
-}: {
-  item: { type: string; stepName: string | null; attempt: number; createdAt: string };
-}) {
-  const { t, lang } = useApp();
-  const color =
-    item.type === 'StepCompleted' || item.type === 'FunctionCompleted'
-      ? 'bg-ok'
-      : item.type === 'StepFailed' || item.type === 'FunctionFailed' || item.type === 'StepErrored'
-      ? 'bg-err'
-      : item.type === 'StepStarted' || item.type === 'FunctionStarted'
-      ? 'bg-warn'
-      : 'bg-ink-4';
-  return (
-    <div className="flex items-start gap-2 text-[11px]">
-      <span className={`w-1.5 h-1.5 rounded-full ${color} shrink-0 mt-1.5`} />
-      <div className="min-w-0 flex-1">
-        <div className="text-ink-2">
-          <span className="font-medium">{item.type}</span>
-          {item.stepName && <span className="text-ink-3 ml-2">· {item.stepName}</span>}
-          {item.attempt > 0 && <span className="text-warn ml-2">· {t('monitor_timeline_retry')} {item.attempt}</span>}
-        </div>
-        <div className="text-[10px] mono text-ink-4">
-          {formatTime(item.createdAt, lang)}
-        </div>
-      </div>
     </div>
   );
 }

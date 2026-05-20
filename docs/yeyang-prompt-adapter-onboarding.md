@@ -508,7 +508,7 @@ function renderClientBlock(client: ClientSlot): string {
 ```
 LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行为
 ─────────────────────────────────────────────────────────────────────
-"PASS"                       →   RULE_CHECK_PASSED    →   matchResumeAgent 继续调
+"PASS"                       →   MATCH_RULE_CHECK_PASSED    →   matchResumeAgent 继续调
                                                           RAAS API Server →
                                                           Robohire 深度匹配评分
 "FAIL"                       →   RULE_CHECK_FAILED    →   候选人加入 blacklist,
@@ -521,7 +521,7 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
 ```
 你是简历预筛查员。判断候选人简历是否值得交给 Robohire 做深度匹配。
 你的决策直接驱动两个事件:
-- 输出 overall_decision="PASS" → 系统会 emit RULE_CHECK_PASSED 事件 →
+- 输出 overall_decision="PASS" → 系统会 emit MATCH_RULE_CHECK_PASSED 事件 →
   matchResumeAgent 调 Robohire 做深度匹配评分
 - 输出 overall_decision="FAIL" → 系统会 emit RULE_CHECK_FAILED 事件 →
   候选人加入 blacklist,流程终止,不调 Robohire
@@ -565,10 +565,10 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
 
 跑完全部 applicable 规则后:
 1. 任一 `rule_flags[i].result == "FAIL"` → `overall_decision = "FAIL"` → 系统 emit `RULE_CHECK_FAILED`
-2. 否则 → `overall_decision = "PASS"` → 系统 emit `RULE_CHECK_PASSED`
+2. 否则 → `overall_decision = "PASS"` → 系统 emit `MATCH_RULE_CHECK_PASSED`
 
 **核心简化**:之前设计有 KEEP/DROP/PAUSE 三态(含人工复核挂起路径),现在改为二元 PASS/FAIL。
-- PASS:候选人通过预筛,emit `RULE_CHECK_PASSED` → matchResumeAgent 调 Robohire 深度匹配
+- PASS:候选人通过预筛,emit `MATCH_RULE_CHECK_PASSED` → matchResumeAgent 调 Robohire 深度匹配
 - FAIL:候选人未通过(命中任一终止级 / 需人工 / 软性违反的规则都归入 FAIL),emit `RULE_CHECK_FAILED` → 进 blacklist 终态,**不调 Robohire**
 - 后续如果 HSM 要解封 blacklist,走另一个流程,不在本设计内
 
@@ -582,13 +582,13 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
 - [ ] 不要给候选人打 matching score(这是下游 Robohire 的工作)
 ````
 
-**重要**:OUTPUT schema 字段直接进我们 emit 的事件 payload(`RULE_CHECK_PASSED` / `RULE_CHECK_FAILED`),所以字段命名 + 类型必须稳定。任何变动告诉我们。
+**重要**:OUTPUT schema 字段直接进我们 emit 的事件 payload(`MATCH_RULE_CHECK_PASSED` / `RULE_CHECK_FAILED`),所以字段命名 + 类型必须稳定。任何变动告诉我们。
 
 ---
 
 ## 6. Ontology 数据文件改动 — 你需要知道的部分
 
-为了让 LLM 的 `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 决策能被 EM gateway 接受、能 emit 出去、能被下游消费,**ontology 三个数据文件都要改**。改动总成本 ~34 行,**陈洋负责改 ontology repo,你只需要知情**(因为你的 codegen 会读这些数据)。
+为了让 LLM 的 `MATCH_RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 决策能被 EM gateway 接受、能 emit 出去、能被下游消费,**ontology 三个数据文件都要改**。改动总成本 ~34 行,**陈洋负责改 ontology repo,你只需要知情**(因为你的 codegen 会读这些数据)。
 
 ### 6.1 改动总览
 
@@ -606,7 +606,7 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
 
 ```jsonc
 {
-  "name": "RULE_CHECK_PASSED",
+  "name": "MATCH_RULE_CHECK_PASSED",
   "description": "候选人简历通过 LLM 规则预筛(无终止级规则命中),允许进入 Robohire 深度匹配评分。",
   "payload": {
     "source_action": "matchResume",
@@ -680,7 +680,7 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
       "MATCH_PASSED_NEED_INTERVIEW",
       "MATCH_PASSED_NO_INTERVIEW",
       "MATCH_FAILED",
-+     "RULE_CHECK_PASSED",
++     "MATCH_RULE_CHECK_PASSED",
 +     "RULE_CHECK_FAILED"
     ]
   }
@@ -701,7 +701,7 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
       "MATCH_PASSED_NEED_INTERVIEW",
       "MATCH_PASSED_NO_INTERVIEW",
       "MATCH_FAILED",
-+     "RULE_CHECK_PASSED",
++     "MATCH_RULE_CHECK_PASSED",
 +     "RULE_CHECK_FAILED"
     ]
   }
@@ -710,14 +710,14 @@ LLM 输出 overall_decision   →   AO 这边 emit 的事件   →   下游行�
 ### 6.5 你(叶洋)在 ontology 改完后需要做什么
 
 1. **重新生成 snapshot** — `npm run gen:v4-snapshot -- --action matchResume --domain RAAS-v1`
-2. **验证 snapshot 的 prompt 里 OUTPUT 段提到新事件** — grep `RULE_CHECK_PASSED|RULE_CHECK_FAILED`
-3. **如果没提到** — 在你的 prompt 模板 §1 角色段 / §4 决策结算逻辑段加上 §5.1 给的"PASS → RULE_CHECK_PASSED / FAIL → RULE_CHECK_FAILED" 说明,让 LLM 明白它的决策驱动哪个事件
+2. **验证 snapshot 的 prompt 里 OUTPUT 段提到新事件** — grep `MATCH_RULE_CHECK_PASSED|RULE_CHECK_FAILED`
+3. **如果没提到** — 在你的 prompt 模板 §1 角色段 / §4 决策结算逻辑段加上 §5.1 给的"PASS → MATCH_RULE_CHECK_PASSED / FAIL → RULE_CHECK_FAILED" 说明,让 LLM 明白它的决策驱动哪个事件
 
 ### 6.6 ontology 不改的代价
 
 | 不改的文件 | 直接后果 |
 |-----------|---------|
-| events_*.json | 🔴 致命 — EM gateway schema 校验 reject `RULE_CHECK_PASSED/FAILED`,我们 emit 时被打成 `EVENT_REJECTED` 元事件,整条链路废 |
+| events_*.json | 🔴 致命 — EM gateway schema 校验 reject `MATCH_RULE_CHECK_PASSED/FAILED`,我们 emit 时被打成 `EVENT_REJECTED` 元事件,整条链路废 |
 | workflow_*.json | 🟡 文档 drift — 别人看 workflow_*.json 不知道 matchResume 还触发 RULE_CHECK_* 事件 |
 | actions_*.json | 🟡 文档 drift — 同上 |
 
@@ -972,7 +972,7 @@ console.log(ready.prompt);
 - [ ] **10.1** `MatchResumeRuntimeInput` 加 3 个顶层字段(`runtime_context` / `job_requisition_specification` / `hsm_feedback`)— 见 §3.3 P0-1
 - [ ] **10.2** `ClientSlot` 加 3 个新字段(`business_group_code` / `department_display` / `studio`)— 见 §3.3 P0-2
 - [ ] **10.3** 验证 snapshot 的 prompt 里有 OUTPUT 段(`## 输出格式` + JSON schema + 决策结算逻辑 + 提交前自检)— 见 §3.3 P0-3
-- [ ] **10.4** prompt §1 角色段 / §4 决策结算段明确说明"PASS → RULE_CHECK_PASSED / FAIL → RULE_CHECK_FAILED"事件映射 — 见 §5.1
+- [ ] **10.4** prompt §1 角色段 / §4 决策结算段明确说明"PASS → MATCH_RULE_CHECK_PASSED / FAIL → RULE_CHECK_FAILED"事件映射 — 见 §5.1
 - [ ] **10.5** prompt §3 RULES 段告诉 LLM evidence 写法约定 — 见 §7.3
 - [ ] **10.6** prompt §3 RULES 段明确 NOT_APPLICABLE vs PASS 的区分 — 见 §7.2
 - [ ] **10.7** 内部规则过滤逻辑用 `client.name` + `business_group_code` + `studio`(可能需要扩展你的 ontology API 调用)— 见 §7.1

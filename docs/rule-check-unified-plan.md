@@ -101,7 +101,7 @@ matchResumeAgent (per JD loop)
        ▼
 ┌───────────────────────────────────────────────────────────────────┐
 │  D. Gate                                                            │
-│     KEEP → emit RULE_CHECK_PASSED → continue                       │
+│     KEEP → emit MATCH_RULE_CHECK_PASSED → continue                       │
 │     DROP → emit RULE_CHECK_FAILED → skip Robohire (Kenny §5)       │
 │     PAUSE → emit RULE_CHECK_FAILED with reason=needs_hsm           │
 └───────────────────────────────────────────────────────────────────┘

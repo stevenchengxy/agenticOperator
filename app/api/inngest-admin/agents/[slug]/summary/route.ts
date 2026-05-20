@@ -92,10 +92,13 @@ async function build(slug: string): Promise<{ text: string; model: string; durat
   if (exampleRun) {
     try {
       const hist = await getRunHistory(exampleRun.runId);
-      const steps = (hist.history ?? [])
-        .filter((h) => h.type === 'StepCompleted' && h.stepName && h.stepName !== 'step')
-        .map((h) => h.stepName as string);
-      exampleStepNames = Array.from(new Set(steps)); // dedupe in order
+      // V2 trace gives us per-step structure directly; drop the function-
+      // lifecycle marker spans ("function success" / "function failure")
+      // that aren't real user steps.
+      const stepNames = (hist.steps ?? [])
+        .filter((s) => s.status.toUpperCase() === 'COMPLETED' && s.stepOp === 'RUN' && s.name)
+        .map((s) => s.name);
+      exampleStepNames = Array.from(new Set(stepNames)); // dedupe in order
     } catch {
       /* soft */
     }

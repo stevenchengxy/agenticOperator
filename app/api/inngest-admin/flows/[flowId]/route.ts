@@ -36,19 +36,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ flowId:
     // Sort by startedAt ASC → timeline order
     allRuns.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 
-    // For each run, also load the full history (step trace + I/O)
+    // For each run, also load the full V2 trace (per-step durations + output JSON)
     const enriched = await Promise.all(
       allRuns.map(async (r) => {
-        let history = null as Awaited<ReturnType<typeof getRunHistory>> | null;
+        let detail = null as Awaited<ReturnType<typeof getRunHistory>> | null;
         try {
-          history = await getRunHistory(r.runId);
+          detail = await getRunHistory(r.runId);
         } catch {
           /* soft fail */
         }
         return {
           ...r,
           functionName: (fns.find((f) => f.slug === r.eventName) ?? null)?.name ?? null,
-          history,
+          detail,
         };
       }),
     );
@@ -75,9 +75,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ flowId:
         startedAt: r.startedAt,
         finishedAt: r.finishedAt,
         durationMs: r.durationMs,
-        history: r.history?.history ?? [],
-        output: r.history?.output ?? null,
-        function: r.history?.function ?? null,
+        steps: r.detail?.steps ?? [],
+        output: r.detail?.output ?? null,
+        function: r.detail?.function ?? null,
       })),
       meta: { generatedAt: new Date().toISOString() },
     });

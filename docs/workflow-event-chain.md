@@ -48,7 +48,7 @@
    │       │  4.0  [optional]  rule-check gate            │  │
    │       │      (RULE_CHECK_ENABLED=true 才跑)          │  │
    │       │      LLM 评判 → PASS/FAIL                    │  │
-   │       │      → emit RULE_CHECK_PASSED / FAILED       │  │
+   │       │      → emit MATCH_RULE_CHECK_PASSED / FAILED       │  │
    │       └──────────────────────────────────────────────┘  │
    │      4a.  POST /match-resume  (RAAS → Robohire)         │
    │      4b.  POST /match-results (持久化,need_interview)   │
@@ -73,7 +73,7 @@
 | `RESUME_DOWNLOADED` | RAAS → AO | raas_v4 backend(用户上传) | `resumeParserAgent` | `upload_id, bucket, objectKey, employeeId, job_requisition_id (optional)` |
 | `RESUME_PROCESSED` | AO → AO + RAAS | `resumeParserAgent` | `matchResumeAgent` + raas_v4 | `upload_id, candidate_id, resume_id, parsed.data, job_requisition_id` |
 | `MATCH_PASSED_NEED_INTERVIEW` | AO → RAAS | `matchResumeAgent`(per JD) | raas_v4 backend / UI | `upload_id, job_requisition_id, data:{matchScore,...}` |
-| `RULE_CHECK_PASSED` | AO → AO | `matchResumeAgent`(gate enabled) | 审计 / 未来 Neo4j | `upload_id, job_requisition_id, audit:{rules_evaluated, llm_decision, llm_model, ...}` |
+| `MATCH_RULE_CHECK_PASSED` | AO → AO | `matchResumeAgent`(gate enabled) | 审计 / 未来 Neo4j | `upload_id, job_requisition_id, audit:{rules_evaluated, llm_decision, llm_model, ...}` |
 | `RULE_CHECK_FAILED` | AO → AO | `matchResumeAgent`(gate enabled) | 审计 / 未来 Neo4j | 同上 + `failure_reasons[], hit_rules[]` |
 
 ### 1.2 已声明、暂未发的事件
@@ -156,7 +156,7 @@
 | 4 | **for each JD**: ↓ | | |
 | 4.0 | `rule-check-${jr_id}`(可选) | `RULE_CHECK_ENABLED=true` 才跑。`buildRuleCheckInput` → `runRuleCheck`(prompt 来源由 `RULE_CHECK_PROMPT_SOURCE` 选 `poc` / `yeyang`)→ LLM 评判 → binary PASS/FAIL | LLM 网关(AI_BASE_URL 或 OpenAI) |
 | 4.0a | (FAIL 路径) emit + skip | sendEvent `RULE_CHECK_FAILED`,`continue` 跳过这条 JD,不调 Robohire | Inngest |
-| 4.0b | (PASS 路径) emit + 继续 | sendEvent `RULE_CHECK_PASSED`,进入 4a | Inngest |
+| 4.0b | (PASS 路径) emit + 继续 | sendEvent `MATCH_RULE_CHECK_PASSED`,进入 4a | Inngest |
 | 4a | `match-${jr_id}` | POST `/api/v1/match-resume`(透传 Robohire,resume_text + jd_text) | RAAS API (Robohire) |
 | 4b | `save-match-${jr_id}` | POST `/api/v1/match-results` (持久化,source="need_interview",spread Robohire data 整段 + raas anchor) | RAAS API |
 | 4c | `emit-match-${jr_id}` | sendEvent `MATCH_PASSED_NEED_INTERVIEW` | Inngest |
@@ -253,14 +253,14 @@ RESUME_PROCESSED → matchResumeAgent → list JDs
                     ┌─────────────┴─────────────┐
                     ▼                           ▼
               PASS (KEEP)                  FAIL (DROP/PAUSE/error)
-              emit RULE_CHECK_PASSED       emit RULE_CHECK_FAILED
+              emit MATCH_RULE_CHECK_PASSED       emit RULE_CHECK_FAILED
                     ▼                      continue (skip this JD)
               continue to 4a
               POST /match-resume
 ```
 
 **新事件流向**:
-- `RULE_CHECK_PASSED`:per-JD audit signal,目前没人订阅
+- `MATCH_RULE_CHECK_PASSED`:per-JD audit signal,目前没人订阅
 - `RULE_CHECK_FAILED`:per-JD reject signal,带 `failure_reasons[]` + `hit_rules[]`
 
 **收益**:
@@ -275,14 +275,14 @@ RESUME_PROCESSED → matchResumeAgent → list JDs
 
 **触发条件**:`ENABLE_NEO4J_INSTANCE_WRITE=true`(待加)+ Ontology API token 配好
 
-**事件链改动**:在 `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 之后,把 audit 写入 Neo4j(走 Ontology API,不直连 driver)
+**事件链改动**:在 `MATCH_RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 之后,把 audit 写入 Neo4j(走 Ontology API,不直连 driver)
 
 ```
 matchResumeAgent (gate enabled)
        │
        │ rule-check step done
        ▼
-   emit RULE_CHECK_PASSED / FAILED
+   emit MATCH_RULE_CHECK_PASSED / FAILED
        │
        ▼
 ┌──────────────────────────────────────────┐    Add new step:
@@ -313,7 +313,7 @@ matchResumeAgent (gate enabled)
 
 **触发条件**:`RULE_CHECK_ENABLED=true` + `RULE_CHECK_PROMPT_SOURCE=yeyang`
 
-**事件链改动**:rule-check step 内部的 prompt 来源切换。对外事件链不变(还是 `RULE_CHECK_PASSED/FAILED`),但 prompt 内容和 LLM 输出 schema 变了。
+**事件链改动**:rule-check step 内部的 prompt 来源切换。对外事件链不变(还是 `MATCH_RULE_CHECK_PASSED/FAILED`),但 prompt 内容和 LLM 输出 schema 变了。
 
 | 对比 | POC 路径(默认) | 叶洋 v4 路径 |
 |---|---|---|
@@ -371,7 +371,7 @@ matchResumeAgent (gate enabled)
    │  │                                                              │  │
    │  │  fold → binary PASS/FAIL                                   │  │
    │  │                                                              │  │
-   │  │  PASS → emit RULE_CHECK_PASSED                             │  │
+   │  │  PASS → emit MATCH_RULE_CHECK_PASSED                             │  │
    │  │  FAIL → emit RULE_CHECK_FAILED, continue (skip JD)         │  │
    │  │                                                              │  │
    │  │  [Increment B] write audit to Neo4j via Ontology API       │  │
