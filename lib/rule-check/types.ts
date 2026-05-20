@@ -133,6 +133,12 @@ export type MatchResumeCheckResult = {
     /** OpenAI-protocol finish_reason on the last LLM response. "length" =
      *  max_tokens cap hit (truncation); "stop" = model finished cleanly. */
     llm_finish_reason?: string;
+    /** Full user prompt sent to LLM (markdown) — for /rule-check audit UI. */
+    user_prompt?: string;
+    /** Full LLM raw response text — for /rule-check audit UI Rule Flags / LLM Response tabs. */
+    llm_raw_text?: string;
+    /** System prompt used (constant per release) — for audit display. */
+    system_prompt?: string;
   };
 };
 

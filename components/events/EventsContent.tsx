@@ -2,7 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AGENT_MAP, INNGEST_REAL_SHORTS } from "@/lib/agent-mapping";
+import { AGENT_MAP, INNGEST_REAL_SHORTS, deploymentKind, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
 import { useInngestEvents, type InngestEventRow } from "@/lib/api/inngest-events";
 import { useEmHealth } from "@/lib/api/em-health";
 import { fetchJson } from "@/lib/api/client";
@@ -33,10 +33,15 @@ const EVENT_TO_SUBSCRIBERS: Record<string, string[]> = (() => {
   return map;
 })();
 
-function subscribersOf(eventName: string): { short: string; isReal: boolean }[] {
+function subscribersOf(eventName: string): { short: string; isReal: boolean; kind: DeploymentKind }[] {
   const list = EVENT_TO_SUBSCRIBERS[eventName] ?? [];
-  return list.map((short) => ({ short, isReal: INNGEST_REAL_SHORTS.has(short) }));
+  return list.map((short) => {
+    const kind = deploymentKind(short);
+    return { short, isReal: kind === "real", kind };
+  });
 }
+// keep import referenced for typecheck side-channels
+void INNGEST_REAL_SHORTS;
 
 export function EventsContent() {
   const router = useRouter();
@@ -200,15 +205,15 @@ export function EventsContent() {
                       className="inline-flex items-center gap-1 rounded border border-line bg-surface hover:bg-panel transition-colors"
                       style={{
                         padding: "2px 7px", fontSize: 11,
-                        color: s.isReal ? "var(--c-ink-1)" : "var(--c-ink-3)",
+                        color: s.kind === "unbuilt" ? "var(--c-ink-3)" : "var(--c-ink-1)",
                         textDecoration: "none",
                       }}
-                      title={s.isReal ? "在监控中看这个 agent 的运行" : "未实装(蓝图)"}
+                      title={s.kind === "unbuilt" ? `${s.short} — 未实装(蓝图)` : `${s.short} — 在监控中看这个 agent 的运行`}
                     >
-                      {s.isReal && (
+                      {s.kind !== "unbuilt" && (
                         <span className="rounded-full" style={{ width: 5, height: 5, background: "var(--c-ok)" }} />
                       )}
-                      {s.short}
+                      {agentDisplayName(s.short)}
                     </Link>
                   ))}
                 </span>
@@ -235,6 +240,34 @@ export function EventsContent() {
 function PayloadViewer({ event, contract, setUrl }: { event: InngestEventRow; contract: EventContract | null; setUrl: (mut: (p: URLSearchParams) => void) => void }) {
   const subs = subscribersOf(event.name);
   const [showSchema, setShowSchema] = React.useState(false);
+  const [replayBusy, setReplayBusy] = React.useState(false);
+  const [replayMsg, setReplayMsg] = React.useState<string | null>(null);
+
+  async function handleReplay() {
+    const evId = event.internal_id ?? event.id;
+    if (!evId) {
+      setReplayMsg('无 event id');
+      setTimeout(() => setReplayMsg(null), 2000);
+      return;
+    }
+    setReplayBusy(true);
+    setReplayMsg(null);
+    try {
+      const r = await fetch('/api/inngest-admin/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: evId }),
+      });
+      const b = await r.json();
+      setReplayMsg(b.ok ? `✓ 已重新发送 · 新事件 ${b.new_event_id?.slice(0, 12)}…` : `✗ ${b.message ?? b.error ?? 'failed'}`);
+    } catch (err) {
+      setReplayMsg(`✗ ${(err as Error).message}`);
+    } finally {
+      setReplayBusy(false);
+      setTimeout(() => setReplayMsg(null), 4000);
+    }
+  }
+
   return (
     <div style={{ padding: "20px 24px" }}>
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
@@ -244,8 +277,23 @@ function PayloadViewer({ event, contract, setUrl }: { event: InngestEventRow; co
           </h2>
           <RegistrationBadge contract={contract} large />
         </div>
-        <button onClick={() => setUrl((p) => p.delete("id"))} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 13 }}>×</button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleReplay}
+            disabled={replayBusy}
+            title="重新发送此事件 (replay 原 payload),会触发所有订阅 agent + partner subscriber"
+            className="text-[12px] px-2.5 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+          >
+            {replayBusy ? '发送中…' : '↺ 重新发送'}
+          </button>
+          <button onClick={() => setUrl((p) => p.delete("id"))} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 13 }}>×</button>
+        </div>
       </div>
+      {replayMsg && (
+        <div className="mt-2 text-[11px]" style={{ color: replayMsg.startsWith('✓') ? 'var(--c-ok)' : 'var(--c-err)' }}>
+          {replayMsg}
+        </div>
+      )}
 
       <div className="mt-3 grid gap-y-1.5" style={{ gridTemplateColumns: "auto 1fr", columnGap: 16, fontSize: 12 }}>
         <span className="text-ink-3">事件 ID</span>
@@ -303,11 +351,12 @@ function PayloadViewer({ event, contract, setUrl }: { event: InngestEventRow; co
                 key={s.short}
                 href={`/monitor?agent=${encodeURIComponent(s.short)}&event=${encodeURIComponent(event.name)}`}
                 className="inline-flex items-center gap-1.5 rounded border border-line bg-surface hover:bg-panel transition-colors"
-                style={{ padding: "4px 10px", fontSize: 12, textDecoration: "none", color: s.isReal ? "var(--c-ink-1)" : "var(--c-ink-3)" }}
+                style={{ padding: "4px 10px", fontSize: 12, textDecoration: "none", color: s.kind === "unbuilt" ? "var(--c-ink-3)" : "var(--c-ink-1)" }}
+                title={s.short}
               >
-                {s.isReal && <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-ok)" }} />}
-                {s.short}
-                {!s.isReal && <span className="text-ink-4" style={{ fontSize: 11 }}>蓝图</span>}
+                {s.kind !== "unbuilt" && <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-ok)" }} />}
+                {agentDisplayName(s.short)}
+                {s.kind === "unbuilt" && <span className="text-ink-4" style={{ fontSize: 11 }}>蓝图</span>}
               </Link>
             ))}
           </div>

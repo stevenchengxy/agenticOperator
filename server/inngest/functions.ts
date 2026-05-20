@@ -47,15 +47,16 @@ import { ruleCheckAgent } from "./agents/rule-check-agent";  // NEW PR-4
 
 // wsIds owned by the real agents above. Stub-factory MUST skip these to
 // avoid double-handling of trigger events (race condition).
-const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10"]);
+const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10", "10-5"]);
 
 // Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation).
 const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
 
-// ★ v0_1_010 defaults: only the 3 real agents register. To restore the
-// fleet / workflow demo flows, set STUB_AGENTS=1 (and BEHAVIOR_AGENTS=1
-// for Monitor + Manager cron / decision agents).
-const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS === "1";
+// v0_1_011: shells are now ON by default. Every business agent in AGENT_MAP
+// (except real ones + Chatbot) registers as an empty-shell Inngest function
+// so /fleet, /monitor, /workflow all show the full roster as "deployed".
+// To suppress shells for a production-clean event bus, set STUB_AGENTS=0.
+const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS !== "0";
 const BEHAVIOR_AGENTS_ENABLED = process.env.BEHAVIOR_AGENTS === "1";
 
 // Build a stub per business agent with at least one trigger event.

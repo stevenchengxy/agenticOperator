@@ -9,6 +9,8 @@ import type { ActivityResponse, LogEntry } from "@/lib/api/activity-types";
 import { useAgentsHealth } from "@/lib/api/agents-health";
 import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/route";
 import { byShortFunction } from "@/lib/agent-functions";
+import { AGENT_MAP, deploymentKind, byShort } from "@/lib/agent-mapping";
+import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
 
 // /overview — system-at-a-glance dashboard.
 //
@@ -20,20 +22,42 @@ import { byShortFunction } from "@/lib/agent-functions";
 //
 // Sections:
 //   A. 顶部 KPI 条 — active runs / 1h failed runs / 1h anomalies / total agents healthy
-//   B. Agent 健康矩阵 — 22 agents 的实时状态点 + counts; click → /workflow
+//   B. Agent 矩阵 — AGENT_MAP 全量 agent，按部署 lifecycle 着色（绿/黄/红 = 已上线/暂停/未上线），
+//                  与 /fleet 状态点同源；runtime 异常作为次级标记叠加。
 //   C. 最近异常 — 跨 run 的 anomaly / error / step.failed 流; click → /live?run=...
 //   D. 当前 active run — top N; click → /live?run=...
 
-const HEALTH_TONE: Record<AgentHealthStatus, { color: string; label: string; pulse: boolean }> = {
-  idle: { color: "var(--c-ink-4)", label: "idle", pulse: false },
-  running: { color: "var(--c-ok)", label: "running", pulse: true },
-  healthy: { color: "var(--c-ok)", label: "healthy", pulse: false },
-  degraded: { color: "var(--c-warn)", label: "degraded", pulse: false },
-  failed: { color: "var(--c-err)", label: "failed", pulse: true },
+// Deployment lifecycle = "is this agent online?" (mirrors /fleet FleetStatus):
+//   online       — real or shell Inngest function, not paused        → 绿
+//   paused       — registered Inngest function, paused               → 黄
+//   not_deployed — unbuilt (no Inngest function yet)                 → 红
+type DeployStatus = "online" | "paused" | "not_deployed";
+
+const DEPLOY_TONE: Record<DeployStatus, { color: string; label: string }> = {
+  online:       { color: "var(--c-ok)",   label: "已上线" },
+  paused:       { color: "var(--c-warn)", label: "已暂停" },
+  not_deployed: { color: "var(--c-err)",  label: "未上线" },
+};
+
+// Runtime health overlay — only shown when deployed AND runtime signal is bad.
+// A deployed agent that's currently failing gets a small red ring on top of
+// the green/yellow headline dot so ops can spot it without losing the
+// "is it online?" answer.
+const RUNTIME_BADGE_TONE: Partial<Record<AgentHealthStatus, { color: string; label: string }>> = {
+  failed:   { color: "var(--c-err)",  label: "运行失败" },
+  degraded: { color: "var(--c-warn)", label: "运行降级" },
+  running:  { color: "var(--c-ok)",   label: "运行中" },
+};
+
+type MatrixRow = {
+  short: string;
+  deploy: DeployStatus;
+  health: AgentHealth | null;
 };
 
 export function OverviewContent() {
   const health = useAgentsHealth(4_000);
+  const { byWsId: liveByWsId } = useInngestLiveOverlay();
   const [activeRuns, setActiveRuns] = React.useState<RunSummary[] | null>(null);
   const [failed1h, setFailed1h] = React.useState<RunSummary[] | null>(null);
   const [anomalies, setAnomalies] = React.useState<LogEntry[] | null>(null);
@@ -76,6 +100,43 @@ export function OverviewContent() {
     (activeRuns?.length ?? 0) === 0 &&
     (anomalies?.length ?? 0) === 0;
 
+  // Build matrix rows from AGENT_MAP (single source of truth — same set
+  // /fleet renders). Deployment status mirrors /fleet's FleetStatus exactly;
+  // runtime health is overlaid as a secondary signal.
+  const matrixRows: MatrixRow[] = React.useMemo(() => {
+    const rows: MatrixRow[] = AGENT_MAP.map((a) => {
+      const kind = deploymentKind(a.short);
+      const live = liveByWsId.get(a.wsId);
+      const deploy: DeployStatus =
+        kind === "unbuilt" ? "not_deployed" :
+        live?.paused       ? "paused" :
+                             "online";
+      return { short: a.short, deploy, health: health.byShort.get(a.short) ?? null };
+    });
+    // Sort: not_deployed → paused → online, then by failing runtime first,
+    // then alpha. Puts attention-worthy gaps at the top of the matrix.
+    const deployOrder: Record<DeployStatus, number> = { not_deployed: 0, paused: 1, online: 2 };
+    const healthOrder: Record<AgentHealthStatus, number> = {
+      failed: 0, degraded: 1, running: 2, healthy: 3, idle: 4,
+    };
+    rows.sort((x, y) => {
+      if (deployOrder[x.deploy] !== deployOrder[y.deploy]) {
+        return deployOrder[x.deploy] - deployOrder[y.deploy];
+      }
+      const hx = x.health ? healthOrder[x.health.status] : 4;
+      const hy = y.health ? healthOrder[y.health.status] : 4;
+      if (hx !== hy) return hx - hy;
+      return x.short.localeCompare(y.short);
+    });
+    return rows;
+  }, [liveByWsId, health.byShort]);
+
+  const deployCounts = React.useMemo(() => {
+    const out = { online: 0, paused: 0, not_deployed: 0 };
+    for (const r of matrixRows) out[r.deploy]++;
+    return out;
+  }, [matrixRows]);
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-auto">
       <Header onRefresh={refresh} fetchedAt={health.fetchedAt} />
@@ -106,7 +167,7 @@ export function OverviewContent() {
         }}
       >
         <div className="overflow-auto" style={{ padding: "16px 22px" }}>
-          <AgentMatrix agents={health.agents} loading={health.loading} />
+          <AgentMatrix rows={matrixRows} loading={health.loading} counts={deployCounts} />
           <ActiveRunsSection runs={activeRuns} />
         </div>
         <aside className="border-l border-line bg-surface flex flex-col min-h-0 overflow-auto">
@@ -308,20 +369,33 @@ function Kpi({
   );
 }
 
-// ── Agent health matrix ──────────────────────────────────────────────
+// ── Agent matrix ─────────────────────────────────────────────────────
+// AGENT_MAP 全量 agent；着色与 /fleet 同源（已上线 / 已暂停 / 未上线）。
+// runtime health 作为副指示器叠加（部署正常但 runtime 失败的 agent 会带红
+// 环），这样 ops 既能一眼看出"哪些没上线"，也不会丢失"哪些跑挂了"的信号。
 
-function AgentMatrix({ agents, loading }: { agents: AgentHealth[]; loading: boolean }) {
+function AgentMatrix({
+  rows,
+  loading,
+  counts,
+}: {
+  rows: MatrixRow[];
+  loading: boolean;
+  counts: { online: number; paused: number; not_deployed: number };
+}) {
   return (
     <section className="mb-5">
-      <div className="flex items-center mb-2">
-        <div className="text-[13px] font-semibold flex-1">Agent 健康矩阵</div>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="text-[13px] font-semibold">Agent 矩阵</div>
         <span className="mono text-[10.5px] text-ink-4">
-          5min 窗口 · click → /workflow
+          与 /fleet 同源 · 部署状态
         </span>
+        <div className="flex-1" />
+        <DeployLegend counts={counts} />
       </div>
-      {loading && agents.length === 0 ? (
+      {loading && rows.length === 0 ? (
         <div className="text-[12px] text-ink-3 py-4">加载中…</div>
-      ) : agents.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState title="暂无 agent" hint="AGENT_MAP 为空" />
       ) : (
         <div
@@ -331,8 +405,8 @@ function AgentMatrix({ agents, loading }: { agents: AgentHealth[]; loading: bool
             gap: 8,
           }}
         >
-          {agents.map((a) => (
-            <AgentCard key={a.short} health={a} />
+          {rows.map((r) => (
+            <AgentCard key={r.short} row={r} />
           ))}
         </div>
       )}
@@ -340,29 +414,59 @@ function AgentMatrix({ agents, loading }: { agents: AgentHealth[]; loading: bool
   );
 }
 
-function AgentCard({ health }: { health: AgentHealth }) {
-  const tone = HEALTH_TONE[health.status];
-  const fn = byShortFunction(health.short);
-  const errorCount = health.counts.failed + health.counts.error;
-  const lastLabel = health.lastActivityAt
-    ? new Date(health.lastActivityAt).toLocaleTimeString(undefined, { hour12: false })
+function DeployLegend({ counts }: { counts: { online: number; paused: number; not_deployed: number } }) {
+  return (
+    <div className="flex items-center gap-3 mono text-[10.5px] text-ink-3">
+      <LegendDot color="var(--c-ok)"   label="已上线" value={counts.online} />
+      <LegendDot color="var(--c-warn)" label="已暂停" value={counts.paused} />
+      <LegendDot color="var(--c-err)"  label="未上线" value={counts.not_deployed} />
+    </div>
+  );
+}
+
+function LegendDot({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      <span>{label}</span>
+      <span className="tabular-nums text-ink-2">{value}</span>
+    </span>
+  );
+}
+
+function AgentCard({ row }: { row: MatrixRow }) {
+  const tone = DEPLOY_TONE[row.deploy];
+  const fn = byShortFunction(row.short);
+  const meta = byShort(row.short);
+  // Runtime overlay: only meaningful when agent is actually deployed.
+  const runtimeStatus = row.deploy !== "not_deployed" ? row.health?.status : null;
+  const runtimeBadge = runtimeStatus ? RUNTIME_BADGE_TONE[runtimeStatus] : undefined;
+  const counts = row.health?.counts;
+  const errorCount = counts ? counts.failed + counts.error : 0;
+  const lastLabel = row.health?.lastActivityAt
+    ? new Date(row.health.lastActivityAt).toLocaleTimeString(undefined, { hour12: false })
     : null;
+  // Unbuilt agents have no /workflow node; link back to fleet detail instead.
+  const href = row.deploy === "not_deployed"
+    ? `/fleet/${encodeURIComponent(row.short)}`
+    : `/workflow?agent=${encodeURIComponent(row.short)}`;
   return (
     <Link
-      href={`/workflow?agent=${encodeURIComponent(health.short)}`}
+      href={href}
       className="no-underline border border-line rounded-md bg-surface hover:border-line-strong transition-colors block"
-      style={{ padding: "8px 10px" }}
+      style={{ padding: "8px 10px", opacity: row.deploy === "not_deployed" ? 0.85 : 1 }}
     >
       <div className="flex items-center gap-2 mb-0.5">
         <span
           className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+          title={tone.label}
           style={{
             background: tone.color,
             boxShadow: `0 0 0 3px color-mix(in oklab, ${tone.color} 18%, transparent)`,
           }}
         />
         <span className="mono text-[11.5px] font-semibold text-ink-1 flex-1 truncate">
-          {health.short}
+          {meta?.inngestName ?? row.short}
         </span>
         <span
           className="mono text-[9.5px]"
@@ -373,15 +477,34 @@ function AgentCard({ health }: { health: AgentHealth }) {
       </div>
       {fn && <div className="text-[10.5px] text-ink-3 mb-1 truncate">{fn.summary}</div>}
       <div className="mono text-[10px] text-ink-4 flex items-center gap-2">
-        <span>
-          {health.counts.completed}/{health.counts.started} step
-        </span>
-        {errorCount > 0 && (
-          <span style={{ color: "var(--c-err)" }}>· {errorCount} err</span>
+        {row.deploy === "not_deployed" ? (
+          <span className="text-ink-3">未注册 Inngest function</span>
+        ) : counts ? (
+          <>
+            <span>{counts.completed}/{counts.started} step</span>
+            {errorCount > 0 && (
+              <span style={{ color: "var(--c-err)" }}>· {errorCount} err</span>
+            )}
+            {counts.tool > 0 && <span>· {counts.tool} tool</span>}
+          </>
+        ) : (
+          <span>—</span>
         )}
-        {health.counts.tool > 0 && <span>· {health.counts.tool} tool</span>}
         <div className="flex-1" />
-        {lastLabel && <span title={health.lastActivityAt ?? ""}>{lastLabel}</span>}
+        {runtimeBadge && (
+          <span
+            className="px-1 rounded"
+            style={{
+              color: runtimeBadge.color,
+              border: `1px solid color-mix(in oklab, ${runtimeBadge.color} 40%, transparent)`,
+              fontWeight: 600,
+            }}
+            title={runtimeBadge.label}
+          >
+            {runtimeBadge.label}
+          </span>
+        )}
+        {lastLabel && <span title={row.health?.lastActivityAt ?? ""}>{lastLabel}</span>}
       </div>
     </Link>
   );

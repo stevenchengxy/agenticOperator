@@ -18,21 +18,27 @@
 
 import { randomUUID } from 'node:crypto';
 import { NonRetriableError } from 'inngest';
+import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
+import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import {
-  RaasApiError,
-  getRequirementDetail,
-  isRaasApiConfigured,
-  syncJdGenerated,
-  type RaasRequirement,
-  type RaasRequirementSpecification,
+  syncJdToPartnerPg,
   type SyncJdInput,
-} from '@/lib/raas-api-client';
+} from '@/lib/partner-pg/job-posting';
+import type {
+  JobRequisition as RaasRequirement,
+  JobRequisitionSpecification as RaasRequirementSpecification,
+} from '@/lib/partner-pg/types';
 import {
   generateJdDirect,
   RobohireApiError,
   type RobohireGenerateJdData,
 } from '@/lib/robohire-client';
+import {
+  writeJobPostingInstance,
+  writeJobRequisitionInstance,
+} from '@/lib/allmeta-writers';
 import { inngest, type JdGeneratedEnvelope } from '@/server/inngest/client';
+import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 
 const AGENT_ID = 'create-jd-agent';
 const AGENT_NAME = 'createJD';
@@ -92,7 +98,7 @@ type RequirementLoggedEnvelope = {
 export const createJdAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Create JD Agent (workflow node 4)',
+    name: 'Create JD Agent',
     retries: 1,
     triggers: [
       { event: 'REQUIREMENT_LOGGED' },
@@ -100,51 +106,80 @@ export const createJdAgent = inngest.createFunction(
       { event: 'JD_REJECTED' },
     ],
   },
-  async ({ event, step, logger }) => {
-    if (!isRaasApiConfigured()) {
+  async ({ event, step, logger, runId }) => {
+    if (!isPartnerPgConfigured()) {
       throw new NonRetriableError(
-        `[${AGENT_NAME}] RAAS_API_BASE_URL / AGENT_API_KEY env 未配置`,
+        `[${AGENT_NAME}] RAAS_POSTGRES_URL env 未配置`,
       );
     }
 
     const envelope = (event.data ?? {}) as RequirementLoggedEnvelope;
     const traceId = getTraceId(event.data);
+    const requisitionIdCandidate = pickRequisitionIdFromEnvelope(envelope);
+    const fileLogger = createAgentLogger({
+      agent: 'createJD',
+      runId: runId ?? `local-${Date.now()}`,
+      traceId: traceId ?? null,
+      anchors: { job_requisition_id: requisitionIdCandidate ?? undefined },
+    });
+    return runWithLogger(fileLogger, async () => {
+    fileLogger.event('handler.start', {
+      event_name: event.name,
+      job_requisition_id: requisitionIdCandidate,
+    });
 
     // ── 1. 从事件取 entity_id (= job_requisition_id) ──
     // 新流程: RAAS 在事件里只放 entity_id，agent 主动调
     // GET /api/v1/requirements/:id 拉详情。entity_id 缺失时兼容老格式
     // (payload.raw_input_data.job_requisition_id / payload.requirement_id)。
-    const requisitionId = pickRequisitionIdFromEnvelope(envelope);
+    const requisitionId = requisitionIdCandidate;
     if (!requisitionId) {
+      fileLogger.event('handler.error', {
+        reason: 'missing-entity-id',
+        event_name: event.name,
+      });
       throw new NonRetriableError(
         `[${AGENT_NAME}] ${event.name} 缺 entity_id / requisition_id —— 无法调 GET /requirements/:id`,
       );
     }
 
-    // ── 2. 调 GET /api/v1/requirements/:id 拉完整需求详情 ──
+    // ── 2. 直读 partner Postgres 拉完整需求详情 ──
+    // 2026-05-20: 改成直连 Postgres,不再走 RAAS HTTP API。
+    // partner-pg/requirements 返回 r + specification(JOIN'd row_to_json)。
     const detail = await step.run(`fetch-requirement-${sanitize(requisitionId)}`, async () => {
-      try {
-        const r = await getRequirementDetail(requisitionId, { traceId });
-        logger.info(
-          `[${AGENT_NAME}] requirements/:id OK · jrid=${requisitionId} ` +
-            `title="${r.requirement.client_job_title ?? '?'}" ` +
-            `client_id=${r.requirement.client_id ?? '—'} ` +
-            `status=${r.specification?.status ?? '—'}`,
+      const r = await getRequirementDetail(requisitionId);
+      if (!r) {
+        throw new NonRetriableError(
+          `[${AGENT_NAME}] partner Postgres: job_requisition ${requisitionId} 不存在`,
         );
-        return r;
-      } catch (e) {
-        if (e instanceof RaasApiError && e.isClientError) {
-          throw new NonRetriableError(
-            `RAAS GET /requirements/${requisitionId} 4xx: ${e.code} ${e.message}`,
-          );
-        }
-        throw e;
       }
+      logger.info(
+        `[${AGENT_NAME}] partner-pg getRequirementDetail OK · jrid=${requisitionId} ` +
+          `title="${r.client_job_title ?? '?'}" ` +
+          `client_id=${r.client_id ?? '—'} ` +
+          `status=${r.specification?.status ?? '—'}`,
+      );
+      return r;
     });
 
-    const requirement = detail.requirement;
-    const specification = detail.specification;
+    // 旧 RAAS API 返回 {requirement, specification},现在直读返回 requirement 整段
+    // (含 specification 作为 nested object via row_to_json)。下面 buildPromptFromRequirement
+    // 仍按旧 shape 拆解。
+    const requirement = detail as unknown as RaasRequirement;
+    const specification = (detail as { specification: RaasRequirementSpecification | null }).specification;
     const clientId = requirement.client_id ?? specification?.client_id;
+
+    // ── 2b. 镜像 JR 到 Neo4j (via allmeta) ──
+    // 让 Rule Check Audit "实时读 Neo4j" 的 :Job_Requisition anchor 能查到.
+    // partner 数据库是真相源,Neo4j 镜像 idempotent upsert.
+    await step.run(`write-jr-neo4j-${sanitize(requisitionId)}`, async () => {
+      const r = await writeJobRequisitionInstance({
+        requirement: requirement as unknown as Record<string, unknown>,
+      });
+      if (r.ok) logger.info(`[${AGENT_NAME}] ✓ allmeta wrote Job_Requisition ${requisitionId}`);
+      else logger.warn(`[${AGENT_NAME}] allmeta JR write failed: ${r.error}`);
+      return r;
+    });
     if (!clientId) {
       throw new NonRetriableError(
         `[${AGENT_NAME}] requirement ${requisitionId} 缺 client_id — POST /jd/sync-generated 必填`,
@@ -195,23 +230,18 @@ export const createJdAgent = inngest.createFunction(
     });
 
     const jdData = generated.data;
-    const jdId = `jd_${randomUUID().slice(0, 8)}_${Date.now().toString(36)}`;
 
-    // ── 5. 调 RAAS API: POST /api/v1/jd/sync-generated ──
+    // ── 5. 写入 partner Postgres job_posting 表(state_mutations 主存储)──
     //
-    // doc v5 §4.6: handler 同时接受 camelCase (RoboHire 原始) 和 snake_case
-    // (raas 内部)。最便捷写法 — 直接 spread generate-jd 的 data，
-    // 再加上 requirement 详情里 raas snake_case 的增强字段（must-have /
-    // nice-to-have / 学历 / 年限 / 面试形式等，generate-jd 不给的）。
-    await step.run(`sync-jd-${sanitize(requisitionId)}`, async () => {
+    // 实体数据(title / responsibility / requirement / key_words /
+    // recruitment_type / work_years 等 Job_Posting impacted_properties)全部
+    // 写进 partner Postgres,partner 订阅 JD_GENERATED 后从表里读。
+    // 事件本身只携带 2 个字段(canonical):job_posting_id + jd_content。
+    const syncResult = await step.run(`sync-jd-${sanitize(requisitionId)}`, async () => {
       const input: SyncJdInput = {
         job_requisition_id: requisitionId,
         client_id: clientId,
-        // a) RoboHire camelCase 整段 spread (title/description/qualifications/
-        //    hardRequirements/niceToHave/salaryMin/salaryMax/... 全部带过去)
         ...(jdData as Record<string, unknown>),
-        // b) requirement 详情里的 raas 增强字段（generate-jd 没给，但 RAAS
-        //    端持久化 JobRequisition 需要）。仅当原 jdData 没覆盖时透传。
         must_have_skills: arrayOrUndefined(requirement.must_have_skills),
         nice_to_have_skills: arrayOrUndefined(requirement.nice_to_have_skills),
         negative_requirement: stringOrUndefined(requirement.negative_requirement),
@@ -223,123 +253,62 @@ export const createJdAgent = inngest.createFunction(
           typeof requirement.work_years === 'number' ? requirement.work_years : undefined,
         interview_mode: stringOrUndefined(requirement.interview_mode),
         recruitment_type: stringOrUndefined(requirement.recruitment_type),
-        // c) city 转 array（RoboHire 给的是 string，RAAS JobPosting 期望 array）
         city: pickCityFromBoth(requirement, jdData),
       };
-      try {
-        const r = await syncJdGenerated(input, { traceId });
-        logger.info(
-          `[${AGENT_NAME}] sync-generated OK · synced=${r.synced} job_posting_id=${r.job_posting_id}`,
-        );
-        return r;
-      } catch (e) {
-        if (e instanceof RaasApiError && e.isClientError) {
-          throw new NonRetriableError(
-            `RAAS sync-generated 4xx: ${e.code} ${e.message}`,
-          );
-        }
-        throw e;
-      }
+      const r = await syncJdToPartnerPg(input);
+      logger.info(
+        `[${AGENT_NAME}] partner-pg syncJdToPartnerPg OK · synced=${r.synced} ` +
+          `job_posting_id=${r.job_posting_id}` +
+          (r.reason ? ` reason=${r.reason}` : ''),
+      );
+      return r;
     });
 
-    // ── 6. emit JD_GENERATED (cascade 触发，不再依赖订阅入库) ──
-    //
-    // doc v5 §4.6 写法：直接 spread RoboHire generate-jd 的 data。我们的
-    // JD_GENERATED.payload 跟我们调 sync-generated 的 body 形态保持一致 ——
-    // 整段 spread jdData (description / qualifications / hardRequirements /
-    // niceToHave / interviewRequirements / evaluationRules / benefits /
-    // salaryMin / salaryMax / headcount / experienceLevel / education / location /
-    // employmentType / workType / companyName / department / salaryCurrency /
-    // salaryPeriod / salaryText / title 等 21 字段全部带过去)，然后叠
-    // partner-canonical normalized snake_case 字段做兜底/转格式 (city array /
-    // salary_range / posting_description / 数值化 work_years 等)。
-    //
-    // jdData 里的诊断字段 (searchKeywords / qualityScore / qualitySuggestions /
-    // marketCompetitiveness) 也通过 spread 自动透传到 search_keywords 等
-    // snake_case key 的同名 normalized field 之上 —— 我们再读一遍 jdData
-    // 里对应的 camelCase 值做 normalized 兜底。
-    const jdAny = jdData as Record<string, unknown>;
-    const searchKeywords = Array.isArray(jdAny.searchKeywords)
-      ? (jdAny.searchKeywords as string[])
-      : [];
-    const qualityScore =
-      typeof jdAny.qualityScore === 'number' ? (jdAny.qualityScore as number) : 0;
-    const qualitySuggestions = Array.isArray(jdAny.qualitySuggestions)
-      ? (jdAny.qualitySuggestions as string[])
-      : [];
-    const marketCompetitiveness =
-      jdAny.marketCompetitiveness === '高' ||
-      jdAny.marketCompetitiveness === '中' ||
-      jdAny.marketCompetitiveness === '低'
-        ? (jdAny.marketCompetitiveness as '高' | '中' | '低')
-        : '中';
+    const jobPostingId = syncResult.job_posting_id;
+    if (!jobPostingId) {
+      throw new NonRetriableError(
+        `[${AGENT_NAME}] partner-pg syncJdToPartnerPg 没返回 job_posting_id (reason=${syncResult.reason ?? '?'})`,
+      );
+    }
 
-    const outboundEnvelope: JdGeneratedEnvelope = {
-      entity_type: 'JobDescription',
-      entity_id: jdId,
-      event_id: randomUUID(),
-      payload: {
-        // a) RoboHire generate-jd data 整段 spread (camelCase 原样)。
-        //    description / qualifications / hardRequirements / niceToHave / ...
-        ...jdAny,
-        // b) raas 关联（必带）
+    // ── 5b. 写 Neo4j Job_Posting instance via allmeta ──
+    await step.run(`write-jobposting-neo4j-${sanitize(requisitionId)}`, async () => {
+      const r = await writeJobPostingInstance({
+        job_posting_id: jobPostingId,
         job_requisition_id: requisitionId,
         client_id: clientId,
-        // c) partner-canonical normalized snake_case 字段（与 sync-generated body 对齐）
-        posting_title: typeof jdData.title === 'string' ? jdData.title : '未命名岗位',
-        posting_description: typeof jdData.description === 'string' ? jdData.description : '',
-        city: pickCityFromBoth(requirement, jdData) ?? [],
-        salary_range:
-          (typeof jdData.salaryText === 'string' && jdData.salaryText.trim())
-            ? jdData.salaryText.trim()
-            : (jdData.salaryMin != null && jdData.salaryMax != null)
-              ? `${jdData.salaryMin}-${jdData.salaryMax}`
-              : '',
-        interview_mode:
-          (requirement.interview_mode as string | undefined) ?? 'unspecified',
-        degree_requirement:
-          (requirement.degree_requirement as string | undefined) ??
-          (typeof jdData.education === 'string' ? jdData.education : ''),
-        education_requirement:
-          (requirement.education_requirement as string | undefined) ??
-          (typeof jdData.education === 'string' ? jdData.education : ''),
-        work_years:
-          typeof requirement.work_years === 'number' ? requirement.work_years : 0,
-        recruitment_type:
-          (requirement.recruitment_type as string | undefined) ??
-          (typeof jdData.employmentType === 'string' ? jdData.employmentType : 'unspecified'),
-        must_have_skills: Array.isArray(requirement.must_have_skills)
-          ? (requirement.must_have_skills as string[])
-          : [],
-        nice_to_have_skills: Array.isArray(requirement.nice_to_have_skills)
-          ? (requirement.nice_to_have_skills as string[])
-          : [],
-        negative_requirement: (requirement.negative_requirement as string | undefined) ?? '',
-        language_requirements:
-          (requirement.language_requirements as string | undefined) ?? '',
-        expected_level:
-          (requirement.expected_level as string | undefined) ??
-          (typeof jdData.experienceLevel === 'string' ? jdData.experienceLevel : 'unspecified'),
-        responsibility:
-          typeof jdData.qualifications === 'string' ? jdData.qualifications : '',
-        requirement:
-          typeof jdData.hardRequirements === 'string' ? jdData.hardRequirements : '',
-        // d) bookkeeping
-        jd_id: jdId,
-        claimer_employee_id:
-          (specification?.recruiter_employee_id as string | undefined) ?? null,
-        hsm_employee_id: (specification?.hsm_employee_id as string | undefined) ?? null,
-        client_job_id: (requirement.client_job_id as string | undefined) ?? null,
-        // e) 诊断字段（从 jdData 里透传，不再硬编码）
-        search_keywords: searchKeywords,
-        quality_score: qualityScore,
-        quality_suggestions: qualitySuggestions,
-        market_competitiveness: marketCompetitiveness,
-        generator_version: GENERATOR_VERSION,
-        generator_model: 'robohire/jobs/generate-jd',
-        generated_at: new Date().toISOString(),
+        recruiter_employee_id: specification?.recruiter_employee_id ?? null,
+        roboHireData: jdData as unknown as Record<string, unknown>,
+        requirement: requirement as unknown as Record<string, unknown>,
+        publish_status: 'pending',
+      });
+      if (r.ok) {
+        logger.info(`[${AGENT_NAME}] ✓ allmeta wrote Job_Posting ${jobPostingId}`);
+      } else {
+        logger.warn(`[${AGENT_NAME}] allmeta Job_Posting write failed: ${r.error}`);
+      }
+      return r;
+    });
+
+    // ── 6. emit JD_GENERATED (canonical schema — events_v0_1_002.json)──
+    //
+    // canonical event_data:job_posting_id + jd_content。
+    // partner 便利 FK:job_requisition_id + client_id(对齐 REQUIREMENT_LOGGED
+    // 把 FK 平铺在 payload 顶层的习惯,让订阅者一查就到位)。
+    // 其他实体数据(title/responsibility/requirement/...)由 partner-pg 写入
+    // partner Postgres job_posting 表;partner 订阅事件后从表里读。
+    const outboundEnvelope: JdGeneratedEnvelope = {
+      entity_type: 'Job_Posting',
+      entity_id: jobPostingId,
+      event_id: randomUUID(),
+      source_action: 'createJD',
+      payload: {
+        job_posting_id: jobPostingId,
+        job_requisition_id: requisitionId,
+        client_id: clientId,
+        jd_content: assembleJdContent(jdData),
       },
-      trace: envelope.trace ?? {
+      trace: (envelope.trace as Record<string, unknown> | undefined) ?? {
         trace_id: null,
         request_id: null,
         workflow_id: null,
@@ -347,25 +316,69 @@ export const createJdAgent = inngest.createFunction(
       },
     };
 
+    fileLogger.event('emit.jd-generated', {
+      job_posting_id: jobPostingId,
+      job_requisition_id: requisitionId,
+      client_id: clientId,
+    });
     await step.sendEvent(`emit-jd-generated-${sanitize(requisitionId)}`, {
       name: 'JD_GENERATED',
       data: outboundEnvelope,
     });
 
     logger.info(
-      `[${AGENT_NAME}] ✅ emitted JD_GENERATED · jd_id=${jdId} requisition=${requisitionId}`,
+      `[${AGENT_NAME}] ✅ emitted JD_GENERATED · job_posting_id=${jobPostingId} requisition=${requisitionId}`,
     );
+    fileLogger.event('handler.done', {
+      job_posting_id: jobPostingId,
+      requisition_id: requisitionId,
+      robohire_request_id: generated.requestId,
+    });
 
     return {
       ok: true,
-      jd_id: jdId,
+      job_posting_id: jobPostingId,
       requisition_id: requisitionId,
       client_id: clientId,
       title: typeof jdData.title === 'string' ? jdData.title : null,
       robohire_request_id: generated.requestId,
     };
+    }); // runWithLogger
   },
 );
+
+/**
+ * 把 RoboHire generate-jd 输出拼成一段 markdown 作为 canonical `jd_content`。
+ * 包含: 标题 + 描述正文 + 任职要求 + 加分项 + 面试要求 + 评估规则 + 福利。
+ */
+function assembleJdContent(jdData: RobohireGenerateJdData): string {
+  const j = jdData as unknown as Record<string, unknown>;
+  const parts: string[] = [];
+  const title = typeof j.title === 'string' ? j.title : '未命名岗位';
+  parts.push(`# ${title}`);
+  if (typeof j.description === 'string' && j.description.trim()) {
+    parts.push(j.description.trim());
+  }
+  if (typeof j.qualifications === 'string' && j.qualifications.trim()) {
+    parts.push(`## 任职要求(详细)\n${j.qualifications.trim()}`);
+  }
+  if (typeof j.hardRequirements === 'string' && j.hardRequirements.trim()) {
+    parts.push(`## 硬性要求\n${j.hardRequirements.trim()}`);
+  }
+  if (typeof j.niceToHave === 'string' && j.niceToHave.trim()) {
+    parts.push(`## 加分项\n${j.niceToHave.trim()}`);
+  }
+  if (typeof j.interviewRequirements === 'string' && j.interviewRequirements.trim()) {
+    parts.push(`## 面试要求\n${j.interviewRequirements.trim()}`);
+  }
+  if (typeof j.evaluationRules === 'string' && j.evaluationRules.trim()) {
+    parts.push(`## 评估标准\n${j.evaluationRules.trim()}`);
+  }
+  if (typeof j.benefits === 'string' && j.benefits.trim()) {
+    parts.push(`## 薪资福利\n${j.benefits.trim()}`);
+  }
+  return parts.join('\n\n');
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Helpers

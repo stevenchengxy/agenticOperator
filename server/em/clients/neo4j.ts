@@ -1,9 +1,14 @@
 // Neo4j client for EM — single shared driver, lazy-init, graceful failure.
 //
-// Reads RAAS_LINKS_NEO4J_* (preferred) or NEO4J_* (fallback). When the host
-// is unreachable (off-VPN), getDriver() throws a typed error and callers
-// (sync worker, /api/em/health) record the failure in EmSystemStatus.
-// This module never throws on import.
+// Env precedence (matches the convention in .env.local — AO writers always
+// prefer the local AO-owned instance Neo4j over the company-VPN legacy host):
+//   1. NEO4J_INSTANCE_*       — local instance (allmeta studio writes here)
+//   2. RAAS_LINKS_NEO4J_*     — company VPN links Neo4j (legacy, may be offline)
+//   3. NEO4J_*                — generic fallback
+//
+// When the chosen host is unreachable (off-VPN, container down, etc.),
+// getDriver() throws a typed error and callers (sync worker, /api/em/health)
+// record the failure in EmSystemStatus. This module never throws on import.
 
 import neo4j, { Driver, Session, auth } from "neo4j-driver";
 
@@ -30,12 +35,19 @@ type Config = {
 
 function readConfig(): Config | null {
   const uri =
-    process.env.RAAS_LINKS_NEO4J_URI ?? process.env.NEO4J_URI;
+    process.env.NEO4J_INSTANCE_URI ??
+    process.env.RAAS_LINKS_NEO4J_URI ??
+    process.env.NEO4J_URI;
   const user =
-    process.env.RAAS_LINKS_NEO4J_USER ?? process.env.NEO4J_USERNAME;
+    process.env.NEO4J_INSTANCE_USER ??
+    process.env.RAAS_LINKS_NEO4J_USER ??
+    process.env.NEO4J_USERNAME;
   const password =
-    process.env.RAAS_LINKS_NEO4J_PASSWORD ?? process.env.NEO4J_PASSWORD;
+    process.env.NEO4J_INSTANCE_PASSWORD ??
+    process.env.RAAS_LINKS_NEO4J_PASSWORD ??
+    process.env.NEO4J_PASSWORD;
   const database =
+    process.env.NEO4J_INSTANCE_DATABASE ??
     process.env.RAAS_LINKS_NEO4J_DATABASE ??
     process.env.NEO4J_DATABASE ??
     "neo4j";

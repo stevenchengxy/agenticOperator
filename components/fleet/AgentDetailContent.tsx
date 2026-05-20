@@ -7,7 +7,7 @@ import { Ic } from "@/components/shared/Ic";
 import { Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import type { AgentsResponse, AgentRow } from "@/lib/api/types";
-import { isReal } from "@/lib/agent-mapping";
+import { isReal, deploymentKind, type DeploymentKind } from "@/lib/agent-mapping";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 
 // Fleet IA v2.1 — agent detail page (`/fleet/[short]`).
@@ -16,12 +16,15 @@ import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from
 // tab is fleshed out; tabs 2-7 render an EmptyState (see spec §5.3).
 
 type Lifecycle = "active" | "paused" | "deprecated" | "draft";
-type Realness = "real" | "stub";
+type Realness = DeploymentKind; // "real" | "shell" | "unbuilt"
 
 type DetailRow = {
   short: string;
   wsId: string;
+  /** i18n key for the Chinese / English display name. */
   displayName: string;
+  /** Inngest function name (matches dashboard). */
+  inngestName: string;
   ownerTeam: string;
   stage: AgentRow["stage"];
   version: string;
@@ -105,9 +108,11 @@ export function AgentDetailContent({ short }: { short: string }) {
   const [optimisticPause, setOptimisticPause] = React.useState<boolean | null>(null);
 
   const real = agentRow ? isReal(agentRow.short) : false;
+  const realness: Realness = agentRow ? deploymentKind(agentRow.short) : "unbuilt";
+  const deployed = realness !== "unbuilt"; // real or shell — both are registered Inngest functions
   const wsId = agentRow?.wsId ?? "";
-  const slug = real ? WSID_TO_INNGEST_SLUG[wsId] ?? null : null;
-  const live: LiveAgentState | undefined = real ? liveByWsId.get(wsId) : undefined;
+  const slug = deployed ? WSID_TO_INNGEST_SLUG[wsId] ?? null : null;
+  const live: LiveAgentState | undefined = deployed ? liveByWsId.get(wsId) : undefined;
   const livePaused = live?.paused ?? false;
   const effectivePaused = optimisticPause ?? livePaused;
 
@@ -115,11 +120,12 @@ export function AgentDetailContent({ short }: { short: string }) {
     short: agentRow.short,
     wsId: agentRow.wsId,
     displayName: agentRow.displayName,
+    inngestName: agentRow.inngestName ?? agentRow.short,
     ownerTeam: agentRow.ownerTeam,
     stage: agentRow.stage,
     version: agentRow.version,
-    lifecycle: !real ? "draft" : effectivePaused ? "paused" : "active",
-    realness: real ? "real" : "stub",
+    lifecycle: realness === "unbuilt" ? "draft" : effectivePaused ? "paused" : "active",
+    realness,
     slug,
     paused: effectivePaused,
     liveTotal: live?.total ?? null,
@@ -210,7 +216,7 @@ function LiveIndicator({ lastRefresh }: { lastRefresh: string | null }) {
 // ── header band ──────────────────────────────────────────────────────
 
 function DetailHeader({ agent, t, onTogglePause, lastRefresh }: { agent: DetailRow; t: (k: string) => string; onTogglePause: () => void; lastRefresh: string | null }) {
-  const stub = agent.realness === "stub";
+  const stub = agent.realness === "unbuilt";
   return (
     <div className="border-b border-line" style={{ padding: "24px 32px 22px" }}>
       <div className="flex items-start gap-4">
@@ -233,7 +239,7 @@ function DetailHeader({ agent, t, onTogglePause, lastRefresh }: { agent: DetailR
                 lineHeight: 1.15,
               }}
             >
-              {agent.short}
+              {agent.inngestName}
             </h1>
             <RealnessTag realness={agent.realness} paused={agent.paused} t={t} />
           </div>
@@ -303,7 +309,7 @@ function MetaItem({ label, value }: { label: string; value: string }) {
 }
 
 function RealnessTag({ realness, paused, t }: { realness: Realness; paused?: boolean; t: (k: string) => string }) {
-  if (realness === "real") {
+  if (realness === "real" || realness === "shell") {
     if (paused) {
       return (
         <span className="inline-flex items-center gap-1.5 text-ink-3" style={{ fontSize: 12 }}>
@@ -421,7 +427,7 @@ function TabBar({ tab, setTab, t }: { tab: TabId; setTab: (t: TabId) => void; t:
 // ── overview tab ────────────────────────────────────────────────────
 
 function OverviewTab({ agent, t }: { agent: DetailRow; t: (k: string) => string }) {
-  const stub = agent.realness === "stub";
+  const stub = agent.realness === "unbuilt";
   return (
     <div className="grid gap-8" style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)" }}>
       <div className="flex flex-col gap-7">

@@ -20,23 +20,33 @@
 import { NonRetriableError } from 'inngest';
 import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
 import { extractDims } from '@/lib/rule-check/ontology';
+import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
+import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import {
-  RaasApiError,
-  getRequirementDetail,
   getRequirementsAgentView,
-  getParsedResume,
-  isRaasApiConfigured,
-  type RequirementsAgentViewItem,
-} from '@/lib/raas-api-client';
+  getHsmJobPostingsAsRequirements,
+} from '@/lib/partner-pg/agent-view';
+import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
+/**
+ * RequirementsAgentViewItem stays loose (Record<string, unknown>) here on
+ * purpose — both path A merged shape and path B agent-view items flow through
+ * the same helpers (pickRequisitionId / pickClientId / hasMatchableContent /
+ * isRecruitingStatus), which probe field names defensively.
+ */
+type RequirementsAgentViewItem = Record<string, unknown>;
 import {
   inngest,
-  type MatchEventData,
+  type MatchRuleCheckFailedData,
   type MatchRuleCheckPassedData,
   type RuleCheckAuditMeta,
   type RuleCheckRuntimeContext,
 } from '@/server/inngest/client';
 import { prisma } from '@/server/db';
-import { writeInstance, AllmetaApiError } from '@/lib/allmeta-client';
+import {
+  writeCandidateMatchResultInstance,
+  writeJobRequisitionInstance,
+} from '@/lib/allmeta-writers';
+import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 
 const AGENT_ID = 'rule-check-agent';
 const AGENT_NAME = 'ruleCheck';
@@ -46,6 +56,7 @@ export async function ruleCheckAgentHandler({
   event,
   step,
   logger,
+  runId,
 }: {
   event: { name: string; data: unknown };
   step: {
@@ -53,6 +64,7 @@ export async function ruleCheckAgentHandler({
     sendEvent: (id: string, e: { name: string; data: unknown }) => Promise<unknown>;
   };
   logger: { info: (s: string) => void; warn: (s: string) => void; error: (s: string) => void };
+  runId?: string;
 }) {
   const data = unwrapResumeProcessedEvent(event.data);
   const traceId = getTraceId(event.data);
@@ -61,14 +73,34 @@ export async function ruleCheckAgentHandler({
   const employeeId = pickEmployeeId(data);
   const resumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
 
+  const fileLogger = createAgentLogger({
+    agent: 'ruleCheck',
+    runId: runId ?? `local-${Date.now()}`,
+    traceId,
+    anchors: {
+      upload_id: uploadId,
+      candidate_id: candidateId,
+      employee_id: employeeId,
+      resume_id: resumeId,
+    },
+  });
+  return runWithLogger(fileLogger, async () => {
+  fileLogger.event('handler.start', {
+    event_name: event.name,
+    upload_id: uploadId,
+    candidate_id: candidateId,
+    employee_id: employeeId,
+    resume_id: resumeId,
+  });
+
   if (!uploadId && !candidateId) {
     throw new NonRetriableError(`[${AGENT_NAME}] RESUME_PROCESSED 缺 upload_id 和 candidate_id`);
   }
   if (!employeeId) {
     throw new NonRetriableError(`[${AGENT_NAME}] RESUME_PROCESSED 缺 employee_id`);
   }
-  if (!isRaasApiConfigured()) {
-    throw new NonRetriableError(`[${AGENT_NAME}] RAAS_API_BASE_URL / AGENT_API_KEY env 未配置`);
+  if (!isPartnerPgConfigured()) {
+    throw new NonRetriableError(`[${AGENT_NAME}] RAAS_POSTGRES_URL env 未配置`);
   }
 
   logger.info(
@@ -82,53 +114,61 @@ export async function ruleCheckAgentHandler({
       : null;
 
   // ── 1. JR 列表收敛 ──
+  // 2026-05-20: 直读 partner Postgres,不再走 RAAS HTTP API.
   const requirements = await step.run('list-requirements', async () => {
     if (linkedJrId) {
-      try {
-        const detail = await getRequirementDetail(linkedJrId, { traceId });
-        const merged = {
-          ...(detail.specification ?? {}),
-          ...(detail.requirement ?? {}),
-        } as unknown as RequirementsAgentViewItem;
-        if (!hasMatchableContent(merged)) {
-          logger.warn(`[${AGENT_NAME}] linked JR ${linkedJrId} 内容空,跳过`);
-          return [];
-        }
-        return [merged];
-      } catch (e) {
-        if (e instanceof RaasApiError && e.isClientError) {
-          throw new NonRetriableError(
-            `getRequirementDetail 4xx for ${linkedJrId}: ${e.code} ${e.message}`,
-          );
-        }
-        throw e;
+      const detail = await getRequirementDetail(linkedJrId);
+      if (!detail) {
+        throw new NonRetriableError(
+          `[${AGENT_NAME}] partner Postgres: job_requisition ${linkedJrId} 不存在`,
+        );
       }
+      // 旧 RAAS API: { requirement, specification }
+      // 新 partner-pg: requirement 整段 + .specification(nested via row_to_json)
+      // 兼容下游 helper(probe field names): flatten 出来。
+      const merged: RequirementsAgentViewItem = {
+        ...(detail.specification ?? {}),
+        ...detail,
+      };
+      if (!hasMatchableContent(merged)) {
+        logger.warn(`[${AGENT_NAME}] linked JR ${linkedJrId} 内容空,跳过`);
+        return [];
+      }
+      return [merged];
     }
-    try {
-      const resumeFilenameRaw =
-        typeof data.filename === 'string' && data.filename.trim()
-          ? data.filename.trim()
-          : undefined;
-      if (resumeFilenameRaw) {
-        logger.info(`[${AGENT_NAME}] path-B agent-view with resume_filename="${resumeFilenameRaw}"`);
-      }
-      const r = await getRequirementsAgentView(
-        { claimer_employee_id: employeeId, resume_filename: resumeFilenameRaw },
-        { traceId },
+    // 2026-05-20 path B 改造:不再扫 claimer 的 requirement_claim,
+    // 改成"HSM 名下有 Job_Posting 才匹配"——
+    //   - 没 Job_Posting → 停止匹配(JR 还是草稿,不该 rule-check)
+    //   - 有 Job_Posting → 反推 JR,逐一 rule-check
+    const resumeFilenameRaw =
+      typeof data.filename === 'string' && data.filename.trim()
+        ? data.filename.trim()
+        : undefined;
+    logger.info(
+      `[${AGENT_NAME}] path-B HSM Job_Postings lookup · hsm=${employeeId}` +
+        (resumeFilenameRaw ? ` · resume_filename="${resumeFilenameRaw}"` : ''),
+    );
+    const r = await getHsmJobPostingsAsRequirements({
+      claimerEmployeeId: employeeId, // HSM employee_id, 字段复用
+      resumeFilename: resumeFilenameRaw,
+    });
+    if ((r.items?.length ?? 0) === 0) {
+      logger.warn(
+        `[${AGENT_NAME}] path-B HSM ${employeeId} 名下 0 个 Job_Posting,停止匹配`,
       );
-      const recruiting = (r.items ?? []).filter(isRecruitingStatus);
-      const matchable = recruiting.filter(hasMatchableContent);
-      logger.info(
-        `[${AGENT_NAME}] RAAS returned ${r.items?.length ?? 0} requirement(s); ` +
-          `${recruiting.length} recruiting; ${matchable.length} matchable`,
-      );
-      return matchable;
-    } catch (e) {
-      if (e instanceof RaasApiError && e.isClientError) {
-        throw new NonRetriableError(`getRequirementsAgentView 4xx: ${e.code} ${e.message}`);
-      }
-      throw e;
+      return [] as RequirementsAgentViewItem[];
     }
+    const recruiting = (r.items ?? []).filter((it) =>
+      isRecruitingStatus(it as unknown as RequirementsAgentViewItem),
+    );
+    const matchable = recruiting.filter((it) =>
+      hasMatchableContent(it as unknown as RequirementsAgentViewItem),
+    );
+    logger.info(
+      `[${AGENT_NAME}] path-B HSM has ${r.items?.length ?? 0} Job_Posting → ` +
+        `${recruiting.length} recruiting JR · ${matchable.length} matchable`,
+    );
+    return matchable as unknown as RequirementsAgentViewItem[];
   });
 
   if (requirements.length === 0) {
@@ -138,7 +178,10 @@ export async function ruleCheckAgentHandler({
       candidate_id: candidateId,
       employee_id: employeeId,
       requested_count: 0,
-      reason: 'no-matchable-requirements',
+      reason:
+        linkedJrId === null
+          ? 'no-job-postings-under-hsm'
+          : 'no-matchable-requirements',
     };
   }
 
@@ -156,21 +199,17 @@ export async function ruleCheckAgentHandler({
       );
     }
     parsedData = await step.run('fetch-parsed-resume', async () => {
-      try {
-        const r = await getParsedResume(candidateId, resumeId, { traceId });
-        logger.info(
-          `[${AGENT_NAME}] thin-event back-pull OK · candidate_id=${candidateId} ` +
-            `resume_id=${resumeId} data_keys=${Object.keys(r.data ?? {}).length}`,
+      const r = await getParsedResume(candidateId, resumeId);
+      if (!r) {
+        throw new NonRetriableError(
+          `[${AGENT_NAME}] partner Postgres: resume not found · candidate_id=${candidateId} resume_id=${resumeId}`,
         );
-        return r.data ?? {};
-      } catch (e) {
-        if (e instanceof RaasApiError && e.isClientError) {
-          throw new NonRetriableError(
-            `RAAS GET /candidates/${candidateId}/resumes/${resumeId}/parsed 4xx: ${e.code} ${e.message}`,
-          );
-        }
-        throw e;
       }
+      logger.info(
+        `[${AGENT_NAME}] thin-event back-pull OK · candidate_id=${candidateId} ` +
+          `resume_id=${resumeId} data_keys=${Object.keys(r.data ?? {}).length}`,
+      );
+      return r.data ?? {};
     });
   }
 
@@ -184,6 +223,18 @@ export async function ruleCheckAgentHandler({
     if (!jrid) continue;
     const stepKey = sanitize(jrid);
     const clientId = pickClientId(req) ?? '';
+
+    // ── 3a. 镜像 JR 到 Neo4j (via allmeta) ──
+    // 路径 A: 直读单个 JR;路径 B: 循环每个 claimer 在招 JR.
+    // 任一情况都保证 Rule Check Audit "实时读 :Job_Requisition" 能查到.
+    await step.run(`write-jr-neo4j-${stepKey}`, async () => {
+      const r = await writeJobRequisitionInstance({
+        requirement: req as unknown as Record<string, unknown>,
+      });
+      if (r.ok) logger.info(`[${AGENT_NAME}] ✓ allmeta wrote Job_Requisition ${jrid}`);
+      else logger.warn(`[${AGENT_NAME}] allmeta JR write failed jr=${jrid}: ${r.error}`);
+      return r;
+    });
 
     const runtimeContext: RuleCheckRuntimeContext = {
       upload_id: uploadId ?? '',
@@ -209,11 +260,13 @@ export async function ruleCheckAgentHandler({
         fail_reason: 'bypassed',
       };
       const bypassPayload: MatchRuleCheckPassedData = {
-        upload_id: uploadId ?? null,
         candidate_id: candidateId ?? null,
         resume_id: resumeId || null,
         job_requisition_id: jrid,
         client_id: clientId,
+        rule_check_result: '通过',
+        rule_check_reason: '',
+        upload_id: uploadId ?? null,
         employee_id: employeeId,
         audit: bypassAudit,
         job_requisition: req as unknown as Record<string, unknown>,
@@ -232,12 +285,19 @@ export async function ruleCheckAgentHandler({
     }
 
     const result = await step.run(`rule-check-${stepKey}`, async () => {
+      fileLogger.event('step.start', { step_id: `rule-check-${stepKey}`, jr_id: jrid, client_id: clientId });
       const input = buildRuleCheckInput({
         runtime_context: runtimeContext,
         parsed_resume: parsedData,
         job_requisition: req as unknown as Record<string, unknown>,
       });
-      const r = await runRuleCheck(input);
+      const r = await runRuleCheck(input, { logger: fileLogger });
+      fileLogger.event('step.end', {
+        step_id: `rule-check-${stepKey}`,
+        decision: r.decision,
+        stats: r.stats,
+        rules_evaluated: r.audit.rules_evaluated,
+      });
       logger.info(
         `[${AGENT_NAME}] jr=${jrid} decision=${r.decision} ` +
           `stats=pass:${r.stats.pass}/fail:${r.stats.fail}/pending:${r.stats.pending}/info:${r.stats.insufficient_info} ` +
@@ -302,6 +362,17 @@ export async function ruleCheckAgentHandler({
             rules_total_in_ontology: result.audit.rules_evaluated ?? 0,
             rule_source: result.audit.rule_source ?? 'unknown',
             partial_resume_fields: '[]',
+            // 2026-05-20: persist prompts + raw LLM response so the
+            // /rule-check Audit detail UI (User Prompt / LLM Response /
+            // Rule Flags tabs) has data. Slice to 200k to avoid blowing
+            // SQLite TEXT column on extreme cases.
+            user_prompt: result.audit.user_prompt
+              ? result.audit.user_prompt.slice(0, 200_000)
+              : null,
+            system_prompt: result.audit.system_prompt ?? null,
+            llm_raw_text: result.audit.llm_raw_text
+              ? result.audit.llm_raw_text.slice(0, 200_000)
+              : null,
             parsed_resume_json: parsedData
               ? JSON.stringify(parsedData).slice(0, 200_000)
               : null,
@@ -326,10 +397,12 @@ export async function ruleCheckAgentHandler({
     //   Soft-fail: write errors don't block emit downstream.
     await step.run(`write-cmr-${stepKey}`, async () => {
       const cmrId = `cmr_${candidateId || 'unknown'}_${jrid}`;
-      // Only true violations (decision='FAIL') get 未通过. REVIEW (rules
-      // explicitly need HSM judgment) folds to 通过 with a note in reason —
-      // the workflow continues, human reviews via /rule-check UI.
-      const ruleCheckResult = result.decision === 'FAIL' ? '未通过' : '通过';
+      const ruleCheckResult: '通过' | '未通过' | '待人工复核' =
+        result.decision === 'FAIL'
+          ? '未通过'
+          : result.decision === 'REVIEW'
+            ? '待人工复核'
+            : '通过';
       const ruleCheckReason =
         result.decision === 'FAIL'
           ? result.explanations
@@ -338,31 +411,28 @@ export async function ruleCheckAgentHandler({
               .join(' | ')
               .slice(0, 1000)
           : result.decision === 'REVIEW'
-            ? '待人工复核:' + result.explanations
+            ? result.explanations
                 .filter((e) => e.status === 'pending')
                 .map((e) => `[${e.rule_id}] ${e.rule_name}`)
                 .join(', ')
                 .slice(0, 1000)
             : '';
-      try {
-        await writeInstance('Candidate_Match_Result', {
-          candidate_match_result_id: cmrId,
-          client_id: clientId || '',
-          candidate_id: candidateId || '',
-          job_position_id: jrid,
-          rule_check_result: ruleCheckResult,
-          rule_check_reason: ruleCheckReason,
-        });
+      const r = await writeCandidateMatchResultInstance({
+        candidate_match_result_id: cmrId,
+        client_id: clientId,
+        candidate_id: candidateId || '',
+        job_requisition_id: jrid,
+        rule_check_result: ruleCheckResult,
+        rule_check_reason: ruleCheckReason,
+      });
+      if (r.ok) {
         logger.info(
-          `[${AGENT_NAME}] ✓ wrote Candidate_Match_Result ${cmrId} rule_check_result=${ruleCheckResult}`,
+          `[${AGENT_NAME}] ✓ allmeta wrote Candidate_Match_Result ${cmrId} rule_check_result=${ruleCheckResult}`,
         );
-        return { ok: true, cmrId };
-      } catch (e) {
-        const msg =
-          e instanceof AllmetaApiError ? `${e.status} ${e.message}` : (e as Error).message;
-        logger.warn(`[${AGENT_NAME}] write-cmr failed jr=${jrid}: ${msg.slice(0, 240)}`);
-        return { ok: false, error: msg.slice(0, 240) };
+      } else {
+        logger.warn(`[${AGENT_NAME}] allmeta CMR write failed jr=${jrid}: ${r.error}`);
       }
+      return r;
     });
 
     // Policy 2026-05-20: 信息缺失放行,只有违反才 FAIL。
@@ -370,12 +440,25 @@ export async function ruleCheckAgentHandler({
     // 案例通过 /rule-check UI + Candidate_Match_Result.rule_check_reason
     // 给到 HSM 复核。
     if (result.decision !== 'FAIL') {
+      // PASS(无违规)→ rule_check_result='通过'
+      // REVIEW(规则要求 HSM 人工复核)→ rule_check_result='待人工复核',原因写明
+      const isReview = result.decision === 'REVIEW';
+      const reviewReason = isReview
+        ? '待人工复核:' +
+          result.explanations
+            .filter((e) => e.status === 'pending')
+            .map((e) => `[${e.rule_id}] ${e.rule_name}`)
+            .join(', ')
+            .slice(0, 1000)
+        : '';
       const payload: MatchRuleCheckPassedData = {
-        upload_id: uploadId ?? null,
         candidate_id: candidateId ?? null,
         resume_id: resumeId || null,
         job_requisition_id: jrid,
         client_id: clientId,
+        rule_check_result: isReview ? '待人工复核' : '通过',
+        rule_check_reason: reviewReason,
+        upload_id: uploadId ?? null,
         employee_id: employeeId,
         audit,
         job_requisition: req as unknown as Record<string, unknown>,
@@ -389,40 +472,48 @@ export async function ruleCheckAgentHandler({
       logger.info(`[${AGENT_NAME}] ✓ emitted MATCH_RULE_CHECK_PASSED for JR=${jrid}`);
       passed += 1;
     } else {
-      const failedPayload: MatchEventData = {
-        job_requisition_id: jrid,
+      const failedRules = result.explanations
+        .filter((e) => e.status === 'fail')
+        .map((e) => ({
+          rule_id: e.rule_id,
+          rule_name: e.rule_name,
+          step_id: e.step_id,
+          severity: undefined,
+          reason: e.reason,
+        }));
+      const failureReason = failedRules
+        .map((r) => `[${r.rule_id}] ${r.rule_name}: ${r.reason ?? ''}`)
+        .join(' | ')
+        .slice(0, 1000);
+      const failedPayload: MatchRuleCheckFailedData = {
         candidate_id: candidateId || null,
-        matching_score: null,
+        resume_id: resumeId || null,
+        job_requisition_id: jrid,
+        client_id: clientId,
+        rule_check_result: '未通过',
+        rule_check_reason: failureReason,
+        failed_rules: failedRules,
         upload_id: uploadId || null,
+        matching_score: null,
         success: false,
-        data: {
-          rule_check_decision: result.decision,
-          failed_rules: result.explanations.map((e) => ({
-            rule_id: e.rule_id,
-            rule_name: e.rule_name,
-            step_id: e.step_id,
-            status: e.status,
-            reason: e.reason,
-          })),
-          audit,
-        },
-        error: `rule-check-${result.decision.toLowerCase()}`,
+        data: { audit },
       };
-      // Rule-check FAIL/REVIEW → emit MATCH_RULE_CHECK_FAILED (distinct from
-      // matchResume 自身的 MATCH_FAILED 低分淘汰).  Reverted from short-lived
-      // Plan B unification (2026-05-19) per team review — keeping the
-      // separate event preserves semantic distinction in audits and lets
-      // partner dispatchers route differently if they choose.
       await step.sendEvent(`emit-failed-${stepKey}`, {
         name: 'MATCH_RULE_CHECK_FAILED',
         data: failedPayload,
       });
       logger.info(
-        `[${AGENT_NAME}] ✗ emitted MATCH_RULE_CHECK_FAILED for JR=${jrid} (${result.decision})`,
+        `[${AGENT_NAME}] ✗ emitted MATCH_RULE_CHECK_FAILED for JR=${jrid} (${result.decision}) — ${failedRules.length} failed rule(s)`,
       );
       failed += 1;
     }
   }
+
+  fileLogger.event('handler.done', {
+    requested_count: requirements.length,
+    passed,
+    failed,
+  });
 
   return {
     ok: true,
@@ -433,12 +524,13 @@ export async function ruleCheckAgentHandler({
     passed,
     failed,
   };
+  }); // runWithLogger
 }
 
 export const ruleCheckAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Rule Check Agent (workflow node 10-1)',
+    name: 'Rule Check Agent',
     retries: 1,
     triggers: [{ event: 'RESUME_PROCESSED' }],
   },

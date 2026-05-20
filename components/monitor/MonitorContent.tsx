@@ -3,7 +3,7 @@ import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
-import { INNGEST_REAL_SHORTS } from "@/lib/agent-mapping";
+import { AGENT_MAP, deploymentKind, displayName as agentDisplayName } from "@/lib/agent-mapping";
 import { WSID_TO_INNGEST_SLUG } from "@/lib/api/inngest-live-overlay";
 import {
   RunDetailExpansion,
@@ -33,7 +33,12 @@ import {
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-const REAL_AGENT_SHORTS = Array.from(INNGEST_REAL_SHORTS);
+// All agents with a registered Inngest function (real + shell). Listed in
+// workflow stage order so the monitor filter mirrors the pipeline.
+const DEPLOYED_AGENT_SHORTS: string[] = AGENT_MAP
+  .filter((a) => deploymentKind(a.short) !== "unbuilt")
+  .map((a) => a.short);
+const REAL_AGENT_SHORTS = DEPLOYED_AGENT_SHORTS;
 
 type StatusFilter = "all" | RunStatus;
 type WindowId = "1h" | "24h" | "7d";
@@ -231,13 +236,14 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
     <>
       <div
         className="grid gap-4 text-ink-3 border-b border-line"
-        style={{ gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 18px", padding: "8px 12px", fontSize: 11.5 }}
+        style={{ gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5 }}
       >
         <span>智能体</span>
         <span>触发事件</span>
         <span>状态</span>
         <span style={{ textAlign: "right" }}>开始</span>
         <span style={{ textAlign: "right" }}>耗时</span>
+        <span style={{ textAlign: "center" }}>重新触发</span>
         <span />
       </div>
       {runs.map((r) => {
@@ -245,33 +251,43 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
         const agentShort = slugToShort(r.function?.slug);
         return (
           <div key={r.id} className="border-b border-line">
-            <button
-              onClick={() => toggle(r)}
-              className="w-full grid items-center gap-4 hover:bg-panel transition-colors text-left cursor-pointer"
-              style={{ padding: "12px 12px", gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 18px" }}
+            <div
+              className="w-full grid items-center gap-4 hover:bg-panel transition-colors"
+              style={{ padding: "12px 12px", gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px" }}
             >
-              <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }}>
-                {agentShort ?? r.function?.slug ?? "—"}
-              </span>
-              <span className="text-ink-3 truncate" style={{ fontSize: 12 }}>
-                {r.eventName ?? "—"}
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="rounded-full inline-block" style={{ width: 7, height: 7, background: statusDotColor(r.status) }} />
-                <span style={{ fontSize: 12.5, color: r.status === "Failed" ? "var(--c-err)" : "var(--c-ink-1)" }}>
-                  {STATUS_ZH[r.status]}
+              <button
+                onClick={() => toggle(r)}
+                className="contents text-left cursor-pointer bg-transparent border-0"
+              >
+                <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }} title={agentShort ?? undefined}>
+                  {agentShort ? agentDisplayName(agentShort) : r.function?.slug ?? "—"}
                 </span>
-              </span>
-              <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
-                {relTime(r.startedAt)}
-              </span>
-              <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
-                {r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : "—"}
-              </span>
-              <span className="text-ink-4 flex justify-center" style={{ fontSize: 11 }}>
+                <span className="text-ink-3 truncate" style={{ fontSize: 12 }}>
+                  {r.eventName ?? "—"}
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="rounded-full inline-block" style={{ width: 7, height: 7, background: statusDotColor(r.status) }} />
+                  <span style={{ fontSize: 12.5, color: r.status === "Failed" ? "var(--c-err)" : "var(--c-ink-1)" }}>
+                    {STATUS_ZH[r.status]}
+                  </span>
+                </span>
+                <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
+                  {relTime(r.startedAt)}
+                </span>
+                <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
+                  {r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : "—"}
+                </span>
+              </button>
+              <ReplayRunButton run={r} />
+              <button
+                onClick={() => toggle(r)}
+                className="text-ink-4 flex justify-center bg-transparent border-0 cursor-pointer"
+                style={{ fontSize: 11 }}
+                aria-label="toggle details"
+              >
                 <Ic.chev style={{ width: 10, height: 10, transition: "transform 0.15s", transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }} />
-              </span>
-            </button>
+              </button>
+            </div>
             {expanded && (
               <RunDetailExpansion
                 run={r}
@@ -284,6 +300,49 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
         );
       })}
     </>
+  );
+}
+
+// ── Replay button (per-row, calls /api/inngest-admin/replay) ─────
+function ReplayRunButton({ run }: { run: RunRow }) {
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState<string | null>(null);
+
+  async function handle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!run.eventId) {
+      setMsg('无 eventId');
+      setTimeout(() => setMsg(null), 2000);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/inngest-admin/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: run.eventId }),
+      });
+      const b = await r.json();
+      setMsg(b.ok ? '✓ 已触发' : `✗ ${b.message ?? b.error ?? 'failed'}`);
+    } catch (err) {
+      setMsg(`✗ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMsg(null), 2500);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handle}
+      disabled={busy || !run.eventId}
+      title={run.eventId ? `重新触发(replay 原事件 ${run.eventId})` : '无 eventId,无法重跑'}
+      className="text-[11px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium whitespace-nowrap"
+      style={{ justifySelf: "center" }}
+    >
+      {busy ? '…' : msg ?? '↺ 重跑'}
+    </button>
   );
 }
 
@@ -390,8 +449,9 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
             background: value === short ? "var(--c-panel)" : "transparent",
             fontWeight: value === short ? 500 : 400,
           }}
+          title={short}
         >
-          {short}
+          {agentDisplayName(short)}
         </button>
       ))}
     </div>

@@ -35,6 +35,7 @@ export async function GET(_req: Request): Promise<Response> {
       short: a.short,
       wsId: a.wsId,
       displayName: displayKey(a.short),
+      inngestName: a.inngestName ?? a.short,
       stage: a.stage,
       kind: a.kind,
       ownerTeam: a.ownerTeam,

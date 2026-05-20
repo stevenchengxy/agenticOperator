@@ -159,8 +159,13 @@ function parseFilteredOut(v: string | null): RuleCheckAuditDetail['filtered_out_
 }
 
 /**
- * 从 llm_raw_text 抠 rule_flags[] —— audit row 漏写时(早期 writer 过滤掉
- * applicable=false)用来还原完整 27 条。LLM raw 始终是全的,DB 才是被裁的。
+ * 从 llm_raw_text 抠 rule 结果 —— audit row 漏写时(早期 writer 过滤掉
+ * applicable=false)用来还原完整规则评估。LLM raw 始终是全的,DB 才是被裁的。
+ *
+ * 兼容两种 LLM 输出形状:
+ *   - 新版(rule-check runner.ts): `rule_results: [{rule_id, status, reason?}]`
+ *     status: pass | fail | insufficient_info | not_triggered
+ *   - 老版(早期 rule_flags shape): `rule_flags: [{rule_id, severity, applicable, result, evidence, next_action}]`
  */
 type RawFlag = {
   rule_id: string;
@@ -172,6 +177,23 @@ type RawFlag = {
   next_action?: string;
 };
 
+/** Map LLM rule_results.status → RuleCheckFlag.result (legacy uppercase). */
+function statusToResult(status: string): string {
+  const s = status.toLowerCase();
+  if (s === 'pass') return 'PASS';
+  if (s === 'fail') return 'FAIL';
+  if (s === 'insufficient_info') return 'INSUFFICIENT_INFO';
+  if (s === 'not_triggered') return 'NOT_TRIGGERED';
+  if (s === 'review' || s === 'pending') return 'REVIEW';
+  return status.toUpperCase();
+}
+
+function statusToApplicable(status: string): boolean {
+  const s = status.toLowerCase();
+  // 只有 not_triggered 算"规则不适用此场景";其他(pass/fail/insufficient_info)都是 applicable
+  return s !== 'not_triggered';
+}
+
 function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag> {
   const out = new Map<string, RawFlag>();
   if (!llmRawText || !llmRawText.trim()) return out;
@@ -182,13 +204,37 @@ function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag
     return out;
   }
   if (!parsed || typeof parsed !== 'object') return out;
+
+  // 新版: rule_results
+  const ruleResults = (parsed as { rule_results?: unknown }).rule_results;
+  if (Array.isArray(ruleResults)) {
+    for (const r of ruleResults) {
+      if (!r || typeof r !== 'object') continue;
+      const o = r as { rule_id?: unknown; status?: unknown; reason?: unknown; rule_name?: unknown };
+      if (typeof o.rule_id !== 'string' || !o.rule_id) continue;
+      const status = typeof o.status === 'string' ? o.status : 'not_triggered';
+      out.set(o.rule_id, {
+        rule_id: o.rule_id,
+        rule_name: typeof o.rule_name === 'string' ? o.rule_name : undefined,
+        severity: 'flag_only',
+        applicable: statusToApplicable(status),
+        result: statusToResult(status),
+        evidence: typeof o.reason === 'string' ? o.reason : '',
+        next_action: '',
+      });
+    }
+    if (out.size > 0) return out;
+  }
+
+  // 老版(legacy): rule_flags
   const flags = (parsed as { rule_flags?: unknown }).rule_flags;
-  if (!Array.isArray(flags)) return out;
-  for (const f of flags) {
-    if (!f || typeof f !== 'object') continue;
-    const r = f as RawFlag;
-    if (typeof r.rule_id !== 'string' || !r.rule_id) continue;
-    out.set(r.rule_id, r);
+  if (Array.isArray(flags)) {
+    for (const f of flags) {
+      if (!f || typeof f !== 'object') continue;
+      const r = f as RawFlag;
+      if (typeof r.rule_id !== 'string' || !r.rule_id) continue;
+      out.set(r.rule_id, r);
+    }
   }
   return out;
 }

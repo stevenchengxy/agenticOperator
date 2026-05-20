@@ -120,6 +120,7 @@ export function extractErrorMessage(output: unknown): string | null {
 export function failedStepName(detail: RunDetail | null): string | null {
   if (!detail?.steps) return null;
   for (const s of detail.steps) {
+    if (!s.states?.length) continue;
     const lastState = s.states[s.states.length - 1];
     if (lastState?.type === "StepFailed" || lastState?.type === "StepErrored") {
       return s.stepName;
@@ -191,7 +192,7 @@ export function buildTimeline(detail: RunDetail, runStartedAt: string | null, ru
   }
 
   const sorted = [...detail.steps]
-    .filter((s) => s.stepName && s.stepName !== "step" && s.states.length > 0)
+    .filter((s) => s.stepName && s.stepName !== "step" && s.states?.length > 0)
     .map((s) => {
       const first = s.states[0];
       const last = s.states[s.states.length - 1];
@@ -392,6 +393,10 @@ export function RunDetailBody({
           json={detail.event.payload}
         />
       )}
+
+      {/* 数据写入摘要 — Postgres step trace + Neo4j 实时反查 */}
+      <DataWritesSummary runId={run.id} stepOutputs={detail.stepOutputs ?? []} />
+
 
       {/* per-step outputs — one expandable row per step.run / step.sendEvent.
           Mirrors what Inngest dev UI shows when you click a span. */}
@@ -612,6 +617,470 @@ export function MetaCell({ label, value }: { label: string; value: React.ReactNo
       <span className="text-ink-4">{label}</span>{" "}
       <span className="text-ink-2">{value}</span>
     </span>
+  );
+}
+
+// ── 数据写入摘要 ──
+//
+// 按 step name 模式把写入操作分类成 Postgres / Neo4j 两组,显眼地展示
+// 写了哪些实体 + 主键 ID + 成功/失败状态。展开后看完整 input + output。
+
+type DataWriteEntry = {
+  step: RunStepOutput;
+  target: "Postgres" | "Neo4j";
+  entityLabel: string;     // Job_Posting / Candidate / Resume / Application / Candidate_Match_Result
+  primaryKey: string | null;
+  ok: boolean;
+  detail: string;          // 简短说明(如 "synced=true / created=true / 4xx 错误信息")
+};
+
+function classifyWriteStep(step: RunStepOutput): DataWriteEntry | null {
+  const name = step.name;
+  let target: "Postgres" | "Neo4j" | null = null;
+  let entityLabel = "";
+
+  // Postgres writes
+  if (name.startsWith("sync-jd-")) {
+    target = "Postgres";
+    entityLabel = "Job_Posting + Job_Requisition + spec.status";
+  } else if (name === "save-candidate") {
+    target = "Postgres";
+    entityLabel = "Candidate + Resume + Application";
+  } else if (name.startsWith("save-match-")) {
+    target = "Postgres";
+    entityLabel = "Candidate_Match_Result + runtime_state";
+  }
+  // Neo4j writes (via allmeta)
+  else if (name.startsWith("write-jobposting-neo4j-")) {
+    target = "Neo4j";
+    entityLabel = "Job_Posting";
+  } else if (name.startsWith("write-candidate-neo4j-")) {
+    target = "Neo4j";
+    entityLabel = "Candidate";
+  } else if (name.startsWith("write-resume-neo4j-")) {
+    target = "Neo4j";
+    entityLabel = "Resume";
+  } else if (name.startsWith("write-application-neo4j-")) {
+    target = "Neo4j";
+    entityLabel = "Application";
+  } else if (name.startsWith("write-cmr-neo4j-") || name.startsWith("write-cmr-")) {
+    target = "Neo4j";
+    entityLabel = "Candidate_Match_Result";
+  }
+  // RuleCheckAudit (AO SQLite)
+  else if (name.startsWith("write-audit-")) {
+    target = "Postgres";
+    entityLabel = "RuleCheckAudit (AO SQLite)";
+  } else {
+    return null;
+  }
+
+  // Parse step output to extract pk + ok status
+  let parsed: Record<string, unknown> | null = null;
+  if (step.output) {
+    try {
+      parsed = JSON.parse(step.output) as Record<string, unknown>;
+    } catch {
+      parsed = null;
+    }
+  }
+  const stepOk = step.status === "COMPLETED" || step.status === "Completed";
+  let okFromBody = stepOk;
+  if (parsed && typeof parsed.ok === "boolean") okFromBody = parsed.ok;
+
+  // Extract pk from output. partner-pg returns specific id fields; allmeta returns `instance.upserted[]`.
+  let primaryKey: string | null = null;
+  let detail = "";
+  if (parsed) {
+    const cmrId =
+      (parsed.candidate_match_result_id as string | undefined) ?? null;
+    const jpId = (parsed.job_posting_id as string | undefined) ?? null;
+    const candId = (parsed.candidate_id as string | undefined) ?? null;
+    const resId = (parsed.resume_id as string | undefined) ?? null;
+    const appId = (parsed.application_id as string | undefined) ?? null;
+    const auditId = (parsed.auditId as string | undefined) ?? null;
+    primaryKey =
+      cmrId ?? jpId ?? candId ?? resId ?? appId ?? auditId ?? null;
+    // For allmeta safeWriteInstance result: {ok, instance: {upserted: [pk], ...}} or {ok:false, error}
+    if (!primaryKey && parsed.instance && typeof parsed.instance === "object") {
+      const inst = parsed.instance as Record<string, unknown>;
+      const ups = inst.upserted;
+      if (Array.isArray(ups) && ups.length > 0 && typeof ups[0] === "string") {
+        primaryKey = ups[0] as string;
+      }
+    }
+    if (typeof parsed.error === "string" && parsed.error) {
+      detail = parsed.error.slice(0, 160);
+    } else if (parsed.synced != null) {
+      detail = `synced=${parsed.synced}` + (parsed.reason ? ` · ${parsed.reason}` : "");
+    } else if (parsed.created != null) {
+      detail = `created=${parsed.created}`;
+    } else if (parsed.candidate_created != null) {
+      detail = `candidate_created=${parsed.candidate_created} · resume_created=${parsed.resume_created ?? "?"}`;
+    } else if (parsed.ok != null) {
+      detail = okFromBody ? "ok" : "failed";
+    }
+  }
+
+  return {
+    step,
+    target,
+    entityLabel,
+    primaryKey,
+    ok: okFromBody,
+    detail,
+  };
+}
+
+// ── Neo4j 实时反查 ──
+//
+// Inngest dev server V2 trace 不一定把所有 step.run 都暴露在 childrenSpans,
+// 导致 step-based 分类漏写。这里 useEffect 直接 fetch
+// /api/monitor/run-neo4j-instances?runId=… 拿 allmeta 真实存在性,而非靠 trace。
+
+type Neo4jProbeResult = {
+  label: string;
+  pk: string;
+  source: 'event-input' | 'run-output';
+  exists: boolean;
+  error?: string;
+};
+
+function DataWritesSummary({
+  runId,
+  stepOutputs,
+}: {
+  runId: string;
+  stepOutputs: RunStepOutput[];
+}) {
+  const writes = React.useMemo(() => {
+    const out: DataWriteEntry[] = [];
+    for (const s of stepOutputs) {
+      const e = classifyWriteStep(s);
+      if (e) out.push(e);
+    }
+    return out;
+  }, [stepOutputs]);
+
+  // Live probe(绕开 Inngest trace 限制)— 一次 fetch 拿 Postgres + Neo4j 两边
+  const [live, setLive] = React.useState<{
+    loading: boolean;
+    neoEntities: Neo4jProbeResult[];
+    pgEntities: Neo4jProbeResult[];
+    error?: string;
+  }>({ loading: true, neoEntities: [], pgEntities: [] });
+
+  React.useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    fetch(`/api/monitor/run-neo4j-instances?runId=${encodeURIComponent(runId)}`)
+      .then((r) => r.json())
+      .then((b) => {
+        if (cancelled) return;
+        if (b.entities || b.postgres_entities) {
+          setLive({
+            loading: false,
+            neoEntities: b.entities ?? [],
+            pgEntities: b.postgres_entities ?? [],
+          });
+        } else {
+          setLive({
+            loading: false,
+            neoEntities: [],
+            pgEntities: [],
+            error: b.reason ?? b.error ?? 'unknown',
+          });
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setLive({
+          loading: false,
+          neoEntities: [],
+          pgEntities: [],
+          error: (e as Error).message ?? 'fetch-failed',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  // Step-based detection kept as fallback when live probe returns nothing
+  const pgFromSteps = writes.filter((w) => w.target === "Postgres");
+  const neoFromSteps = writes.filter((w) => w.target === "Neo4j");
+  const pgLiveExists = live.pgEntities.filter((e) => e.exists);
+  const pgLiveMissing = live.pgEntities.filter((e) => !e.exists);
+  const neoLiveExists = live.neoEntities.filter((e) => e.exists);
+  const neoLiveMissing = live.neoEntities.filter((e) => !e.exists);
+
+  const hasContent =
+    writes.length > 0 ||
+    live.neoEntities.length > 0 ||
+    live.pgEntities.length > 0 ||
+    live.loading;
+  if (!hasContent) return null;
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="text-ink-3" style={{ fontSize: 11.5, letterSpacing: "0.02em" }}>
+        数据写入 · Postgres {live.loading ? "…" : pgLiveExists.length}
+        {pgLiveMissing.length > 0 && (
+          <span style={{ color: "var(--c-err)" }}> ({pgLiveMissing.length} 缺失)</span>
+        )}
+        {" · Neo4j "}
+        {live.loading ? "…" : neoLiveExists.length}
+        {neoLiveMissing.length > 0 && (
+          <span style={{ color: "var(--c-err)" }}> ({neoLiveMissing.length} 缺失)</span>
+        )}
+      </div>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <Neo4jLiveColumn
+          title="Postgres (partner DB · 实时反查)"
+          loading={live.loading}
+          error={live.error}
+          entities={live.pgEntities}
+          stepFallback={pgFromSteps}
+        />
+        <Neo4jLiveColumn
+          title="Neo4j (via allmeta · 实时反查)"
+          loading={live.loading}
+          error={live.error}
+          entities={live.neoEntities}
+          stepFallback={neoFromSteps}
+        />
+      </div>
+    </div>
+  );
+}
+
+function Neo4jLiveColumn({
+  title,
+  loading,
+  error,
+  entities,
+  stepFallback,
+}: {
+  title: string;
+  loading: boolean;
+  error?: string;
+  entities: Neo4jProbeResult[];
+  stepFallback: DataWriteEntry[];
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--c-line)",
+        borderRadius: 6,
+        background: "var(--c-surface)",
+        padding: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10.5,
+          color: "var(--c-ok)",
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          marginBottom: 6,
+        }}
+      >
+        {title}
+      </div>
+      {loading && (
+        <div className="text-ink-4" style={{ fontSize: 11 }}>
+          查询 Neo4j 中…
+        </div>
+      )}
+      {!loading && error && entities.length === 0 && (
+        <div className="text-ink-4" style={{ fontSize: 11 }}>
+          反查失败:{error}
+        </div>
+      )}
+      {!loading && entities.length === 0 && !error && stepFallback.length === 0 && (
+        <div className="text-ink-4" style={{ fontSize: 11 }}>
+          (此 agent 不写 Neo4j)
+        </div>
+      )}
+      {!loading && entities.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {entities.map((e, i) => (
+            <Neo4jProbeRow key={`${e.label}-${e.pk}-${i}`} entry={e} />
+          ))}
+        </div>
+      )}
+      {/* fallback: 如果 live 反查没数据,但 step trace 有,显示 step-based 信息 */}
+      {!loading && entities.length === 0 && stepFallback.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {stepFallback.map((w, i) => (
+            <WriteRow key={`${w.step.spanID}-${i}`} entry={w} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Neo4jProbeRow({ entry }: { entry: Neo4jProbeResult }) {
+  const statusIcon = entry.exists ? "✓" : "✗";
+  const statusColor = entry.exists ? "var(--c-ok)" : "var(--c-err)";
+  return (
+    <div
+      style={{
+        border: "1px solid var(--c-line)",
+        borderRadius: 4,
+        background: "var(--c-panel)",
+        padding: "5px 8px",
+        fontSize: 11,
+      }}
+    >
+      <div className="flex items-start gap-2">
+        <span style={{ color: statusColor, fontWeight: 600, width: 12 }}>{statusIcon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-ink-1" style={{ fontWeight: 500, fontSize: 11.5 }}>
+            :{entry.label}
+          </div>
+          <div
+            className="text-ink-3 truncate"
+            style={{ fontFamily: "var(--f-mono)", fontSize: 10.5 }}
+          >
+            pk = {entry.pk}
+          </div>
+          {entry.error && (
+            <div className="text-ink-4 truncate" style={{ fontSize: 10.5 }}>
+              {entry.error}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WriteColumn({
+  title,
+  tone,
+  writes,
+}: {
+  title: string;
+  tone: "accent" | "ok";
+  writes: DataWriteEntry[];
+}) {
+  const headerColor = tone === "accent" ? "var(--c-accent)" : "var(--c-ok)";
+  return (
+    <div
+      style={{
+        border: "1px solid var(--c-line)",
+        borderRadius: 6,
+        background: "var(--c-surface)",
+        padding: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10.5,
+          color: headerColor,
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          marginBottom: 6,
+        }}
+      >
+        {title}
+      </div>
+      {writes.length === 0 ? (
+        <div className="text-ink-4" style={{ fontSize: 11 }}>
+          (无写入)
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {writes.map((w, i) => (
+            <WriteRow key={`${w.step.spanID}-${i}`} entry={w} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WriteRow({ entry }: { entry: DataWriteEntry }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const statusIcon = entry.ok ? "✓" : "✗";
+  const statusColor = entry.ok ? "var(--c-ok)" : "var(--c-err)";
+  let outputPretty = "";
+  if (entry.step.output) {
+    try {
+      outputPretty = JSON.stringify(JSON.parse(entry.step.output), null, 2);
+    } catch {
+      outputPretty = entry.step.output;
+    }
+  }
+  return (
+    <div
+      style={{
+        border: "1px solid var(--c-line)",
+        borderRadius: 4,
+        background: "var(--c-panel)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-start gap-2 text-left hover:bg-[color:var(--c-surface)]"
+        style={{ padding: "5px 8px", fontSize: 11 }}
+      >
+        <Ic.chev
+          style={{
+            width: 9,
+            height: 9,
+            marginTop: 4,
+            transition: "transform 0.15s",
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+            color: "var(--c-ink-4)",
+          }}
+        />
+        <span style={{ color: statusColor, fontWeight: 600, width: 12 }}>{statusIcon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-ink-1" style={{ fontWeight: 500, fontSize: 11.5 }}>
+            {entry.entityLabel}
+          </div>
+          {entry.primaryKey && (
+            <div className="text-ink-3 truncate" style={{ fontFamily: "var(--f-mono)", fontSize: 10.5 }}>
+              pk = {entry.primaryKey}
+            </div>
+          )}
+          {entry.detail && (
+            <div className="text-ink-3 truncate" style={{ fontSize: 10.5 }}>
+              {entry.detail}
+            </div>
+          )}
+        </div>
+      </button>
+      {expanded && (
+        <div style={{ padding: "0 8px 8px 28px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {outputPretty ? (
+            <pre
+              className="text-ink-1 whitespace-pre-wrap break-words"
+              style={{
+                fontFamily: "var(--f-mono)", fontSize: 10.5,
+                margin: 0, padding: "6px 8px",
+                background: "var(--c-surface)",
+                border: "1px solid var(--c-line)",
+                borderRadius: 4,
+                maxHeight: 240,
+                overflow: "auto",
+                lineHeight: 1.5,
+              }}
+            >
+              {outputPretty}
+            </pre>
+          ) : (
+            <div className="text-ink-4" style={{ fontSize: 10.5 }}>(无 output)</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

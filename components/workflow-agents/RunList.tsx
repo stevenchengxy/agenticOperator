@@ -103,10 +103,10 @@ function RunRowItem({ run, onClick }: { run: RunRow; onClick: () => void }) {
         type="button"
         onClick={rerun}
         disabled={!run.eventId}
-        title={run.eventId ? `↺ 重跑(事件 ${run.eventId})` : '无 eventId,无法重跑'}
-        className="shrink-0 text-[11px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed"
+        title={run.eventId ? `重新触发(replay 原事件 ${run.eventId})` : '无 eventId,无法重跑'}
+        className="shrink-0 text-[11px] px-2.5 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium"
       >
-        ↺
+        ↺ {t('manage_action_restart')}
       </button>
     </div>
   );

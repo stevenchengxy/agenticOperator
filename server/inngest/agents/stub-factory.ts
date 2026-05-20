@@ -62,7 +62,7 @@ export function createStubAgent(meta: AgentMeta) {
   const triggers = meta.triggersEvents.map((name) => ({ event: name }));
 
   return inngest.createFunction(
-    { id: fnId, name: `${meta.short} (stub)`, triggers },
+    { id: fnId, name: meta.short, triggers },
     async ({ event, step }) => {
       if (!STUB_ENABLED) {
         return { skipped: true };

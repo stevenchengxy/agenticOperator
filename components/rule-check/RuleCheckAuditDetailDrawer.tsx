@@ -2,6 +2,7 @@
 import React from "react";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
+import { MiniMarkdown } from "@/components/shared/MiniMarkdown";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type {
@@ -34,6 +35,7 @@ export function RuleCheckAuditDetailDrawer({
   auditId: string;
   onClose: () => void;
 }) {
+  const { t } = useApp();
   const [data, setData] = React.useState<RuleCheckAuditDetailResponse | null>(
     null,
   );
@@ -101,30 +103,30 @@ export function RuleCheckAuditDetailDrawer({
           <Ic.shield />
           <div className="flex-1 min-w-0">
             <div className="text-[14px] font-semibold tracking-tight truncate">
-              Rule Check Audit
+              {t("rc_drawer_title")}
             </div>
             <div className="mono text-[11px] text-ink-3 truncate">{auditId}</div>
           </div>
           <Neo4jLinkBtn
             label="🔗 Neo4j"
-            title="复制查询并跳 Neo4j Browser"
+            title={t("rc_drawer_neo4j_title")}
             cypher={`MATCH (a:RuleCheckAudit {audit_id: "${auditId}"})\nOPTIONAL MATCH (a)-[r]->(n)\nRETURN a, r, n`}
           />
           <Btn size="sm" onClick={onClose}>
-            关闭 (Esc)
+            {t("rc_drawer_close")}
           </Btn>
         </div>
 
         {loading && !data ? (
           <div className="flex-1 flex items-center justify-center">
-            <EmptyState title="加载中…" hint="" />
+            <EmptyState title={t("rc_loading")} hint="" />
           </div>
         ) : !data ? (
           <div className="flex-1 flex items-center justify-center">
             <EmptyState
               icon={<Ic.alert />}
-              title="加载失败"
-              hint="后端无响应"
+              title={t("rc_drawer_load_failed")}
+              hint={t("rc_drawer_no_response")}
             />
           </div>
         ) : !data.ok ? (
@@ -133,8 +135,8 @@ export function RuleCheckAuditDetailDrawer({
               icon={<Ic.alert />}
               title={
                 data.reason === "not_found"
-                  ? "audit 不存在"
-                  : "读取出错"
+                  ? t("rc_drawer_audit_missing")
+                  : t("rc_rule_def_load_err")
               }
               hint={data.reason === "error" ? data.error ?? "" : ""}
               variant="info"
@@ -165,16 +167,16 @@ export function RuleCheckAuditDetailDrawer({
               style={{ padding: "0 18px", gap: 16 }}
             >
               <TabBtn active={tab === "prompt"} onClick={() => setTab("prompt")}>
-                User Prompt
+                {t("rc_tab_prompt")}
               </TabBtn>
               <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>
-                Rule Flags ({data.detail.flags.length})
+                {t("rc_tab_flags")} ({data.detail.flags.length})
               </TabBtn>
               <TabBtn active={tab === "response"} onClick={() => setTab("response")}>
-                LLM Response
+                {t("rc_tab_response")}
               </TabBtn>
               <TabBtn active={tab === "instances"} onClick={() => setTab("instances")}>
-                实例数据 (anchors)
+                {t("rc_tab_instances")}
               </TabBtn>
             </div>
             <div className="flex-1 overflow-auto" style={{ padding: "16px 18px" }}>
@@ -509,26 +511,25 @@ function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
 }
 
 function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
+  const [view, setView] = React.useState<"rendered" | "raw">("rendered");
   if (!detail.user_prompt) {
     return (
       <EmptyState
         icon={<Ic.alert />}
-        title="本条 audit 未保存 prompt"
-        hint="本条 audit 在 lib/rule-check/runner.ts 增加 user_prompt 持久化前就写入了 Neo4j。新跑的 audit 会带 prompt。"
+        title={t("rc_prompt_missing_title")}
+        hint={t("rc_prompt_missing_hint")}
         variant="info"
       />
     );
   }
   return (
     <div className="flex flex-col gap-4">
-      {/* User Prompt 之前先展示 — 哪些规则被 client/department filter 过滤掉了 + 原因 */}
+      {/* Before the prompt — surface which rules were filtered out + why */}
       <FilteredOutRulesSection detail={detail} />
       <div>
-        <div
-          className="hint flex items-center"
-          style={{ gap: 8, marginBottom: 6 }}
-        >
-          <span>System Prompt</span>
+        <div className="hint flex items-center" style={{ gap: 8, marginBottom: 6 }}>
+          <span>{t("rc_prompt_system")}</span>
           <span className="mono text-ink-3 text-[10.5px]">
             {detail.system_prompt?.length ?? 0} chars
           </span>
@@ -542,23 +543,69 @@ function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
         </pre>
       </div>
       <div>
-        <div
-          className="hint flex items-center"
-          style={{ gap: 8, marginBottom: 6 }}
-        >
-          <span>User Prompt (markdown, 喂给 LLM)</span>
+        <div className="hint flex items-center" style={{ gap: 8, marginBottom: 6 }}>
+          <span>{t("rc_prompt_user")}</span>
           <span className="mono text-ink-3 text-[10.5px]">
             {detail.user_prompt.length} chars
           </span>
+          <ViewToggle view={view} onChange={setView} t={t} />
           <CopyBtn text={detail.user_prompt} />
         </div>
-        <pre
-          className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
-          style={{ padding: "12px 14px" }}
-        >
-          {detail.user_prompt}
-        </pre>
+        {view === "rendered" ? (
+          <div
+            className="border border-line rounded-sm"
+            style={{
+              padding: "12px 16px",
+              background: "var(--c-surface)",
+              maxHeight: 700,
+              overflow: "auto",
+            }}
+          >
+            <MiniMarkdown source={detail.user_prompt} />
+          </div>
+        ) : (
+          <pre
+            className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
+            style={{ padding: "12px 14px", maxHeight: 700, overflow: "auto" }}
+          >
+            {detail.user_prompt}
+          </pre>
+        )}
       </div>
+    </div>
+  );
+}
+
+function ViewToggle({
+  view,
+  onChange,
+  t,
+}: {
+  view: "rendered" | "raw";
+  onChange: (v: "rendered" | "raw") => void;
+  t: (k: string) => string;
+}) {
+  return (
+    <div
+      className="inline-flex border border-line rounded-sm overflow-hidden"
+      style={{ marginLeft: 4 }}
+    >
+      {(["rendered", "raw"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          className="mono text-[10.5px] cursor-pointer"
+          style={{
+            padding: "2px 8px",
+            background: view === v ? "var(--c-ink-1)" : "var(--c-surface)",
+            color: view === v ? "var(--c-bg)" : "var(--c-ink-2)",
+            border: 0,
+            borderRight: v === "rendered" ? "1px solid var(--c-line)" : 0,
+          }}
+        >
+          {v === "rendered" ? t("rc_prompt_view_rendered") : t("rc_prompt_view_raw")}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1549,12 +1596,13 @@ function CopyBtn({ text }: { text: string }) {
  * 由 React key 重建组件,自然清缓存。
  */
 function RuleDefinitionPanel({ ruleId }: { ruleId: string }) {
+  const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   const [data, setData] = React.useState<OntologyRuleResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
-  // 懒加载:第一次展开才 fetch,后续 toggle 用 cache。
+  // Lazy load: fetch on first expand, cache thereafter.
   React.useEffect(() => {
     if (!open || data || loading) return;
     setLoading(true);
@@ -1563,9 +1611,9 @@ function RuleDefinitionPanel({ ruleId }: { ruleId: string }) {
       `/api/ontology/rules/${encodeURIComponent(ruleId)}`,
     )
       .then(setData)
-      .catch((e) => setErr((e as Error)?.message || "加载失败"))
+      .catch((e) => setErr((e as Error)?.message || t("rc_rule_def_load_failed")))
       .finally(() => setLoading(false));
-  }, [open, ruleId, data, loading]);
+  }, [open, ruleId, data, loading, t]);
 
   return (
     <div
@@ -1579,23 +1627,23 @@ function RuleDefinitionPanel({ ruleId }: { ruleId: string }) {
         style={{ padding: "8px 14px", background: "transparent", border: 0 }}
       >
         <span className="hint">
-          {open ? "▾" : "▸"} 查看原规则定义(Allmeta Ontology API)
+          {open ? "▾" : "▸"} {t("rc_rule_def_view")}
         </span>
         <span className="mono text-[10.5px] text-ink-3">
-          {open ? "收起" : "展开"}
+          {open ? t("rc_rule_def_collapse") : t("rc_rule_def_expand")}
         </span>
       </button>
       {open ? (
         <div style={{ padding: "0 14px 12px" }}>
           {loading ? (
-            <div className="mono text-[11px] text-ink-3">加载中…</div>
+            <div className="mono text-[11px] text-ink-3">{t("rc_rule_def_loading")}</div>
           ) : err ? (
-            <div className="mono text-[11px] text-err">加载失败:{err}</div>
+            <div className="mono text-[11px] text-err">{t("rc_rule_def_load_failed")}: {err}</div>
           ) : !data ? null : !data.ok ? (
             <div className="mono text-[11px] text-warn">
               {data.reason === "not_found"
-                ? `ontology 里找不到 rule_id="${ruleId}" (数据漂移?)`
-                : `读取出错:${data.error ?? "(无 message)"}`}
+                ? `${t("rc_rule_def_not_found")}: "${ruleId}" ${t("rc_rule_def_drift")}`
+                : `${t("rc_rule_def_load_err")}: ${data.error ?? "(no message)"}`}
             </div>
           ) : (
             <RuleDefinitionBody rule={data.rule} source={data.source} />

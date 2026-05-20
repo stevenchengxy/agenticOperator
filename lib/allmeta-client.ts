@@ -3,9 +3,20 @@
 // Single entry for AO to write/read instance data through Allmeta studio (:3500).
 // Allmeta is the only path to Neo4j instance data (per ADR-0011 + alignment doc §1).
 
+import { currentLogger } from '@/lib/agent-logger';
+
 const DEFAULT_BASE_URL = process.env.ALLMETA_BASE_URL ?? 'http://localhost:3500';
 const DEFAULT_DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
 const API_KEY = process.env.ALLMETA_API_KEY ?? '';
+
+// Label = first 2 URL segments, e.g. "allmeta.POST /api/v1/ontology/instances".
+function callLabel(method: string, path: string): string {
+  const trimmed = path.split('?')[0];
+  const segs = trimmed.split('/').filter(Boolean);
+  // /api/v1/ontology/{resource}/{id?} — group by /{resource}, drop {id}
+  const groupedPath = segs.slice(0, 4).join('/');
+  return `allmeta.${method} /${groupedPath}`;
+}
 
 export type AllmetaError = {
   status: number;
@@ -50,6 +61,10 @@ async function doRequest<T>(
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (API_KEY) headers['Authorization'] = `Bearer ${API_KEY}`;
 
+  const logger = currentLogger();
+  const label = callLabel(method, path);
+  const start = Date.now();
+
   let res: Response;
   try {
     res = await fetch(url, {
@@ -58,6 +73,17 @@ async function doRequest<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
+  } catch (err) {
+    // Network / abort error — nothing to parse, but still emit a log line so
+    // the agent file shows "we tried, it never connected".
+    logger?.apiCall(label, {
+      url,
+      method,
+      request: body,
+      durationMs: Date.now() - start,
+      error: (err as Error).message,
+    });
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -69,6 +95,16 @@ async function doRequest<T>(
   } catch {
     parsed = rawText;
   }
+
+  logger?.apiCall(label, {
+    url,
+    method,
+    request: body,
+    status: res.status,
+    durationMs: Date.now() - start,
+    response: parsed,
+    ...(res.ok ? {} : { error: `HTTP ${res.status}` }),
+  });
 
   if (!res.ok) {
     const errObj = (parsed as Record<string, unknown>) ?? {};

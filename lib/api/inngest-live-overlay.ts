@@ -15,13 +15,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AGENT_MAP, isShell } from '@/lib/agent-mapping';
 
+// Real production agents — explicit slug mapping (matches the actual
+// Inngest function IDs declared in server/inngest/agents/*.ts).
 export const WSID_TO_INNGEST_SLUG: Record<string, string> = {
   '4': 'agentic-operator-main-create-jd-agent',
   '9-1': 'agentic-operator-main-resume-parser-agent',
   '10': 'agentic-operator-main-match-resume-agent',
   '10-5': 'agentic-operator-main-rule-check-agent',
 };
+
+// Empty-shell agents — slug derived from stub-factory:
+//   fnId = `agent.${short.toLowerCase()}`
+//   → slug = `agentic-operator-main-agent.${short.toLowerCase()}` (dot preserved by Inngest)
+for (const a of AGENT_MAP) {
+  if (!isShell(a.short)) continue;
+  if (WSID_TO_INNGEST_SLUG[a.wsId]) continue;
+  WSID_TO_INNGEST_SLUG[a.wsId] = `agentic-operator-main-agent.${a.short.toLowerCase()}`;
+}
 
 export const INNGEST_SLUG_TO_WSID: Record<string, string> = Object.fromEntries(
   Object.entries(WSID_TO_INNGEST_SLUG).map(([k, v]) => [v, k]),

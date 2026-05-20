@@ -20,15 +20,26 @@
 
 import { createHash } from 'node:crypto';
 import { NonRetriableError } from 'inngest';
+import { getResumeBuffer, statResume } from '@/lib/minio';
 import {
-  downloadResumeRaw,
-  saveCandidate,
-  RaasApiError,
-  type RaasParseResumeData,
+  saveCandidateToPartnerPg,
+  markResumeUploadFailed,
   type SaveCandidateInput,
-} from '@/lib/raas-api-client';
+} from '@/lib/partner-pg/candidates';
+import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
+import {
+  writeCandidateInstance,
+  writeResumeInstance,
+} from '@/lib/allmeta-writers';
 import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
+import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
+
+// Local alias mirroring the RoboHire parse-resume `data` shape that we
+// historically imported from raas-api-client.ts. After the 2026-05-20
+// direct-write migration we use partner-pg + direct RoboHire, so this is
+// just a structural alias.
+type RaasParseResumeData = Record<string, unknown> & { name?: string | null };
 
 export const resumeParserAgent = inngest.createFunction(
   {
@@ -37,13 +48,38 @@ export const resumeParserAgent = inngest.createFunction(
     retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
     triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
-  async ({ event, step, logger }) => {
+  async ({ event, step, logger, runId }) => {
     // RESUME_DOWNLOADED 兼容两种 shape:
     //   A) RAAS canonical envelope —
     //      { entity_id, entity_type, event_id, payload: { ... }, trace }
     //   B) Flat (legacy / publish-test) —
     //      { upload_id, bucket, object_key, parsed, ... }
     const raw = unwrapDownloadedEnvelope(event.data);
+    const fileLogger = createAgentLogger({
+      agent: 'resumeParser',
+      runId: runId ?? `local-${Date.now()}`,
+      traceId: getTraceId(event.data) ?? null,
+      anchors: {
+        upload_id: typeof raw.upload_id === 'string' ? raw.upload_id : undefined,
+        bucket: typeof raw.bucket === 'string' ? raw.bucket : undefined,
+        object_key: typeof raw.object_key === 'string' ? raw.object_key : undefined,
+      },
+    });
+    return runWithLogger(fileLogger, async () => {
+    fileLogger.event('handler.start', {
+      event_name: event.name,
+      upload_id: raw.upload_id ?? raw.uploadId,
+      bucket: raw.bucket,
+      object_key: raw.object_key ?? raw.objectKey,
+      filename: raw.filename,
+      employee_id: raw.employee_id ?? raw.employeeId ?? raw.operator_employee_id ?? null,
+      client_id: raw.client_id ?? null,
+      job_requisition_id: raw.job_requisition_id ?? null,
+      sourcing_channel_id: raw.sourcing_channel_id ?? raw.sourcingChannelId ?? null,
+      hr_folder: raw.hr_folder ?? raw.hrFolder ?? null,
+      // Echo the raw event keys so missing fields are diagnosable from logs alone.
+      _raw_keys: Object.keys(raw).sort(),
+    });
 
     // ── 提取 anchor 字段 ──
     const upload_id = raw.upload_id ?? raw.uploadId;
@@ -57,6 +93,16 @@ export const resumeParserAgent = inngest.createFunction(
     const job_requisition_id = raw.job_requisition_id ?? null;
     const mime_type = raw.mime_type ?? raw.contentType ?? 'application/pdf';
     const file_size = raw.size ?? raw.file_size ?? null;
+    // RAAS publishes sourcing_channel_id on RESUME_DOWNLOADED — pass it through
+    // to partner Postgres so candidate.sourcing_channel_id reflects which
+    // channel (BOSS直聘 / 猎聘 / LinkedIn / 人才库-AI / …) sourced the resume.
+    // Accept both snake- and camelCase variants for forward compat.
+    const sourcing_channel_id =
+      typeof raw.sourcing_channel_id === 'string' && raw.sourcing_channel_id.trim()
+        ? raw.sourcing_channel_id.trim()
+        : typeof raw.sourcingChannelId === 'string' && raw.sourcingChannelId.trim()
+          ? raw.sourcingChannelId.trim()
+          : null;
     const traceId = getTraceId(event.data);
 
     if (!upload_id) {
@@ -66,7 +112,12 @@ export const resumeParserAgent = inngest.createFunction(
     }
     if (!bucket || !object_key) {
       throw new NonRetriableError(
-        `RESUME_DOWNLOADED missing bucket/object_key — RAAS 端 saveCandidate 需要这两个字段做 Resume 去重`,
+        `RESUME_DOWNLOADED missing bucket/object_key — partner-pg saveCandidate 需要这两个字段做 Resume 去重`,
+      );
+    }
+    if (!isPartnerPgConfigured()) {
+      throw new NonRetriableError(
+        `[resume-persist] RAAS_POSTGRES_URL env 未配置`,
       );
     }
 
@@ -95,27 +146,35 @@ export const resumeParserAgent = inngest.createFunction(
       // v7 §4.8 标准路径: 自己拉 PDF 字节 + 自己 parse.
       const stepKey = sanitize(String(upload_id));
       const downloadAndParse = await step.run(`download-and-parse-${stepKey}`, async () => {
-        // 1) GET /api/v1/resumes/uploads/:upload_id/raw
-        let downloaded;
+        // 1) 直连 MinIO 下载 PDF 字节 (2026-05-20: 不再走 RAAS proxy)
+        let pdfBuffer: Buffer;
+        let minioContentType: string | null = null;
         try {
-          downloaded = await downloadResumeRaw(String(upload_id), { traceId });
+          pdfBuffer = await getResumeBuffer(String(bucket), String(object_key));
+          try {
+            const stat = await statResume(String(bucket), String(object_key));
+            minioContentType = stat.contentType;
+          } catch {
+            // stat failure is non-fatal; we have the bytes
+          }
         } catch (e) {
-          if (e instanceof RaasApiError && e.isClientError) {
+          // MinIO 404 / NoSuchKey → 不重试 (object 不存在,重试没意义)
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/NoSuchKey|NotFound|404/i.test(msg)) {
             throw new NonRetriableError(
-              `RAAS GET /resumes/uploads/${upload_id}/raw 4xx: ${e.code} ${e.message}`,
+              `MinIO ${bucket}/${object_key} not found: ${msg}`,
             );
           }
           throw e;
         }
-        const pdfBuffer = downloaded.pdf;
         logger.info(
-          `[resume-persist] downloaded PDF · upload_id=${upload_id} ` +
-            `bytes=${pdfBuffer.length} content-type=${downloaded.contentType} ` +
-            `filename="${downloaded.filename ?? filename ?? '—'}"`,
+          `[resume-persist] downloaded PDF from MinIO · upload_id=${upload_id} ` +
+            `bytes=${pdfBuffer.length} content-type=${minioContentType ?? '—'} ` +
+            `filename="${filename ?? '—'}"`,
         );
 
-        // 2) POST /api/v1/parse-resume (multipart) — 直连 RoboHire (绕过 RAAS proxy)
-        const pdfFilename = downloaded.filename ?? (filename as string | undefined) ?? 'resume.pdf';
+        // 2) POST /api/v1/parse-resume (multipart) — 直连 RoboHire
+        const pdfFilename = (filename as string | undefined) ?? 'resume.pdf';
         let parseRes;
         try {
           parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId });
@@ -155,44 +214,82 @@ export const resumeParserAgent = inngest.createFunction(
     const finalEtag =
       typeof eventEtag === 'string' && eventEtag.trim() ? eventEtag.trim() : computedEtag;
 
-    // ── 调 RAAS API: POST /api/v1/candidates ──
+    // ── 直写 Partner Postgres (2026-05-20: 不再走 RAAS API) ──
     const saveResult = await step.run('save-candidate', async () => {
       const input: SaveCandidateInput = {
         upload_id: String(upload_id),
         bucket: String(bucket),
         object_key: String(object_key),
         etag: finalEtag,
-        mime_type,
-        file_size: typeof file_size === 'number' ? file_size : undefined,
-        original_filename: filename ?? undefined,
-        operator_employee_id: employeeId ?? undefined,
-        operator_id: operator_id ?? undefined,
+        size: typeof file_size === 'number' ? file_size : null,
+        filename: filename ?? undefined,
+        employee_id: employeeId ?? undefined,
         client_id: client_id ?? undefined,
         job_requisition_id: job_requisition_id ?? undefined,
-        parsed,
-        robohire_request_id:
-          robohireRequestId ?? raw.robohire_request_id ?? raw.parser_request_id ?? undefined,
+        sourcing_channel_id: sourcing_channel_id ?? undefined,
+        parsed: { data: parsed as Record<string, unknown> },
       };
 
       try {
-        const r = await saveCandidate(input, { traceId });
+        const r = await saveCandidateToPartnerPg(input);
         logger.info(
-          `[resume-persist] ✅ saveCandidate OK · candidate_id=${r.candidate_id} ` +
-            `resume_id=${r.resume_id ?? '—'} is_new_candidate=${r.is_new_candidate ?? '?'} ` +
-            `is_new_resume=${r.is_new_resume ?? '?'}`,
+          `[resume-persist] ✅ partner-pg saveCandidate OK · candidate_id=${r.candidate_id} ` +
+            `resume_id=${r.resume_id} application_id=${r.application_id ?? '—'} ` +
+            `candidate_created=${r.candidate_created} resume_created=${r.resume_created}`,
         );
+        fileLogger.event('save-candidate.ok', {
+          upload_id,
+          candidate_id: r.candidate_id,
+          resume_id: r.resume_id,
+          application_id: r.application_id,
+        });
         return r;
       } catch (e) {
-        if (e instanceof RaasApiError && e.isClientError) {
-          // 4xx (除 429) → agent payload 问题，不重试
-          throw new NonRetriableError(
-            `RAAS saveCandidate 4xx: ${e.code} ${e.message}`,
+        const msg = e instanceof Error ? e.message : String(e);
+        // Mark the upload as failed in partner's state-machine table so RAAS
+        // sees a terminal error instead of an indefinite 'pending'. Non-fatal
+        // — if this write itself fails, swallow and re-throw the original.
+        try {
+          await markResumeUploadFailed(String(upload_id), msg);
+        } catch (markErr) {
+          logger.warn(
+            `[resume-persist] markResumeUploadFailed failed: ${(markErr as Error).message}`,
           );
         }
-        // 5xx / 429 / 网络 → 让 Inngest step.run 重试
+        fileLogger.event('save-candidate.failed', { upload_id, error: msg });
         throw e;
       }
     });
+
+    // ── 5b. 写 Neo4j Candidate + Resume + Application instances via allmeta ──
+    const stepKeyForNeo4j = sanitize(String(upload_id));
+    await step.run(`write-candidate-neo4j-${stepKeyForNeo4j}`, async () => {
+      const r = await writeCandidateInstance({
+        candidate_id: saveResult.candidate_id,
+        employee_id: employeeId,
+        parsed: parsed as unknown as Record<string, unknown>,
+      });
+      if (r.ok) logger.info(`[resume-persist] ✓ allmeta wrote Candidate ${saveResult.candidate_id}`);
+      else logger.warn(`[resume-persist] allmeta Candidate write failed: ${r.error}`);
+      return r;
+    });
+    await step.run(`write-resume-neo4j-${stepKeyForNeo4j}`, async () => {
+      const r = await writeResumeInstance({
+        resume_id: saveResult.resume_id,
+        candidate_id: saveResult.candidate_id,
+        job_requisition_id: job_requisition_id ?? null,
+        employee_id: employeeId,
+        file_path: object_key,
+        parsed: parsed as unknown as Record<string, unknown>,
+      });
+      if (r.ok) logger.info(`[resume-persist] ✓ allmeta wrote Resume ${saveResult.resume_id}`);
+      else logger.warn(`[resume-persist] allmeta Resume write failed: ${r.error}`);
+      return r;
+    });
+    // Application instance write removed (2026-05-21) — RAAS owns Application
+    // creation in both partner Postgres and ontology Neo4j now. AO's role is
+    // only to surface application_id in downstream events when it's already
+    // there; we never mint or write Application rows.
 
     // ── emit RESUME_PROCESSED 触发下游 matcher ──
     // Note: 在 v7 §4.8 下,RAAS 自己在 saveCandidate 后也会按规则发
@@ -221,6 +318,9 @@ export const resumeParserAgent = inngest.createFunction(
       // 透传上传时关联的岗位 — matchResumeAgent 据此决定"单岗位精准匹配"
       // 还是"上传者名下全部 recruiting 岗位扫描"。
       job_requisition_id: job_requisition_id ?? null,
+      // 透传 RAAS 上游传来的 sourcing_channel_id / client_id,partner / 重新订阅方都需要
+      sourcing_channel_id: sourcing_channel_id ?? null,
+      client_id: client_id ?? null,
       // 老的 4 对象嵌套字段保留为空 (RAAS 不再要求 agent 转结构)
       candidate: {} as ResumeProcessedData['candidate'],
       candidate_expectation: {} as ResumeProcessedData['candidate_expectation'],
@@ -230,6 +330,21 @@ export const resumeParserAgent = inngest.createFunction(
       parserVersion: 'v7-pull-model@2026-05-08',
     };
 
+    // 2026-05-21: explicit upload_id pass-through audit so logs prove every
+    // RESUME_PROCESSED emit carries upload_id (partner / RAAS subscribers
+    // anchor on this field).
+    fileLogger.event('emit.resume-processed', {
+      upload_id,
+      candidate_id: saveResult.candidate_id,
+      resume_id: saveResult.resume_id,
+      application_id: saveResult.application_id,
+      job_requisition_id: job_requisition_id ?? null,
+      sourcing_channel_id: sourcing_channel_id ?? null,
+      client_id: client_id ?? null,
+      filename: (filename ?? 'resume.pdf').trim(),
+      bucket,
+      object_key,
+    });
     await step.sendEvent('emit-resume-processed', {
       name: 'RESUME_PROCESSED',
       data: processedPayload,
@@ -239,16 +354,24 @@ export const resumeParserAgent = inngest.createFunction(
       `[resume-persist] ✅ emitted RESUME_PROCESSED · upload_id=${upload_id} ` +
         `candidate_id=${saveResult.candidate_id}`,
     );
+    fileLogger.event('handler.done', {
+      upload_id,
+      candidate_id: saveResult.candidate_id,
+      is_new_candidate: saveResult.candidate_created,
+      is_new_resume: saveResult.resume_created,
+    });
 
     return {
       ok: true,
       upload_id,
       candidate_id: saveResult.candidate_id,
-      candidate_name: saveResult.candidate_name,
+      candidate_name: parsed.name ?? null,
       resume_id: saveResult.resume_id,
-      is_new_candidate: saveResult.is_new_candidate,
-      is_new_resume: saveResult.is_new_resume,
+      application_id: saveResult.application_id,
+      is_new_candidate: saveResult.candidate_created,
+      is_new_resume: saveResult.resume_created,
     };
+    }); // runWithLogger
   },
 );
 

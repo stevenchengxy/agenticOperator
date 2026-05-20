@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
@@ -10,16 +11,15 @@ import type {
 } from "@/app/api/rule-check-audits/route";
 import type { RuleCheckStatsResponse } from "@/app/api/rule-check-audits/stats/route";
 import { RuleCheckAuditDetailDrawer } from "./RuleCheckAuditDetailDrawer";
-import { RuleSeverityMatrix } from "./RuleSeverityMatrix";
 
 export function RuleCheckAuditsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useApp();
   const decision = searchParams.get("decision") ?? "";
   const client = searchParams.get("client") ?? "";
   const jrId = searchParams.get("jrId") ?? "";
   const openAuditId = searchParams.get("auditId") ?? "";
-  const tab = (searchParams.get("tab") ?? "list") as "list" | "matrix";
 
   const [data, setData] = React.useState<RuleCheckAuditListResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -64,56 +64,41 @@ export function RuleCheckAuditsContent() {
     router.replace(`/rule-check${sp.toString() ? "?" + sp.toString() : ""}`);
   };
 
-  const switchTab = (t: "list" | "matrix") => {
-    const sp = new URLSearchParams(searchParams.toString());
-    if (t === "list") sp.delete("tab");
-    else sp.set("tab", t);
-    router.replace(`/rule-check${sp.toString() ? "?" + sp.toString() : ""}`);
-  };
-
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* B4 — 价值锚 banner */}
-      {stats && stats.total > 0 ? <ValueAnchorBanner stats={stats} /> : null}
+      {/* B4 — value-anchor banner */}
+      {stats && stats.total > 0 ? <ValueAnchorBanner stats={stats} t={t} /> : null}
 
-      {/* 顶部 tab 切换 + 筛选 */}
+      {/* header + filters */}
       <div
         className="border-b border-line bg-surface flex items-center"
         style={{ padding: "14px 22px", gap: 18 }}
       >
         <div>
           <div className="text-[15px] font-semibold tracking-tight">
-            Rule Check 审计
+            {t("rc_audits_title")}
           </div>
           <div className="text-ink-3 text-[12px] mt-px">
-            matchResume LLM 预筛决策 · 含完整 user prompt / LLM 响应
-            {data ? ` · ${data.total.toLocaleString()} 条` : ""}
+            {t("rc_audits_sub")}
+            {data ? ` · ${data.total.toLocaleString()} ${t("rc_count_unit")}` : ""}
           </div>
-        </div>
-        <div style={{ marginLeft: 24, display: "flex", gap: 14 }}>
-          <TabHeaderBtn active={tab === "list"} onClick={() => switchTab("list")}>
-            审计列表
-          </TabHeaderBtn>
-          <TabHeaderBtn active={tab === "matrix"} onClick={() => switchTab("matrix")}>
-            Rule × 决策矩阵
-          </TabHeaderBtn>
         </div>
         <div className="flex-1" />
         <FilterSelect
-          label="决策"
+          label={t("rc_filter_decision")}
           value={decision}
           onChange={(v) => setFilter("decision", v)}
           options={[
-            { value: "", label: "全部" },
+            { value: "", label: t("rc_filter_all") },
             { value: "PASS", label: "PASS" },
             { value: "FAIL", label: "FAIL" },
           ]}
         />
         <FilterInput
-          label="客户"
+          label={t("rc_filter_client")}
           value={client}
           onChange={(v) => setFilter("client", v)}
-          placeholder="腾讯 / 字节"
+          placeholder={t("rc_filter_client_placeholder")}
         />
         <FilterInput
           label="job_req_id"
@@ -123,38 +108,32 @@ export function RuleCheckAuditsContent() {
         />
       </div>
       <div className="flex-1 overflow-auto" style={{ padding: "16px 22px" }}>
-        {tab === "matrix" ? (
-          <RuleSeverityMatrix />
-        ) : loading && !data ? (
-          <EmptyState title="加载中…" hint="" />
+        {loading && !data ? (
+          <EmptyState title={t("rc_loading")} hint="" />
         ) : data?.meta.not_configured ? (
           <EmptyState
             icon={<Ic.alert />}
-            title="Neo4j 未配置"
-            hint="设置 NEO4J_INSTANCE_URI / RAAS_LINKS_NEO4J_URI + USER + PASSWORD 后,matchResumeAgent 跑过的 rule-check 审计会自动写入并在这里显示。"
+            title={t("rc_empty_no_neo4j_title")}
+            hint={t("rc_empty_no_neo4j_hint")}
             variant="info"
           />
         ) : data?.meta.error ? (
           <EmptyState
             icon={<Ic.alert />}
-            title="Neo4j 读取出错"
+            title={t("rc_empty_neo4j_err_title")}
             hint={data.meta.error}
             variant="default"
           />
         ) : !data || data.rows.length === 0 ? (
           <EmptyState
             icon={<Ic.shield />}
-            title={data?.meta.empty ? "暂无 rule check 审计" : "无匹配项"}
-            hint={
-              data?.meta.empty
-                ? "等候 ruleCheckAgent 完成首条 MATCH_RULE_CHECK_PASSED / MATCH_RULE_CHECK_FAILED。每条决策都会带着完整 user prompt 写入 Neo4j。"
-                : "尝试清空筛选条件"
-            }
+            title={data?.meta.empty ? t("rc_empty_no_audits_title") : t("rc_empty_filter_title")}
+            hint={data?.meta.empty ? t("rc_empty_no_audits_hint") : t("rc_empty_filter_hint")}
             variant={data?.meta.empty ? "info" : "default"}
             action={
               !data?.meta.empty ? (
                 <Btn size="sm" onClick={() => router.replace("/rule-check")}>
-                  清空筛选
+                  {t("rc_clear_filters")}
                 </Btn>
               ) : undefined
             }
@@ -163,19 +142,19 @@ export function RuleCheckAuditsContent() {
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ width: 150 }}>时间</th>
-                <th style={{ width: 70 }}>决策</th>
-                <th style={{ width: 130 }}>客户 × BG</th>
-                <th>candidate × job_req</th>
-                <th style={{ width: 90 }}>flags</th>
-                <th style={{ width: 110 }}>LLM model</th>
-                <th style={{ width: 90 }}>耗时</th>
-                <th style={{ width: 110 }}>规则来源</th>
+                <th style={{ width: 150 }}>{t("rc_col_time")}</th>
+                <th style={{ width: 70 }}>{t("rc_col_decision")}</th>
+                <th style={{ width: 130 }}>{t("rc_col_client_bg")}</th>
+                <th>{t("rc_col_candidate_jr")}</th>
+                <th style={{ width: 90 }}>{t("rc_col_flags")}</th>
+                <th style={{ width: 110 }}>{t("rc_col_llm_model")}</th>
+                <th style={{ width: 90 }}>{t("rc_col_duration")}</th>
+                <th style={{ width: 110 }}>{t("rc_col_rule_source")}</th>
               </tr>
             </thead>
             <tbody>
               {data.rows.map((r) => (
-                <AuditRow key={r.audit_id} row={r} onOpen={openDetail} />
+                <AuditRow key={r.audit_id} row={r} onOpen={openDetail} t={t} />
               ))}
             </tbody>
           </table>
@@ -191,33 +170,8 @@ export function RuleCheckAuditsContent() {
   );
 }
 
-function TabHeaderBtn({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="text-[13px] border-0 bg-transparent cursor-pointer"
-      style={{
-        padding: "6px 0",
-        color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
-        borderBottom: active ? "2px solid var(--c-accent)" : "2px solid transparent",
-        fontWeight: active ? 600 : 400,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-// B4 — 价值锚 banner
-function ValueAnchorBanner({ stats }: { stats: RuleCheckStatsResponse }) {
+// B4 — value-anchor banner
+function ValueAnchorBanner({ stats, t }: { stats: RuleCheckStatsResponse; t: (k: string) => string }) {
   const pct = stats.total > 0 ? Math.round((stats.fail / stats.total) * 100) : 0;
   return (
     <div
@@ -231,29 +185,29 @@ function ValueAnchorBanner({ stats }: { stats: RuleCheckStatsResponse }) {
       }}
     >
       <Stat
-        label="近 7 天 audit"
+        label={t("rc_stat_audits_7d")}
         value={stats.total.toLocaleString()}
         sub={`PASS ${stats.pass} · FAIL ${stats.fail}`}
       />
       <Stat
-        label="拦截不合格"
+        label={t("rc_stat_blocked")}
         value={`${stats.blocked_robohire_calls}`}
-        sub={`占比 ${pct}% · 节省 Robohire 调用`}
+        sub={`${t("rc_stat_blocked_sub_pre")} ${pct}% · ${t("rc_stat_blocked_sub_post")}`}
         accent="err"
       />
       <Stat
-        label="估算节省"
+        label={t("rc_stat_savings")}
         value={`$${stats.estimated_robohire_savings_usd.toFixed(2)}`}
-        sub={`@ $0.20 / Robohire 调用`}
+        sub={t("rc_stat_savings_sub")}
         accent="ok"
       />
       <Stat
-        label="LLM 平均耗时"
+        label={t("rc_stat_llm_duration")}
         value={`${(stats.avg_llm_duration_ms / 1000).toFixed(1)}s`}
-        sub={`总 ${(stats.total_prompt_tokens / 1000).toFixed(1)}K + ${(stats.total_completion_tokens / 1000).toFixed(1)}K tokens`}
+        sub={`${(stats.total_prompt_tokens / 1000).toFixed(1)}K + ${(stats.total_completion_tokens / 1000).toFixed(1)}K tokens`}
       />
       <Stat
-        label="Top 失败规则"
+        label={t("rc_stat_top_fail_rules")}
         value={
           stats.top_failure_rules
             .slice(0, 3)
@@ -358,9 +312,11 @@ function FilterSelect({
 function AuditRow({
   row,
   onOpen,
+  t: _t,
 }: {
   row: RuleCheckAuditRow;
   onOpen: (auditId: string) => void;
+  t: (k: string) => string;
 }) {
   const t = row.created_at ? new Date(row.created_at) : null;
   const time = t

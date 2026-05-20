@@ -8,30 +8,43 @@
 import { NextResponse } from 'next/server';
 import { listFunctions } from '@/lib/inngest-admin-client';
 import { prisma } from '@/server/db';
+import { AGENT_MAP, deploymentKind } from '@/lib/agent-mapping';
 
 export const dynamic = 'force-dynamic';
 
-// Static fallback for paused agents. Our serve handler drops paused agents
-// from Inngest registration, so Inngest stops reporting them — but the UI
-// should still render the card (red, "paused") so the user can resume it.
-const MONITORED_FALLBACK: Record<string, { name: string; triggers: Array<{ type: string; value: string }> }> = {
-  'agentic-operator-main-resume-parser-agent': {
-    name: 'Resume Parser Agent',
-    triggers: [{ type: 'EVENT', value: 'RESUME_DOWNLOADED' }],
-  },
-  'agentic-operator-main-create-jd-agent': {
-    name: 'Create JD Agent (workflow node 4)',
-    triggers: [
-      { type: 'EVENT', value: 'REQUIREMENT_LOGGED' },
-      { type: 'EVENT', value: 'CLARIFICATION_READY' },
-      { type: 'EVENT', value: 'JD_REJECTED' },
-    ],
-  },
-  'agentic-operator-main-match-resume-agent': {
-    name: 'Match Resume Agent (workflow node 10)',
-    triggers: [{ type: 'EVENT', value: 'RESUME_PROCESSED' }],
-  },
-};
+// Ghost-entry fallback for paused agents. Our serve handler drops paused
+// agents from Inngest registration, so Inngest stops reporting them — but
+// the UI must still render the row (grey, "paused") so the user can resume
+// it. Without this map, pausing an agent makes it disappear from /fleet and
+// /monitor with no way back.
+//
+// Derived from AGENT_MAP so every real and shell agent is covered. Slugs
+// match the Inngest function ids:
+//   - real agents: explicit ids in server/inngest/agents/*.ts
+//   - shells:      `agent.<short.toLowerCase()>` from stub-factory
+const MONITORED_FALLBACK: Record<string, { name: string; triggers: Array<{ type: string; value: string }> }> = (() => {
+  const out: Record<string, { name: string; triggers: Array<{ type: string; value: string }> }> = {};
+  const REAL_ID_BY_SHORT: Record<string, string> = {
+    JDGenerator: 'create-jd-agent',
+    ResumeParser: 'resume-parser-agent',
+    Matcher: 'match-resume-agent',
+    RuleCheck: 'rule-check-agent',
+  };
+  for (const a of AGENT_MAP) {
+    const kind = deploymentKind(a.short);
+    if (kind === 'unbuilt') continue;
+    const fnId =
+      kind === 'real'
+        ? REAL_ID_BY_SHORT[a.short] ?? `agent.${a.short.toLowerCase()}`
+        : `agent.${a.short.toLowerCase()}`;
+    const slug = `agentic-operator-main-${fnId}`;
+    out[slug] = {
+      name: a.inngestName ?? a.short,
+      triggers: (a.triggersEvents ?? []).map((value) => ({ type: 'EVENT', value })),
+    };
+  }
+  return out;
+})();
 
 export async function GET() {
   try {

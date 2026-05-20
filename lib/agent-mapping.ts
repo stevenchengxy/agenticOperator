@@ -21,6 +21,13 @@ export type AgentMeta = {
   triggersEvents: string[];
   emitsEvents: string[];
   terminal: boolean;
+  /**
+   * Human-readable name as registered in Inngest (server/inngest/agents/*.ts).
+   * When present this is what the Fleet / Monitor UIs show as the primary
+   * identifier so AO mirrors the Inngest dashboard. Falls back to `short`.
+   * Shells (registered via stub-factory) use `short` directly.
+   */
+  inngestName?: string;
 };
 
 export const AGENT_MAP: AgentMeta[] = [
@@ -29,23 +36,23 @@ export const AGENT_MAP: AgentMeta[] = [
   { short: 'ReqAnalyzer',      wsId: '2',       stage: 'requirement', kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v2.1.0', triggersEvents: ['REQUIREMENT_SYNCED', 'REQUIREMENT_LOGGED'],       emitsEvents: ['ANALYSIS_COMPLETED', 'ANALYSIS_BLOCKED'],                                   terminal: false },
   { short: 'Clarifier',        wsId: '3',       stage: 'requirement', kind: 'hybrid', ownerTeam: 'HSM·澄清',  version: 'v1.2.0', triggersEvents: ['ANALYSIS_COMPLETED'],                             emitsEvents: ['CLARIFICATION_INCOMPLETE', 'CLARIFICATION_READY'],                          terminal: false },
   { short: 'ReClarifier',      wsId: '3-2',     stage: 'requirement', kind: 'hitl',   ownerTeam: 'HSM·澄清',  version: 'v1.0.0', triggersEvents: ['CLARIFICATION_INCOMPLETE'],                       emitsEvents: ['CLARIFICATION_RETRY'],                                                      terminal: false },
-  { short: 'JDGenerator',      wsId: '4',       stage: 'jd',          kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v1.9.4', triggersEvents: ['CLARIFICATION_READY', 'JD_REJECTED'],             emitsEvents: ['JD_GENERATED'],                                                             terminal: false },
+  { short: 'JDGenerator',      wsId: '4',       stage: 'jd',          kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v1.9.4', triggersEvents: ['CLARIFICATION_READY', 'JD_REJECTED'],             emitsEvents: ['JD_GENERATED'],                                                             terminal: false, inngestName: 'Create JD Agent' },
   { short: 'JDReviewer',       wsId: '5',       stage: 'jd',          kind: 'hitl',   ownerTeam: 'HSM·交付',  version: 'v1.0.0', triggersEvents: ['JD_GENERATED'],                                   emitsEvents: ['JD_APPROVED', 'JD_REJECTED'],                                               terminal: false },
   { short: 'TaskAssigner',     wsId: '6',       stage: 'jd',          kind: 'auto',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['JD_APPROVED'],                                    emitsEvents: ['TASK_ASSIGNED'],                                                            terminal: false },
   { short: 'Publisher',        wsId: '7-1',     stage: 'jd',          kind: 'auto',   ownerTeam: '招聘运营', version: 'v1.2.0', triggersEvents: ['TASK_ASSIGNED'],                                  emitsEvents: ['CHANNEL_PUBLISHED', 'CHANNEL_PUBLISHED_FAILED'],                            terminal: true  },
   { short: 'ManualPublish',    wsId: '7-2',     stage: 'jd',          kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['CHANNEL_PUBLISHED_FAILED'],                       emitsEvents: ['CHANNEL_PUBLISHED'],                                                        terminal: false },
   { short: 'ResumeCollector',  wsId: '8',       stage: 'resume',      kind: 'hybrid', ownerTeam: '招聘运营', version: 'v3.0.1', triggersEvents: ['CHANNEL_PUBLISHED'],                              emitsEvents: ['RESUME_DOWNLOADED'],                                                        terminal: false },
-  { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false },
+  { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false, inngestName: 'Resume Parser Agent' },
   { short: 'ResumeFixer',      wsId: '9-2',     stage: 'resume',      kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['RESUME_PARSE_ERROR'],                             emitsEvents: ['RESUME_PROCESSED'],                                                         terminal: false },
   // 2026-05-19 consolidation: matchResume 收敛成只订 MATCH_RULE_CHECK_PASSED;
   // 第一段(RESUME_PROCESSED → 拉 JR + 派发)整段并进 RuleCheck。
   // wsId 保持 '10' / '10-5' 以兼容 monitor / topology / workflow-graph 现有节点 ID;
   // 与 partner actions_v0_1_002 的 10-1 / 10-2 在事件名级别对齐(triggers / emits)。
-  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v3.0.0', triggersEvents: ['MATCH_RULE_CHECK_PASSED'],                       emitsEvents: ['MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false },
+  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v3.0.0', triggersEvents: ['MATCH_RULE_CHECK_PASSED'],                       emitsEvents: ['MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false, inngestName: 'Match Resume Agent' },
   // RuleCheck — independent Inngest function. 直接订 RESUME_PROCESSED,
   // 内部 fan-out per JR. 重派场景由 partner 重发 RESUME_PROCESSED 触发,无额外订阅。
   // 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
-  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v2.0.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: ['MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED'],                        terminal: false },
+  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v2.0.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: ['MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED'],                        terminal: false, inngestName: 'Rule Check Agent' },
   // MatchReviewer (wsId 10-HITL) removed: not in authoritative workflow JSON.
   // MATCH_FAILED is terminal in the canonical workflow spec.
   { short: 'InterviewInviter', wsId: '11-1',    stage: 'interview',   kind: 'auto',   ownerTeam: '技术招聘', version: 'v0.7.2', triggersEvents: ['MATCH_PASSED_NEED_INTERVIEW'],                    emitsEvents: ['INTERVIEW_INVITATION_SENT'],                                                terminal: true  },
@@ -85,4 +92,39 @@ export const INNGEST_REAL_SHORTS: ReadonlySet<string> = new Set([
 
 export function isReal(short: string): boolean {
   return INNGEST_REAL_SHORTS.has(short);
+}
+
+/**
+ * Display name used by Fleet / Monitor / Events / Workflow UIs as the primary
+ * label. Mirrors the name registered in Inngest (see
+ * server/inngest/agents/*.ts → createFunction({ name })). Falls back to short
+ * for shells / unbuilt agents whose Inngest name is just the short.
+ */
+export function displayName(short: string): string {
+  const meta = byShort(short);
+  return meta?.inngestName ?? short;
+}
+
+// "Shell" = registered as an empty-shell Inngest function via stub-factory.
+// Every business agent with at least one trigger event is eligible. Chatbot
+// is excluded (no triggers, system meta). Real agents are excluded (they
+// have their own production-quality implementations).
+// See server/inngest/functions.ts — STUB_AGENTS=0 disables shell registration.
+export function isShell(short: string): boolean {
+  if (isReal(short)) return false;
+  const meta = byShort(short);
+  if (!meta) return false;
+  if (meta.triggersEvents.length === 0) return false;
+  return true;
+}
+
+// Deployment kind for fleet / monitor UIs.
+//   real    — production Inngest function with full business logic
+//   shell   — registered empty-shell Inngest function (demo / placeholder)
+//   unbuilt — no Inngest function (Chatbot or anything without triggers)
+export type DeploymentKind = "real" | "shell" | "unbuilt";
+export function deploymentKind(short: string): DeploymentKind {
+  if (isReal(short)) return "real";
+  if (isShell(short)) return "shell";
+  return "unbuilt";
 }

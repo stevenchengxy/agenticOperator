@@ -111,6 +111,10 @@ export type ResumeProcessedData = {
   resume_id?: string;
   // 上传时关联的岗位（raas 前端"上传简历"弹框里的"关联岗位"下拉）
   job_requisition_id?: string | null;
+  // 来源渠道(RAAS 在 RESUME_DOWNLOADED 里给 → AO 透传 → 下游 / partner 重新订阅时仍可见)
+  sourcing_channel_id?: string | null;
+  // 客户(用于下游 matcher 的 client 维度过滤)
+  client_id?: string | null;
 };
 
 // ─── §3.3 匹配输出事件 ─────────────────────────────────────
@@ -132,6 +136,11 @@ export type MatchEventData = {
   upload_id: string | null;
   /** 关联 posting,有则带 */
   job_posting_id?: string | null;
+  /** Partner Postgres candidate_match_result 主键。matchResumeAgent
+   *  写完 partner-pg 后回填,partner 订阅 dispatcher 可以直接 update 同一行. */
+  candidate_match_result_id?: string | null;
+  /** Canonical MATCH_FAILED.event_data — "匹配" | "不匹配" — partner 直接判定. */
+  overall_status?: '匹配' | '不匹配';
 
   // ── envelope 保留字段(RoboHire 风格,供 consumer cherry-pick)──
   success?: boolean;
@@ -181,18 +190,30 @@ export type RuleCheckRuntimeContext = {
 };
 
 /**
- * ruleCheckAgent → matchResumeAgent 过桥事件。
+ * ruleCheckAgent → matchResumeAgent 过桥事件 + partner 订阅。
  *
- * payload 在 partner dispatcher 看的字段顶层平铺(同 MATCH_* F3 契约),
- * matchResumeAgent 第二段需要的 jr / parsed_resume / runtime_context 透传。
+ * Canonical schema (events_v0_1_002.json MATCH_RULE_CHECK_PASSED):
+ *   source_action: "ruleCheckForMatchResume"
+ *   event_data: [candidate_id, resume_id, job_requisition_id, client_id,
+ *                rule_check_result, rule_check_reason]
+ *   state_mutations: Candidate_Match_Result CREATE (rule_check_result, rule_check_reason)
+ *
+ * Plus partner conv 字段:upload_id / employee_id / audit / job_requisition /
+ * parsed_resume / runtime_context — matchResumeAgent 第二段需要这些避免反查。
  */
 export type MatchRuleCheckPassedData = {
-  /** ★ matchResumeAgent 第二段需要 */
-  upload_id: string | null;
+  // ── canonical event_data(必带,partner 直接读)──
   candidate_id: string | null;
   resume_id: string | null;
   job_requisition_id: string;
   client_id: string;
+  /** Canonical: '通过' | '待人工复核'(REVIEW 走 PASS 路径,reason 标记 HSM 需介入) */
+  rule_check_result: '通过' | '待人工复核';
+  /** 通过时为空;REVIEW 时列出待复核规则 */
+  rule_check_reason: string;
+
+  // ── partner conv 字段(便利 + matchResumeAgent 用) ──
+  upload_id: string | null;
   employee_id: string;
   audit: RuleCheckAuditMeta;
   /** Full JR object — 第二段调 matchResumeDirect 时拼 jd text。 */
@@ -206,11 +227,38 @@ export type MatchRuleCheckPassedData = {
 /**
  * ruleCheckAgent → partner(可选订阅)的失败事件。
  *
- * 复用 MatchEventData(F3 平铺契约) — `matching_score` 在 rule-check 阶段
- * 必然为 null(还没跑 RoboHire match);`data` 里塞 `rule_check_decision` /
- * `failed_rules` / `audit` 结构化信息。
+ * Canonical schema (events_v0_1_002.json MATCH_RULE_CHECK_FAILED):
+ *   source_action: "ruleCheckForMatchResume"
+ *   event_data: [candidate_id, resume_id, job_requisition_id, client_id,
+ *                rule_check_result, rule_check_reason, failed_rules]
+ *
+ * canonical event_data 顶层平铺 + F3 兼容字段。partner dispatcher 看顶层
+ * `rule_check_result` 直接路由(不用解构 data)。
  */
-export type MatchRuleCheckFailedData = MatchEventData;
+export type MatchRuleCheckFailedData = {
+  // ── canonical event_data ──
+  candidate_id: string | null;
+  resume_id: string | null;
+  job_requisition_id: string;
+  client_id: string;
+  rule_check_result: '未通过';
+  rule_check_reason: string;
+  /** Failed rule details(canonical event_data field): [{rule_id, rule_name, step_id?, severity?, reason?}, ...] */
+  failed_rules: Array<{
+    rule_id: string;
+    rule_name: string;
+    step_id?: string;
+    severity?: string;
+    reason?: string;
+  }>;
+
+  // ── F3 兼容字段(matching_score=null;upload_id 透传)──
+  matching_score: null;
+  upload_id: string | null;
+  success: false;
+  /** envelope 保留:RoboHire envelope fields 不适用 rule-check 阶段 */
+  data?: Record<string, unknown>;
+};
 
 // ─── §3.4 JD 生成相关事件 ─────────────────────────────────
 export type RequirementLoggedData = {
@@ -226,77 +274,41 @@ export type RequirementLoggedData = {
   };
 };
 
+/**
+ * JD_GENERATED canonical schema (neo4j_data/events_v0_1_002.json).
+ *
+ * Per ontology event registry (event_data 列出的 2 个字段必带):
+ *   - job_posting_id (String, target_object=Job_Posting)
+ *   - jd_content     (String, target_object=null)
+ *
+ * Per partner convention(对齐 REQUIREMENT_LOGGED 的 payload shape):
+ *   payload 顶层还要平铺 FK 便利字段,让订阅者一查就到位:
+ *   - job_requisition_id (FK→Job_Requisition,parent JR)
+ *   - client_id          (FK→Client,routing context)
+ *
+ * State mutations(title/responsibility/requirement/key_words/type/
+ * recruitment_type/work_years 等)由 partner-pg/job-posting.ts 直接写入
+ * partner Postgres job_posting 表,partner 订阅后从表里读。NOT 携带在事件 payload 里。
+ */
 export type JdGeneratedPayload = {
+  /** Partner Postgres job_posting.job_posting_id — entity_id 也用这个值. */
+  job_posting_id: string;
+  /** Parent Job_Requisition ID — partner 用这个 join JR 表拿 must_have_skills 等. */
   job_requisition_id: string;
+  /** Client ID — partner 按客户路由通知 / HitlTask 用. */
   client_id: string | null;
-
-  title?: string;
-  description?: string;
-  qualifications?: string;
-  hardRequirements?: string;
-  niceToHave?: string;
-  interviewRequirements?: string;
-  evaluationRules?: string;
-  benefits?: string;
-  salaryMin?: string | number;
-  salaryMax?: string | number;
-  salaryCurrency?: string;
-  salaryPeriod?: string;
-  salaryText?: string;
-  headcount?: string | number;
-  experienceLevel?: string;
-  education?: string;
-  employmentType?: string;
-  location?: string;
-  workType?: string;
-  companyName?: string;
-  department?: string;
-
-  posting_title: string;
-  posting_description: string;
-  city: string[];
-  salary_range: string;
-  interview_mode: string;
-  degree_requirement: string;
-  education_requirement: string;
-  work_years: number;
-  recruitment_type: string;
-  must_have_skills: string[];
-  nice_to_have_skills: string[];
-  negative_requirement: string;
-  language_requirements: string;
-  expected_level: string;
-
-  responsibility: string;
-  requirement: string;
-
-  jd_id: string;
-  claimer_employee_id: string | null;
-  hsm_employee_id: string | null;
-  client_job_id: string | null;
-
-  search_keywords: string[];
-  quality_score: number;
-  quality_suggestions: string[];
-  market_competitiveness: "高" | "中" | "低";
-  generator_version: string;
-  generator_model: string;
-  generated_at: string;
-
-  [key: string]: unknown;
+  /** 整段 JD markdown(title/职责/要求/福利/评估等),partner 直接展示. */
+  jd_content: string;
 };
 
 export type JdGeneratedEnvelope = {
-  entity_type: "JobDescription";
-  entity_id: string | null;
+  entity_type: "Job_Posting";
+  entity_id: string;
   event_id: string;
+  /** Per canonical schema events_v0_1_002.json. */
+  source_action: "createJD";
   payload: JdGeneratedPayload;
-  trace?: {
-    trace_id?: string | null;
-    request_id?: string | null;
-    workflow_id?: string | null;
-    parent_trace_id?: string | null;
-  };
+  trace?: Record<string, unknown>;
 };
 
 // 事件 schema 在 inngest@4 已经不再走 EventSchemas/fromRecord(那是 v3 的

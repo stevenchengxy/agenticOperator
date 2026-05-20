@@ -175,6 +175,37 @@ function EventRow({
   runs: RunForEvent[] | null;
 }) {
   const { t } = useApp();
+  const [replaying, setReplaying] = useState(false);
+  const [replayMsg, setReplayMsg] = useState<string | null>(null);
+
+  async function handleReplay(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!event.id) {
+      setReplayMsg(t('monitor_detail_retry_failed').replace('{message}', 'no event id'));
+      return;
+    }
+    setReplaying(true);
+    setReplayMsg(null);
+    try {
+      const r = await fetch('/api/inngest-admin/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: event.id }),
+      });
+      const b = await r.json();
+      if (b.ok) {
+        setReplayMsg(t('monitor_detail_retry_success').replace('{id}', b.new_event_id));
+      } else {
+        setReplayMsg(t('monitor_detail_retry_failed').replace('{message}', b.message ?? b.error));
+      }
+    } catch (err) {
+      setReplayMsg(
+        t('monitor_detail_retry_failed').replace('{message}', (err as Error).message),
+      );
+    } finally {
+      setReplaying(false);
+    }
+  }
   const time = event.received_at
     ? new Date(event.received_at).toLocaleString('zh-CN', { hour12: false })
     : event.ts
@@ -231,6 +262,22 @@ function EventRow({
 
       {expanded && (
         <div className="border-t border-line p-3 space-y-3">
+          {/* Actions row — replay */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleReplay}
+              disabled={replaying || !event.id}
+              title={t('monitor_detail_retry_warning')}
+              className="text-[11px] px-2.5 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+            >
+              ↺ {replaying ? t('monitor_run_retrying') : t('em_replay')}
+            </button>
+            {replayMsg && (
+              <span className="text-[10.5px] text-ink-3">{replayMsg}</span>
+            )}
+          </div>
+
           {/* Payload JSON */}
           <div>
             <div className="text-[10px] uppercase text-ink-4 mb-1.5 tracking-wide">

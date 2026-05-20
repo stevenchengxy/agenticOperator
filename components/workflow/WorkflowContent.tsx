@@ -7,6 +7,7 @@ import { AgenticToggle } from "@/components/shared/AgenticToggle";
 import { WORKFLOW_META } from "@/lib/workflow-meta";
 import { fetchJson } from "@/lib/api/client";
 import { byShortFunction } from "@/lib/agent-functions";
+import { displayName as agentDisplayName } from "@/lib/agent-mapping";
 import type { ExplainResponse } from "@/app/api/agents/[short]/explain/route";
 import { LogStream } from "@/components/shared/LogStream";
 import { useAgentsHealth } from "@/lib/api/agents-health";
@@ -89,7 +90,7 @@ export function WorkflowContent() {
           <Ic.pulse /> 实时监控
         </Link>
         <div className="text-[11px] text-ink-3 mono">
-          <span className="text-ok font-semibold">{liveOverlay.byWsId.size}</span> live ·{" "}
+          <span className="text-ok font-semibold">{liveOverlay.byWsId.size}</span> 已注册 ·{" "}
           <span className="text-ink-4">{nodes.filter(n => n.kind === "agent").length - liveOverlay.byWsId.size}</span> 蓝图
         </div>
         <div className="w-px h-5 bg-line" />
@@ -113,12 +114,12 @@ export function WorkflowContent() {
           <PaletteSection title="智能体 · AGENTS" items={[
             { icon: "db", label: "ReqSync" },
             { icon: "sparkle", label: "ReqAnalyzer" },
-            { icon: "sparkle", label: "JDGenerator" },
+            { icon: "sparkle", label: agentDisplayName("JDGenerator") },
             { icon: "plug", label: "Publisher" },
             { icon: "db", label: "ResumeCollector" },
-            { icon: "cpu", label: "ResumeParser" },
+            { icon: "cpu", label: agentDisplayName("ResumeParser") },
             { icon: "cpu", label: "DupeChecker" },
-            { icon: "cpu", label: "Matcher" },
+            { icon: "cpu", label: agentDisplayName("Matcher") },
             { icon: "sparkle", label: "AIInterviewer" },
             { icon: "cpu", label: "Evaluator" },
             { icon: "book", label: "PackageBuilder" },
@@ -319,6 +320,19 @@ function nodeAgentShort(node: WorkflowNode): string | null {
   return null;
 }
 
+// Human label for a node — prefers the Inngest function name so the canvas
+// matches the Fleet / Monitor / Events UIs. Falls back to the raw title for
+// non-agent nodes (triggers, terminals, etc.).
+function nodeTitleLabel(node: WorkflowNode): string {
+  const short = nodeAgentShort(node);
+  if (!short) return node.title;
+  const inngestLabel = agentDisplayName(short);
+  // If the raw title carries extra decoration like "ResumeParser + DupeCheck",
+  // splice the inngest label in for the short while preserving the rest.
+  if (node.title === short) return inngestLabel;
+  return node.title.replace(short, inngestLabel);
+}
+
 const HEALTH_TONE: Record<AgentHealthStatus, { color: string; label: string; pulse: boolean }> = {
   idle: { color: "var(--c-ink-4)", label: "idle", pulse: false },
   running: { color: "var(--c-ok)", label: "running", pulse: true },
@@ -420,7 +434,7 @@ function WFNode({
         style={{ fontFamily: "var(--f-sans)" }}
         dominantBaseline="middle"
       >
-        {node.title}
+        {nodeTitleLabel(node)}
       </text>
 
       {/* Status dot (top-right) — pulse uses a soft breathing ripple */}
@@ -544,7 +558,7 @@ function Inspector({
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[13px] font-semibold">{node.title}</span>
+              <span className="text-[13px] font-semibold">{nodeTitleLabel(node)}</span>
               {liveAgent && !liveAgent.paused && (
                 <span className="text-[9px] mono font-bold px-1.5 py-0.5 rounded bg-ok-bg text-ok">● LIVE</span>
               )}
@@ -573,7 +587,7 @@ function Inspector({
             它定义了完整工作流的位置 / 触发事件 / 下游连接,作为 v0_1_010 实施路线图的参考。
             <br />
             <br />
-            当前部署的实际 agent:JDGenerator · ResumeParser · Matcher。
+            当前部署的实际 agent:Create JD Agent · Resume Parser Agent · Match Resume Agent · Rule Check Agent。
             <Link href="/workflow-agents" className="text-accent hover:underline ml-1">
               → 完整 list 视图
             </Link>

@@ -1,31 +1,31 @@
 "use client";
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useApp } from "@/lib/i18n";
 import { RuleCheckDashboardContent } from "./RuleCheckDashboardContent";
 import { RuleCheckAuditsContent } from "./RuleCheckAuditsContent";
-import { RuleCheckContent } from "./RuleCheckContent";
 
-// Rule Check page — 3-layer view per 2026-05-19 user request:
-//   总览 (陈洋 macro Dashboard)   ← first thing leaders / operators see
-//   审计 (我 mid Audits list)     ← drill into past audits
-//   运行器 (叶洋 detail Runner)   ← live scenario runner with LLM trace
+// Rule Check page — 2-layer view (2026-05-20 simplification):
+//   总览 (macro Dashboard)   ← coverage, top failure rules, client distribution
+//   审计 (audits list)       ← drill into past audits + Neo4j-stored prompt + response
 //
-// URL: ?view=dashboard | audits | runner. Default = dashboard.
+// URL: ?view=dashboard | audits. Default = dashboard.
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-type View = "dashboard" | "audits" | "runner";
-
-const VIEW_META: Record<View, { label: string; sub: string }> = {
-  dashboard: { label: "总览",   sub: "覆盖率 · 失败率最高的 rules · 客户分布" },
-  audits:    { label: "审计",   sub: "历史审计列表 · 按客户 / 决策 / JR 筛选" },
-  runner:    { label: "运行器", sub: "场景集驱动的 rule check · LLM trace · 推理链" },
-};
+type View = "dashboard" | "audits";
 
 export function RuleCheckPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
-  const view = (sp.get("view") ?? "dashboard") as View;
+  const { t } = useApp();
+  const rawView = sp.get("view");
+  const view: View = rawView === "audits" ? "audits" : "dashboard";
+
+  const VIEW_META: Record<View, { label: string; sub: string }> = {
+    dashboard: { label: t("rc_view_dashboard"), sub: t("rc_view_dashboard_sub") },
+    audits:    { label: t("rc_view_audits"),    sub: t("rc_view_audits_sub") },
+  };
 
   const setView = (v: View) => {
     const next = new URLSearchParams(sp.toString());
@@ -41,7 +41,7 @@ export function RuleCheckPageContent() {
         <div className="flex items-start gap-6">
           <div className="flex-1 min-w-0">
             <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
-              规则检查
+              {t("rc_page_title")}
             </h1>
             <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
               {VIEW_META[view].sub}
@@ -75,7 +75,6 @@ export function RuleCheckPageContent() {
       <div className="flex-1 min-h-0 overflow-auto">
         {view === "dashboard" && <RuleCheckDashboardContent />}
         {view === "audits"    && <RuleCheckAuditsContent />}
-        {view === "runner"    && <RuleCheckContent />}
       </div>
     </div>
   );

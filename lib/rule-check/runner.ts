@@ -5,8 +5,8 @@
 //     dims → fetch rules → filter → build graph context →
 //     compose prompt → chatComplete (with tools) → fold to MatchResumeCheckResult
 
-import { applyClientFilter, extractDims } from './ontology';
-import { fetchRulesForMatchResume } from './ontology-source';
+import { extractDims } from './ontology';
+import { fetchRulesViaOntologyApi, RuleFetchApiError } from './api-rule-fetcher';
 import { buildGraphContext, createDispatcher } from './graph-context';
 import {
   composeMatchResumePrompt,
@@ -24,6 +24,7 @@ import type {
 } from './types';
 import { chatComplete } from '@/server/llm/gateway';
 import { ruleCheckLog } from './log';
+import { createNullLogger, type AgentLogger } from '@/lib/agent-logger';
 
 const TOOL_SCHEMA = [
   {
@@ -253,28 +254,41 @@ function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['dec
 export type RunRuleCheckOptions = {
   /** Override the gateway's default model for this call only. */
   model?: string;
+  /** Per-run agent logger — Ontology API 调用 + step 事件全部走它落到 logs/。 */
+  logger?: AgentLogger;
 };
 
 export async function runRuleCheck(
   input: RuleCheckInput,
   opts: RunRuleCheckOptions = {},
 ): Promise<MatchResumeCheckResult> {
-  const dims = extractDims(input.job_requisition);
+  // dims 不再用于 rule filtering(新 fetcher 直接走 Neo4j client lookup),
+  // 但保留 extractDims 调用做侧效验证(防御 ill-formed JR);return 不读它。
+  void extractDims(input.job_requisition);
+  const logger = opts.logger ?? createNullLogger();
+
+  // 2026-05-20 重写:走 /actions/ruleCheckForMatchResume/rules + Neo4j client lookup,
+  // 不再读 rules.json,不再 fallback。
   let sourceResult;
   try {
-    sourceResult = await fetchRulesForMatchResume();
+    // raw client_id 从 JR 上取(extractDims normalize 过的会丢失原始 ID,这里用原 JR)
+    const rawClientId =
+      typeof input.job_requisition.client_id === 'string'
+        ? (input.job_requisition.client_id as string)
+        : null;
+    sourceResult = await fetchRulesViaOntologyApi({
+      clientId: rawClientId,
+      logger,
+    });
   } catch (err) {
-    // Defensive: ontology-source today absorbs all errors internally and falls
-    // back to JSON, but the contract isn't enforced. Surface as a fail-safe.
-    return failSafe('llm-call-error', {});
+    const msg = (err as Error).message ?? String(err);
+    ruleCheckLog.error('rule-fetch.failed', { message: msg });
+    logger.event('rule-fetch.failed', { message: msg });
+    const reason = err instanceof RuleFetchApiError ? 'ontology-graph-unavailable' : 'llm-call-error';
+    return failSafe(reason, { rule_source: 'ontology-api' });
   }
-  const filtered = applyClientFilter(sourceResult.rules, dims);
 
-  // Build the filtered Set groups by intersecting fetched steps with `filtered`.
-  const filteredIds = new Set(filtered.map((r) => r.id));
-  const filteredSteps: MatchResumeStepGroup[] = (sourceResult.steps ?? [])
-    .map((s) => ({ ...s, rules: s.rules.filter((r) => filteredIds.has(r.id)) }))
-    .filter((s) => s.rules.length > 0);
+  const filteredSteps: MatchResumeStepGroup[] = sourceResult.steps;
   const expectedRuleCount = filteredSteps.reduce(
     (sum, s) => sum + s.rules.length,
     0,
@@ -287,6 +301,19 @@ export async function runRuleCheck(
     model_override: opts.model,
     expected_rule_count: expectedRuleCount,
     rule_source: sourceResult.source,
+    client_name_resolved: sourceResult.client_name_resolved,
+    api_rule_count: sourceResult.api_rule_count,
+    filtered_rule_count: sourceResult.filtered_rule_count,
+  });
+  logger.event('runRuleCheck.start', {
+    candidate_id: input.runtime_context.candidate_id,
+    resume_id: input.runtime_context.resume_id,
+    job_requisition_id: input.job_requisition.job_requisition_id,
+    client_id_raw: input.job_requisition.client_id ?? null,
+    client_name_resolved: sourceResult.client_name_resolved,
+    api_rule_count: sourceResult.api_rule_count,
+    filtered_rule_count: sourceResult.filtered_rule_count,
+    rule_ids: sourceResult.rules.map((r) => r.id),
   });
 
   // Pre-fetch graph context. Surface 401/502 as ontology-graph-unavailable.
@@ -432,6 +459,11 @@ export async function runRuleCheck(
       llm_completion_tokens: llmResult.usage?.completionTokens,
       rule_source: sourceResult.source,
       llm_finish_reason: llmResult.finishReason,
+      // 2026-05-20: surface the prompts + raw response so the /rule-check
+      // audit UI's User Prompt / LLM Response / Rule Flags tabs have data.
+      user_prompt: userPrompt,
+      system_prompt: MATCH_RESUME_SYSTEM_PROMPT,
+      llm_raw_text: llmResult.text,
     },
   };
 }

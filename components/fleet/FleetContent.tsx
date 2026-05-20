@@ -7,7 +7,7 @@ import { Ic } from "@/components/shared/Ic";
 import { Btn } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import type { AgentsResponse, AgentRow } from "@/lib/api/types";
-import { isReal } from "@/lib/agent-mapping";
+import { isReal, deploymentKind, type DeploymentKind } from "@/lib/agent-mapping";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 
 // Fleet IA v2.1 — see docs/superpowers/specs/2026-05-19-fleet-ia-design.md
@@ -24,11 +24,11 @@ type Lifecycle = "active" | "paused" | "deprecated" | "draft";
 // the headline answers "is this agent online?" — deployment state, NOT
 // transient runtime success. Past run failures are operational details
 // surfaced in the 近期运行 column and the detail page, not the headline.
-//   deployed     — real Inngest function, not paused → 绿
-//   paused       — real, manually paused          → 灰
-//   not_deployed — stub (no Inngest function yet) → 红
+//   deployed     — real or shell Inngest function, not paused → 绿
+//   paused       — real, manually paused                     → 灰
+//   not_deployed — unbuilt (no Inngest function yet)         → 红
 type FleetStatus = "deployed" | "paused" | "not_deployed";
-type Realness = "real" | "stub";
+type Realness = DeploymentKind; // "real" | "shell" | "unbuilt"
 
 type FleetRow = {
   short: string;
@@ -55,9 +55,9 @@ type FleetRow = {
 // Status answers "is this agent currently online?", not "have past runs
 // succeeded?". Run-level failures live in the 近期运行 column and detail page.
 function deriveStatus(realness: Realness, live: LiveAgentState | undefined): FleetStatus {
-  if (realness === "stub") return "not_deployed";
-  // For real agents: if the admin API is unreachable we assume deployed
-  // (Inngest registers them on PUT /api/inngest at startup).
+  if (realness === "unbuilt") return "not_deployed";
+  // Shells register at Inngest startup just like real agents → deployed.
+  // For real agents: if the admin API is unreachable we assume deployed.
   if (live?.paused) return "paused";
   return "deployed";
 }
@@ -84,19 +84,19 @@ function isAnomalous(r: FleetRow): boolean {
 
 function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>): FleetRow[] {
   return api.agents.map((a) => {
-    const real = isReal(a.short);
-    const realness: Realness = real ? "real" : "stub";
-    const live = real ? liveByWsId.get(a.wsId) : undefined;
-    const slug = real ? WSID_TO_INNGEST_SLUG[a.wsId] ?? null : null;
+    const realness: Realness = deploymentKind(a.short);
+    const deployed = realness !== "unbuilt"; // real or shell — both register at Inngest
+    const live = deployed ? liveByWsId.get(a.wsId) : undefined;
+    const slug = deployed ? WSID_TO_INNGEST_SLUG[a.wsId] ?? null : null;
 
     let lifecycle: Lifecycle;
-    if (!real) lifecycle = "draft";
+    if (realness === "unbuilt") lifecycle = "draft";
     else if (live?.paused) lifecycle = "paused";
     else lifecycle = "active";
 
     return {
       short: a.short,
-      name: a.short,
+      name: a.inngestName ?? a.short,
       roleK: a.displayName,
       ownerTeam: a.ownerTeam,
       stage: a.stage,
@@ -622,7 +622,7 @@ function GroupHeader({ title, rows }: { title: string; rows: FleetRow[] }) {
 }
 
 function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void }) {
-  const stub = row.realness === "stub";
+  const stub = row.realness === "unbuilt";
   const dim = row.lifecycle === "deprecated";
   return (
     <div

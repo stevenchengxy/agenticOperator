@@ -7,26 +7,28 @@
 // 流程:
 //   1. 直连 RoboHire POST /match-resume(不走 RAAS proxy)
 //   2. RAAS POST /match-results 落 overall match 字段
-//   3. score 阈值分发(F3):
-//        > 90       → MATCH_PASSED_NO_INTERVIEW
-//        [50, 90]   → MATCH_PASSED_NEED_INTERVIEW
-//        < 50       → MATCH_FAILED
-//        null / 调用失败 → MATCH_FAILED
+//   3. score 阈值分发(F3,2026-05-21 单阈值化):
+//        < 40                    → MATCH_FAILED
+//        其它(含 null / 缺分)     → MATCH_PASSED_NEED_INTERVIEW
+//        调用失败                → MATCH_FAILED (上方 RobohireApiError 分支)
 //
 // 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
 
 import { NonRetriableError } from 'inngest';
-import {
-  RaasApiError,
-  saveMatchResults,
-  type RequirementsAgentViewItem,
-} from '@/lib/raas-api-client';
+import { saveMatchResultsToPartnerPg } from '@/lib/partner-pg/match-results';
+import { resolveMatchPayload } from '@/lib/partner-pg/_robohire-normalize';
+import { writeCandidateMatchResultInstance } from '@/lib/allmeta-writers';
 import { matchResumeDirect, RobohireApiError } from '@/lib/robohire-client';
+import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import {
   inngest,
   type MatchEventData,
   type MatchRuleCheckPassedData,
 } from '@/server/inngest/client';
+
+// Loose shape — the merged JR object from rule-check carries arbitrary
+// keys (path A flatten + path B agent-view item). Field-name probes below.
+type RequirementsAgentViewItem = Record<string, unknown>;
 
 const AGENT_ID = 'match-resume-agent';
 const AGENT_NAME = 'matchResume';
@@ -34,12 +36,12 @@ const AGENT_NAME = 'matchResume';
 export const matchResumeAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Match Resume Agent (workflow node 10-2)',
+    name: 'Match Resume Agent',
     retries: 2,
     triggers: [{ event: 'MATCH_RULE_CHECK_PASSED' }],
   },
-  async ({ event, step, logger }) => {
-    return await handleMatchRuleCheckPassed({ event, step, logger });
+  async ({ event, step, logger, runId }) => {
+    return await handleMatchRuleCheckPassed({ event, step, logger, runId });
   },
 );
 
@@ -47,13 +49,30 @@ export const matchResumeAgent = inngest.createFunction(
 // MATCH_RULE_CHECK_PASSED → RoboHire match → saveMatchResults → emit MATCH_*
 // ──────────────────────────────────────────────────────────────────────
 
-async function handleMatchRuleCheckPassed({ event, step, logger }: any) {
+async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
   const data = event.data as MatchRuleCheckPassedData;
   const traceId = data.runtime_context?.trace_id ?? undefined;
   const stepKey = sanitizeStepKey(data.job_requisition_id);
   const req = (data.job_requisition ?? {}) as RequirementsAgentViewItem;
   const candidateId = data.candidate_id ?? '';
   const uploadId = data.upload_id ?? '';
+
+  const fileLogger = createAgentLogger({
+    agent: 'matchResume',
+    runId: runId ?? `local-${Date.now()}`,
+    traceId: traceId ?? null,
+    anchors: {
+      candidate_id: candidateId || undefined,
+      job_requisition_id: data.job_requisition_id,
+      upload_id: uploadId || undefined,
+    },
+  });
+  return runWithLogger(fileLogger, async () => {
+  fileLogger.event('handler.start', {
+    event_name: event.name,
+    candidate_id: candidateId,
+    job_requisition_id: data.job_requisition_id,
+  });
 
   if (!data.job_requisition || !data.parsed_resume) {
     logger.warn(
@@ -104,10 +123,16 @@ async function handleMatchRuleCheckPassed({ event, step, logger }: any) {
       candidate_id: candidateId || null,
       matching_score: null,
       upload_id: uploadId || null,
+      overall_status: '不匹配',
       success: false,
       data: { error_kind: 'robohire-match-call-failed' },
       error: matchResult.error,
     };
+    fileLogger.event('emit.match-failed-robohire-error', {
+      candidate_id: candidateId,
+      job_requisition_id: data.job_requisition_id,
+      error: matchResult.error,
+    });
     await step.sendEvent(`emit-match-failed-${stepKey}`, {
       name: 'MATCH_FAILED',
       data: failedPayload,
@@ -115,33 +140,58 @@ async function handleMatchRuleCheckPassed({ event, step, logger }: any) {
     return { ok: false, job_requisition_id: data.job_requisition_id, error: matchResult.error };
   }
 
-  await step.run(`save-match-${stepKey}`, async () => {
-    try {
-      const r = await saveMatchResults(
-        {
-          ...(matchResult.data as Record<string, unknown>),
-          source: 'need_interview',
-          candidate_id: candidateId || undefined,
-          upload_id: uploadId || undefined,
-          job_requisition_id: data.job_requisition_id,
-          client_id: pickClientId(req),
-          robohire_request_id: matchResult.requestId,
-          savedAs: matchResult.savedAs,
-        },
-        { traceId },
-      );
-      logger.info(`[${AGENT_NAME}] saveMatchResults OK · jr=${data.job_requisition_id}`);
-      return r;
-    } catch (e) {
-      if (e instanceof RaasApiError && e.isClientError) {
-        throw new NonRetriableError(`saveMatchResults 4xx: ${e.code} ${e.message}`);
-      }
-      throw e;
-    }
+  const saveResult = await step.run(`save-match-${stepKey}`, async () => {
+    // 2026-05-21: pass the RoboHire envelope verbatim — the writer now
+    // ports raas_v4's resolveMatchPayload / buildShapeDInner so real scores
+    // (nested under overallMatchScore.score + breakdown) land in the right
+    // columns. job_posting_id is resolved server-side from the JR if absent.
+    const rd = matchResult.data as Record<string, unknown>;
+    const r = await saveMatchResultsToPartnerPg({
+      candidate_id: candidateId,
+      job_requisition_id: data.job_requisition_id,
+      client_id: pickClientId(req) ?? null,
+      job_posting_id:
+        typeof (req as Record<string, unknown>).job_posting_id === 'string'
+          ? ((req as Record<string, unknown>).job_posting_id as string)
+          : null,
+      source: 'need_interview',
+      created_by: 'ai_engine',
+      raw_llm_response: rd,
+    });
+    logger.info(
+      `[${AGENT_NAME}] partner-pg saveMatchResults OK · jr=${data.job_requisition_id} ` +
+        `cmr=${r.candidate_match_result_id} jp=${r.job_posting_id ?? '-'} ` +
+        `created=${r.created}${r.skipped ? ` skipped=${r.reason}` : ''}`,
+    );
+    return r;
   });
 
   const matching_score = extractMatchingScore(matchResult.data);
   const eventName = decideMatchEvent(matching_score);
+  const overall_status: '匹配' | '不匹配' = eventName === 'MATCH_FAILED' ? '不匹配' : '匹配';
+
+  // ── 写 Neo4j Candidate_Match_Result overall_* fields via allmeta ──
+  // PK 复用 ruleCheckAgent 已建的 cmr_<candidate>_<jr>(allmeta upsert by PK)
+  // 跟 ruleCheckAgent 那条 row 合并 — 覆盖 overall_* 不动 rule_check_*
+  await step.run(`write-cmr-neo4j-${stepKey}`, async () => {
+    const rd = matchResult.data as Record<string, unknown>;
+    const cmrId = `cmr_${candidateId || 'unknown'}_${data.job_requisition_id}`;
+    const r = await writeCandidateMatchResultInstance({
+      candidate_match_result_id: cmrId,
+      client_id: pickClientId(req) ?? null,
+      candidate_id: candidateId,
+      job_requisition_id: data.job_requisition_id,
+      overall_match_score: matching_score,
+      overall_fit_verdict: overall_status,
+      overall_fit_summary:
+        typeof rd.recommendation === 'string' ? rd.recommendation : null,
+      overall_match_grade: gradeFromScore(matching_score),
+    });
+    if (r.ok)
+      logger.info(`[${AGENT_NAME}] ✓ allmeta wrote Candidate_Match_Result ${cmrId} overall_*`);
+    else logger.warn(`[${AGENT_NAME}] allmeta CMR write failed: ${r.error}`);
+    return r;
+  });
 
   const payload: MatchEventData = {
     job_requisition_id: data.job_requisition_id,
@@ -152,16 +202,32 @@ async function handleMatchRuleCheckPassed({ event, step, logger }: any) {
       typeof (req as any).job_posting_id === 'string' && (req as any).job_posting_id.trim()
         ? ((req as any).job_posting_id as string).trim()
         : null,
+    candidate_match_result_id: saveResult.candidate_match_result_id,
+    overall_status,
     success: true,
     data: matchResult.data as unknown as Record<string, unknown>,
     requestId: matchResult.requestId,
     savedAs: matchResult.savedAs,
   };
+  fileLogger.event('emit.match-event', {
+    event_name: eventName,
+    candidate_id: candidateId,
+    job_requisition_id: data.job_requisition_id,
+    matching_score,
+    candidate_match_result_id: saveResult.candidate_match_result_id,
+    overall_status,
+  });
   await step.sendEvent(`emit-match-${stepKey}`, { name: eventName, data: payload });
 
   logger.info(
     `[${AGENT_NAME}] ✅ emitted ${eventName} · jr=${data.job_requisition_id} score=${matching_score}`,
   );
+  fileLogger.event('handler.done', {
+    event_name: eventName,
+    candidate_id: candidateId,
+    job_requisition_id: data.job_requisition_id,
+    matching_score,
+  });
   return {
     ok: true,
     job_requisition_id: data.job_requisition_id,
@@ -169,6 +235,7 @@ async function handleMatchRuleCheckPassed({ event, step, logger }: any) {
     eventName,
     matching_score,
   };
+  }); // runWithLogger
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -216,25 +283,35 @@ function sanitizeStepKey(s: string): string {
 }
 
 function extractMatchingScore(robohireData: unknown): number | null {
+  // RoboHire real-shape: d.matchScore is always null, real score nests at
+  // d.overallMatchScore.score. Reuse the normalizer (same logic as
+  // saveMatchResultsToPartnerPg) so event routing and DB write agree.
   if (!robohireData || typeof robohireData !== 'object') return null;
-  const d = robohireData as Record<string, unknown>;
-  if (typeof d.matchScore === 'number') return d.matchScore;
-  if (typeof d.overallMatchScore === 'number') return d.overallMatchScore;
-  return null;
+  const { inner } = resolveMatchPayload(robohireData as Record<string, unknown>);
+  const s = (inner as { matchScore?: unknown }).matchScore;
+  return typeof s === 'number' ? s : null;
 }
 
 /**
- * F3 score → event-name dispatch.
- *   score > 90       → MATCH_PASSED_NO_INTERVIEW
- *   50 ≤ score ≤ 90  → MATCH_PASSED_NEED_INTERVIEW
- *   score < 50       → MATCH_FAILED
- *   null             → MATCH_PASSED_NEED_INTERVIEW (conservative when score missing)
+ * F3 score → event-name dispatch (2026-05-21 单阈值化):
+ *   score < 40 → MATCH_FAILED
+ *   其它(含 null) → MATCH_PASSED_NEED_INTERVIEW
+ *
+ * MATCH_PASSED_NO_INTERVIEW 路径已下线 —— 不再按分数自动免面试,统一让 ≥40
+ * 的候选人都进面试环节。
  */
 function decideMatchEvent(
   score: number | null,
-): 'MATCH_PASSED_NO_INTERVIEW' | 'MATCH_PASSED_NEED_INTERVIEW' | 'MATCH_FAILED' {
+): 'MATCH_PASSED_NEED_INTERVIEW' | 'MATCH_FAILED' {
   if (score === null) return 'MATCH_PASSED_NEED_INTERVIEW';
-  if (score > 90) return 'MATCH_PASSED_NO_INTERVIEW';
-  if (score >= 50) return 'MATCH_PASSED_NEED_INTERVIEW';
-  return 'MATCH_FAILED';
+  if (score < 40) return 'MATCH_FAILED';
+  return 'MATCH_PASSED_NEED_INTERVIEW';
+}
+
+function gradeFromScore(score: number | null): string {
+  if (score === null) return '未评级';
+  if (score >= 90) return 'A';
+  if (score >= 75) return 'B';
+  if (score >= 50) return 'C';
+  return 'D';
 }

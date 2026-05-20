@@ -24,7 +24,10 @@ export type ApiMeta = {
 export type AgentRow = {
   short: string;
   wsId: string;
+  /** i18n key for the Chinese / English translated display name. */
   displayName: string;
+  /** Human name as registered in Inngest (matches the Inngest dashboard). */
+  inngestName: string;
   stage: Stage;
   kind: AgentKind;
   ownerTeam: string;
