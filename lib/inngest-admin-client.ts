@@ -208,6 +208,134 @@ export async function getRunHistory(runId: string): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────
+// Step-level outputs (V2 trace API).
+//
+// `getRunHistory()` returns step state transitions but NOT the actual JSON
+// returned by each step.run(). Inngest's V2 trace API exposes per-span
+// outputID pointers; resolving each one yields the JSON the step returned.
+//
+// This is what the Inngest dev UI shows when you expand a step — duplicating
+// it inside RAAS / AO monitoring saves an extra-tab round trip.
+//
+// Returns leaf spans only (the user-visible step.run / step.sendEvent calls)
+// — internal Inngest plumbing spans (no stepOp) are filtered out. Output is
+// the raw JSON string Inngest stored; caller can JSON.parse for display.
+// ─────────────────────────────────────────────────────────────
+
+export type RunStepOutput = {
+  spanID: string;
+  name: string;
+  stepOp: string | null;
+  status: string | null;
+  attempts: number | null;
+  durationMs: number | null;
+  queuedAt: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  /** Raw JSON string Inngest stored for this step's return value. */
+  output: string | null;
+  /** Set if fetching the output failed (e.g. expired / not yet ready). */
+  outputError: string | null;
+};
+
+type RawSpan = {
+  spanID: string;
+  name: string;
+  stepOp: string | null;
+  status: string | null;
+  attempts: number | null;
+  duration: number | null;
+  queuedAt: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  outputID: string | null;
+  childrenSpans: RawSpan[] | null;
+};
+
+function flattenLeafSpans(span: RawSpan | null | undefined): RawSpan[] {
+  if (!span) return [];
+  const kids = Array.isArray(span.childrenSpans) ? span.childrenSpans : [];
+  if (kids.length === 0) return [span];
+  return kids.flatMap(flattenLeafSpans);
+}
+
+export async function getRunStepOutputs(runId: string): Promise<RunStepOutput[]> {
+  // V2 trace API — same query the Inngest dev UI uses. childrenSpans is
+  // recursive; we walk the tree client-side because GraphQL recursion needs
+  // an explicit fragment.
+  const data = await gql<{
+    run: { trace: RawSpan | null } | null;
+  }>(`
+    {
+      run(runID: "${runId}") {
+        trace {
+          spanID name stepOp status attempts duration outputID
+          queuedAt startedAt endedAt
+          childrenSpans {
+            spanID name stepOp status attempts duration outputID
+            queuedAt startedAt endedAt
+            childrenSpans {
+              spanID name stepOp status attempts duration outputID
+              queuedAt startedAt endedAt
+              childrenSpans {
+                spanID name stepOp status attempts duration outputID
+                queuedAt startedAt endedAt
+              }
+            }
+          }
+        }
+      }
+    }
+  `);
+  const trace = data.run?.trace;
+  if (!trace) return [];
+
+  const leaves = flattenLeafSpans(trace);
+
+  // Resolve outputID → JSON string in parallel. Failures per-step are
+  // captured in `outputError` and don't fail the whole batch.
+  return Promise.all(
+    leaves.map(async (span): Promise<RunStepOutput> => {
+      const base: RunStepOutput = {
+        spanID: span.spanID,
+        name: span.name,
+        stepOp: span.stepOp,
+        status: span.status,
+        attempts: span.attempts,
+        durationMs: span.duration,
+        queuedAt: span.queuedAt,
+        startedAt: span.startedAt,
+        endedAt: span.endedAt,
+        output: null,
+        outputError: null,
+      };
+      if (!span.outputID) return base;
+      try {
+        const resp = await gql<{
+          runTraceSpanOutputByID: { data: string | null; error: { message: string } | null } | null;
+        }>(`
+          {
+            runTraceSpanOutputByID(outputID: "${span.outputID}") {
+              data
+              error { message }
+            }
+          }
+        `);
+        const r = resp.runTraceSpanOutputByID;
+        if (r?.error?.message) {
+          base.outputError = r.error.message;
+        } else {
+          base.output = r?.data ?? null;
+        }
+      } catch (err) {
+        base.outputError = (err as Error).message;
+      }
+      return base;
+    }),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Flow grouping (Level 4 — per-candidate × per-JD process trace)
 // ─────────────────────────────────────────────────────────────
 

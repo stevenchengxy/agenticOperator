@@ -78,3 +78,8 @@ data/e2e-out/
 # External projects (separate git repos that happen to live in this dir)
 event_manager/
 raas_v4/
+
+# Ontology snapshot fixtures (large blobs, regenerated from raas_v4)
+neo4j_data/
+*.bak
+*.bak.*

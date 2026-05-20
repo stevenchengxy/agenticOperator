@@ -37,11 +37,15 @@ export const AGENT_MAP: AgentMeta[] = [
   { short: 'ResumeCollector',  wsId: '8',       stage: 'resume',      kind: 'hybrid', ownerTeam: '招聘运营', version: 'v3.0.1', triggersEvents: ['CHANNEL_PUBLISHED'],                              emitsEvents: ['RESUME_DOWNLOADED'],                                                        terminal: false },
   { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false },
   { short: 'ResumeFixer',      wsId: '9-2',     stage: 'resume',      kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['RESUME_PARSE_ERROR'],                             emitsEvents: ['RESUME_PROCESSED'],                                                         terminal: false },
-  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.3.1', triggersEvents: ['RESUME_PROCESSED', 'RULE_CHECK_PASSED'], emitsEvents: ['RULE_CHECK_REQUESTED', 'MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false },
-  // RuleCheck (wsId 10-5) — independent Inngest function (PR-4, 2026-05-19).
-  // Sits between Matcher 1st seg (emits RULE_CHECK_REQUESTED) and Matcher 2nd seg
-  // (subscribes RULE_CHECK_PASSED). See docs/workflow-agents-inngest-spec.md §5.
-  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v1.0.0', triggersEvents: ['RULE_CHECK_REQUESTED'],                          emitsEvents: ['RULE_CHECK_PASSED', 'MATCH_FAILED'],                                        terminal: false },
+  // 2026-05-19 consolidation: matchResume 收敛成只订 MATCH_RULE_CHECK_PASSED;
+  // 第一段(RESUME_PROCESSED → 拉 JR + 派发)整段并进 RuleCheck。
+  // wsId 保持 '10' / '10-5' 以兼容 monitor / topology / workflow-graph 现有节点 ID;
+  // 与 partner actions_v0_1_002 的 10-1 / 10-2 在事件名级别对齐(triggers / emits)。
+  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v3.0.0', triggersEvents: ['MATCH_RULE_CHECK_PASSED'],                       emitsEvents: ['MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false },
+  // RuleCheck — independent Inngest function. 直接订 RESUME_PROCESSED,
+  // 内部 fan-out per JR. 重派场景由 partner 重发 RESUME_PROCESSED 触发,无额外订阅。
+  // 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
+  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v2.0.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: ['MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED'],                        terminal: false },
   // MatchReviewer (wsId 10-HITL) removed: not in authoritative workflow JSON.
   // MATCH_FAILED is terminal in the canonical workflow spec.
   { short: 'InterviewInviter', wsId: '11-1',    stage: 'interview',   kind: 'auto',   ownerTeam: '技术招聘', version: 'v0.7.2', triggersEvents: ['MATCH_PASSED_NEED_INTERVIEW'],                    emitsEvents: ['INTERVIEW_INVITATION_SENT'],                                                terminal: true  },

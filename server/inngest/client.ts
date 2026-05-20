@@ -147,8 +147,13 @@ export type MatchPassedNeedInterviewData = MatchEventData;
 export type MatchPassedNoInterviewData = MatchEventData;
 export type MatchFailedData = MatchEventData;
 
-// ─── §3.5 Rule check 事件(matchResumeAgent 在调 RAAS /match-resume 之前
-// 跑一次 LLM 预筛,决定是否推进。PASS/FAIL/REVIEW,见 lib/rule-check/) ───
+// ─── §3.5 Rule check 事件(workflow node 10-1) ───
+//
+// 2026-05-19 consolidation: ruleCheckAgent 直接订阅 `RESUME_PROCESSED`
+// (吸收原 matchResume 第一段);事件名按 neo4j_data/actions_v0_1_002.json
+// 10-1 对齐 — emit `MATCH_RULE_CHECK_PASSED` / `MATCH_RULE_CHECK_FAILED`。
+//
+// 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
 export type RuleCheckAuditMeta = {
   rules_evaluated: number;
   graph_calls: number;
@@ -164,52 +169,48 @@ export type RuleCheckAuditMeta = {
   fail_reason?: string;
 };
 
-/**
- * Rule check 请求事件 — matchResumeAgent 第一段对每条 JR emit 一条,
- * 触发 ruleCheckAgent 跑 LLM 评估。
- *
- * 新增 in PR-4 (2026-05-19)。之前 rule-check 内嵌在 matchResumeAgent step 4.0。
- */
-export type RuleCheckRequestedData = {
+/** ruleCheckAgent 在 handler 内构造 runRuleCheck input 时用到的运行时上下文。 */
+export type RuleCheckRuntimeContext = {
   upload_id: string;
   candidate_id: string;
   resume_id: string;
   employee_id: string;
-  job_requisition_id: string;
-  client_id?: string;
-  // 完整 JR 对象 + parsed resume — 给 ruleCheckAgent 用,避免再去拉 RAAS
-  job_requisition: Record<string, unknown>;
-  parsed_resume: Record<string, unknown> | null;
-  // runtime_context 由 ruleCheckAgent 转给 buildRuleCheckInput
-  runtime_context: {
-    upload_id: string;
-    candidate_id: string;
-    resume_id: string;
-    employee_id: string;
-    filename?: string;
-    received_at?: string;
-    trace_id?: string | null;
-  };
+  filename?: string;
+  received_at?: string;
   trace_id?: string | null;
 };
 
-export type RuleCheckPassedData = {
-  upload_id: string;
-  candidate_id?: string;
-  resume_id?: string;
+/**
+ * ruleCheckAgent → matchResumeAgent 过桥事件。
+ *
+ * payload 在 partner dispatcher 看的字段顶层平铺(同 MATCH_* F3 契约),
+ * matchResumeAgent 第二段需要的 jr / parsed_resume / runtime_context 透传。
+ */
+export type MatchRuleCheckPassedData = {
+  /** ★ matchResumeAgent 第二段需要 */
+  upload_id: string | null;
+  candidate_id: string | null;
+  resume_id: string | null;
   job_requisition_id: string;
   client_id: string;
+  employee_id: string;
   audit: RuleCheckAuditMeta;
-  // ── NEW in PR-4: 透传给 matchResumeAgent 第二段(订阅 RULE_CHECK_PASSED) ──
   /** Full JR object — 第二段调 matchResumeDirect 时拼 jd text。 */
-  job_requisition?: Record<string, unknown>;
+  job_requisition: Record<string, unknown>;
   /** Parsed resume(可能为 null,如果 RoboHire parse 之后没拿到)。 */
-  parsed_resume?: Record<string, unknown> | null;
+  parsed_resume: Record<string, unknown> | null;
   /** runtime_context 透传(主要 traceId)。 */
-  runtime_context?: RuleCheckRequestedData['runtime_context'];
-  /** employee_id 给第二段 saveMatchResults 用。 */
-  employee_id?: string;
+  runtime_context: RuleCheckRuntimeContext;
 };
+
+/**
+ * ruleCheckAgent → partner(可选订阅)的失败事件。
+ *
+ * 复用 MatchEventData(F3 平铺契约) — `matching_score` 在 rule-check 阶段
+ * 必然为 null(还没跑 RoboHire match);`data` 里塞 `rule_check_decision` /
+ * `failed_rules` / `audit` 结构化信息。
+ */
+export type MatchRuleCheckFailedData = MatchEventData;
 
 // ─── §3.4 JD 生成相关事件 ─────────────────────────────────
 export type RequirementLoggedData = {

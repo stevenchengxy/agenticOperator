@@ -5,6 +5,20 @@ import { useApp } from '@/lib/i18n';
 import { formatDateTime, formatTime, statusLabel } from '@/components/monitor/i18n-utils';
 import { EvidenceTrail } from '@/components/monitor/EvidenceTrail';
 
+type StepOutput = {
+  spanID: string;
+  name: string;
+  stepOp: string | null;
+  status: string | null;
+  attempts: number | null;
+  durationMs: number | null;
+  queuedAt: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  output: string | null;
+  outputError: string | null;
+};
+
 type RunDetail = {
   id: string;
   status: string;
@@ -17,6 +31,7 @@ type RunDetail = {
     stepName: string;
     states: Array<{ type: string; attempt: number; createdAt: string }>;
   }>;
+  stepOutputs?: StepOutput[];
   event?: { id: string; name: string; payload?: string; createdAt?: string } | null;
   tokenUsage?: { prompt: number; completion: number; total: number };
 };
@@ -153,6 +168,23 @@ export function RunDetailDrawer({
                 </div>
               </div>
 
+              {/* Per-step output (Inngest V2 trace API). Each row is one
+                  step.run/step.sendEvent leaf with its return value — same
+                  data the Inngest dev UI surfaces under each step, so users
+                  don't have to context-switch to localhost:8288. */}
+              {detail.stepOutputs && detail.stepOutputs.length > 0 && (
+                <div>
+                  <h3 className="text-[12px] font-medium text-ink-2 mb-2">
+                    步骤输出 ({detail.stepOutputs.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {detail.stepOutputs.map((s) => (
+                      <StepOutputBlock key={s.spanID} step={s} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Output */}
               {detail.output != null && (
                 <div>
@@ -180,6 +212,61 @@ function Field({ label, value, highlight }: { label: string; value: string; high
     <div>
       <div className="text-[10px] text-ink-4 uppercase">{label}</div>
       <div className={`mt-0.5 ${highlight ? 'text-ink-1 font-medium' : 'text-ink-2'}`}>{value}</div>
+    </div>
+  );
+}
+
+function StepOutputBlock({ step }: { step: StepOutput }) {
+  const [expanded, setExpanded] = useState(false);
+  const statusTone =
+    step.status === 'COMPLETED'
+      ? 'text-ok'
+      : step.status === 'FAILED'
+        ? 'text-err'
+        : step.status === 'RUNNING'
+          ? 'text-warn'
+          : 'text-ink-3';
+  // Pretty-print if it's valid JSON; otherwise show raw.
+  let pretty = step.output ?? '';
+  if (step.output) {
+    try {
+      pretty = JSON.stringify(JSON.parse(step.output), null, 2);
+    } catch {
+      pretty = step.output;
+    }
+  }
+  return (
+    <div className="border border-line rounded text-[11px]">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-surface/60 text-left"
+      >
+        <span className="text-ink-4 mono text-[10px]">{expanded ? '▾' : '▸'}</span>
+        <span className="flex-1 min-w-0 truncate text-ink-2">{step.name}</span>
+        {step.stepOp && <span className="text-ink-4 mono text-[10px]">{step.stepOp}</span>}
+        {step.durationMs != null && (
+          <span className="text-ink-4 mono text-[10px]">{step.durationMs}ms</span>
+        )}
+        <span className={`${statusTone} mono text-[10px]`}>{step.status ?? '—'}</span>
+      </button>
+      {expanded && (
+        <div className="px-2 pb-2 pt-1 border-t border-line bg-surface/40">
+          {step.outputError ? (
+            <div className="text-err text-[11px]">output 拉取失败: {step.outputError}</div>
+          ) : step.output == null ? (
+            <div className="text-ink-3 text-[11px] italic">
+              {step.stepOp === 'INVOKE' || step.stepOp === 'WAIT_FOR_EVENT'
+                ? '此 step 类型无 output'
+                : '(无 output)'}
+            </div>
+          ) : (
+            <pre className="text-[10.5px] mono whitespace-pre-wrap break-words text-ink-2 max-h-[280px] overflow-auto">
+              {pretty}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

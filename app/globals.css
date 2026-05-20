@@ -238,6 +238,14 @@ body {
   animation: pulse 2s ease-in-out infinite;
 }
 
+/* Workflow topology nodes — subtle hover affordance */
+.wf-node {
+  transition: filter 140ms ease-out;
+}
+.wf-node:hover {
+  filter: drop-shadow(0 2px 6px color-mix(in oklab, var(--c-ink-1) 18%, transparent));
+}
+
 /* ===== scrollbars ===== */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb {

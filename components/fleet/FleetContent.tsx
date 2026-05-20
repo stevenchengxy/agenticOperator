@@ -1,392 +1,819 @@
 "use client";
 import React from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
-import { Badge, Btn, Card, CardHead, Metric, Spark, StatusDot } from "@/components/shared/atoms";
+import { Btn } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
-import type { AgentsResponse } from "@/lib/api/types";
+import type { AgentsResponse, AgentRow } from "@/lib/api/types";
+import { isReal } from "@/lib/agent-mapping";
+import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 
-const fakeSpark = (i: number) => {
-  const base = [3, 4, 5, 4, 6, 7, 6, 8, 7, 9, 8, 9, 8, 7, 9, 8];
-  return base.map((v, j) => Math.max(1, v + ((i * 3 + j * 2) % 4) - 2));
-};
+// Fleet IA v2.1 — see docs/superpowers/specs/2026-05-19-fleet-ia-design.md
+// Three-pillar entry surface: deploy (Behavior) · monitor · govern (Manage).
+// This pass tightens typography and drops decorative chrome — glyph tiles,
+// chevrons, all-caps pills — to land closer to Claude's calm aesthetic.
+//
+// Realness (real vs stub) is orthogonal to lifecycle. See spec §3.
+// "real" = registered as an Inngest function (4 production agents today,
+// see docs/workflow-agents-inngest-spec.md §10).
 
-// /fleet legacy row shape (4-status enum). Map RunStatus → legacy.
-type LegacyRow = {
-  id: string;
+type Lifecycle = "active" | "paused" | "deprecated" | "draft";
+// Status semantics (per Kenny's "Speed/subway control board" framing):
+// the headline answers "is this agent online?" — deployment state, NOT
+// transient runtime success. Past run failures are operational details
+// surfaced in the 近期运行 column and the detail page, not the headline.
+//   deployed     — real Inngest function, not paused → 绿
+//   paused       — real, manually paused          → 灰
+//   not_deployed — stub (no Inngest function yet) → 红
+type FleetStatus = "deployed" | "paused" | "not_deployed";
+type Realness = "real" | "stub";
+
+type FleetRow = {
+  short: string;
   name: string;
-  roleK: string;       // i18n key for sublabel
-  status: "running" | "review" | "degraded" | "paused";
-  owner: string;
-  p50: string;
-  runs: number;
-  success: number | string;
-  cost: string;
-  last: string;
-  ver: string;
-  spark: number[];
+  roleK: string;
+  ownerTeam: string;
+  stage: AgentRow["stage"];
+  version: string;
+  status: FleetStatus;
+  lifecycle: Lifecycle;
+  realness: Realness;
+  // Run statistics — all from Inngest admin API for real agents, null for stubs.
+  liveTotal: number | null;
+  liveCompleted: number | null;
+  liveFailed: number | null;
+  liveRunning: number | null;
+  successRate: number | null;   // computed: completed / total
+  lastActiveAt: string | null;  // ISO timestamp from latest run
+  paused: boolean;
+  // Inngest slug for pause/resume mutation
+  slug: string | null;
 };
 
-function mapStatus(s: AgentsResponse["agents"][number]["status"]): LegacyRow["status"] {
-  if (s === "running") return "running";
-  if (s === "suspended") return "review";
-  if (s === "failed" || s === "timed_out" || s === "interrupted") return "degraded";
-  return "paused"; // null / paused / completed
+// Status answers "is this agent currently online?", not "have past runs
+// succeeded?". Run-level failures live in the 近期运行 column and detail page.
+function deriveStatus(realness: Realness, live: LiveAgentState | undefined): FleetStatus {
+  if (realness === "stub") return "not_deployed";
+  // For real agents: if the admin API is unreachable we assume deployed
+  // (Inngest registers them on PUT /api/inngest at startup).
+  if (live?.paused) return "paused";
+  return "deployed";
 }
+
+function relTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "—";
+  const diffSec = Math.max(0, (Date.now() - t) / 1000);
+  if (diffSec < 60) return "刚刚";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
+  return `${Math.floor(diffSec / 86400)}d`;
+}
+
+// "Anomaly" = operational attention needed on a deployed agent. Paused is
+// intentional (not anomalous); stubs are a known gap (also not anomalous).
+// Anomaly only fires on a deployed agent whose recent quality dropped.
+function isAnomalous(r: FleetRow): boolean {
+  if (r.status !== "deployed") return false;
+  if (r.successRate != null && r.successRate < 80) return true;
+  return false;
+}
+
+function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>): FleetRow[] {
+  return api.agents.map((a) => {
+    const real = isReal(a.short);
+    const realness: Realness = real ? "real" : "stub";
+    const live = real ? liveByWsId.get(a.wsId) : undefined;
+    const slug = real ? WSID_TO_INNGEST_SLUG[a.wsId] ?? null : null;
+
+    let lifecycle: Lifecycle;
+    if (!real) lifecycle = "draft";
+    else if (live?.paused) lifecycle = "paused";
+    else lifecycle = "active";
+
+    return {
+      short: a.short,
+      name: a.short,
+      roleK: a.displayName,
+      ownerTeam: a.ownerTeam,
+      stage: a.stage,
+      version: a.version,
+      status: deriveStatus(realness, live),
+      lifecycle,
+      realness,
+      liveTotal: live?.total ?? null,
+      liveCompleted: live?.completed ?? null,
+      liveFailed: live?.failed ?? null,
+      liveRunning: live?.running ?? null,
+      successRate: live?.successRate ?? null,
+      lastActiveAt: live?.latestStartedAt ?? null,
+      paused: live?.paused ?? false,
+      slug,
+    };
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+
+// Stages in workflow order — used to sort groups when grouping by stage so
+// the page reads top-to-bottom in pipeline order (需求 → JD → 简历 → ...)
+// regardless of how many live agents each stage currently has.
+const STAGE_ORDER = [
+  "system",
+  "requirement",
+  "jd",
+  "resume",
+  "match",
+  "interview",
+  "eval",
+  "package",
+  "submit",
+] as const;
+
+const STAGE_ZH: Record<string, string> = {
+  system: "系统",
+  requirement: "需求",
+  jd: "JD",
+  resume: "简历",
+  match: "匹配",
+  interview: "面试",
+  eval: "评估",
+  package: "推荐包",
+  submit: "提交",
+};
 
 export function FleetContent() {
   const { t } = useApp();
-  const [apiAgents, setApiAgents] = React.useState<LegacyRow[] | null>(null);
+  const router = useRouter();
+  const sp = useSearchParams();
+
+  const group = (sp.get("group") ?? "team") as "team" | "status" | "stage" | "flat";
+  const statusFilter = (sp.get("status") ?? "all") as FilterId;
+  const windowId = (sp.get("window") ?? "7d") as "7d" | "30d" | "90d";
+
+  const setUrl = React.useCallback(
+    (mut: (params: URLSearchParams) => void) => {
+      const next = new URLSearchParams(sp.toString());
+      mut(next);
+      router.replace(`/fleet${next.toString() ? `?${next.toString()}` : ""}`);
+    },
+    [router, sp],
+  );
+
+  const [agentsRes, setAgentsRes] = React.useState<AgentsResponse | null>(null);
   const [partial, setPartial] = React.useState(false);
+  const { byWsId: liveByWsId, lastRefresh } = useInngestLiveOverlay();
 
   React.useEffect(() => {
     fetchJson<AgentsResponse>("/api/agents")
       .then((res) => {
         if (res.meta.partial?.includes("ws")) setPartial(true);
-        const rows: LegacyRow[] = res.agents.map((a, i) => ({
-          id: a.short.toUpperCase().slice(0, 3) + "-" + String(i + 1).padStart(2, "0"),
-          name: a.short,
-          roleK: a.displayName, // display_<short_lower>
-          status: mapStatus(a.status),
-          owner: a.ownerTeam,
-          p50: a.p50Ms != null ? `${a.p50Ms}ms` : "—",
-          runs: a.runs24h,
-          success: a.successRate != null ? Number((a.successRate * 100).toFixed(1)) : "—",
-          cost: a.costYuan ? `¥${a.costYuan}` : "¥0",
-          last: a.lastActivityAt ?? "—",
-          ver: a.version,
-          spark: a.spark.length === 16 ? a.spark : fakeSpark(i),
-        }));
-        setApiAgents(rows);
+        setAgentsRes(res);
       })
-      .catch(() => setPartial(true));
+      .catch(() => {
+        setPartial(true);
+        setAgentsRes({ agents: [], meta: { generatedAt: new Date().toISOString() } });
+      });
   }, []);
 
-  const metrics = [
-    { key: "m_active_agents", value: "11 / 12", delta: "+1", kind: "up" as const },
-    { key: "m_runs_24h", value: "9,427", delta: "+22.4%", kind: "up" as const },
-    { key: "m_success_rate", value: "94.8%", delta: "+0.6pp", kind: "up" as const },
-    { key: "m_hitl_queue", value: "42", delta: "−8", kind: "up" as const, sub: "JD审批 · 推荐包 · 评分分歧" },
-    { key: "m_cost_today", value: "¥2,749", delta: "+¥312", kind: "down" as const },
-    { key: "m_anomalies", value: "4", delta: "1 new", kind: "down" as const },
-  ];
+  const rows: FleetRow[] | null = agentsRes ? buildRows(agentsRes, liveByWsId) : null;
+  const safeRows = rows ?? [];
 
-  const agents = [
-    { id: "REQ-01", name: "ReqSync", roleK: "agent_req_sync", status: "running", owner: "HSM · 交付", p50: "420ms", runs: 214, success: 99.1, cost: "¥48", last: "刚刚", ver: "v1.4.2", spark: [3, 4, 2, 5, 7, 6, 8, 5, 9, 6, 7, 8, 9, 7, 8, 9] },
-    { id: "ANA-02", name: "ReqAnalyzer", roleK: "agent_req_analyzer", status: "running", owner: "HSM · 交付", p50: "1.8s", runs: 204, success: 96.6, cost: "¥182", last: "1m", ver: "v2.1.0", spark: [2, 3, 4, 3, 5, 6, 5, 7, 6, 8, 5, 6, 7, 6, 5, 7] },
-    { id: "JDG-03", name: "JDGenerator", roleK: "agent_jd_gen", status: "running", owner: "HSM · 交付", p50: "2.1s", runs: 198, success: 97.3, cost: "¥221", last: "2m", ver: "v1.9.4", spark: [4, 5, 6, 7, 5, 6, 8, 7, 9, 6, 7, 5, 8, 7, 6, 7] },
-    { id: "PUB-04", name: "Publisher", roleK: "agent_publisher", status: "degraded", owner: "招聘运营", p50: "3.4s", runs: 187, success: 82.4, cost: "¥64", last: "4m", ver: "v1.2.0", spark: [3, 4, 5, 3, 4, 5, 3, 4, 2, 3, 4, 5, 3, 4, 3, 4] },
-    { id: "COL-05", name: "ResumeCollector", roleK: "agent_collector", status: "running", owner: "招聘运营", p50: "680ms", runs: 3284, success: 99.6, cost: "¥58", last: "刚刚", ver: "v3.0.1", spark: [5, 6, 7, 8, 6, 7, 9, 8, 9, 8, 9, 7, 9, 8, 7, 9] },
-    { id: "PAR-06", name: "ResumeParser", roleK: "agent_parser", status: "running", owner: "招聘运营", p50: "1.2s", runs: 3102, success: 94.8, cost: "¥412", last: "刚刚", ver: "v2.8.0", spark: [4, 5, 6, 7, 6, 7, 8, 7, 9, 6, 7, 8, 9, 7, 8, 9] },
-    { id: "DUP-07", name: "DupeCheck", roleK: "agent_dupe", status: "running", owner: "合规", p50: "280ms", runs: 2941, success: 99.9, cost: "¥36", last: "刚刚", ver: "v1.5.3", spark: [2, 3, 3, 4, 5, 6, 5, 7, 6, 8, 7, 8, 9, 7, 8, 9] },
-    { id: "MAT-08", name: "Matcher", roleK: "agent_matcher", status: "running", owner: "招聘运营", p50: "1.6s", runs: 2802, success: 93.1, cost: "¥264", last: "刚刚", ver: "v2.3.1", spark: [3, 4, 5, 4, 6, 7, 6, 8, 7, 9, 8, 9, 8, 7, 9, 8] },
-    { id: "ITV-09", name: "AIInterviewer", roleK: "agent_interviewer", status: "review", owner: "技术招聘", p50: "24m", runs: 88, success: 88.6, cost: "¥1,204", last: "6m", ver: "v0.7.2", spark: [1, 2, 2, 3, 4, 3, 5, 4, 6, 5, 7, 6, 5, 4, 3, 4] },
-    { id: "EVL-10", name: "Evaluator", roleK: "agent_evaluator", status: "running", owner: "技术招聘", p50: "2.4s", runs: 81, success: 97.5, cost: "¥172", last: "8m", ver: "v1.6.0", spark: [2, 3, 3, 4, 5, 6, 5, 7, 6, 8, 7, 8, 9, 7, 8, 9] },
-    { id: "PKG-11", name: "PackageBuilder", roleK: "agent_packager", status: "running", owner: "招聘运营", p50: "3.1s", runs: 64, success: 98.4, cost: "¥88", last: "12m", ver: "v1.1.2", spark: [1, 2, 1, 2, 3, 2, 3, 4, 3, 4, 3, 4, 5, 4, 5, 4] },
-    { id: "SUB-12", name: "PortalSubmitter", roleK: "agent_submitter", status: "paused", owner: "招聘运营", p50: "—", runs: 0, success: "—" as any, cost: "¥0", last: "2h", ver: "v2.0.0", spark: [2, 2, 1, 2, 3, 2, 1, 2, 1, 0, 0, 0, 0, 0, 0, 0] },
-  ];
+  // Local optimistic toggle ─ on Pause/Resume click we immediately reflect
+  // the new state, then the next overlay refresh confirms (every 5s).
+  const [optimisticPause, setOptimisticPause] = React.useState<Record<string, boolean>>({});
+  const togglePause = React.useCallback(async (slug: string, next: boolean) => {
+    setOptimisticPause((m) => ({ ...m, [slug]: next }));
+    try {
+      await fetch(`/api/inngest-admin/functions/${encodeURIComponent(slug)}/toggle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paused: next }),
+      });
+    } catch {
+      // revert optimistic state on failure
+      setOptimisticPause((m) => { const c = { ...m }; delete c[slug]; return c; });
+    }
+  }, []);
+  // Apply optimistic overrides
+  const effectiveRows = safeRows.map((r) => {
+    if (!r.slug || !(r.slug in optimisticPause)) return r;
+    const paused = optimisticPause[r.slug];
+    return {
+      ...r,
+      paused,
+      status: paused ? ("paused" as FleetStatus) : ("deployed" as FleetStatus),
+      lifecycle: paused ? ("paused" as Lifecycle) : ("active" as Lifecycle),
+    };
+  });
 
-  const alerts = [
-    { sev: "high", title: "Publisher · 猎聘渠道推送失败率 17.6%", sub: "CHANNEL_PUBLISHED_FAILED · token 校验 401", agent: "PUB-04", time: "6m" },
-    { sev: "med", title: "AIInterviewer · 评分置信度 <0.65", sub: "CAND-8821 · JOB-142 建议人工复核", agent: "ITV-09", time: "14m" },
-    { sev: "med", title: "ResumeParser · 解析错误率上升", sub: "近 30 分钟 5.2% → 9.8% · RESUME_PARSE_ERROR", agent: "PAR-06", time: "22m" },
-    { sev: "low", title: "Matcher · 3 份简历归属冲突", sub: "RESUME_LOCKED_CONFLICT · 另一顾问已锁定", agent: "MAT-08", time: "38m" },
-  ];
+  const filtered = React.useMemo(() => {
+    if (statusFilter === "all") return effectiveRows;
+    if (statusFilter === "live") return effectiveRows.filter((r) => r.status === "deployed");
+    if (statusFilter === "blueprint") return effectiveRows.filter((r) => r.status === "not_deployed");
+    if (statusFilter === "anomalies") return effectiveRows.filter((r) => isAnomalous(r));
+    if (statusFilter === "paused") return effectiveRows.filter((r) => r.status === "paused");
+    if (statusFilter === "deprecated") return effectiveRows.filter((r) => r.lifecycle === "deprecated");
+    return effectiveRows;
+  }, [effectiveRows, statusFilter]);
 
-  const activity = [
-    { who: "System", what: "事件 · REQUIREMENT_SYNCED", meta: "JR-2041 · 工行 · 高级后端工程师", t: "2分钟前", kind: "info" as const },
-    { who: "Zhang W.", what: "批准 · PACKAGE_APPROVED", meta: "CAND-8790 → JR-1987 · 字节", t: "6分钟前", kind: "ok" as const },
-    { who: "System", what: "事件 · JD_APPROVED", meta: "JR-2039 · HSM 李航 审批", t: "11分钟前", kind: "info" as const },
-    { who: "System", what: "告警 · CHANNEL_PUBLISHED_FAILED", meta: "猎聘 · JR-2035", t: "28分钟前", kind: "err" as const },
-    { who: "Chen Y.", what: "澄清 · CLARIFICATION_READY", meta: "JR-2032 · 补充必备技能 + 薪资带宽", t: "1小时前", kind: "info" as const },
-    { who: "System", what: "事件 · APPLICATION_SUBMITTED", meta: "CAND-8731 → 招行招聘门户", t: "2小时前", kind: "ok" as const },
-  ];
+  const grouped = React.useMemo(() => groupRows(filtered, group), [filtered, group]);
 
-  const statusBadge = (s: string) => {
-    if (s === "running") return <Badge variant="ok" dot pulse>{t("s_running")}</Badge>;
-    if (s === "paused") return <Badge dot>{t("s_paused")}</Badge>;
-    if (s === "review") return <Badge variant="warn" dot>{t("s_review")}</Badge>;
-    if (s === "degraded") return <Badge variant="err" dot pulse>{t("s_degraded")}</Badge>;
-    if (s === "failed") return <Badge variant="err" dot>{t("s_failed")}</Badge>;
-    return <Badge>{s}</Badge>;
-  };
+  const total = effectiveRows.length;
+  const liveCount = effectiveRows.filter((r) => r.realness === "real").length;
+  const realRowsWithRuns = effectiveRows.filter((r) => r.realness === "real" && r.successRate != null);
+  const aggSuccessRate = realRowsWithRuns.length
+    ? realRowsWithRuns.reduce((sum, r) => sum + (r.successRate as number), 0) / realRowsWithRuns.length
+    : null;
+  const anomalies = effectiveRows.filter((r) => r.realness === "real" && isAnomalous(r)).length;
+  const teams = new Set(effectiveRows.map((r) => r.ownerTeam)).size;
+
+  const setStatusFilter = (next: FilterId) =>
+    setUrl((p) => { if (next === "all") p.delete("status"); else p.set("status", next); });
+  const setGroup = (next: typeof group) =>
+    setUrl((p) => { if (next === "team") p.delete("group"); else p.set("group", next); });
+  const setWindow = (next: typeof windowId) =>
+    setUrl((p) => { if (next === "7d") p.delete("window"); else p.set("window", next); });
+
+  const [behaviorModal, setBehaviorModal] = React.useState(false);
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-auto">
+    <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
       {/* page header */}
-      <div className="flex items-end gap-4 border-b border-line" style={{ padding: "18px 22px 10px" }}>
-        <div className="flex-1">
-          <div className="text-[18px] font-semibold tracking-tight">{t("fleet_title")}</div>
-          <div className="text-ink-3 text-[12px] mt-0.5">{t("fleet_sub")}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Btn size="sm"><Ic.clock /> {t("last_24h")} <Ic.chevD /></Btn>
-          <Btn size="sm"><Ic.user /> {t("everyone")} <Ic.chevD /></Btn>
-          <div className="w-px h-5 bg-line" />
-          <Btn size="sm"><Ic.plug /> {t("new_workflow")}</Btn>
-          <Btn variant="primary" size="sm"><Ic.plus /> {t("deploy_agent")}</Btn>
-        </div>
-      </div>
-
-      {/* metric strip */}
-      <div className="grid grid-cols-6 gap-px bg-line border-b border-line">
-        {metrics.map((m, i) => (
-          <div key={i} className="bg-surface" style={{ padding: "14px 18px" }}>
-            <Metric label={t(m.key)} value={m.value} delta={m.delta} deltaKind={m.kind} sub={m.sub} />
-            <div className="mt-2"><Spark data={fakeSpark(i)} /></div>
+      <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
+        <div className="flex items-start gap-6">
+          <div className="flex-1 min-w-0">
+            <h1
+              className="m-0 text-ink-1"
+              style={{
+                fontFamily: 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif',
+                fontWeight: 500,
+                fontSize: 26,
+                letterSpacing: "-0.015em",
+                lineHeight: 1.15,
+              }}
+            >
+              {t("fleet_title")}
+            </h1>
+            <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+              {t("fleet_sub")}
+            </div>
           </div>
+          <div className="flex items-center gap-3 mt-1">
+            <LiveIndicator lastRefresh={lastRefresh} />
+            {partial && (
+              <span className="text-[11.5px] text-ink-3 flex items-center gap-1.5">
+                <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-warn)" }} />
+                部分数据未到
+              </span>
+            )}
+            <Btn variant="primary" size="sm" onClick={() => setBehaviorModal(true)}>
+              <Ic.plus /> {t("deploy_agent")}
+            </Btn>
+          </div>
+        </div>
+      </div>
+
+      {/* summary strip + period */}
+      <div className="border-b border-line flex items-center gap-x-8 gap-y-3 flex-wrap" style={{ padding: "16px 32px" }}>
+        <SummaryChip
+          label={t("f2_kind_real")}
+          value={`${liveCount}`}
+          sub={`/ ${total}`}
+          tone="ok"
+          active={statusFilter === "live"}
+          onClick={() => setStatusFilter(statusFilter === "live" ? "all" : "live")}
+        />
+        <SummaryChip
+          label={t("f2_chip_success_7d")}
+          value={aggSuccessRate == null ? "—" : `${aggSuccessRate.toFixed(1)}%`}
+          tone={aggSuccessRate == null ? "muted" : aggSuccessRate >= 95 ? "ok" : aggSuccessRate >= 90 ? "warn" : "err"}
+        />
+        <SummaryChip
+          label="需关注"
+          value={String(anomalies)}
+          tone={anomalies === 0 ? "muted" : "err"}
+          active={statusFilter === "anomalies"}
+          onClick={() => setStatusFilter(anomalies > 0 ? (statusFilter === "anomalies" ? "all" : "anomalies") : "all")}
+        />
+        <SummaryChip
+          label={t("f2_chip_teams")}
+          value={String(teams)}
+          tone="muted"
+        />
+        <div className="flex-1" />
+        <PeriodDropdown value={windowId} onChange={setWindow} t={t} />
+      </div>
+
+      {/* secondary toolbar — group + active-filter pill */}
+      <div className="flex items-center gap-3 text-[12.5px]" style={{ padding: "10px 32px" }}>
+        <span className="text-ink-3">分组</span>
+        <SegLinks
+          options={[
+            { id: "team",   label: t("f2_group_by_team") },
+            { id: "stage",  label: t("f2_group_by_stage") },
+            { id: "status", label: t("f2_group_by_status") },
+            { id: "flat",   label: t("f2_group_flat") },
+          ]}
+          value={group}
+          onChange={(v) => setGroup(v as typeof group)}
+        />
+        <div className="flex-1" />
+        {statusFilter !== "all" && (
+          <button
+            onClick={() => setStatusFilter("all")}
+            className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 rounded border border-line bg-surface"
+            style={{ padding: "3px 9px", fontSize: 12 }}
+          >
+            <span className="text-ink-3">筛选:</span>
+            <span className="font-medium">{filterLabel(statusFilter, t)}</span>
+            <span className="text-ink-3 ml-1">×</span>
+          </button>
+        )}
+        <FilterMenu value={statusFilter} onChange={setStatusFilter} t={t} />
+      </div>
+
+      {/* list */}
+      <div className="flex-1 min-h-0" style={{ padding: "4px 32px 48px" }}>
+        {agentsRes === null && (
+          <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
+        )}
+        {agentsRes !== null && grouped.length > 0 && (
+          <div
+            className="grid gap-4 text-ink-3 border-b border-line"
+            style={{ gridTemplateColumns: GRID, padding: "8px 12px", fontSize: 11.5 }}
+          >
+            <span>智能体</span>
+            <span>部署状态</span>
+            <span>近期运行</span>
+            <span style={{ textAlign: "right" }}>最近活动</span>
+            <span style={{ textAlign: "right" }}>版本</span>
+          </div>
+        )}
+        {agentsRes !== null && grouped.map((g) => (
+          <section key={g.key}>
+            {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} />}
+            {g.rows.map((r) => (
+              <AgentListRow key={r.short} row={r} t={t} onTogglePause={togglePause} />
+            ))}
+          </section>
         ))}
+        {agentsRes !== null && grouped.length === 0 && (
+          <div className="text-ink-3 text-[13px] text-center py-16">
+            没有匹配当前筛选的智能体。
+          </div>
+        )}
+        {agentsRes !== null && filtered.length > 0 && (
+          <div className="flex items-center gap-2 text-[12px] text-ink-3 mt-6">
+            <span>显示 {filtered.length} / {total}</span>
+          </div>
+        )}
       </div>
 
-      {/* body grid */}
-      <div className="grid flex-1 min-h-0" style={{ gridTemplateColumns: "minmax(0, 1fr) 320px" }}>
-        {/* agents table */}
-        <div className="min-w-0" style={{ padding: "16px 22px" }}>
-          <Card>
-            <CardHead>
-              <h3 className="m-0 text-[13px] font-semibold tracking-tight">{t("fleet_title")}</h3>
-              <Badge variant="info">{(apiAgents ?? agents).length}</Badge>
-              {partial && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
-              <div className="flex-1" />
-              <Btn size="sm" variant="ghost"><Ic.search /> {t("filter")}</Btn>
-              <Btn size="sm" variant="ghost"><Ic.dots /></Btn>
-            </CardHead>
-            <div className="overflow-auto">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>{t("col_agent")}</th>
-                    <th>{t("col_role")}</th>
-                    <th>{t("col_status")}</th>
-                    <th>24h</th>
-                    <th style={{ textAlign: "right" }}>{t("col_runs")}</th>
-                    <th style={{ textAlign: "right" }}>{t("col_success")}</th>
-                    <th style={{ textAlign: "right" }}>{t("col_p50")}</th>
-                    <th style={{ textAlign: "right" }}>{t("col_cost")}</th>
-                    <th>{t("col_version")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(apiAgents ?? agents).map((a) => (
-                    <tr key={a.id}>
-                      <td>
-                        <div className="flex items-center gap-2.5">
-                          <AgentGlyph id={a.id} />
-                          <div>
-                            <div className="font-medium">{a.name}</div>
-                            <div className="mono text-[10.5px] text-ink-4">{a.id} · {a.owner}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td>{t(a.roleK)}</td>
-                      <td>{statusBadge(a.status)}</td>
-                      <td style={{ width: 96 }}><Spark data={a.spark} height={22} /></td>
-                      <td style={{ textAlign: "right" }} className="mono">{a.runs}</td>
-                      <td style={{ textAlign: "right" }} className="mono">
-                        {typeof a.success === "number" ? (
-                          <span style={{ color: a.success >= 95 ? "var(--c-ok)" : a.success >= 88 ? "var(--c-ink-1)" : "var(--c-err)" }}>
-                            {a.success.toFixed(1)}%
-                          </span>
-                        ) : a.success}
-                      </td>
-                      <td style={{ textAlign: "right" }} className="mono">{a.p50}</td>
-                      <td style={{ textAlign: "right" }} className="mono">{a.cost}</td>
-                      <td className="mono" style={{ color: "var(--c-ink-3)" }}>{a.ver}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center text-[11.5px] text-ink-3 border-t border-line" style={{ padding: "8px 14px" }}>
-              显示 {(apiAgents ?? agents).length} / {apiAgents ? 22 : 14} · <span className="text-ink-3 ml-1.5">已筛选：所有状态</span>
-              <div className="flex-1" />
-              <Btn size="sm" variant="ghost">{t("view_all")} <Ic.chev /></Btn>
-            </div>
-          </Card>
-
-          {/* pipeline strip */}
-          <Card className="mt-4">
-            <CardHead>
-              <h3 className="m-0 text-[13px] font-semibold tracking-tight">{t("pipeline")} · JR-2041 高级后端工程师 · 工行</h3>
-              <div className="flex-1" />
-              <Badge variant="info">{t("realtime")}</Badge>
-            </CardHead>
-            <div style={{ padding: "16px 18px" }}>
-              <PipelineStrip />
-            </div>
-          </Card>
-        </div>
-
-        {/* right rail */}
-        <div className="flex flex-col gap-4" style={{ padding: "16px 22px 16px 0" }}>
-          {/* alerts */}
-          <Card>
-            <CardHead>
-              <h3 className="m-0 text-[13px] font-semibold">{t("al_title")}</h3>
-              <Badge variant="err">{alerts.length}</Badge>
-              <div className="flex-1" />
-              <Btn size="sm" variant="ghost">{t("view_all")}</Btn>
-            </CardHead>
-            <div>
-              {alerts.map((a, i) => (
-                <div
-                  key={i}
-                  className="flex gap-2.5 items-start"
-                  style={{
-                    padding: "12px 14px",
-                    borderBottom: i < alerts.length - 1 ? "1px solid var(--c-line)" : "0",
-                  }}
-                >
-                  <div
-                    className="w-6 h-6 rounded-md flex-shrink-0 grid place-items-center"
-                    style={{
-                      background: a.sev === "high" ? "var(--c-err-bg)" : a.sev === "med" ? "var(--c-warn-bg)" : "var(--c-info-bg)",
-                      color: a.sev === "high" ? "var(--c-err)" : a.sev === "med" ? "oklch(0.5 0.14 75)" : "var(--c-info)",
-                    }}
-                  >
-                    <Ic.alert />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-medium leading-snug">{a.title}</div>
-                    <div className="text-[11px] text-ink-3 mt-0.5">{a.sub}</div>
-                    <div className="mt-2 flex gap-1.5 flex-wrap">
-                      <Btn size="sm" variant="ghost" style={{ height: 22, padding: "0 7px", fontSize: 11 }}>{t("live_investigate")}</Btn>
-                      <Btn size="sm" variant="ghost" style={{ height: 22, padding: "0 7px", fontSize: 11 }}>{t("live_ack")}</Btn>
-                    </div>
-                  </div>
-                  <div className="mono text-[10.5px] text-ink-4 whitespace-nowrap">{a.time}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* activity feed */}
-          <Card>
-            <CardHead>
-              <h3 className="m-0 text-[13px] font-semibold">活动 · Activity</h3>
-              <div className="flex-1" />
-              <span className="hint">{t("last_24h")}</span>
-            </CardHead>
-            <div style={{ padding: "6px 0" }}>
-              {activity.map((it, i) => (
-                <div key={i} className="flex gap-2.5 items-start" style={{ padding: "8px 14px" }}>
-                  <div
-                    className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-[6px]"
-                    style={{
-                      background: it.kind === "ok" ? "var(--c-ok)" : it.kind === "err" ? "var(--c-err)" : "var(--c-info)",
-                    }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12px]">
-                      <span className="font-medium">{it.who}</span>
-                      {" · "}
-                      <span>{it.what}</span>
-                    </div>
-                    <div className="mono text-[10.5px] text-ink-3 mt-px">{it.meta}</div>
-                  </div>
-                  <div className="mono text-[10.5px] text-ink-4">{it.t}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card>
-            <CardHead>
-              <h3 className="m-0 text-[13px] font-semibold">合规 · Compliance</h3>
-              <div className="flex-1" />
-              <Badge variant="ok" dot>100%</Badge>
-            </CardHead>
-            <div className="grid grid-cols-2 gap-2.5 text-[12px]" style={{ padding: "12px 14px" }}>
-              <ComplianceRow label="PII 数据处理" ok />
-              <ComplianceRow label="候选人同意" ok />
-              <ComplianceRow label="EEO 偏差检测" ok />
-              <ComplianceRow label="GDPR 留存" ok />
-              <ComplianceRow label="审计覆盖率" ok sub="100%" />
-              <ComplianceRow label="权限最小化" ok sub="14 / 14" />
-            </div>
-          </Card>
-        </div>
-      </div>
+      {behaviorModal && (
+        <BehaviorPlaceholderModal onClose={() => setBehaviorModal(false)} t={t} />
+      )}
     </div>
   );
 }
 
-function ComplianceRow({ label, ok, sub }: { label: string; ok?: boolean; sub?: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span
-        className="w-4 h-4 rounded-sm grid place-items-center"
-        style={{
-          background: ok ? "var(--c-ok-bg)" : "var(--c-err-bg)",
-          color: ok ? "var(--c-ok)" : "var(--c-err)",
-        }}
-      >
-        {ok ? <Ic.check /> : <Ic.cross />}
-      </span>
-      <span className="flex-1">{label}</span>
-      {sub && <span className="mono text-ink-3 text-[10.5px]">{sub}</span>}
-    </div>
-  );
+// ────────────────────────────────────────────────────────────────────
+
+type FilterId = "all" | "live" | "blueprint" | "anomalies" | "paused" | "deprecated";
+
+function filterLabel(f: FilterId, t: (k: string) => string): string {
+  switch (f) {
+    case "all": return t("f2_filter_all");
+    case "live": return t("f2_kind_real");
+    case "blueprint": return t("f2_kind_stub");
+    case "anomalies": return t("f2_filter_anomalies");
+    case "paused": return t("f2_filter_paused");
+    case "deprecated": return t("f2_filter_deprecated");
+  }
 }
 
-function AgentGlyph({ id }: { id: string }) {
-  const seed = id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const hues = [255, 210, 155, 75, 25, 320, 175];
-  const h = hues[seed % hues.length];
+function sortWithinGroup(rs: FleetRow[]): FleetRow[] {
+  return [...rs].sort((a, b) => {
+    if (a.realness !== b.realness) return a.realness === "real" ? -1 : 1;
+    const ar = a.successRate ?? -1;
+    const br = b.successRate ?? -1;
+    return br - ar;
+  });
+}
+
+function groupRows(rows: FleetRow[], group: "team" | "status" | "stage" | "flat") {
+  if (group === "flat") {
+    return [{ key: "flat", title: "", rows: sortWithinGroup(rows) }];
+  }
+  const map = new Map<string, FleetRow[]>();
+  for (const r of rows) {
+    const key =
+      group === "team" ? r.ownerTeam :
+      group === "stage" ? r.stage :
+      r.status;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(r);
+  }
+  const entries = [...map.entries()];
+  if (group === "stage") {
+    // Workflow pipeline order — fixed regardless of live count.
+    entries.sort((a, b) => {
+      const ai = STAGE_ORDER.indexOf(a[0] as typeof STAGE_ORDER[number]);
+      const bi = STAGE_ORDER.indexOf(b[0] as typeof STAGE_ORDER[number]);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+  } else {
+    // For team/status: real-heavy first, then alphabetical.
+    entries.sort((a, b) => {
+      const aLive = a[1].filter((r) => r.realness === "real").length;
+      const bLive = b[1].filter((r) => r.realness === "real").length;
+      if (aLive !== bLive) return bLive - aLive;
+      return a[0].localeCompare(b[0]);
+    });
+  }
+  return entries.map(([k, rs]) => ({ key: k, title: k, rows: sortWithinGroup(rs) }));
+}
+
+function groupTitle(title: string, group: string, _t: (k: string) => string): string {
+  if (group === "stage") return STAGE_ZH[title] ?? title;
+  return title;
+}
+
+// ── chips ──────────────────────────────────────────────────────────
+
+function SummaryChip({
+  label, value, sub, tone, active, onClick,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "ok" | "warn" | "err" | "muted";
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const color =
+    tone === "ok" ? "var(--c-ok)" :
+    tone === "warn" ? "oklch(0.5 0.14 75)" :
+    tone === "err" ? "var(--c-err)" :
+    tone === "muted" ? "var(--c-ink-2)" :
+    "var(--c-ink-1)";
+  const Tag: React.ElementType = onClick ? "button" : "div";
   return (
-    <div
-      className="w-6 h-6 rounded-md flex-shrink-0 grid place-items-center mono font-semibold"
+    <Tag
+      className={"flex items-baseline gap-2 transition-opacity " + (onClick ? "cursor-pointer hover:opacity-75" : "")}
+      onClick={onClick}
       style={{
-        background: `linear-gradient(135deg, oklch(0.94 0.04 ${h}) 0%, oklch(0.86 0.08 ${h}) 100%)`,
-        border: `1px solid oklch(0.80 0.08 ${h})`,
-        fontSize: 9.5,
-        color: `oklch(0.35 0.10 ${h})`,
-        letterSpacing: "0.02em",
+        borderBottom: active ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
+        paddingBottom: 2,
       }}
     >
-      {id.slice(0, 3)}
+      <span className="text-ink-3" style={{ fontSize: 12 }}>{label}</span>
+      <span className="font-semibold tabular-nums" style={{ fontSize: 18, color, letterSpacing: "-0.015em" }}>{value}</span>
+      {sub && <span className="text-ink-3 tabular-nums" style={{ fontSize: 12 }}>{sub}</span>}
+    </Tag>
+  );
+}
+
+// ── segmented links (quieter than SegGroup) ───────────────────────
+
+function SegLinks({
+  options, value, onChange,
+}: {
+  options: { id: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          className="transition-colors rounded"
+          style={{
+            padding: "3px 9px",
+            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
+            background: value === o.id ? "var(--c-panel)" : "transparent",
+            fontWeight: value === o.id ? 500 : 400,
+            fontSize: 12.5,
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
 
-function PipelineStrip() {
-  const stages = [
-    { label: "需求同步", agent: "ReqSync", count: 24, hitl: false },
-    { label: "JD 生成", agent: "JDGenerator", count: 22, hitl: false },
-    { label: "渠道发布", agent: "Publisher", count: 20, hitl: false },
-    { label: "简历入库", agent: "ResumeParser", count: 3102, hitl: false },
-    { label: "人岗匹配", agent: "Matcher", count: 2802, hitl: false },
-    { label: "AI 面试", agent: "AIInterviewer", count: 214, hitl: false },
-    { label: "综合评估", agent: "Evaluator", count: 88, hitl: false },
-    { label: "推荐包", agent: "PackageBuilder", count: 64, hitl: true },
-    { label: "已提客户", agent: "PortalSubmitter", count: 42, hitl: false },
+// ── period dropdown ───────────────────────────────────────────────
+
+function PeriodDropdown({ value, onChange, t }: { value: "7d" | "30d" | "90d"; onChange: (v: "7d" | "30d" | "90d") => void; t: (k: string) => string }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const label = value === "7d" ? t("f2_window_7d") : value === "30d" ? t("f2_window_30d") : t("f2_window_90d");
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 transition-colors"
+        style={{ fontSize: 12.5 }}
+      >
+        <span className="text-ink-3">区间</span>
+        <span className="font-medium">{label}</span>
+        <Ic.chevD style={{ width: 10, height: 10 }} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 bg-surface border border-line rounded-md shadow-sh-2 z-30" style={{ minWidth: 120 }}>
+          {(["7d", "30d", "90d"] as const).map((id) => (
+            <button
+              key={id}
+              onClick={() => { onChange(id); setOpen(false); }}
+              className="w-full text-left hover:bg-panel transition-colors flex items-center justify-between"
+              style={{ padding: "8px 12px", fontSize: 12.5, color: value === id ? "var(--c-ink-1)" : "var(--c-ink-2)" }}
+            >
+              {id === "7d" ? t("f2_window_7d") : id === "30d" ? t("f2_window_30d") : t("f2_window_90d")}
+              {value === id && <Ic.check style={{ width: 12, height: 12 }} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── filter menu (popover with all 6 filters) ──────────────────────
+
+function FilterMenu({ value, onChange, t }: { value: FilterId; onChange: (v: FilterId) => void; t: (k: string) => string }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const options: { id: FilterId; label: string }[] = [
+    { id: "all",        label: t("f2_filter_all") },
+    { id: "live",       label: t("f2_kind_real") },
+    { id: "blueprint",  label: t("f2_kind_stub") },
+    { id: "anomalies",  label: t("f2_filter_anomalies") },
+    { id: "paused",     label: t("f2_filter_paused") },
+    { id: "deprecated", label: t("f2_filter_deprecated") },
   ];
-  const max = stages[0].count;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 transition-colors"
+        style={{ fontSize: 12.5 }}
+      >
+        <Ic.search style={{ width: 12, height: 12 }} />
+        <span>筛选</span>
+        <Ic.chevD style={{ width: 10, height: 10 }} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 bg-surface border border-line rounded-md shadow-sh-2 z-30" style={{ minWidth: 160 }}>
+          {options.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => { onChange(o.id); setOpen(false); }}
+              className="w-full text-left hover:bg-panel transition-colors flex items-center justify-between"
+              style={{ padding: "8px 12px", fontSize: 12.5, color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-2)" }}
+            >
+              {o.label}
+              {value === o.id && <Ic.check style={{ width: 12, height: 12 }} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── list ──────────────────────────────────────────────────────────
+
+const GRID = "minmax(280px, 1fr) 120px 140px 100px 70px";
+
+function GroupHeader({ title, rows }: { title: string; rows: FleetRow[] }) {
+  const deployed = rows.filter((r) => r.status === "deployed").length;
+  const paused = rows.filter((r) => r.status === "paused").length;
+  const notDeployed = rows.filter((r) => r.status === "not_deployed").length;
+  const anomalous = rows.filter((r) => isAnomalous(r)).length;
+  return (
+    <div className="mt-7 mb-2 flex items-baseline gap-3" style={{ paddingInline: 12 }}>
+      <h3 className="m-0 text-ink-1" style={{ fontSize: 14, fontWeight: 500, letterSpacing: "-0.01em" }}>
+        {title}
+      </h3>
+      <span className="text-ink-3" style={{ fontSize: 12 }}>
+        {deployed > 0 && <><span style={{ color: "var(--c-ok)" }}>{deployed}</span> 已上线</>}
+        {paused > 0 && <>{deployed > 0 && " · "}{paused} 已暂停</>}
+        {notDeployed > 0 && <>{(deployed > 0 || paused > 0) && " · "}<span style={{ color: "var(--c-err)" }}>{notDeployed}</span> 未上线</>}
+        {anomalous > 0 && <> · <span style={{ color: "var(--c-err)" }}>{anomalous} 需关注</span></>}
+      </span>
+    </div>
+  );
+}
+
+function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void }) {
+  const stub = row.realness === "stub";
+  const dim = row.lifecycle === "deprecated";
   return (
     <div
-      className="grid gap-px bg-line rounded-md overflow-hidden border border-line"
-      style={{ gridTemplateColumns: `repeat(${stages.length}, 1fr)` }}
+      className="group relative grid gap-4 border-b border-line transition-colors hover:bg-panel"
+      style={{
+        gridTemplateColumns: GRID,
+        padding: stub ? "8px 12px" : "16px 12px",
+        opacity: dim ? 0.55 : 1,
+        alignItems: "center",
+      }}
     >
-      {stages.map((s, i) => (
-        <div
-          key={i}
-          className="p-2.5"
-          style={{ background: s.hitl ? "var(--c-warn-bg)" : "var(--c-surface)" }}
-        >
-          <div className="text-[10.5px] tracking-[0.04em] uppercase text-ink-3">{s.label}</div>
-          <div className="mono text-[18px] font-semibold mt-1 tracking-tight">{s.count.toLocaleString()}</div>
-          <div className="h-[3px] bg-line rounded-sm mt-1.5 overflow-hidden">
-            <div
-              className="h-full rounded-sm"
+      {/* the row itself is a link; the action button is a sibling that
+          captures clicks before the Link does */}
+      <Link
+        href={`/fleet/${row.short}`}
+        className="absolute inset-0"
+        style={{ textDecoration: "none" }}
+        aria-label={`open ${row.name}`}
+      />
+
+      {/* identity */}
+      <div className="relative flex items-baseline gap-2.5 min-w-0">
+        <RowStatusDot status={row.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span
+              className="truncate text-ink-1"
               style={{
-                width: `${(s.count / max) * 100}%`,
-                background: s.hitl ? "var(--c-warn)" : "var(--c-accent)",
+                fontSize: stub ? 13 : 14,
+                fontWeight: stub ? 400 : 500,
+                letterSpacing: "-0.005em",
+                textDecoration: row.lifecycle === "deprecated" ? "line-through" : "none",
               }}
-            />
+            >
+              {row.name}
+            </span>
           </div>
-          <div className="hint mt-1.5">{s.agent}</div>
+          <div className="truncate text-ink-3" style={{ fontSize: 12, marginTop: stub ? 0 : 2 }}>
+            {t(row.roleK)} · {row.ownerTeam}
+          </div>
         </div>
-      ))}
+      </div>
+
+      {/* status */}
+      <div className="relative">
+        <StatusCell status={row.status} t={t} />
+      </div>
+
+      {/* runs: total + breakdown (real data) */}
+      <div className="relative">
+        {stub ? <span /> : <RunsCell row={row} />}
+      </div>
+
+      {/* last active */}
+      <div className="relative text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
+        {stub ? "" : relTime(row.lastActiveAt)}
+      </div>
+
+      {/* version + hover action */}
+      <div className="relative text-ink-3 tabular-nums flex items-center justify-end gap-2" style={{ fontSize: 12 }}>
+        {!stub && row.slug && (
+          <PauseToggleButton
+            paused={row.paused}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (row.slug) onTogglePause(row.slug, !row.paused);
+            }}
+          />
+        )}
+        <span>{stub ? "" : row.version}</span>
+      </div>
+    </div>
+  );
+}
+
+function PauseToggleButton({ paused, onClick }: { paused: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={paused ? "恢复运行" : "暂停"}
+      className="opacity-0 group-hover:opacity-100 rounded transition-all hover:bg-surface"
+      style={{
+        padding: "3px 5px",
+        border: "1px solid var(--c-line)",
+        color: paused ? "var(--c-ok)" : "var(--c-ink-2)",
+      }}
+    >
+      {paused ? <Ic.play /> : <Ic.pause />}
+    </button>
+  );
+}
+
+function RunsCell({ row }: { row: FleetRow }) {
+  const total = row.liveTotal;
+  if (total == null) return <span className="text-ink-4" style={{ fontSize: 13 }}>—</span>;
+  if (total === 0) {
+    return <span className="text-ink-4" style={{ fontSize: 13 }}>无运行</span>;
+  }
+  const succ = row.liveCompleted ?? 0;
+  const fail = row.liveFailed ?? 0;
+  return (
+    <div className="flex items-baseline gap-2 tabular-nums">
+      <span className="text-ink-1" style={{ fontSize: 13 }}>{total}</span>
+      <span className="text-ink-3" style={{ fontSize: 11.5 }}>
+        <span style={{ color: "var(--c-ok)" }}>✓{succ}</span>
+        {fail > 0 && <> · <span style={{ color: "var(--c-err)" }}>✗{fail}</span></>}
+      </span>
+    </div>
+  );
+}
+
+function RowStatusDot({ status }: { status: FleetStatus }) {
+  const color =
+    status === "deployed"     ? "var(--c-ok)" :
+    status === "paused"       ? "var(--c-ink-4)" :
+    status === "not_deployed" ? "var(--c-err)" :
+    "var(--c-ink-4)";
+  return (
+    <span
+      className="rounded-full shrink-0"
+      style={{
+        width: 7, height: 7, background: color,
+        marginTop: 4,
+        boxShadow: status === "deployed" ? `0 0 0 3px color-mix(in oklab, ${color} 18%, transparent)` : "none",
+      }}
+    />
+  );
+}
+
+function StatusCell({ status }: { status: FleetStatus; t: (k: string) => string }) {
+  const label =
+    status === "deployed"     ? "已上线" :
+    status === "paused"       ? "已暂停" :
+    status === "not_deployed" ? "未上线" :
+    "";
+  const color =
+    status === "not_deployed" ? "var(--c-err)" :
+    status === "paused"       ? "var(--c-ink-3)" :
+    "var(--c-ink-1)";
+  return (
+    <span style={{ fontSize: 13, color }}>{label}</span>
+  );
+}
+
+// ── live indicator ───────────────────────────────────────────────
+
+function LiveIndicator({ lastRefresh }: { lastRefresh: string | null }) {
+  const live = !!lastRefresh;
+  return (
+    <span
+      className="flex items-center gap-1.5 text-ink-3"
+      title={live ? `数据来自 Inngest · 最后刷新 ${lastRefresh}` : "正在连接 Inngest…"}
+      style={{ fontSize: 11.5 }}
+    >
+      <span
+        className={live ? "rounded-full anim-pulse" : "rounded-full"}
+        style={{
+          width: 6, height: 6,
+          background: live ? "var(--c-ok)" : "var(--c-ink-4)",
+        }}
+      />
+      {live ? "实时" : "连接中"}
+    </span>
+  );
+}
+
+// ── modal ─────────────────────────────────────────────────────────
+
+function BehaviorPlaceholderModal({ onClose, t }: { onClose: () => void; t: (k: string) => string }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center"
+      style={{ background: "color-mix(in oklab, var(--c-ink-1) 35%, transparent)" }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface rounded-lg border border-line shadow-sh-3"
+        style={{ padding: "24px 28px", maxWidth: 460 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="m-0 text-ink-1" style={{ fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em" }}>
+          {t("f2_behavior_not_live_title")}
+        </h2>
+        <p className="text-ink-2 mt-3" style={{ fontSize: 13, lineHeight: 1.55 }}>
+          {t("f2_behavior_not_live_body")}
+        </p>
+        <div className="flex justify-end mt-6">
+          <Btn variant="primary" size="sm" onClick={onClose}>关闭</Btn>
+        </div>
+      </div>
     </div>
   );
 }

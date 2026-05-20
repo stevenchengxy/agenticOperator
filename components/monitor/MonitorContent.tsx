@@ -1,359 +1,416 @@
 "use client";
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { usePoll } from "@/lib/monitor/usePoll";
-import { MonitorGraph } from "./MonitorGraph";
-import { FilterChips } from "./FilterChips";
-import { FailuresFeed } from "./FailuresFeed";
-import { HitlFeed } from "./HitlFeed";
-import { MiniRunList } from "./MiniRunList";
-import { InstanceCardsSection } from "./InstanceCardsSection";
-import { MonitorHeader } from "./MonitorHeader";
-import { ActionBar } from "./ActionBar";
-import { AgentDetailPanel } from "./AgentDetailPanel";
+import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
-import { MonitorTabNav, type MonitorTab } from "./MonitorTabNav";
-import { InngestAgentsTab } from "./InngestAgentsTab";
-import { InngestRunsTab } from "./InngestRunsTab";
-import { InngestDlqTab } from "./InngestDlqTab";
-import { InngestEventsTab } from "./InngestEventsTab";
-import { RuntimeTopologyView } from "./RuntimeTopologyView";
-import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
-import { useApp } from "@/lib/i18n";
-import type { MonitorOverviewResponse, MonitorRunRow } from "@/lib/monitor/types";
+import { INNGEST_REAL_SHORTS } from "@/lib/agent-mapping";
+import { WSID_TO_INNGEST_SLUG } from "@/lib/api/inngest-live-overlay";
+import {
+  RunDetailExpansion,
+  fetchRunDetail,
+  STATUS_ZH,
+  statusDotColor,
+  relTime,
+  type RunRow,
+  type RunDetail,
+  type RunStatus,
+} from "@/components/shared/RunTrace";
 
-const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
+// /monitor — 运行监控
+//
+// Job: "What's running / has run? Show me the trace of any individual run."
+// Plus: infrastructure status cards (event mgr / RAAS API / Ontology / Inngest).
+//
+// Per IA spec (2026-05-19):
+//   - Run-level execution only (no agent registry → /fleet, no event stream → /events)
+//   - Infrastructure status preserved per user explicit request
+//
+// Removed from the old multi-tab page:
+//   - InngestAgentsTab → owned by /fleet
+//   - InngestEventsTab → owned by /events
+//   - DLQ tab → /alerts (future)
+//   - MonitorGraph / RuntimeTopologyView → deferred
 
-function MonitorContentInner() {
-  const { t } = useApp();
+const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
+
+const REAL_AGENT_SHORTS = Array.from(INNGEST_REAL_SHORTS);
+
+type StatusFilter = "all" | RunStatus;
+type WindowId = "1h" | "24h" | "7d";
+
+export function MonitorContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // URL state
-  const windowMs = Number(sp.get('windowMs') ?? DEFAULT_WINDOW_MS);
-  const status = sp.get('status') ?? undefined;
-  // ★ Active tab — driven by ?tab= query param so deep links survive.
-  const tab: MonitorTab = (sp.get('tab') as MonitorTab) ?? 'topology';
-  // Search state hoisted here so it feeds both FilterChips and InstanceCardsSection
-  const [search, setSearch] = React.useState<string>(sp.get('q') ?? '');
+  const agentFilter = sp.get("agent");
+  const statusFilter = (sp.get("status") ?? "all") as StatusFilter;
+  const windowId = (sp.get("window") ?? "24h") as WindowId;
+  const eventName = sp.get("event");
+  const runIdParam = sp.get("run");
 
-  // ★ Inngest live counts — used in tab badges (Agents · 3 · DLQ · 0).
-  const liveOverlay = useInngestLiveOverlay();
-  const [dlqCount, setDlqCount] = React.useState(0);
-  React.useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const r = await fetch('/api/inngest-admin/dlq');
-        const b = await r.json();
-        if (!cancelled) setDlqCount(b.dlq?.length ?? 0);
-      } catch {
-        /* soft */
-      }
-    }
-    load();
-    const t = setInterval(load, 8000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, []);
-  const [runCount, setRunCount] = React.useState(0);
-  const [eventCount, setEventCount] = React.useState(0);
-  React.useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const r = await fetch('/api/inngest-events?limit=100');
-        const b = await r.json();
-        if (!cancelled) setEventCount(b.events?.length ?? 0);
-      } catch {
-        /* soft */
-      }
-    }
-    load();
-    const t = setInterval(load, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, []);
-  React.useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const r = await fetch('/api/inngest-admin/runs?limit=200');
-        const b = await r.json();
-        if (!cancelled) setRunCount(b.runs?.length ?? 0);
-      } catch {
-        /* soft */
-      }
-    }
-    load();
-    const t = setInterval(load, 8000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, []);
-
-  // Pause/resume polling
-  const [paused, setPaused] = React.useState(false);
-  const onTogglePause = React.useCallback(() => setPaused(p => !p), []);
-
-  // Selected agent for the right-rail detail panel
-  const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
-
-  const updateUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
+  const setUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(sp.toString());
     mut(next);
-    router.replace(`/monitor${next.toString() ? `?${next.toString()}` : ''}`);
+    router.replace(`/monitor${next.toString() ? `?${next.toString()}` : ""}`);
   }, [router, sp]);
 
-  // Build the API URL from filters
-  const apiUrl = React.useMemo(() => {
-    const p = new URLSearchParams();
-    p.set('windowMs', String(windowMs));
-    if (status) p.set('status', status);
-    return `/api/monitor/overview?${p.toString()}`;
-  }, [windowMs, status]);
+  const agentSlug = React.useMemo(() => {
+    if (!agentFilter) return null;
+    return shortToSlug(agentFilter);
+  }, [agentFilter]);
 
-  const { data, error, lastSuccessAt } = usePoll<MonitorOverviewResponse>(apiUrl, 4_000, paused);
+  const [runs, setRuns] = React.useState<RunRow[] | null>(null);
+  const [lastRefresh, setLastRefresh] = React.useState<string | null>(null);
 
-  // Mini run list state (when a node's "running ▶" badge is clicked)
-  const [miniAgent, setMiniAgent] = React.useState<string | null>(null);
-  const miniRows: MonitorRunRow[] = React.useMemo(() => {
-    if (!miniAgent || !data) return [];
-    return data.recentRuns.filter(r => r.status === 'running').slice(0, 5);
-  }, [miniAgent, data]);
+  React.useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const url = agentSlug
+          ? `/api/inngest-admin/runs?fn=${encodeURIComponent(agentSlug)}&limit=200`
+          : `/api/inngest-admin/runs?limit=200`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const body = await res.json();
+        if (cancelled) return;
+        setRuns(body.runs ?? []);
+        setLastRefresh(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
+      } catch { /* soft */ }
+    }
+    load();
+    const timer = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [agentSlug]);
 
-  // Header stats derived from KPI data
-  const headerStats = React.useMemo(() => {
-    if (!data?.kpi) return null;
-    const kpi = data.kpi;
-    return {
-      activeRuns: kpi.activeRuns,
-      pendingHitl: kpi.pendingHitl,
-      failuresInWindow: kpi.failuresInWindow,
-      tokensInWindow: kpi.tokensInWindow,
-    };
-  }, [data]);
+  const filtered = React.useMemo(() => {
+    if (!runs) return [];
+    let xs = runs;
+    if (statusFilter !== "all") xs = xs.filter((r) => r.status === statusFilter);
+    if (eventName) xs = xs.filter((r) => r.eventName === eventName);
+    const windowMs = windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000;
+    const cutoff = Date.now() - windowMs;
+    xs = xs.filter((r) => {
+      if (!r.startedAt) return true;
+      return new Date(r.startedAt).getTime() >= cutoff;
+    });
+    return xs;
+  }, [runs, statusFilter, eventName, windowId]);
+
+  const counts = React.useMemo(() => {
+    const c = { running: 0, completed: 0, failed: 0, cancelled: 0 };
+    for (const r of filtered) {
+      if (r.status === "Running") c.running++;
+      else if (r.status === "Completed") c.completed++;
+      else if (r.status === "Failed") c.failed++;
+      else if (r.status === "Cancelled") c.cancelled++;
+    }
+    return c;
+  }, [filtered]);
 
   return (
-    <div className="p-6 max-w-[1620px] mx-auto">
-      <MonitorHeader
-        stats={headerStats}
-        lastSuccessAt={lastSuccessAt}
-        hasError={!!error}
-      />
-
-      <ActionBar paused={paused} onTogglePause={onTogglePause} />
-
-      {/* System Status Cards — collapsed by default, infrastructure visibility on demand */}
-      <SystemStatusCards paused={paused} />
-
-      {error && (
-        <p className="text-claude-err text-[12px] mb-2">
-          {t("monitor_polling_error")} {error}
-        </p>
-      )}
-
-      {/* Filter + KPI row — compact, single visual strip */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
-        <FilterChips
-          windowMs={windowMs}
-          onWindowChange={(ms) => updateUrl(p => p.set('windowMs', String(ms)))}
-          status={status}
-          onStatusChange={(s) => updateUrl(p => { s ? p.set('status', s) : p.delete('status'); })}
-          search={search}
-          onSearchChange={setSearch}
-        />
-      </div>
-      {/* ── ★ Tab nav for unified Monitor dashboard ── */}
-      <MonitorTabNav
-        tab={tab}
-        onChange={(t) => updateUrl((p) => (t === 'topology' ? p.delete('tab') : p.set('tab', t)))}
-        counts={{
-          agents: liveOverlay.byWsId.size,
-          runs: runCount,
-          events: eventCount,
-          dlq: dlqCount,
-        }}
-      />
-
-      {/* ── Tab: 拓扑 — dual mode (default: 实时 3-agent · 切换: 完整 23-node 蓝图) ── */}
-      {tab === 'topology' && (
-        <>
-          {/* Mode toggle */}
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-[11px] text-ink-3 uppercase">{t("monitor_view_label")}</span>
-            <button
-              onClick={() => updateUrl((p) => p.delete('view'))}
-              className={`text-[12px] px-3 py-1 rounded border ${
-                (sp.get('view') ?? 'runtime') === 'runtime'
-                  ? 'border-accent text-accent bg-accent-bg/30'
-                  : 'border-line text-ink-2 hover:bg-surface-hover'
-              }`}
-            >
-              {t("monitor_view_runtime")}
-            </button>
-            <button
-              onClick={() => updateUrl((p) => p.set('view', 'blueprint'))}
-              className={`text-[12px] px-3 py-1 rounded border ${
-                sp.get('view') === 'blueprint'
-                  ? 'border-accent text-accent bg-accent-bg/30'
-                  : 'border-line text-ink-2 hover:bg-surface-hover'
-              }`}
-            >
-              {t("monitor_view_blueprint")}
-            </button>
-            <span className="ml-2 text-[11px] text-ink-4">
-              {(sp.get('view') ?? 'runtime') === 'runtime'
-                ? t("monitor_view_runtime_hint")
-                : t("monitor_view_blueprint_hint")}
-            </span>
+    <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
+      <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
+        <div className="flex items-start gap-6">
+          <div className="flex-1 min-w-0">
+            <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
+              运行监控
+            </h1>
+            <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+              基础设施健康 · 每一次 agent 运行的详情与 trace
+            </div>
           </div>
-
-          {(sp.get('view') ?? 'runtime') === 'runtime' ? (
-            <div className="mb-4">
-              <RuntimeTopologyView />
-            </div>
-          ) : (
-            <div className="mb-4 relative">
-              <MonitorGraph
-                nodeAggs={data?.nodes}
-                edgeAggs={data?.edges}
-                onNodeClick={(id) => setSelectedAgentId(prev => prev === id ? null : id)}
-                onRunningClick={(id) => setMiniAgent(id)}
-                onHitlClick={(id) => router.push(`/inbox?agent=${encodeURIComponent(id)}`)}
-                onQueueClick={(id) => router.push(`/monitor/queue?nodeId=${encodeURIComponent(id)}`)}
-                selectedNodeId={selectedAgentId}
-                graphHeight={700}
-                inngestLiveByWsId={liveOverlay.byWsId}
-              />
-            </div>
-          )}
-
-          {/* ★ Instances · Failures · HITL — dynamic 3-col.
-              Width rebalances based on content:
-                - 实时实例 always gets generous space (50% if others empty, 40% otherwise)
-                - 故障 collapses when empty (160px instead of 30%)
-                - HITL takes the rest
-              Cards inside 实时实例 get min-w 200px so they don't crush. */}
-          {(() => {
-            const failureCount = data?.failures?.length ?? 0;
-            const hitlCount = data?.hitl?.length ?? 0;
-            // Build grid template based on which columns have content
-            const cols =
-              failureCount === 0 && hitlCount === 0
-                ? '1fr'
-                : failureCount === 0
-                ? 'minmax(420px, 1.4fr) 200px minmax(360px, 1fr)'
-                : hitlCount === 0
-                ? 'minmax(420px, 1.4fr) minmax(360px, 1fr) 200px'
-                : 'minmax(420px, 1.2fr) minmax(280px, 1fr) minmax(280px, 1fr)';
-            return (
-              <div
-                className="grid gap-3 mb-6"
-                style={{ gridTemplateColumns: cols, minHeight: 200 }}
-              >
-                <div className="border border-claude-line rounded-[10px] bg-claude-surface p-3 overflow-hidden flex flex-col">
-                  <InstanceCardsSection paused={paused} searchQuery={search} compact />
-                </div>
-                <div
-                  className={`border border-claude-line rounded-[10px] bg-claude-surface p-3 ${
-                    failureCount === 0 ? 'flex flex-col justify-center items-center' : 'overflow-y-auto'
-                  }`}
-                  title={failureCount === 0 ? t('monitor_failures_empty') : ''}
-                >
-                  {failureCount === 0 ? (
-                    <>
-                      <div className="text-[11px] uppercase text-ink-4 mb-1">{t('monitor_failures_title')}</div>
-                      <div className="text-ok text-[14px] mb-0.5">✓</div>
-                      <div className="text-[10px] text-ink-4">{t('monitor_failures_empty')}</div>
-                    </>
-                  ) : (
-                    <FailuresFeed rows={data?.failures ?? []} />
-                  )}
-                </div>
-                <div
-                  className={`border border-claude-line rounded-[10px] bg-claude-surface p-3 ${
-                    hitlCount === 0 ? 'flex flex-col justify-center items-center' : 'overflow-y-auto'
-                  }`}
-                >
-                  {hitlCount === 0 ? (
-                    <>
-                      <div className="text-[11px] uppercase text-ink-4 mb-1">{t('monitor_hitl_title')}</div>
-                      <div className="text-ink-3 text-[14px] mb-0.5">—</div>
-                      <div className="text-[10px] text-ink-4">{t('monitor_hitl_empty')}</div>
-                    </>
-                  ) : (
-                    <HitlFeed rows={data?.hitl ?? []} />
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-        </>
-      )}
-
-      {/* ── Tab: Agents — 3 real PRA agent cards (was /workflow-agents) ── */}
-      {tab === 'agents' && (
-        <div className="mb-6">
-          <InngestAgentsTab />
+          <div className="flex items-center gap-3 mt-1">
+            <LiveDot lastRefresh={lastRefresh} />
+          </div>
         </div>
-      )}
 
-      {/* ── Tab: Runs — Inngest run list (filterable) ── */}
-      {tab === 'runs' && (
-        <div className="mb-6">
-          <InngestRunsTab />
+        <div className="flex items-center gap-x-7 gap-y-1.5 mt-4 flex-wrap">
+          <CountChip label="总" value={String(filtered.length)} tone="muted" />
+          <CountChip
+            label="运行中"
+            value={String(counts.running)}
+            tone={counts.running > 0 ? "ok" : "muted"}
+            active={statusFilter === "Running"}
+            onClick={() => setUrl((p) => statusFilter === "Running" ? p.delete("status") : p.set("status", "Running"))}
+          />
+          <CountChip
+            label="已完成"
+            value={String(counts.completed)}
+            tone="muted"
+            active={statusFilter === "Completed"}
+            onClick={() => setUrl((p) => statusFilter === "Completed" ? p.delete("status") : p.set("status", "Completed"))}
+          />
+          <CountChip
+            label="失败"
+            value={String(counts.failed)}
+            tone={counts.failed > 0 ? "err" : "muted"}
+            active={statusFilter === "Failed"}
+            onClick={() => setUrl((p) => statusFilter === "Failed" ? p.delete("status") : p.set("status", "Failed"))}
+          />
+          <div className="flex-1" />
+          <WindowSelector value={windowId} onChange={(v) => setUrl((p) => v === "24h" ? p.delete("window") : p.set("window", v))} />
         </div>
-      )}
+      </div>
 
-      {/* ── Tab: Events — Inngest firehose (★ RAAS 对接调试用)── */}
-      {tab === 'events' && (
-        <div className="mb-6">
-          <InngestEventsTab />
+      {/* infrastructure status — preserved per user request 2026-05-19 */}
+      <div style={{ padding: "16px 32px 0" }}>
+        <div className="text-ink-3 mb-2 flex items-baseline gap-2" style={{ fontSize: 12 }}>
+          基础设施
         </div>
-      )}
+        <SystemStatusCards />
+      </div>
 
-      {/* ── Tab: DLQ — failed runs + retry ── */}
-      {tab === 'dlq' && (
-        <div className="mb-6">
-          <InngestDlqTab />
-        </div>
-      )}
-
-      {miniAgent && (
-        <MiniRunList
-          agentTitle={miniAgent}
-          rows={miniRows}
-          onClose={() => setMiniAgent(null)}
+      {/* secondary filter toolbar */}
+      <div className="flex items-center gap-3 mt-4 flex-wrap" style={{ padding: "10px 32px", fontSize: 12.5 }}>
+        <span className="text-ink-3">智能体</span>
+        <AgentFilter
+          value={agentFilter}
+          onChange={(v) => setUrl((p) => v ? p.set("agent", v) : p.delete("agent"))}
         />
-      )}
+        {(agentFilter || eventName || statusFilter !== "all") && (
+          <button
+            onClick={() => setUrl((p) => { p.delete("agent"); p.delete("event"); p.delete("status"); })}
+            className="text-ink-3 hover:text-ink-1"
+          >
+            清空筛选
+          </button>
+        )}
+        {eventName && (
+          <span className="inline-flex items-center gap-1.5 text-ink-2 rounded border border-line bg-surface" style={{ padding: "3px 9px", fontSize: 12 }}>
+            <span className="text-ink-3">事件</span> {eventName}
+            <button onClick={() => setUrl((p) => p.delete("event"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
+          </span>
+        )}
+      </div>
 
-      <AgentDetailPanel
-        nodeId={selectedAgentId}
-        onClose={() => setSelectedAgentId(null)}
-      />
+      <div className="flex-1 min-h-0" style={{ padding: "8px 32px 48px" }}>
+        {runs === null && (
+          <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
+        )}
+        {runs !== null && filtered.length === 0 && (
+          <div className="text-ink-3 text-[13px] text-center py-16">
+            没有匹配当前筛选的运行记录
+          </div>
+        )}
+        {runs !== null && filtered.length > 0 && (
+          <RunsList runs={filtered} initialExpandedId={runIdParam} />
+        )}
+      </div>
     </div>
   );
 }
 
-export function MonitorContent() {
-  const { t } = useApp();
+// ── runs list with expandable trace ─────────────────────────────
+
+function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpandedId: string | null }) {
+  const [expandedId, setExpandedId] = React.useState<string | null>(initialExpandedId);
+  const [details, setDetails] = React.useState<Record<string, RunDetail | "loading" | "error">>({});
+
+  const fetchDetail = React.useCallback(async (runId: string) => {
+    if (details[runId] && details[runId] !== "error") return;
+    setDetails((m) => ({ ...m, [runId]: "loading" }));
+    const result = await fetchRunDetail(runId);
+    setDetails((m) => ({ ...m, [runId]: result ?? "error" }));
+  }, [details]);
+
+  // If a runId came in via URL, prefetch its detail
+  React.useEffect(() => {
+    if (initialExpandedId && !details[initialExpandedId]) {
+      fetchDetail(initialExpandedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialExpandedId]);
+
+  const toggle = (run: RunRow) => {
+    const next = expandedId === run.id ? null : run.id;
+    setExpandedId(next);
+    if (next) fetchDetail(run.id);
+  };
+
   return (
-    <React.Suspense fallback={
-      <div className="p-6 max-w-[1620px] mx-auto">
-        <div className="text-[11px] uppercase tracking-[0.16em] text-claude-ink-4 font-medium mb-2">
-          {t("monitor_hero_subtitle")}
-        </div>
-        <h1 className="text-[44px] font-medium leading-[1.05]">{t("monitor_title")}</h1>
-        <p className="text-claude-ink-3 text-[13px] mt-1">{t("monitor_loading")}</p>
+    <>
+      <div
+        className="grid gap-4 text-ink-3 border-b border-line"
+        style={{ gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 18px", padding: "8px 12px", fontSize: 11.5 }}
+      >
+        <span>智能体</span>
+        <span>触发事件</span>
+        <span>状态</span>
+        <span style={{ textAlign: "right" }}>开始</span>
+        <span style={{ textAlign: "right" }}>耗时</span>
+        <span />
       </div>
-    }>
-      <MonitorContentInner />
-    </React.Suspense>
+      {runs.map((r) => {
+        const expanded = expandedId === r.id;
+        const agentShort = slugToShort(r.function?.slug);
+        return (
+          <div key={r.id} className="border-b border-line">
+            <button
+              onClick={() => toggle(r)}
+              className="w-full grid items-center gap-4 hover:bg-panel transition-colors text-left cursor-pointer"
+              style={{ padding: "12px 12px", gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 18px" }}
+            >
+              <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }}>
+                {agentShort ?? r.function?.slug ?? "—"}
+              </span>
+              <span className="text-ink-3 truncate" style={{ fontSize: 12 }}>
+                {r.eventName ?? "—"}
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="rounded-full inline-block" style={{ width: 7, height: 7, background: statusDotColor(r.status) }} />
+                <span style={{ fontSize: 12.5, color: r.status === "Failed" ? "var(--c-err)" : "var(--c-ink-1)" }}>
+                  {STATUS_ZH[r.status]}
+                </span>
+              </span>
+              <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
+                {relTime(r.startedAt)}
+              </span>
+              <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
+                {r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : "—"}
+              </span>
+              <span className="text-ink-4 flex justify-center" style={{ fontSize: 11 }}>
+                <Ic.chev style={{ width: 10, height: 10, transition: "transform 0.15s", transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }} />
+              </span>
+            </button>
+            {expanded && (
+              <RunDetailExpansion
+                run={r}
+                detail={details[r.id]}
+                agentShortForLinks={agentShort ?? undefined}
+                showAgentLink
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function shortToSlug(short: string): string | null {
+  if (short === "JDGenerator") return WSID_TO_INNGEST_SLUG["4"];
+  if (short === "ResumeParser") return WSID_TO_INNGEST_SLUG["9-1"];
+  if (short === "Matcher") return WSID_TO_INNGEST_SLUG["10"];
+  if (short === "RuleCheck") return WSID_TO_INNGEST_SLUG["10-5"];
+  return null;
+}
+
+function slugToShort(slug: string | undefined): string | null {
+  if (!slug) return null;
+  if (slug.includes("create-jd")) return "JDGenerator";
+  if (slug.includes("resume-parser")) return "ResumeParser";
+  if (slug.includes("match-resume")) return "Matcher";
+  if (slug.includes("rule-check")) return "RuleCheck";
+  return null;
+}
+
+// ── controls ────────────────────────────────────────────────────
+
+function CountChip({
+  label, value, tone, active, onClick,
+}: {
+  label: string;
+  value: string;
+  tone?: "ok" | "err" | "muted";
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const color =
+    tone === "ok"    ? "var(--c-ok)" :
+    tone === "err"   ? "var(--c-err)" :
+    tone === "muted" ? "var(--c-ink-2)" :
+    "var(--c-ink-1)";
+  const Tag: React.ElementType = onClick ? "button" : "div";
+  return (
+    <Tag
+      onClick={onClick}
+      className={"flex items-baseline gap-2 transition-opacity " + (onClick ? "cursor-pointer hover:opacity-75" : "")}
+      style={{
+        borderBottom: active ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
+        paddingBottom: 2,
+      }}
+    >
+      <span className="text-ink-3" style={{ fontSize: 12 }}>{label}</span>
+      <span className="font-semibold tabular-nums" style={{ fontSize: 18, color, letterSpacing: "-0.015em" }}>{value}</span>
+    </Tag>
+  );
+}
+
+function WindowSelector({ value, onChange }: { value: WindowId; onChange: (v: WindowId) => void }) {
+  const opts: { id: WindowId; label: string }[] = [
+    { id: "1h", label: "近 1h" },
+    { id: "24h", label: "近 24h" },
+    { id: "7d", label: "近 7d" },
+  ];
+  return (
+    <div className="flex items-center gap-1">
+      {opts.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          className="transition-colors rounded"
+          style={{
+            padding: "3px 9px",
+            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
+            background: value === o.id ? "var(--c-panel)" : "transparent",
+            fontWeight: value === o.id ? 500 : 400,
+            fontSize: 12.5,
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <button
+        onClick={() => onChange(null)}
+        className="transition-colors rounded"
+        style={{
+          padding: "3px 9px", fontSize: 12.5,
+          color: value === null ? "var(--c-ink-1)" : "var(--c-ink-3)",
+          background: value === null ? "var(--c-panel)" : "transparent",
+          fontWeight: value === null ? 500 : 400,
+        }}
+      >
+        全部
+      </button>
+      {REAL_AGENT_SHORTS.map((short) => (
+        <button
+          key={short}
+          onClick={() => onChange(short)}
+          className="transition-colors rounded"
+          style={{
+            padding: "3px 9px", fontSize: 12.5,
+            color: value === short ? "var(--c-ink-1)" : "var(--c-ink-3)",
+            background: value === short ? "var(--c-panel)" : "transparent",
+            fontWeight: value === short ? 500 : 400,
+          }}
+        >
+          {short}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LiveDot({ lastRefresh }: { lastRefresh: string | null }) {
+  const live = !!lastRefresh;
+  return (
+    <span
+      className="flex items-center gap-1.5 text-ink-3"
+      title={live ? `最后刷新 ${lastRefresh}` : "正在连接 Inngest…"}
+      style={{ fontSize: 11.5 }}
+    >
+      <span
+        className={live ? "rounded-full anim-pulse" : "rounded-full"}
+        style={{ width: 6, height: 6, background: live ? "var(--c-ok)" : "var(--c-ink-4)" }}
+      />
+      {live ? "实时" : "连接中"}
+    </span>
   );
 }

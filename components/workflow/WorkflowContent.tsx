@@ -14,7 +14,7 @@ import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/rou
 import { NeighborhoodPanel } from "./NeighborhoodPanel";
 import { RecentEntitiesPanel } from "./RecentEntitiesPanel";
 import { AgentChatbot } from "./AgentChatbot";
-import { NODES, EDGES, type WorkflowNode } from "@/lib/workflow-graph-meta";
+import { NODES, EDGES, GRAPH_VIEWBOX, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, type WorkflowNode } from "@/lib/workflow-graph-meta";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 import { LiveAgentPanel } from "./LiveAgentPanel";
 import Link from "next/link";
@@ -140,17 +140,17 @@ export function WorkflowContent() {
         </aside>
 
         {/* canvas */}
-        <div className="relative overflow-hidden bg-panel">
+        <div className="relative overflow-hidden bg-bg">
           <div
             className="absolute inset-0"
             style={{
-              backgroundImage: "radial-gradient(circle, oklch(0.88 0.006 260) 1px, transparent 1px)",
-              backgroundSize: "18px 18px",
-              opacity: 0.9,
+              backgroundImage: "radial-gradient(circle, oklch(0.92 0.005 260) 1px, transparent 1px)",
+              backgroundSize: "20px 20px",
+              opacity: 0.6,
             }}
           />
           <svg
-            viewBox="0 0 1620 560"
+            viewBox={GRAPH_VIEWBOX}
             preserveAspectRatio="xMidYMid meet"
             className="absolute inset-0 w-full h-full"
           >
@@ -162,40 +162,65 @@ export function WorkflowContent() {
                 <path d="M0,0 L0,6 L9,3 z" fill="var(--c-ink-4)" />
               </marker>
             </defs>
+
+            {/* Stage column bands — visual grouping (one column = one workflow stage) */}
+            <StageBands width={GRAPH_WIDTH} height={GRAPH_HEIGHT} />
+
             {edges.map((e, i) => {
               const a = nodes.find((n) => n.id === e.from);
               const b = nodes.find((n) => n.id === e.to);
               if (!a || !b) return null;
               const ax = a.x + 140;
-              const ay = a.y + 34;
+              const ay = a.y + 22;  // node height 44 → center at 22
               const bx = b.x;
-              const by = b.y + 34;
+              const by = b.y + 22;
               const mid = (ax + bx) / 2;
               const d = `M ${ax} ${ay} C ${mid} ${ay}, ${mid} ${by}, ${bx} ${by}`;
+
+              // Active edge = edge leading INTO a live agent that currently
+              // has running steps. Renders marching-ants flow animation.
+              const destLive = liveOverlay.byWsId.get(b.wsId);
+              const isActive = !!destLive && destLive.running > 0 && !destLive.paused;
+              const strokeColor = isActive
+                ? "var(--c-ok)"
+                : e.dashed ? "var(--c-ink-4)" : "var(--c-ink-3)";
+              const strokeOpacity = isActive ? 0.85 : e.dashed ? 0.55 : 0.65;
+
               return (
                 <g key={i}>
                   <path
                     d={d}
-                    stroke={e.dashed ? "var(--c-ink-4)" : "var(--c-ink-3)"}
-                    strokeWidth="1.5"
-                    strokeDasharray={e.dashed ? "4 4" : "none"}
+                    stroke={strokeColor}
+                    strokeWidth={isActive ? 1.6 : 1.2}
+                    strokeDasharray={isActive ? "6 4" : e.dashed ? "3 4" : "none"}
+                    strokeOpacity={strokeOpacity}
                     fill="none"
                     markerEnd={e.dashed ? "url(#arrowhead-b-dim)" : "url(#arrowhead-b)"}
-                  />
+                  >
+                    {isActive && (
+                      <animate
+                        attributeName="stroke-dashoffset"
+                        from="0" to="-20" dur="0.8s" repeatCount="indefinite"
+                      />
+                    )}
+                  </path>
                   {e.label && (
                     <g transform={`translate(${mid} ${(ay + by) / 2 - 2})`}>
-                      <rect x="-16" y="-10" width="32" height="18" rx="9" fill="var(--c-surface)" stroke="var(--c-line)" />
-                      <text x="0" y="3" textAnchor="middle" fontSize="10" fontFamily="var(--f-mono)" fill="var(--c-ink-2)">{e.label}</text>
+                      <rect
+                        x="-18" y="-8" width="36" height="14" rx="7"
+                        fill="var(--c-bg)" opacity="0.95"
+                      />
+                      <text
+                        x="0" y="3" textAnchor="middle" fontSize="9"
+                        fontFamily="var(--f-sans)" fill="var(--c-ink-3)"
+                      >
+                        {e.label}
+                      </text>
                     </g>
                   )}
                 </g>
               );
             })}
-            {/* animated packet */}
-            <circle r="4" fill="var(--c-accent)">
-              <animateMotion dur="5s" repeatCount="indefinite" path="M 160 274 L 340 274 L 520 274 L 700 274" />
-              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.9;1" dur="5s" repeatCount="indefinite" />
-            </circle>
 
             {nodes.map((n) => {
               const short = n.kind === "agent" ? nodeAgentShort(n) : null;
@@ -318,18 +343,19 @@ function WFNode({
   onSelect: () => void;
 }) {
   const w = 140;
-  const h = 68;
+  const h = 44;
   // Dim blueprint stubs visually — they're not deployed, so don't pretend
   // they have status.
   const stubOpacity = isBlueprintStub ? 0.55 : 1;
+  const isLive = !!liveAgent && !liveAgent.paused;
   const style = (() => {
     switch (node.kind) {
       case "trigger": return { fill: "var(--c-accent-bg)", stroke: "var(--c-accent-line)", accent: "var(--c-accent)" };
-      case "hitl": return { fill: "var(--c-warn-bg)", stroke: "color-mix(in oklab, var(--c-warn) 40%, transparent)", accent: "oklch(0.5 0.14 75)" };
-      case "guard": return { fill: "var(--c-ok-bg)", stroke: "color-mix(in oklab, var(--c-ok) 30%, transparent)", accent: "var(--c-ok)" };
+      case "hitl": return { fill: "var(--c-warn-bg)", stroke: "color-mix(in oklab, var(--c-warn) 30%, transparent)", accent: "oklch(0.5 0.14 75)" };
+      case "guard": return { fill: "var(--c-ok-bg)", stroke: "color-mix(in oklab, var(--c-ok) 25%, transparent)", accent: "var(--c-ok)" };
       case "branch": return { fill: "var(--c-panel)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-2)" };
       case "done": return { fill: "var(--c-raised)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-3)" };
-      default: return { fill: "var(--c-surface)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-1)" };
+      default: return { fill: "var(--c-surface)", stroke: isLive ? "color-mix(in oklab, var(--c-ok) 35%, var(--c-line-strong))" : "var(--c-line-strong)", accent: "var(--c-ink-1)" };
     }
   })();
   // ★ Live overlay tone takes priority over the legacy /api/agents/health.
@@ -360,92 +386,132 @@ function WFNode({
       transform={`translate(${node.x} ${node.y})`}
       style={{ cursor: "pointer", opacity: stubOpacity }}
       onClick={onSelect}
+      className="wf-node"
     >
+      {/* Selection: subtle dark border ring */}
       {selected && (
-        <rect x="-5" y="-5" width={w + 10} height={h + 10} rx="11" fill="none" stroke="var(--c-accent)" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.8" />
+        <rect
+          x="-3" y="-3" width={w + 6} height={h + 6} rx="9"
+          fill="none" stroke="var(--c-ink-1)" strokeWidth="1.5" opacity="0.9"
+        />
       )}
-      <rect x="0" y="0" width={w} height={h} rx="7" fill={style.fill} stroke={style.stroke} strokeWidth="1" />
-      <rect x="0" y="0" width={w} height="3" rx="7" fill={style.accent} />
-      <foreignObject x="8" y="10" width="22" height="22">
-        <div
-          className="w-[22px] h-[22px] rounded-sm grid place-items-center bg-surface border border-line"
-          style={{ color: style.accent }}
-        >
+
+      {/* Base card with subtle drop shadow on LIVE */}
+      <rect
+        x="0" y="0" width={w} height={h} rx="6"
+        fill={style.fill}
+        stroke={style.stroke}
+        strokeWidth="1"
+        filter={isLive ? "drop-shadow(0 1px 3px color-mix(in oklab, var(--c-ok) 25%, transparent))" : undefined}
+      />
+
+      {/* Icon */}
+      <foreignObject x="11" y={(h - 16) / 2} width="16" height="16">
+        <div className="w-[16px] h-[16px] grid place-items-center" style={{ color: style.accent }}>
           <Icon />
         </div>
       </foreignObject>
-      <text x="36" y="24" fontSize="12" fontWeight="600" fill="var(--c-ink-1)" style={{ fontFamily: "var(--f-sans)" }}>{node.title}</text>
-      <text x="36" y="40" fontSize="10.5" fill="var(--c-ink-3)" style={{ fontFamily: "var(--f-sans)" }}>{node.sub}</text>
 
-      {/* ★ LIVE badge (top-right corner) for the 3 real PRA agents */}
-      {liveAgent && !liveAgent.paused && (
-        <g transform={`translate(${w - 36} 5)`}>
-          <rect width="32" height="14" rx="3" fill="var(--c-ok-bg)" stroke="var(--c-ok)" strokeWidth="0.8" />
-          <text x="16" y="10" textAnchor="middle" fontSize="8.5" fontWeight="700"
-                fill="var(--c-ok)" style={{ fontFamily: "var(--f-mono)" }}>● LIVE</text>
-        </g>
-      )}
-      {liveAgent?.paused && (
-        <g transform={`translate(${w - 44} 5)`}>
-          <rect width="40" height="14" rx="3" fill="var(--c-warn-bg)" stroke="var(--c-warn)" strokeWidth="0.8" />
-          <text x="20" y="10" textAnchor="middle" fontSize="8.5" fontWeight="700"
-                fill="var(--c-warn)" style={{ fontFamily: "var(--f-mono)" }}>⏸ PAUSED</text>
-        </g>
-      )}
+      {/* Title — single primary label, vertically centered */}
+      <text
+        x="34" y={h / 2 + 1}
+        fontSize="11.5" fontWeight="500"
+        fill="var(--c-ink-1)"
+        style={{ fontFamily: "var(--f-sans)" }}
+        dominantBaseline="middle"
+      >
+        {node.title}
+      </text>
 
-      {/* ★ Blueprint badge (top-right corner) for 20 stub agents */}
-      {isBlueprintStub && (
-        <g transform={`translate(${w - 36} 5)`}>
-          <rect width="32" height="14" rx="3" fill="var(--c-panel)" stroke="var(--c-line)" strokeWidth="0.8" />
-          <text x="16" y="10" textAnchor="middle" fontSize="8" fontWeight="600"
-                fill="var(--c-ink-4)" style={{ fontFamily: "var(--f-mono)" }}>蓝图</text>
-        </g>
-      )}
-
-      {/* ★ Run count strip (bottom of live nodes) */}
-      {liveAgent && liveAgent.total > 0 && (
-        <text x={w - 8} y="63" textAnchor="end" fontSize="9.5" fontWeight="600"
-              fill="var(--c-ink-2)" style={{ fontFamily: "var(--f-mono)" }}>
-          {liveAgent.completed}✓ {liveAgent.failed > 0 && `${liveAgent.failed}✗`} {liveAgent.running > 0 && `${liveAgent.running}●`}
-        </text>
-      )}
+      {/* Status dot (top-right) — pulse uses a soft breathing ripple */}
       {statusDot && (
-        <>
-          <circle cx={w - 12} cy="14" r="4" fill={statusDot} opacity="0.2" />
-          <circle cx={w - 12} cy="14" r="2.5" fill={statusDot}>
-            {statusPulse && (
-              <animate
-                attributeName="opacity"
-                values="1;0.4;1"
-                dur="2s"
-                repeatCount="indefinite"
-              />
-            )}
-          </circle>
+        <g transform={`translate(${w - 11} 10)`}>
+          {statusPulse && (
+            <>
+              <circle r="3.5" fill={statusDot} opacity="0.25">
+                <animate attributeName="r" values="3;7;3" dur="2.4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1; 0.4 0 0.2 1" keyTimes="0;0.5;1" />
+                <animate attributeName="opacity" values="0.35;0;0.35" dur="2.4s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1; 0.4 0 0.2 1" keyTimes="0;0.5;1" />
+              </circle>
+            </>
+          )}
+          <circle r="3" fill={statusDot} />
           {tone && (
             <title>
               {tone.label}
+              {liveAgent?.total
+                ? ` · ${liveAgent.completed}✓ ${liveAgent.failed > 0 ? `${liveAgent.failed}✗ ` : ""}${liveAgent.running > 0 ? `${liveAgent.running}●` : ""}`
+                : ""}
               {liveHealth?.lastActivityAt
                 ? ` · last ${new Date(liveHealth.lastActivityAt).toLocaleTimeString(undefined, { hour12: false })}`
                 : ""}
-              {liveHealth && liveHealth.counts.failed + liveHealth.counts.error > 0
-                ? ` · ${liveHealth.counts.failed + liveHealth.counts.error} err`
-                : ""}
             </title>
           )}
-        </>
+        </g>
       )}
-      <line x1="0" y1="52" x2={w} y2="52" stroke="var(--c-line)" />
-      <text x="10" y="63" fontSize="9.5" fill="var(--c-ink-4)" style={{ fontFamily: "var(--f-mono)" }}>
-        {node.kind === "trigger" ? "event · cron"
-          : node.kind === "hitl" ? "SLA 4h · HSM"
-          : node.kind === "guard" ? "blocks on fail"
-          : node.kind === "branch" ? "if / else"
-          : node.kind === "done" ? "terminal"
-          : "retry 3× · HITL"}
-      </text>
-      <circle cx="0" cy={h / 2} r="3.5" fill="var(--c-surface)" stroke="var(--c-ink-4)" />
-      <circle cx={w} cy={h / 2} r="3.5" fill="var(--c-surface)" stroke="var(--c-ink-4)" />
+
+      {/* Blueprint marker — tiny corner label */}
+      {isBlueprintStub && (
+        <text x={w - 7} y={h - 5} textAnchor="end" fontSize="8.5" fill="var(--c-ink-4)" style={{ fontFamily: "var(--f-sans)" }}>
+          蓝图
+        </text>
+      )}
+
+      {/* Run count strip — corner, only for LIVE with traffic */}
+      {liveAgent && liveAgent.total > 0 && !isBlueprintStub && (
+        <text
+          x={w - 7} y={h - 5} textAnchor="end" fontSize="9" fontWeight="500"
+          fill="var(--c-ink-2)" style={{ fontFamily: "var(--f-mono)" }}
+        >
+          {liveAgent.completed}✓{liveAgent.failed > 0 ? ` ${liveAgent.failed}✗` : ""}{liveAgent.running > 0 ? ` ${liveAgent.running}●` : ""}
+        </text>
+      )}
+    </g>
+  );
+}
+
+
+// ── Stage column background bands ───────────────────────────────────
+// Visual grouping for the 8-column left-to-right pipeline. Tone-matched
+// to each stage's role (intake / build / process / match / interview /
+// package / submit). Soft colors — should be felt, not seen.
+
+const STAGE_BANDS: Array<{ x: number; w: number; label: string; tint: string }> = [
+  { x: 0,    w: 200,  label: "触发",   tint: "color-mix(in oklab, var(--c-accent) 4%, transparent)" },
+  { x: 200,  w: 280,  label: "需求",   tint: "color-mix(in oklab, var(--c-ink-3) 3%, transparent)" },
+  { x: 480,  w: 320,  label: "JD",     tint: "color-mix(in oklab, oklch(0.7 0.12 80) 5%, transparent)" },
+  { x: 800,  w: 320,  label: "简历",   tint: "color-mix(in oklab, var(--c-info) 4%, transparent)" },
+  { x: 1120, w: 280,  label: "匹配",   tint: "color-mix(in oklab, var(--c-ok) 5%, transparent)" },
+  { x: 1400, w: 320,  label: "面试评估", tint: "color-mix(in oklab, var(--c-warn) 4%, transparent)" },
+  { x: 1720, w: 320,  label: "推荐包", tint: "color-mix(in oklab, var(--c-ink-3) 3%, transparent)" },
+  { x: 2040, w: 160,  label: "提交",   tint: "color-mix(in oklab, var(--c-accent) 4%, transparent)" },
+];
+
+function StageBands({ width: _width, height }: { width: number; height: number }) {
+  // pointer-events="none" — bands are pure decoration; they must NOT capture
+  // clicks intended for the node groups behind them in the DOM (SVG renders
+  // bands before nodes, but a rect spanning the whole canvas would otherwise
+  // catch clicks falling outside the small node boxes too).
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      {STAGE_BANDS.map((b, i) => (
+        <g key={i}>
+          <rect x={b.x} y={0} width={b.w} height={height} fill={b.tint} />
+          <text
+            x={b.x + b.w / 2} y={28}
+            textAnchor="middle" fontSize="11"
+            fill="var(--c-ink-4)"
+            style={{ fontFamily: "var(--f-sans)", letterSpacing: "0.04em" }}
+          >
+            {b.label}
+          </text>
+          {i > 0 && (
+            <line
+              x1={b.x} y1={0} x2={b.x} y2={height}
+              stroke="var(--c-line)" strokeWidth="0.5" strokeDasharray="2 4" opacity="0.5"
+            />
+          )}
+        </g>
+      ))}
     </g>
   );
 }
@@ -515,6 +581,9 @@ function Inspector({
         </div>
       )}
       <div className="overflow-auto py-1.5">
+        {/* Canonical step details — show for EVERY node, not just real agents.
+            This is the actual "步骤详情" content per the panel title. */}
+        <CanonicalDetailsPanel node={node} />
         <NeighborhoodPanel short={agentShort} onJump={onJumpToAgent} />
         {agentShort && liveHealth !== undefined && (
           <AgentHealthPanel short={agentShort} health={liveHealth} />
@@ -525,6 +594,161 @@ function Inspector({
         {agentShort && <AgentLogsPanel short={agentShort} />}
       </div>
     </>
+  );
+}
+
+// Renders description / trigger events / actions / emitted events from the
+// canonical workflow JSON. Falls back gracefully when the node is the
+// synthetic trigger (wsId='trig').
+function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
+  const canonical = CANONICAL_WORKFLOW.find((n) => n.id === node.wsId);
+
+  // Trigger node — no canonical entry; render a friendly summary so the panel
+  // doesn't look blank.
+  if (!canonical) {
+    return (
+      <div className="border-b border-line" style={{ padding: "12px 16px" }}>
+        <SectionLabel>说明</SectionLabel>
+        <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.6 }}>
+          {node.sub || "外部触发点 · 工作流的入口"}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Description */}
+      <div className="border-b border-line" style={{ padding: "12px 16px" }}>
+        <SectionLabel>描述</SectionLabel>
+        <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.6 }}>
+          {canonical.description}
+        </div>
+      </div>
+
+      {/* Actor */}
+      {canonical.actor && canonical.actor.length > 0 && (
+        <div className="border-b border-line" style={{ padding: "12px 16px" }}>
+          <SectionLabel>执行者</SectionLabel>
+          <div className="flex flex-wrap gap-1.5">
+            {canonical.actor.map((a) => (
+              <span
+                key={a}
+                className="inline-flex items-center rounded border border-line bg-surface text-ink-2"
+                style={{ padding: "2px 8px", fontSize: 11.5 }}
+              >
+                {a === "Agent" ? "Agent 自动" : a === "Human" ? "Human 人工" : a}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Trigger events (what fires this step) */}
+      {canonical.trigger && canonical.trigger.length > 0 && (
+        <div className="border-b border-line" style={{ padding: "12px 16px" }}>
+          <SectionLabel>触发事件 ({canonical.trigger.length})</SectionLabel>
+          <div className="flex flex-col gap-1">
+            {canonical.trigger.map((ev) => (
+              <Link
+                key={ev}
+                href={`/events?name=${encodeURIComponent(ev)}`}
+                className="inline-flex items-center rounded text-ink-2 hover:text-ink-1 hover:bg-panel transition-colors"
+                style={{
+                  padding: "3px 8px", fontSize: 11.5,
+                  fontFamily: "var(--f-mono)",
+                  textDecoration: "none",
+                  border: "1px solid var(--c-line)",
+                  alignSelf: "flex-start",
+                }}
+              >
+                ← {ev}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions (ordered step actions) */}
+      {canonical.actions && canonical.actions.length > 0 && (
+        <div className="border-b border-line" style={{ padding: "12px 16px" }}>
+          <SectionLabel>步骤动作 ({canonical.actions.length})</SectionLabel>
+          <div className="flex flex-col gap-2.5">
+            {canonical.actions.map((act) => (
+              <div key={act.order} className="flex gap-2.5">
+                <span
+                  className="tabular-nums text-ink-4 shrink-0"
+                  style={{ fontSize: 10, marginTop: 2, fontFamily: "var(--f-mono)" }}
+                >
+                  {String(act.order).padStart(2, "0")}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <code className="text-ink-1" style={{ fontSize: 11.5, fontFamily: "var(--f-mono)" }}>
+                      {act.name}
+                    </code>
+                    <span
+                      className="text-ink-4 rounded"
+                      style={{
+                        fontSize: 10, padding: "1px 5px",
+                        background: "var(--c-panel)",
+                        border: "1px solid var(--c-line)",
+                      }}
+                    >
+                      {act.type}
+                    </span>
+                  </div>
+                  {act.condition && (
+                    <div className="text-ink-3 mt-1" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                      <span className="text-ink-4">条件:</span> {act.condition}
+                    </div>
+                  )}
+                  <div className="text-ink-2 mt-1" style={{ fontSize: 11.5, lineHeight: 1.55 }}>
+                    {act.description}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Triggered events (emitted) */}
+      {canonical.triggered_event && canonical.triggered_event.length > 0 && (
+        <div className="border-b border-line" style={{ padding: "12px 16px" }}>
+          <SectionLabel>发出事件 ({canonical.triggered_event.length})</SectionLabel>
+          <div className="flex flex-col gap-1">
+            {canonical.triggered_event.map((ev) => (
+              <Link
+                key={ev}
+                href={`/events?name=${encodeURIComponent(ev)}`}
+                className="inline-flex items-center rounded text-ink-2 hover:text-ink-1 hover:bg-panel transition-colors"
+                style={{
+                  padding: "3px 8px", fontSize: 11.5,
+                  fontFamily: "var(--f-mono)",
+                  textDecoration: "none",
+                  border: "1px solid var(--c-line)",
+                  alignSelf: "flex-start",
+                }}
+              >
+                → {ev}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="text-ink-4 mb-2"
+      style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600 }}
+    >
+      {children}
+    </div>
   );
 }
 

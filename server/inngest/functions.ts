@@ -4,12 +4,18 @@
 // 3 个 agent 文件被搬进 server/inngest/agents/。Inngest dev server 至此
 // 只同步一个 SDK 端点，所有 functions 在一个 dashboard 里看见。
 //
-// 主链路（real production agents 4 个）:
-//   REQUIREMENT_LOGGED   → createJdAgent       → JD_GENERATED
-//   RESUME_DOWNLOADED    → resumeParserAgent   → RESUME_PROCESSED
-//   RESUME_PROCESSED     → matchResumeAgent (1st) → RULE_CHECK_REQUESTED
-//   RULE_CHECK_REQUESTED → ruleCheckAgent   → RULE_CHECK_PASSED / MATCH_FAILED
-//   RULE_CHECK_PASSED    → matchResumeAgent (2nd) → MATCH_PASSED_NO_INTERVIEW / MATCH_PASSED_NEED_INTERVIEW / MATCH_FAILED
+// 主链路（real production agents 4 个 — 2026-05-19 consolidation 后）:
+//   REQUIREMENT_LOGGED       → createJdAgent       → JD_GENERATED
+//   RESUME_DOWNLOADED        → resumeParserAgent   → RESUME_PROCESSED
+//   RESUME_PROCESSED         → ruleCheckAgent (10-1, per-JR fan-out)
+//                                                  → MATCH_RULE_CHECK_PASSED / MATCH_RULE_CHECK_FAILED
+//   MATCH_RULE_CHECK_PASSED  → matchResumeAgent (10-2)
+//                                                  → MATCH_PASSED_NO_INTERVIEW
+//                                                    MATCH_PASSED_NEED_INTERVIEW
+//                                                    MATCH_FAILED
+//
+// 重派场景:partner 重发 RESUME_PROCESSED(带新 job_requisition_id)即触发
+// ruleCheck path-A,无新订阅。详见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
 //
 // 演示用 stub agent（19 个，可选）—— 给 fleet / workflow 可视化页面提供
 // 模拟数据流。Stub 收事件 → 写 AgentActivity → sleep → emit 下游事件 →

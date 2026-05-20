@@ -2,7 +2,7 @@
 // → full run detail: status + step-by-step history + output.
 
 import { NextResponse } from 'next/server';
-import { getRunHistory } from '@/lib/inngest-admin-client';
+import { getRunHistory, getRunStepOutputs } from '@/lib/inngest-admin-client';
 import { getRunTokenUsage } from '@/lib/monitor/run-token-usage';
 
 export const dynamic = 'force-dynamic';
@@ -26,6 +26,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
       stepsBy[e.stepName].states.push(e);
     }
     const tokenByRun = await getRunTokenUsage([run.id]);
+
+    // Per-step outputs from V2 trace API (the JSON each step.run returned).
+    // Best-effort: a failure here doesn't kill the response — the drawer
+    // already renders without step outputs, this just adds them when available.
+    let stepOutputs: Awaited<ReturnType<typeof getRunStepOutputs>> = [];
+    try {
+      stepOutputs = await getRunStepOutputs(run.id);
+    } catch (stepErr) {
+      console.warn(
+        `[run-detail] step outputs unavailable for ${run.id}: ${(stepErr as Error).message}`,
+      );
+    }
+
     return NextResponse.json({
       id: run.id,
       status: run.status,
@@ -35,6 +48,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
       function: run.function,
       history: run.history ?? [],
       steps: Object.values(stepsBy),
+      stepOutputs,
       // Surface the triggering event so the drawer's "replay" button can
       // re-emit by event id (replay endpoint requires eventId, not runId).
       event: run.event ?? null,

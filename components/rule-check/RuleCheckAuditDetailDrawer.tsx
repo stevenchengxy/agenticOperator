@@ -349,7 +349,7 @@ function DecisionBanner({
 
 function buildDecisionSummary(detail: RuleCheckAuditDetail): string {
   if (detail.decision === "PASS") {
-    return `所有底线规则放行(评估 ${detail.rules_evaluated}/${detail.rules_total_in_ontology} 条)。下一步:发 RULE_CHECK_PASSED 事件 → matchResume 调 RAAS API`;
+    return `所有底线规则放行(评估 ${detail.rules_evaluated}/${detail.rules_total_in_ontology} 条)。下一步:发 MATCH_RULE_CHECK_PASSED 事件 → matchResume 调 RoboHire /match-resume`;
   }
   // FAIL
   const reasons = detail.failure_reasons.length

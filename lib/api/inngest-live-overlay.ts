@@ -1,14 +1,16 @@
 // Inngest live overlay hook.
 //
 // Polls /api/inngest-admin/{functions,runs,dlq} every 5s and exposes a Map
-// keyed by workflow `wsId` (e.g. "9-1", "4", "10") for the 3 real PRA agents.
-// Non-real (stub) nodes return undefined → consumers should render them as
-// "蓝图 / blueprint" instead of pretending they're alive.
+// keyed by workflow `wsId` (e.g. "9-1", "4", "10", "10-5") for the 4 real
+// production Inngest functions. Non-real (stub) nodes return undefined →
+// consumers should render them as "蓝图 / blueprint" instead of pretending
+// they're alive.
 //
 // Mapping wsId ↔ Inngest slug:
-//   "4"   → agentic-operator-main-create-jd-agent      (JDGenerator)
-//   "9-1" → agentic-operator-main-resume-parser-agent  (ResumeParser)
-//   "10"  → agentic-operator-main-match-resume-agent   (Matcher)
+//   "4"    → agentic-operator-main-create-jd-agent       (JDGenerator)
+//   "9-1"  → agentic-operator-main-resume-parser-agent   (ResumeParser)
+//   "10"   → agentic-operator-main-match-resume-agent    (Matcher)
+//   "10-5" → agentic-operator-main-rule-check-agent      (RuleCheck) ★ PR-4
 
 'use client';
 
@@ -18,6 +20,7 @@ export const WSID_TO_INNGEST_SLUG: Record<string, string> = {
   '4': 'agentic-operator-main-create-jd-agent',
   '9-1': 'agentic-operator-main-resume-parser-agent',
   '10': 'agentic-operator-main-match-resume-agent',
+  '10-5': 'agentic-operator-main-rule-check-agent',
 };
 
 export const INNGEST_SLUG_TO_WSID: Record<string, string> = Object.fromEntries(

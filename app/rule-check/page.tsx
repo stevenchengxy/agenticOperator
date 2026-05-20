@@ -1,12 +1,15 @@
 "use client";
 
+import React, { Suspense } from "react";
 import { Shell } from "@/components/shared/Shell";
-import { RuleCheckContent } from "@/components/rule-check/RuleCheckContent";
+import { RuleCheckPageContent } from "@/components/rule-check/RuleCheckPageContent";
 
 export default function Page() {
   return (
     <Shell crumbs={["Rule Check", "matchResume"]}>
-      <RuleCheckContent />
+      <Suspense fallback={null}>
+        <RuleCheckPageContent />
+      </Suspense>
     </Shell>
   );
 }
