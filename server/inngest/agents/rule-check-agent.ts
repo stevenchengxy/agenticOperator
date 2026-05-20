@@ -36,6 +36,7 @@ import {
   type RuleCheckRuntimeContext,
 } from '@/server/inngest/client';
 import { prisma } from '@/server/db';
+import { writeInstance, AllmetaApiError } from '@/lib/allmeta-client';
 
 const AGENT_ID = 'rule-check-agent';
 const AGENT_NAME = 'ruleCheck';
@@ -315,10 +316,42 @@ export async function ruleCheckAgentHandler({
       }
     });
 
-    // TODO(partner): actions JSON 10-1 side-effect 写 Candidate_Match_Result via
-    //   RAAS POST /match-results saveMatchResults variant(目前 source 只支持
-    //   'need_interview' / 'no_interview', 等 partner 开放端点后补 step
-    //   `persist-rule-check-${stepKey}`).
+    // ★ actions JSON 10-1 side_effect: write Candidate_Match_Result instance
+    //   to Neo4j via Allmeta Ontology API. rule_check_result / rule_check_reason
+    //   are property-bag additions (not in the 8-field schema, allowed by API).
+    //   PK convention: cmr_<candidate>_<jr>  (one row per (candidate, JR) pair).
+    //   Soft-fail: write errors don't block emit downstream.
+    await step.run(`write-cmr-${stepKey}`, async () => {
+      const cmrId = `cmr_${candidateId || 'unknown'}_${jrid}`;
+      const ruleCheckResult = result.decision === 'PASS' ? '通过' : '未通过';
+      const ruleCheckReason =
+        result.decision === 'PASS'
+          ? ''
+          : result.explanations
+              .filter((e) => e.status === 'fail')
+              .map((e) => `[${e.rule_id}] ${e.rule_name}: ${e.reason ?? ''}`)
+              .join(' | ')
+              .slice(0, 1000);
+      try {
+        await writeInstance('Candidate_Match_Result', {
+          candidate_match_result_id: cmrId,
+          client_id: clientId || '',
+          candidate_id: candidateId || '',
+          job_position_id: jrid,
+          rule_check_result: ruleCheckResult,
+          rule_check_reason: ruleCheckReason,
+        });
+        logger.info(
+          `[${AGENT_NAME}] ✓ wrote Candidate_Match_Result ${cmrId} rule_check_result=${ruleCheckResult}`,
+        );
+        return { ok: true, cmrId };
+      } catch (e) {
+        const msg =
+          e instanceof AllmetaApiError ? `${e.status} ${e.message}` : (e as Error).message;
+        logger.warn(`[${AGENT_NAME}] write-cmr failed jr=${jrid}: ${msg.slice(0, 240)}`);
+        return { ok: false, error: msg.slice(0, 240) };
+      }
+    });
 
     if (result.decision === 'PASS') {
       const payload: MatchRuleCheckPassedData = {
