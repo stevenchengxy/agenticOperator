@@ -159,14 +159,13 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
     subscribers: ["ao.matchResumeAgent"],
   },
   {
-    // ⚠ Deprecated 2026-05-19 (Plan B raas-integration-divergence §4):
-    //   ruleCheckAgent FAIL/REVIEW path now emits MATCH_FAILED instead.
-    //   Registration retained for replay of historical events only —
-    //   no live publisher.
+    // ruleCheckAgent rule-check 失败时发(区别于 matchResumeAgent 自身的
+    // 低分 MATCH_FAILED).  Team review 2026-05-20: revert Plan B 统一 — 保留独立事件,
+    // 让审计 / partner dispatcher 能 route 不同的失败语义。
     name: "MATCH_RULE_CHECK_FAILED",
-    description: "[DEPRECATED] 旧 rule-check failure 事件;新代码统一发 MATCH_FAILED",
+    description: "rule-check FAIL/REVIEW;matching_score 固定 null,data 含 failed_rules + decision",
     versions: [{ version: "1.0", schema: MATCH_RULE_CHECK_FAILED_v1 }],
-    publishers: [],
+    publishers: ["ao.ruleCheckAgent"],
     subscribers: [],
   },
   {
@@ -199,9 +198,9 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
   },
   {
     name: "MATCH_FAILED",
-    description: "候选人 × JD 匹配失败(包括 rule-check FAIL/REVIEW · Plan B 2026-05-19)",
+    description: "matchResumeAgent 低分淘汰(score < 50 / null);rule-check 失败请订阅 MATCH_RULE_CHECK_FAILED",
     versions: [{ version: "1.0", schema: MATCH_FAILED_v1 }],
-    publishers: ["rpa.matchResumeAgent", "ao.ruleCheckAgent"],
+    publishers: ["rpa.matchResumeAgent"],
     subscribers: ["raas-backend.match-result-ingest-failed"],
   },
 ];

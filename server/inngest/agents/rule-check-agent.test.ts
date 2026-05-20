@@ -2,7 +2,7 @@
 //
 // 2026-05-19: trigger 改为 RESUME_PROCESSED;吸收原 matchResume 1st seg
 // (F1 回拉 + JR 列表收敛 + per-JR rule-check + persist + emit
-// MATCH_RULE_CHECK_PASSED / MATCH_FAILED)。
+// MATCH_RULE_CHECK_PASSED / MATCH_RULE_CHECK_FAILED)。
 //
 // Pattern: import handler function directly, mock step.run/sendEvent + the
 // rule-check lib + RAAS API client.
@@ -223,7 +223,7 @@ describe('ruleCheckAgent — F1 thick event compat', () => {
 });
 
 describe('ruleCheckAgent — decision branches', () => {
-  it('emits MATCH_FAILED on FAIL', async () => {
+  it('emits MATCH_RULE_CHECK_FAILED on FAIL', async () => {
     mockGetRequirementDetail.mockResolvedValue({ requirement: sampleReq, specification: {} });
     mockGetParsedResume.mockResolvedValue({ data: { name: 'John' } });
     mockRunRuleCheck.mockResolvedValue({
@@ -244,7 +244,7 @@ describe('ruleCheckAgent — decision branches', () => {
     });
 
     expect(step.sent).toHaveLength(1);
-    expect(step.sent[0].name).toBe('MATCH_FAILED');
+    expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_FAILED');
     expect(step.sent[0].data.success).toBe(false);
     expect(step.sent[0].data.matching_score).toBeNull();
     expect(step.sent[0].data.job_requisition_id).toBe('JR1');
@@ -254,7 +254,7 @@ describe('ruleCheckAgent — decision branches', () => {
     expect(step.sent[0].data.data.failed_rules).toHaveLength(1);
   });
 
-  it('emits MATCH_FAILED with rule_check_decision=REVIEW on REVIEW', async () => {
+  it('emits MATCH_RULE_CHECK_FAILED with rule_check_decision=REVIEW on REVIEW', async () => {
     mockGetRequirementDetail.mockResolvedValue({ requirement: sampleReq, specification: {} });
     mockGetParsedResume.mockResolvedValue({ data: { name: 'John' } });
     mockRunRuleCheck.mockResolvedValue({
@@ -274,7 +274,7 @@ describe('ruleCheckAgent — decision branches', () => {
       logger: mockLogger as any,
     });
 
-    expect(step.sent[0].name).toBe('MATCH_FAILED');
+    expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_FAILED');
     expect(step.sent[0].data.data.rule_check_decision).toBe('REVIEW');
   });
 });

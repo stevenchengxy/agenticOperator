@@ -359,17 +359,17 @@ export async function ruleCheckAgentHandler({
         },
         error: `rule-check-${result.decision.toLowerCase()}`,
       };
-      // Plan B (2026-05-19 raas-integration-divergence): rule-check FAIL/REVIEW
-      // → emit MATCH_FAILED directly. Partner dispatcher consumes the unified
-      // MATCH_* family; the old MATCH_RULE_CHECK_FAILED event was never
-      // subscribed externally. See docs/superpowers/specs/
-      //   2026-05-19-raas-integration-divergence-fixes-design.md §4 plan B.
+      // Rule-check FAIL/REVIEW → emit MATCH_RULE_CHECK_FAILED (distinct from
+      // matchResume 自身的 MATCH_FAILED 低分淘汰).  Reverted from short-lived
+      // Plan B unification (2026-05-19) per team review — keeping the
+      // separate event preserves semantic distinction in audits and lets
+      // partner dispatchers route differently if they choose.
       await step.sendEvent(`emit-failed-${stepKey}`, {
-        name: 'MATCH_FAILED',
+        name: 'MATCH_RULE_CHECK_FAILED',
         data: failedPayload,
       });
       logger.info(
-        `[${AGENT_NAME}] ✗ emitted MATCH_FAILED for JR=${jrid} (${result.decision})`,
+        `[${AGENT_NAME}] ✗ emitted MATCH_RULE_CHECK_FAILED for JR=${jrid} (${result.decision})`,
       );
       failed += 1;
     }
