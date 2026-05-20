@@ -8,7 +8,7 @@
 >
 > **与上一版的差异**:
 > - 新增 4-th agent `ruleCheckAgent`(workflow node 10.5),从 matchResumeAgent step 4.0 抽离
-> - `matchResumeAgent` 从单触发改为**双触发**(订阅 `RESUME_PROCESSED` + `RULE_CHECK_PASSED`)
+> - `matchResumeAgent` 从单触发改为**双触发**(订阅 `RESUME_PROCESSED` + `MATCH_RULE_CHECK_PASSED`)
 > - `parseResume` / `matchResume` 切换为 AO 直连 RoboHire(`lib/robohire-client.ts`),不再走 RAAS API Server 的透传代理
 > - `POST /candidates` / `/match-results` / `/jd/sync-generated` 仍走 RAAS API Server(写 RAAS Postgres,partner dual-write 契约)
 > - rule data 升级到 v0.1.002,Rule 模型新增 `enforcementLevel` + `failurePolicy` 字段;旧的 `inferSeverity()` 关键词启发式删除
@@ -96,7 +96,7 @@ new Inngest({ id: 'agentic-operator-main', schemas: new EventSchemas().fromRecor
 | `RESUME_DOWNLOADED` | `ResumeDownloadedData` | in (RAAS → AO) | `resumeParserAgent` |
 | `RESUME_PROCESSED` | `ResumeProcessedData` | out (AO → RAAS) + 内部级联 | `matchResumeAgent`(1st seg) + RAAS 自家入库 |
 | `RULE_CHECK_REQUESTED` ★ | `RuleCheckRequestedData` | 内部 (AO ↔ AO) | `ruleCheckAgent` |
-| `RULE_CHECK_PASSED` ★ | `RuleCheckPassedData` | 内部 (AO ↔ AO) | `matchResumeAgent`(2nd seg) |
+| `MATCH_RULE_CHECK_PASSED` ★ | `RuleCheckPassedData` | 内部 (AO ↔ AO) | `matchResumeAgent`(2nd seg) |
 | `RULE_CHECK_FAILED` ★ | `RuleCheckFailedData` | out (AO → RAAS) | (终态,无后继 agent;RAAS 可订阅做审计) |
 | `MATCH_PASSED_NEED_INTERVIEW` | `MatchPassedNeedInterviewData` | out (AO → RAAS) | RAAS `match-result-ingest-need-interview` |
 | `MATCH_PASSED_NO_INTERVIEW` | 同上 | out | RAAS ingest fn (no-interview 通道, 当前未发) |
@@ -106,7 +106,7 @@ new Inngest({ id: 'agentic-operator-main', schemas: new EventSchemas().fromRecor
 | `JD_REJECTED` | 同上 | in | `createJdAgent` |
 | `JD_GENERATED` | `JdGeneratedEnvelope` | out | RAAS `jd-generated-sync`(cascade-only) |
 
-★ = PR-4 新增。`RULE_CHECK_REQUESTED` 和 `RULE_CHECK_PASSED` 完全是 AO 内部事件;`RULE_CHECK_FAILED` 是终态,RAAS 可订阅做 audit 但本版不强制。
+★ = PR-4 新增。`RULE_CHECK_REQUESTED` 和 `MATCH_RULE_CHECK_PASSED` 完全是 AO 内部事件;`RULE_CHECK_FAILED` 是终态,RAAS 可订阅做 audit 但本版不强制。
 
 ---
 
@@ -344,11 +344,11 @@ inngest.createFunction(
   { id: 'match-resume-agent', name: 'Match Resume Agent (workflow node 10)', retries: 2 },
   [
     { event: 'RESUME_PROCESSED' },     // 1st segment
-    { event: 'RULE_CHECK_PASSED' },    // 2nd segment ★ NEW (PR-4)
+    { event: 'MATCH_RULE_CHECK_PASSED' },    // 2nd segment ★ NEW (PR-4)
   ],
   async ({ event, step, logger }) => {
     if (event.name === 'RESUME_PROCESSED')  return handleResumeProcessed(...);
-    if (event.name === 'RULE_CHECK_PASSED') return handleRuleCheckPassed(...);
+    if (event.name === 'MATCH_RULE_CHECK_PASSED') return handleRuleCheckPassed(...);
   }
 );
 ```
@@ -378,7 +378,7 @@ RESUME_PROCESSED
    └─ for (each requirement):
         bypass = process.env.RULE_CHECK_BYPASS === 'true'
         if (bypass):
-            // 直接 emit RULE_CHECK_PASSED(audit.fail_reason='bypassed')
+            // 直接 emit MATCH_RULE_CHECK_PASSED(audit.fail_reason='bypassed')
             // 跳过 ruleCheckAgent,链路直接进 2nd segment
         else:
             step.sendEvent("emit-rule-check-requested-<jrid>", {
@@ -395,12 +395,12 @@ RESUME_PROCESSED
             })
 ```
 
-### 4.2 第二段:`handleRuleCheckPassed`(订阅 `RULE_CHECK_PASSED`)
+### 4.2 第二段:`handleRuleCheckPassed`(订阅 `MATCH_RULE_CHECK_PASSED`)
 
 **职责**:接 ruleCheckAgent 的 PASS 决定 → 调 RoboHire match → 持久化到 RAAS Postgres → emit `MATCH_PASSED_NEED_INTERVIEW`。
 
 ```
-RULE_CHECK_PASSED  { ..., job_requisition: <JR full>, parsed_resume: <data> }
+MATCH_RULE_CHECK_PASSED  { ..., job_requisition: <JR full>, parsed_resume: <data> }
    │
    ├─ 校验 payload 含 job_requisition + parsed_resume
    │
@@ -432,7 +432,7 @@ RULE_CHECK_PASSED  { ..., job_requisition: <JR full>, parsed_resume: <data> }
 
 > **⭐ 关键改动 PR-4**:`matchResume` 调用从 RAAS 透传切换 RoboHire 直连。
 >
-> **⭐ 关键改动 PR-4**:rule-check 逻辑从 step 4.0 内嵌位置抽到独立 `ruleCheckAgent` 里(见 §5)。`matchResumeAgent` 1st segment 只负责 "拉 JR + 派工",2nd segment 只负责 "match + 落库 + emit"。两段之间通过 `RULE_CHECK_REQUESTED` → `ruleCheckAgent` → `RULE_CHECK_PASSED` 串联。
+> **⭐ 关键改动 PR-4**:rule-check 逻辑从 step 4.0 内嵌位置抽到独立 `ruleCheckAgent` 里(见 §5)。`matchResumeAgent` 1st segment 只负责 "拉 JR + 派工",2nd segment 只负责 "match + 落库 + emit"。两段之间通过 `RULE_CHECK_REQUESTED` → `ruleCheckAgent` → `MATCH_RULE_CHECK_PASSED` 串联。
 >
 > **dual-trigger 设计权衡**:为什么不拆 2 个 function?在 Inngest 监控里仍然显示 2 次独立 run(每段一次),可观测性 OK;不拆 function 减少注册数和文件数。
 
@@ -442,7 +442,7 @@ RULE_CHECK_PASSED  { ..., job_requisition: <JR full>, parsed_resume: <data> }
 |---|---|---|
 | 缺 upload_id / candidate_id / employee_id | 1st | `NonRetriableError` |
 | RAAS 4xx on requirements 拉取 | 1st | `NonRetriableError` |
-| RULE_CHECK_PASSED payload 缺 job_requisition / parsed_resume | 2nd | return ok:false,跳过该 JR(不抛) |
+| MATCH_RULE_CHECK_PASSED payload 缺 job_requisition / parsed_resume | 2nd | return ok:false,跳过该 JR(不抛) |
 | RoboHire 4xx on match | 2nd | 跳过该 JR,记 ERROR log,不抛 |
 | RoboHire 402 QUOTA_EXHAUSTED | 2nd | 跳过该 JR(可独立告警) |
 | RAAS 4xx on saveMatchResults | 2nd | `NonRetriableError` |
@@ -550,7 +550,7 @@ RULE_CHECK_REQUESTED
    │
    ├─ if (result.decision === 'PASS'):
    │     step.sendEvent("emit-passed-<jrid>", {
-   │       name: 'RULE_CHECK_PASSED',
+   │       name: 'MATCH_RULE_CHECK_PASSED',
    │       data: {
    │         upload_id, candidate_id, resume_id, job_requisition_id, client_id,
    │         audit: RuleCheckAuditMeta,
@@ -626,7 +626,7 @@ ruleCheckAgent 拿到 `FAIL + fail_reason` 后,仍然 emit `RULE_CHECK_FAILED`(d
 
 ### 5.6 RULE_CHECK_BYPASS(PR-5 可选)
 
-`RULE_CHECK_BYPASS=true` 时,`matchResumeAgent` 1st segment 直接 emit `RULE_CHECK_PASSED`(`audit.fail_reason='bypassed'`),**完全跳过 ruleCheckAgent**。链路直接进入 2nd segment。
+`RULE_CHECK_BYPASS=true` 时,`matchResumeAgent` 1st segment 直接 emit `MATCH_RULE_CHECK_PASSED`(`audit.fail_reason='bypassed'`),**完全跳过 ruleCheckAgent**。链路直接进入 2nd segment。
 
 用途:本地 dev 想跳过 LLM 调用快速验证 RoboHire match + RAAS 持久化路径;或 LLM gateway 故障时临时绕过。生产默认关闭。
 
@@ -740,7 +740,7 @@ ruleCheckAgent 拿到 `FAIL + fail_reason` 后,仍然 emit `RULE_CHECK_FAILED`(d
        │    └─ foldDecision: fail > pending > else
        │
        ├─ if decision === 'PASS':
-       │     step.sendEvent RULE_CHECK_PASSED
+       │     step.sendEvent MATCH_RULE_CHECK_PASSED
        │        { ...原 payload + audit, job_requisition, parsed_resume }
        │
        └─ if decision === 'FAIL' / 'REVIEW':
@@ -748,7 +748,7 @@ ruleCheckAgent 拿到 `FAIL + fail_reason` 后,仍然 emit `RULE_CHECK_FAILED`(d
                 { decision, failed_rules: [{rule_id, rule_name, status, reason}], audit }
              # 终态,链路终止
 
-7)  matchResumeAgent (2nd segment)  (订阅 RULE_CHECK_PASSED)
+7)  matchResumeAgent (2nd segment)  (订阅 MATCH_RULE_CHECK_PASSED)
        ├─ buildResumeTextFromParsed + flattenRequirementForMatch
        ├─ ⭐ RoboHire POST /api/v1/match-resume  (DIRECT)
        ├─ RAAS     POST /api/v1/match-results   (写 Postgres, source='need_interview')
@@ -765,7 +765,7 @@ ruleCheckAgent 拿到 `FAIL + fail_reason` 后,仍然 emit `RULE_CHECK_FAILED`(d
 | `RESUME_DOWNLOADED` | 1 |
 | `RESUME_PROCESSED` | 1 |
 | `RULE_CHECK_REQUESTED` | N(每条 JR) |
-| `RULE_CHECK_PASSED` | M(M ≤ N,PASS 的 JR) |
+| `MATCH_RULE_CHECK_PASSED` | M(M ≤ N,PASS 的 JR) |
 | `RULE_CHECK_FAILED` | N - M |
 | `MATCH_PASSED_NEED_INTERVIEW` | M(每条 PASS 的 JR) |
 
@@ -793,7 +793,7 @@ ruleCheckAgent 拿到 `FAIL + fail_reason` 后,仍然 emit `RULE_CHECK_FAILED`(d
 
 ### 8.4 内置 schema:[server/em/schemas/builtin.ts](../server/em/schemas/builtin.ts)
 
-zod v1.0 兜底 8+ 个核心事件。新增的 `RULE_CHECK_REQUESTED` / `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 还未注册到 builtin schemas — agent 间 emit 走 `step.sendEvent`(不过 em.publish),所以 schema validation 不阻断。若要把这 3 个事件加进 RAAS bus(让 RAAS 也能看),需要在 builtin.ts 加 schema。
+zod v1.0 兜底 8+ 个核心事件。新增的 `RULE_CHECK_REQUESTED` / `MATCH_RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 还未注册到 builtin schemas — agent 间 emit 走 `step.sendEvent`(不过 em.publish),所以 schema validation 不阻断。若要把这 3 个事件加进 RAAS bus(让 RAAS 也能看),需要在 builtin.ts 加 schema。
 
 ---
 
@@ -905,7 +905,7 @@ serve handler 在 [app/api/inngest/route.ts](../app/api/inngest/route.ts)。AO-m
 |---|---|---|
 | Agent 数量 | 3 | **4**(新增 ruleCheckAgent) |
 | Agent runtime 位置 | `resume-parser-agent/:3020` 子项目 | **AO-main :3002**(p4 合并已完成) |
-| matchResumeAgent 触发器 | 单触发(`RESUME_PROCESSED`) | **双触发**(`RESUME_PROCESSED` + `RULE_CHECK_PASSED`) |
+| matchResumeAgent 触发器 | 单触发(`RESUME_PROCESSED`) | **双触发**(`RESUME_PROCESSED` + `MATCH_RULE_CHECK_PASSED`) |
 | Rule check 位置 | 内嵌在 matchResumeAgent step 4.0(env gate `RULE_CHECK_ENABLED`) | **独立 ruleCheckAgent**(env gate 改 `RULE_CHECK_BYPASS=true` 反语义) |
 | parse-resume | RAAS API Server 透传 RoboHire | **AO 直连 `api.robohire.io`** |
 | match-resume | RAAS API Server 透传 RoboHire | **AO 直连 `api.robohire.io`** |

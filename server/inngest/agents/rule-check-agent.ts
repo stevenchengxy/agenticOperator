@@ -1,7 +1,7 @@
 // ruleCheckAgent — Workflow node 10.5 (NEW PR-4 2026-05-19).
 //
 // 订阅 RULE_CHECK_REQUESTED(由 matchResumeAgent 第一段 emit),跑 LLM
-// rule check,根据 decision emit RULE_CHECK_PASSED / RULE_CHECK_FAILED。
+// rule check,根据 decision emit MATCH_RULE_CHECK_PASSED / RULE_CHECK_FAILED。
 //
 // runRuleCheck 内部已 fail-safe in-band(异常返回 decision='FAIL'+audit.fail_reason),
 // 不会抛错。retries=1 主要是为 Inngest step.run 自己的层级异常兜底。
@@ -85,7 +85,7 @@ export async function ruleCheckAgentHandler({
       runtime_context: data.runtime_context,
       employee_id: data.employee_id,
     };
-    await step.sendEvent(`emit-passed-${stepKey}`, { name: 'RULE_CHECK_PASSED', data: payload });
+    await step.sendEvent(`emit-passed-${stepKey}`, { name: 'MATCH_RULE_CHECK_PASSED', data: payload });
     return { ok: true, decision: 'PASS' as const, job_requisition_id: data.job_requisition_id };
   }
 

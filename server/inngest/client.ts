@@ -200,7 +200,7 @@ export type RuleCheckPassedData = {
   job_requisition_id: string;
   client_id: string;
   audit: RuleCheckAuditMeta;
-  // ── NEW in PR-4: 透传给 matchResumeAgent 第二段(订阅 RULE_CHECK_PASSED) ──
+  // ── NEW in PR-4: 透传给 matchResumeAgent 第二段(订阅 MATCH_RULE_CHECK_PASSED) ──
   /** Full JR object — 第二段调 matchResumeDirect 时拼 jd text。 */
   job_requisition?: Record<string, unknown>;
   /** Parsed resume(可能为 null,如果 RoboHire parse 之后没拿到)。 */

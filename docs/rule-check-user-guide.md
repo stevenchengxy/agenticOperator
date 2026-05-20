@@ -32,7 +32,7 @@ matchResumeAgent (Inngest)
       │
       ├─ foldVerdict() — 折叠到 binary { PASS | FAIL }
       │
-      ├─ PASS → emit RULE_CHECK_PASSED → 调 RAAS /match-resume
+      ├─ PASS → emit MATCH_RULE_CHECK_PASSED → 调 RAAS /match-resume
       │        (走原链路:saveMatchResults + MATCH_PASSED_NEED_INTERVIEW)
       │
       └─ FAIL → emit RULE_CHECK_FAILED → 跳过这条 JD,不消耗 Robohire 配额
@@ -89,7 +89,7 @@ matchResumeAgent (Inngest)
 │         │      ↓                                                  │    │
 │         │      runRuleCheck(input) →  { decision: PASS | FAIL }  │    │
 │         │      ↓                                                  │    │
-│         │      PASS  → emit RULE_CHECK_PASSED                    │    │
+│         │      PASS  → emit MATCH_RULE_CHECK_PASSED                    │    │
 │         │      FAIL  → emit RULE_CHECK_FAILED, continue          │    │
 │         └────────────────────────────────────────────────────────┘    │
 │         4a.   调 RAAS /match-resume (Robohire 打分)                    │
@@ -318,7 +318,7 @@ LLM 解析失败                                     → FAIL-safe
 
 定义在 [`server/inngest/client.ts`](../server/inngest/client.ts):
 
-### `RULE_CHECK_PASSED`
+### `MATCH_RULE_CHECK_PASSED`
 
 ```ts
 {
@@ -404,13 +404,13 @@ await inngest.send({
 1. `RESUME_PROCESSED` 进站
 2. `match-resume-agent` 起步
 3. **新增** `rule-check-{jr_id}` step(耗时 = LLM 延迟,通常 2-5s)
-4. PASS → emit `RULE_CHECK_PASSED` + 继续 `match-{jr_id}` step
+4. PASS → emit `MATCH_RULE_CHECK_PASSED` + 继续 `match-{jr_id}` step
    FAIL → emit `RULE_CHECK_FAILED`,跳过这条 JD
 
 `match-resume-agent` 日志会打:
 ```
 [matchResume] rule-check · job_req=JR_xxx decision=PASS llm_decision=KEEP hit_flags=0 rules_evaluated=12/51 model=google/gemini-3-flash-preview latency_ms=2150
-[matchResume] ✓ RULE_CHECK_PASSED · job_req=JR_xxx — proceed to matchResume
+[matchResume] ✓ MATCH_RULE_CHECK_PASSED · job_req=JR_xxx — proceed to matchResume
 ```
 
 或:
@@ -478,7 +478,7 @@ Inngest worker 不需要 restart — 下一次 invocation 立刻生效。
 | [`lib/rule-check/rules.json`](../lib/rule-check/rules.json) | 51 条 matchResume 规则(来自 ontology-lab) |
 | [`lib/rule-check/types.ts`](../lib/rule-check/types.ts) | RuleCheckInput / Verdict / 审计 |
 | [`server/inngest/agents/match-resume-agent.ts`](../server/inngest/agents/match-resume-agent.ts) | gate 接入点(`isRuleCheckEnabled()`) |
-| [`server/inngest/client.ts`](../server/inngest/client.ts) | `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 事件 schema |
+| [`server/inngest/client.ts`](../server/inngest/client.ts) | `MATCH_RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` 事件 schema |
 | [`lib/ontology-gen/v4/generate-prompt.ts`](../lib/ontology-gen/v4/generate-prompt.ts) | 主仓:叶洋 v4 canonical `generatePrompt` async entry |
 | [`generated/v4/match-resume.action-object.ts`](../generated/v4/match-resume.action-object.ts) | matchResume 静态 snapshot(p4 合并后 yeyang-runner 直接 import) |
 | [`scripts/rule-check-poc/`](../scripts/rule-check-poc/) | POC 历史:6 个场景 + 主仓真实 Neo4j 跑通的脚本 |
@@ -490,7 +490,7 @@ Inngest worker 不需要 restart — 下一次 invocation 立刻生效。
 
 - **Gate 默认 false** — 别在代码里硬编码 `true`。所有切换走 env。
 - **每次 invocation 实时读 env** — 不要用模块顶层 `const RULE_CHECK_ENABLED = ...`(Inngest worker 会 cache)。用 `function isRuleCheckEnabled()` 这种 getter
-- **PASS 路径必须 emit `RULE_CHECK_PASSED`** — 不只是为了审计,Operator 面板要用它做"已通过 gate 但还没匹配到岗位"的状态展示
+- **PASS 路径必须 emit `MATCH_RULE_CHECK_PASSED`** — 不只是为了审计,Operator 面板要用它做"已通过 gate 但还没匹配到岗位"的状态展示
 - **FAIL 路径必须 `continue;`** — 不能直接 `return`,因为外层 for-loop 还有其他 JD 要处理
 - **`buildRuleCheckInput()` 不要假设字段一定有** — `resume_id` / `filename` 都可能缺,用兜底
 - **LLM 调用 retry** — 不要自己加 retry,让 Inngest `step.run()` 的 retry 机制托管

@@ -147,7 +147,7 @@ export function RuleCheckAuditsContent() {
             title={data?.meta.empty ? "暂无 rule check 审计" : "无匹配项"}
             hint={
               data?.meta.empty
-                ? "等候 matchResumeAgent 完成首条 RULE_CHECK_PASSED / MATCH_FAILED。每条决策都会带着完整 user prompt 写入 Neo4j。"
+                ? "等候 matchResumeAgent 完成首条 MATCH_RULE_CHECK_PASSED / MATCH_FAILED。每条决策都会带着完整 user prompt 写入 Neo4j。"
                 : "尝试清空筛选条件"
             }
             variant={data?.meta.empty ? "info" : "default"}

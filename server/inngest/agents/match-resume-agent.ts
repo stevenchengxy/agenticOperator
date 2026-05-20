@@ -6,16 +6,16 @@
 //    - 通过 RAAS API Server 拉招聘人员名下在招 JR 列表
 //    - 对每条 JR emit RULE_CHECK_REQUESTED → ruleCheckAgent
 //    - 不再内嵌 runRuleCheck(已抽到 ruleCheckAgent)
-//    - 不再调 matchResume(等 ruleCheckAgent 回信 RULE_CHECK_PASSED)
+//    - 不再调 matchResume(等 ruleCheckAgent 回信 MATCH_RULE_CHECK_PASSED)
 //
-// 2. RULE_CHECK_PASSED (第二段)
+// 2. MATCH_RULE_CHECK_PASSED (第二段)
 //    - 直连 RoboHire POST /match-resume (不再走 RAAS proxy)
 //    - 持久化:RAAS POST /match-results (写 Postgres,保留)
 //    - emit MATCH_PASSED_NEED_INTERVIEW
 //
 // 改动 vs PR-4 前:
 //   ❌ 删除 RULE_CHECK_ENABLED env gate + step 4.0 inline rule-check
-//   ✅ 双段订阅 — RESUME_PROCESSED + RULE_CHECK_PASSED
+//   ✅ 双段订阅 — RESUME_PROCESSED + MATCH_RULE_CHECK_PASSED
 //   ✅ matchResume 切换 RoboHire 直连
 //   ✅ POST /match-results 保留(RAAS dual-write 契约,见 memory)
 
@@ -48,14 +48,14 @@ export const matchResumeAgent = inngest.createFunction(
     retries: 2,
     triggers: [
       { event: 'RESUME_PROCESSED' },
-      { event: 'RULE_CHECK_PASSED' },
+      { event: 'MATCH_RULE_CHECK_PASSED' },
     ],
   },
   async ({ event, step, logger }) => {
     if (event.name === 'RESUME_PROCESSED') {
       return await handleResumeProcessed({ event, step, logger });
     }
-    if (event.name === 'RULE_CHECK_PASSED') {
+    if (event.name === 'MATCH_RULE_CHECK_PASSED') {
       return await handleRuleCheckPassed({ event, step, logger });
     }
     logger.warn(`[${AGENT_NAME}] unexpected event name: ${event.name}`);
@@ -196,7 +196,7 @@ async function handleResumeProcessed({ event, step, logger }: any) {
     const stepKey = sanitizeStepKey(jrid);
 
     if (bypass) {
-      // RULE_CHECK_BYPASS=true: skip ruleCheckAgent, emit RULE_CHECK_PASSED directly.
+      // RULE_CHECK_BYPASS=true: skip ruleCheckAgent, emit MATCH_RULE_CHECK_PASSED directly.
       // matchResumeAgent's 2nd segment will pick it up and call RoboHire match.
       const bypassPayload: RuleCheckPassedData = {
         upload_id: uploadId ?? '',
@@ -230,11 +230,11 @@ async function handleResumeProcessed({ event, step, logger }: any) {
         employee_id: employeeId,
       };
       await step.sendEvent(`emit-bypass-passed-${stepKey}`, {
-        name: 'RULE_CHECK_PASSED',
+        name: 'MATCH_RULE_CHECK_PASSED',
         data: bypassPayload,
       });
       logger.info(
-        `[${AGENT_NAME}] ⏭ RULE_CHECK_BYPASS=true · directly emit RULE_CHECK_PASSED for JR=${jrid}`,
+        `[${AGENT_NAME}] ⏭ RULE_CHECK_BYPASS=true · directly emit MATCH_RULE_CHECK_PASSED for JR=${jrid}`,
       );
       requested += 1;
       continue;
@@ -278,7 +278,7 @@ async function handleResumeProcessed({ event, step, logger }: any) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// 第二段:RULE_CHECK_PASSED → RoboHire match → saveMatchResults → emit
+// 第二段:MATCH_RULE_CHECK_PASSED → RoboHire match → saveMatchResults → emit
 // ──────────────────────────────────────────────────────────────────────
 
 async function handleRuleCheckPassed({ event, step, logger }: any) {
@@ -291,7 +291,7 @@ async function handleRuleCheckPassed({ event, step, logger }: any) {
 
   if (!data.job_requisition || !data.parsed_resume) {
     logger.warn(
-      `[${AGENT_NAME}] RULE_CHECK_PASSED missing job_requisition or parsed_resume for JR=${data.job_requisition_id} — cannot match`,
+      `[${AGENT_NAME}] MATCH_RULE_CHECK_PASSED missing job_requisition or parsed_resume for JR=${data.job_requisition_id} — cannot match`,
     );
     return { ok: false, job_requisition_id: data.job_requisition_id, error: 'missing-job-requisition-or-parsed-resume' };
   }

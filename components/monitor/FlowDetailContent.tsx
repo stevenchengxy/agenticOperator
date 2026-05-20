@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/lib/i18n';
-import { formatDateTime, formatTime, statusLabel } from './i18n-utils';
+import { formatDateTime, statusLabel } from './i18n-utils';
 import { EvidenceTrail } from './EvidenceTrail';
 
 type FlowDetail = {
@@ -19,7 +19,19 @@ type FlowDetail = {
     startedAt: string;
     finishedAt?: string;
     durationMs: number | null;
-    history: Array<{ type: string; stepName: string | null; attempt: number; createdAt: string }>;
+    steps: Array<{
+      name: string;
+      status: string;
+      durationMs: number | null;
+      startedAt: string | null;
+      endedAt: string | null;
+      stepOp: string | null;
+      stepID: string | null;
+      attempts: number | null;
+      output: unknown;
+      input: unknown;
+      error: { name: string; message: string; stack?: string } | null;
+    }>;
     output: unknown;
     function: { name: string; slug: string } | null;
   }>;
@@ -169,29 +181,60 @@ function RunRow({
 
       {expanded && (
         <div className="border-t border-line p-3 space-y-3">
-          {/* Step trace */}
+          {/* Step trace — V2 per-step output JSON */}
           <div>
-            <div className="text-[11px] uppercase text-ink-4 mb-1.5">{t('monitor_detail_step_trace')}</div>
-            <div className="space-y-1">
-              {run.history.map((h, i) => (
-                <div key={i} className="text-[11px] flex items-baseline gap-2">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${
-                      h.type.includes('Completed')
-                        ? 'bg-ok'
-                        : h.type.includes('Failed') || h.type.includes('Errored')
-                        ? 'bg-err'
-                        : 'bg-warn'
-                    }`}
-                  />
-                  <span className="text-ink-2 font-medium">{h.type}</span>
-                  {h.stepName && <span className="text-ink-3">· {h.stepName}</span>}
-                  {h.attempt > 0 && <span className="text-warn">· {t('monitor_timeline_retry')} {h.attempt}</span>}
-                  <span className="text-[10px] mono text-ink-4 ml-auto">
-                    {formatTime(h.createdAt, lang)}
-                  </span>
-                </div>
-              ))}
+            <div className="text-[11px] uppercase text-ink-4 mb-1.5">
+              {t('monitor_detail_step_trace')}
+              {run.steps.length > 0 && (
+                <span className="text-ink-4 ml-1 normal-case">· {run.steps.length}</span>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              {run.steps.map((s, i) => {
+                const upper = s.status.toUpperCase();
+                const dot = upper === 'COMPLETED' ? 'bg-ok'
+                  : upper === 'FAILED' || upper === 'CANCELLED' ? 'bg-err'
+                  : upper === 'RUNNING' || upper === 'WAITING' ? 'bg-warn'
+                  : 'bg-ink-4';
+                const statusColor = upper === 'COMPLETED' ? 'text-ok'
+                  : upper === 'FAILED' || upper === 'CANCELLED' ? 'text-err'
+                  : 'text-warn';
+                const hasBody = s.output != null || s.error != null;
+                return (
+                  <details key={`${s.stepID ?? s.name}-${i}`} className="text-[11px] border border-line rounded bg-panel/30">
+                    <summary className={`flex items-baseline gap-2 px-2 py-1 ${hasBody ? 'cursor-pointer hover:bg-panel/60' : 'cursor-default'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                      {s.stepOp && (
+                        <span className="text-[9px] mono px-1 py-px rounded-sm border border-line text-ink-4 uppercase shrink-0">
+                          {s.stepOp.toLowerCase()}
+                        </span>
+                      )}
+                      <span className="mono text-ink-1 truncate flex-1">{s.name}</span>
+                      {s.attempts != null && s.attempts > 1 && (
+                        <span className="text-warn shrink-0">· {t('monitor_timeline_retry')} {s.attempts}</span>
+                      )}
+                      {s.durationMs != null && (
+                        <span className="text-[10px] mono text-ink-4 tabular-nums shrink-0">{s.durationMs}ms</span>
+                      )}
+                      <span className={`text-[10px] mono font-medium shrink-0 ${statusColor}`}>{upper}</span>
+                    </summary>
+                    {hasBody && (
+                      <div className="border-t border-line">
+                        {s.error && (
+                          <div className="text-[10.5px] mono text-err px-2 py-1.5 bg-err-bg/30 border-b border-line">
+                            <span className="font-medium">{s.error.name}:</span> {s.error.message}
+                          </div>
+                        )}
+                        {s.output != null && (
+                          <pre className="mono text-[10px] px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[260px] overflow-y-auto">
+                            {typeof s.output === 'string' ? s.output : JSON.stringify(s.output, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </details>
+                );
+              })}
             </div>
           </div>
 

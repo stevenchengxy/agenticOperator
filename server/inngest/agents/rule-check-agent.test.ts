@@ -78,7 +78,7 @@ beforeEach(() => {
 });
 
 describe('ruleCheckAgent', () => {
-  it('emits RULE_CHECK_PASSED when runRuleCheck returns PASS', async () => {
+  it('emits MATCH_RULE_CHECK_PASSED when runRuleCheck returns PASS', async () => {
     mockRunRuleCheck.mockResolvedValue({
       decision: 'PASS',
       stats: { total: 5, pass: 5, fail: 0, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
@@ -98,7 +98,7 @@ describe('ruleCheckAgent', () => {
     await ruleCheckAgentHandler({ event: evt() as any, step: step as any, logger: mockLogger as any });
 
     expect(step.sent).toHaveLength(1);
-    expect(step.sent[0].name).toBe('RULE_CHECK_PASSED');
+    expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_PASSED');
     expect(step.sent[0].data.job_requisition_id).toBe('JR1');
     expect(step.sent[0].data.job_requisition).toEqual({ job_requisition_id: 'JR1', client_id: 'CLI_TENCENT' });
     expect(step.sent[0].data.parsed_resume).toEqual({ name: 'John' });

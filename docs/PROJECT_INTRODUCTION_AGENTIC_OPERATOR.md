@@ -278,7 +278,7 @@ npm run test           # Vitest（CLAUDE.md 里说没有测试 — 已过时，�
 
 ### 3.5 `lib/rule-check/` — 简历预筛规则引擎
 
-`matchResume` agent 在调 RAAS `/match-resume` **之前**跑的 LLM + 本体图遍历预筛。决策为 `PASS` / `FAIL` / `REVIEW`，对应发 `RULE_CHECK_PASSED` 或 `RULE_CHECK_FAILED` 事件。
+`matchResume` agent 在调 RAAS `/match-resume` **之前**跑的 LLM + 本体图遍历预筛。决策为 `PASS` / `FAIL` / `REVIEW`，对应发 `MATCH_RULE_CHECK_PASSED` 或 `RULE_CHECK_FAILED` 事件。
 
 | 文件 | 职责 |
 |---|---|
@@ -386,7 +386,7 @@ SQLite 文件位于 `data/ao.db`。**24 张表**，按域分组：
 |---|---|---|---|---|
 | 1 | HR 在 RaaS 前端上传简历，RaaS 把 PDF 落到 MinIO，发 `RESUME_DOWNLOADED` | `RESUME_DOWNLOADED` | RaaS（外部）→ `server/em/publish.ts` 入口 | `RaasMessage` / `EventInstance` |
 | 2 | `resumeParserAgent` 订阅 → 从 MinIO 拉 PDF → 调 RaaS `/parse-resume` → 调 RaaS `/candidates` 持久化 | `RESUME_PROCESSED` | `server/inngest/agents/resume-parser-agent.ts` | `EventInstance` / `AgentEpisode` |
-| 3 | `matchResumeAgent` 订阅 → 拉该 HR 名下需求列表 → 对每个需求：**（可选）跑 rule-check 预筛** → 调 RaaS `/match-resume` → 调 RaaS `/match-results` 持久化 | `RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` / `MATCH_PASSED_NEED_INTERVIEW` | `server/inngest/agents/match-resume-agent.ts` + `lib/rule-check/runner.ts` | `EventInstance` / `AgentEpisode` |
+| 3 | `matchResumeAgent` 订阅 → 拉该 HR 名下需求列表 → 对每个需求：**（可选）跑 rule-check 预筛** → 调 RaaS `/match-resume` → 调 RaaS `/match-results` 持久化 | `MATCH_RULE_CHECK_PASSED` / `RULE_CHECK_FAILED` / `MATCH_PASSED_NEED_INTERVIEW` | `server/inngest/agents/match-resume-agent.ts` + `lib/rule-check/runner.ts` | `EventInstance` / `AgentEpisode` |
 | 4 | rule-check 若判 `REVIEW` → 落 `HumanTask` → `/inbox` 出现待审 | — | `lib/rule-check/runner.ts` → `server/em/publish.ts` 链式 | `HumanTask` |
 | 5 | 前端各页面通过 `/api/runs`, `/api/agents`, `/api/events`, `/api/em/event-instances` 等查询事件 / Run / Episode 数据 | — | `app/api/**` + `lib/api/**` | 全部 |
 
