@@ -100,6 +100,22 @@ const MATCH_PASSED_NEED_INTERVIEW_v1 = envelope(MATCH_PAYLOAD_v1);
 const MATCH_PASSED_NO_INTERVIEW_v1 = envelope(MATCH_PAYLOAD_v1);
 const MATCH_FAILED_v1 = envelope(MATCH_PAYLOAD_v1);
 
+// MATCH_RULE_CHECK_PASSED — ruleCheckAgent → matchResumeAgent 过桥事件。
+// 沿用 MATCH_PAYLOAD_v1 平铺契约;另带 job_requisition + parsed_resume 透传。
+const MATCH_RULE_CHECK_PASSED_v1 = envelope(
+  MATCH_PAYLOAD_v1.extend({
+    employee_id: z.string().optional(),
+    audit: z.record(z.string(), z.unknown()).optional(),
+    job_requisition: z.record(z.string(), z.unknown()).optional(),
+    parsed_resume: z.record(z.string(), z.unknown()).nullable().optional(),
+    runtime_context: z.record(z.string(), z.unknown()).optional(),
+  }),
+);
+
+// MATCH_RULE_CHECK_FAILED — ruleCheckAgent rule-check 失败时 emit;
+// matching_score 在 rule-check 阶段固定为 null;data 里塞 failed_rules / decision。
+const MATCH_RULE_CHECK_FAILED_v1 = envelope(MATCH_PAYLOAD_v1);
+
 // JD_REJECTED — when JD generation hits a business reject (unclear req etc.)
 const JD_REJECTED_v1 = envelope(
   z.object({
@@ -127,14 +143,31 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
   },
   {
     name: "RESUME_PROCESSED",
-    description: "简历解析完成（RoboHire / LLM）",
+    description: "简历解析完成（RoboHire / LLM）;2026-05-19 后 ruleCheckAgent 直订",
     versions: [{ version: "1.0", schema: RESUME_PROCESSED_v1 }],
-    publishers: ["rpa.resumeParserAgent"],
+    publishers: ["rpa.resumeParserAgent", "raas.reassign-republisher"],
     subscribers: [
-      "rpa.matchResumeAgent",
-      "ao.matchResumeAgent",
+      "ao.ruleCheckAgent",
       "raas-backend.resume-processed-ingest",
     ],
+  },
+  {
+    name: "MATCH_RULE_CHECK_PASSED",
+    description: "ruleCheckAgent 通过规则检查;matchResumeAgent 据此调 RoboHire match",
+    versions: [{ version: "1.0", schema: MATCH_RULE_CHECK_PASSED_v1 }],
+    publishers: ["ao.ruleCheckAgent"],
+    subscribers: ["ao.matchResumeAgent"],
+  },
+  {
+    // ⚠ Deprecated 2026-05-19 (Plan B raas-integration-divergence §4):
+    //   ruleCheckAgent FAIL/REVIEW path now emits MATCH_FAILED instead.
+    //   Registration retained for replay of historical events only —
+    //   no live publisher.
+    name: "MATCH_RULE_CHECK_FAILED",
+    description: "[DEPRECATED] 旧 rule-check failure 事件;新代码统一发 MATCH_FAILED",
+    versions: [{ version: "1.0", schema: MATCH_RULE_CHECK_FAILED_v1 }],
+    publishers: [],
+    subscribers: [],
   },
   {
     name: "JD_GENERATED",
@@ -166,9 +199,9 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
   },
   {
     name: "MATCH_FAILED",
-    description: "候选人 × JD 匹配失败",
+    description: "候选人 × JD 匹配失败(包括 rule-check FAIL/REVIEW · Plan B 2026-05-19)",
     versions: [{ version: "1.0", schema: MATCH_FAILED_v1 }],
-    publishers: ["rpa.matchResumeAgent"],
+    publishers: ["rpa.matchResumeAgent", "ao.ruleCheckAgent"],
     subscribers: ["raas-backend.match-result-ingest-failed"],
   },
 ];

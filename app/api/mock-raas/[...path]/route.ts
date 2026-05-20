@@ -208,10 +208,19 @@ async function handle(req: Request, params: Params, method: string) {
     });
   }
 
-  // ─── requirements/agents/view (return mock list) ───
-  if (fullPath.includes('/requirements/agents/view') && method === 'GET') {
+  // ─── requirements/agent-view (F2 — note SINGULAR `agent-view`,
+  //     matches lib/raas-api-client.ts getRequirementsAgentView).
+  //     Also accept legacy `/requirements/agents/view` so older test
+  //     scripts don't break.
+  if (
+    (fullPath.includes('/requirements/agent-view') ||
+      fullPath.includes('/requirements/agents/view')) &&
+    method === 'GET'
+  ) {
+    // Endpoint shape per partner spec: top-level { items, page, page_size,
+    // total, total_pages } — NOT wrapped in .data.
     return NextResponse.json({
-      data: [
+      items: [
         {
           job_requisition_id: 'mock-jr-001',
           job_requisition_specification_id: 'mock-spec-001',
@@ -227,9 +236,61 @@ async function handle(req: Request, params: Params, method: string) {
           work_years: 5,
           degree_requirement: '本科',
           recruitment_type: '社招',
+          status: 'recruiting',
         },
       ],
+      page: 1,
+      page_size: 20,
       total: 1,
+      total_pages: 1,
+    });
+  }
+
+  // ─── F1: /candidates/:cid/resumes/:rid/parsed — thin-event back-pull ───
+  //     Added 2026-05-19: mock returns a minimal RoboHire-shape parsed body
+  //     so ruleCheckAgent's fetch-parsed step doesn't 404 in mock mode.
+  if (
+    fullPath.match(/\/candidates\/[^/]+\/resumes\/[^/]+\/parsed$/) &&
+    method === 'GET'
+  ) {
+    const parts = fullPath.split('/');
+    const ridIdx = parts.indexOf('resumes');
+    const cidIdx = parts.indexOf('candidates');
+    const candidateId = cidIdx >= 0 ? parts[cidIdx + 1] : 'mock-cand';
+    const resumeId = ridIdx >= 0 ? parts[ridIdx + 1] : 'mock-res';
+    return NextResponse.json({
+      candidate_id: candidateId,
+      resume_id: resumeId,
+      data: {
+        name: `Mock 候选人 ${candidateId.slice(0, 8)}`,
+        email: 'mock@test.com',
+        phone: '13800000000',
+        location: '北京',
+        summary: 'Mock 简历 — F1 back-pull 返回(mock-raas 占位数据)',
+        experience: [
+          {
+            title: '高级 Java 工程师',
+            company: 'Mock 公司',
+            startDate: '2020-01',
+            endDate: '2025-01',
+            description: 'Mock 工作描述,5 年 Java + Spring + MySQL 经验。',
+          },
+        ],
+        education: [
+          {
+            degree: '本科',
+            field: '计算机科学',
+            institution: 'Mock 大学',
+            graduationYear: '2019',
+          },
+        ],
+        skills: ['Java', 'Spring Boot', 'MySQL', 'Redis'],
+        certifications: [],
+        languages: ['普通话', 'English'],
+      },
+      candidate_snapshot: { candidate_id: candidateId, mock: true },
+      resume_meta: { resume_id: resumeId, mock: true },
+      requestId: `mock_parsed_${Date.now()}`,
     });
   }
 
