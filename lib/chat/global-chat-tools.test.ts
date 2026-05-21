@@ -492,4 +492,28 @@ describe("getEventChain tool", () => {
     expect((result as any).chain).toHaveLength(1);
     expect((result as any).chain[0].refId).toBe("E-99");
   });
+
+  it("getEventChain enriches with candidate names when available", async () => {
+    (prisma.eventInstance.findMany as any).mockResolvedValue([
+      { id: "e1", name: "MATCH_PASSED", ts: new Date(), payloadSummary: '{"candidate_id":"C-1","job_requisition_id":"JR-1"}' },
+    ]);
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockImplementation((type: string) => {
+      if (type === "Candidate") return Promise.resolve(new Map([["C-1", "Alice"]]));
+      if (type === "Job_Requisition") return Promise.resolve(new Map([["JR-1", "Frontend Engineer"]]));
+      return Promise.resolve(new Map());
+    });
+    const { result } = await byName("getEventChain").execute({ anchor: { type: "candidate", value: "C-1" } });
+    expect((result as any).chain[0].involved).toMatchObject({ "C-1": "Alice", "JR-1": "Frontend Engineer" });
+  });
+
+  it("getEventChain returns empty involved when resolveEntityNames fails", async () => {
+    (prisma.eventInstance.findMany as any).mockResolvedValue([
+      { id: "e2", name: "RESUME_UPLOADED", ts: new Date(), payloadSummary: '{"candidate_id":"C-2"}' },
+    ]);
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockRejectedValue(new Error("Neo4j unreachable"));
+    const { result } = await byName("getEventChain").execute({ anchor: { type: "candidate", value: "C-2" } });
+    expect((result as any).chain[0].involved).toEqual({});
+  });
 });

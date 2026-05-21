@@ -15,7 +15,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     nav_triggers: "触发器",
     nav_alerts: "告警",
     nav_correlations: "因果链",
-    nav_sample_agent: "Sample Agent",
     nav_rule_check: "规则检查",
     nav_audit: "审计日志",
     nav_compliance: "合规报告",
@@ -1043,6 +1042,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_time_min_ago: "{n} 分钟前",
     chat_time_hour_ago: "{n} 小时前",
     chat_time_day_ago: "{n} 天前",
+    chat_sources_more: "+{n} 来源",
+    chat_sources_collapse: "收起",
+    chat_sources_expand_tip: "展开全部来源",
   },
   en: {
     brand: "Agentic Operator",
@@ -1055,7 +1057,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     nav_triggers: "Triggers",
     nav_alerts: "Alerts",
     nav_correlations: "Correlations",
-    nav_sample_agent: "Sample Agent",
     nav_rule_check: "Rule Check",
     nav_audit: "Audit Log",
     nav_compliance: "Compliance",
@@ -2081,6 +2082,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_time_min_ago: "{n}m ago",
     chat_time_hour_ago: "{n}h ago",
     chat_time_day_ago: "{n}d ago",
+    chat_sources_more: "+{n} sources",
+    chat_sources_collapse: "collapse",
+    chat_sources_expand_tip: "show all sources",
   },
 };
 

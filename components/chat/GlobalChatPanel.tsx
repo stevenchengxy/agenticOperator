@@ -456,13 +456,67 @@ function MessageRow({
           )}
         </div>
         {sources && sources.length > 0 && (
-          <div className="flex flex-wrap gap-1" style={{ marginTop: 2 }}>
-            {sources.map((s, i) => (
-              <SourcePill key={i} source={s} />
-            ))}
-          </div>
+          <SourcesList sources={sources} />
         )}
       </div>
+    </div>
+  );
+}
+
+function SourcesList({ sources }: { sources: ChatSource[] }) {
+  const { t } = useApp();
+  const [expanded, setExpanded] = React.useState(false);
+  const VISIBLE = 4;
+  const visibleItems = expanded ? sources : sources.slice(0, VISIBLE);
+  const hidden = sources.length - VISIBLE;
+  return (
+    <div className="flex flex-wrap gap-1" style={{ marginTop: 2 }}>
+      {visibleItems.map((s, i) => (
+        <SourcePill key={i} source={s} />
+      ))}
+      {!expanded && hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="inline-flex items-center rounded-full cursor-pointer transition-colors"
+          style={{
+            padding: "2px 9px",
+            background: "var(--c-panel)",
+            color: "var(--c-ink-3)",
+            border: "1px solid var(--c-line)",
+            fontSize: 10.5,
+            fontFamily: "var(--font-mono)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--c-accent-bg)";
+            e.currentTarget.style.color = "var(--c-accent)";
+            e.currentTarget.style.borderColor = "var(--c-accent-line)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--c-panel)";
+            e.currentTarget.style.color = "var(--c-ink-3)";
+            e.currentTarget.style.borderColor = "var(--c-line)";
+          }}
+          title={t("chat_sources_expand_tip")}
+        >
+          {t("chat_sources_more").replace("{n}", String(hidden))}
+        </button>
+      )}
+      {expanded && sources.length > VISIBLE && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="inline-flex items-center rounded-full cursor-pointer text-ink-3 hover:text-ink-1"
+          style={{
+            padding: "2px 9px",
+            background: "transparent",
+            border: "1px solid transparent",
+            fontSize: 10.5,
+          }}
+        >
+          {t("chat_sources_collapse")}
+        </button>
+      )}
     </div>
   );
 }

@@ -588,14 +588,50 @@ const getEventChain: ToolDef = {
       url: `/events?id=${encodeURIComponent(e.id)}`,
     }));
 
+    // Enrich with candidate/JR names from Neo4j (best-effort)
+    const candidateIds = new Set<string>();
+    const jrIds = new Set<string>();
+    const CANDIDATE_RE = /"candidate_id"\s*:\s*"([^"]+)"/g;
+    const JR_RE = /"job_requisition_id"\s*:\s*"([^"]+)"/g;
+    for (const ev of events) {
+      const summary = ev.payloadSummary ?? "";
+      let m: RegExpExecArray | null;
+      CANDIDATE_RE.lastIndex = 0;
+      while ((m = CANDIDATE_RE.exec(summary)) !== null) candidateIds.add(m[1]);
+      JR_RE.lastIndex = 0;
+      while ((m = JR_RE.exec(summary)) !== null) jrIds.add(m[1]);
+    }
+    const [candidateNames, jrNames] = await Promise.all([
+      candidateIds.size > 0 ? resolveEntityNames("Candidate", Array.from(candidateIds)).catch(() => new Map<string, string>()) : Promise.resolve(new Map<string, string>()),
+      jrIds.size > 0 ? resolveEntityNames("Job_Requisition", Array.from(jrIds)).catch(() => new Map<string, string>()) : Promise.resolve(new Map<string, string>()),
+    ]);
+
+    // Enrich chain entries — add `involved` map per event so the LLM has context
+    const chainWithNames = chain.map((c, idx) => {
+      const ev = events[idx];
+      const summary = ev?.payloadSummary ?? "";
+      const cIds = new Set<string>();
+      const jIds = new Set<string>();
+      let m: RegExpExecArray | null;
+      CANDIDATE_RE.lastIndex = 0;
+      while ((m = CANDIDATE_RE.exec(summary)) !== null) cIds.add(m[1]);
+      JR_RE.lastIndex = 0;
+      while ((m = JR_RE.exec(summary)) !== null) jIds.add(m[1]);
+      const involved: Record<string, string> = {};
+      for (const id of cIds) {
+        const n = candidateNames.get(id);
+        if (n) involved[id] = n;
+      }
+      for (const id of jIds) {
+        const n = jrNames.get(id);
+        if (n) involved[id] = n;
+      }
+      return { ...c, involved };
+    });
+
     return {
-      result: { chain },
-      sources: chain.slice(0, 5).map((c) => ({
-        tool: "getEventChain",
-        label: c.name,
-        ref: c.refId,
-        url: c.url,
-      })),
+      result: { chain: chainWithNames },
+      sources: chainWithNames.slice(0, 5).map((c) => ({ tool: "getEventChain", label: c.name, ref: c.refId, url: c.url })),
     };
   },
 };

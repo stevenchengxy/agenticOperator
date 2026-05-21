@@ -224,6 +224,71 @@ export type EntitySearchResult = {
   [k: string]: unknown;
 };
 
+/** Placeholder names that the writer uses when no real name is available.
+ *  Treat these as "no name" so the chatbot falls back to id-suffix. */
+const PLACEHOLDER_NAMES = new Set(["未命名候选人", "未命名", "Unknown", "unknown", ""]);
+
+/** Per-entity-type ordered list of candidate fields to look at for display name. */
+const NAME_FIELDS_BY_TYPE: Record<string, string[]> = {
+  Candidate: ["name"],
+  Resume: ["summary"], // resume has no name; fall through to filename derived below
+  Job_Requisition: ["title", "position_name", "jr_name"],
+  Job_Posting: ["title", "posting_title"],
+  Client: ["client_name", "name"],
+  // default fall-through: try common fields
+};
+
+/**
+ * Extracts a display name from a raw allmeta instance row, trying multiple
+ * fields in priority order. Returns null when nothing usable is found
+ * (caller should fall back to id-suffix).
+ */
+export function pickDisplayName(type: string, row: Record<string, unknown>): string | null {
+  // Allmeta may have set displayName explicitly — prefer that first
+  if (typeof row.displayName === "string" && row.displayName.trim()) {
+    const v = row.displayName.trim();
+    if (!PLACEHOLDER_NAMES.has(v)) return v;
+  }
+  const fields = NAME_FIELDS_BY_TYPE[type] ?? ["name", "title"];
+  for (const f of fields) {
+    const v = row[f];
+    if (typeof v === "string" && v.trim()) {
+      const trimmed = v.trim();
+      if (!PLACEHOLDER_NAMES.has(trimmed)) {
+        // For Resume.summary, take only the first line and truncate
+        if (type === "Resume" && f === "summary") {
+          const firstLine = trimmed.split(/\r?\n/)[0].trim();
+          if (firstLine) return firstLine.length > 40 ? firstLine.slice(0, 40) + "…" : firstLine;
+        } else {
+          return trimmed;
+        }
+      }
+    }
+  }
+  // Resume special case: derive from file_path filename
+  if (type === "Resume" && typeof row.file_path === "string" && row.file_path.trim()) {
+    const fp = row.file_path.trim();
+    const parts = fp.split(/[/\\]/);
+    const filename = parts[parts.length - 1] || "";
+    // strip extension
+    const stem = filename.replace(/\.[^.]+$/, "").trim();
+    if (stem) return stem.length > 40 ? stem.slice(0, 40) + "…" : stem;
+  }
+  return null;
+}
+
+/** Pick the canonical id field for the given type from a raw row. */
+export function pickId(type: string, row: Record<string, unknown>): string | null {
+  // try type-specific id field first
+  const typeIdField = type.toLowerCase() + "_id";
+  const v1 = row[typeIdField];
+  if (typeof v1 === "string" && v1.trim()) return v1.trim();
+  // generic fallback
+  const v2 = row.id;
+  if (typeof v2 === "string" && v2.trim()) return v2.trim();
+  return null;
+}
+
 /**
  * GET /api/v1/ontology/instances/{label}?domain=...&q=...&limit=...
  *
@@ -244,16 +309,20 @@ export async function searchEntitiesNeo4j(
   }).toString();
   const path = `/api/v1/ontology/instances/${label}?${qs}`;
   try {
-    const res = await doRequest<{ items?: EntitySearchResult[]; data?: EntitySearchResult[] } | EntitySearchResult[]>(
-      'GET',
-      path,
-      undefined,
-      opts,
-    );
-    if (Array.isArray(res)) return res;
-    if (Array.isArray((res as any).items)) return (res as any).items;
-    if (Array.isArray((res as any).data)) return (res as any).data;
-    return [];
+    const res = await doRequest<unknown>('GET', path, undefined, opts);
+    const rawRows: Array<Record<string, unknown>> =
+      Array.isArray(res) ? (res as any) :
+      Array.isArray((res as any)?.items) ? (res as any).items :
+      Array.isArray((res as any)?.data) ? (res as any).data :
+      [];
+    return rawRows
+      .map((row) => {
+        const id = pickId(type, row);
+        if (!id) return null;
+        const dn = pickDisplayName(type, row) ?? id; // last resort: use id literally
+        return { id, displayName: dn, ...row } as EntitySearchResult;
+      })
+      .filter((x): x is EntitySearchResult => x !== null);
   } catch {
     return [];
   }
@@ -282,7 +351,10 @@ export async function resolveEntityNames(
         try {
           const hits = await searchEntitiesNeo4j({ type, q: id, limit: 1 }, opts);
           const match = hits.find((h) => h.id === id) ?? hits[0];
-          return match ? ([id, match.displayName] as const) : null;
+          if (!match) return null;
+          // Drop if displayName is literally === id (means pickDisplayName returned null and fell through)
+          if (match.displayName === id) return null;
+          return [id, match.displayName] as const;
         } catch {
           return null;
         }
