@@ -7,6 +7,7 @@
 // Optional ?name=EVENT_NAME filter, ?limit (default 30, max 100).
 
 import { NextResponse } from "next/server";
+import { prisma } from "@/server/db";
 
 const LOCAL_INNGEST = process.env.INNGEST_LOCAL_URL ?? "http://localhost:8288";
 const RAAS_INNGEST = process.env.RAAS_INNGEST_URL ?? "";
@@ -66,8 +67,33 @@ export async function GET(req: Request): Promise<Response> {
   // Sort newest first by id (ULIDs sort chronologically)
   all.sort((a, b) => (b.id > a.id ? 1 : -1));
 
+  const sliced = all.slice(0, limit);
+
+  // Enrich with EventInstance.source so the UI can show direction badges.
+  // We look up by externalEventId (= the Inngest event id) for RAAS-bridged
+  // events, and by the row's own id for internally published events.
+  // Best-effort: any DB error is silently ignored and events get source=null.
+  type EnrichedEvent = (typeof sliced)[number] & { source: string | null };
+  let enriched: EnrichedEvent[] = sliced.map((e) => ({ ...e, source: null }));
+  try {
+    const ids = sliced.map((e) => e.internal_id ?? e.id).filter(Boolean);
+    if (ids.length > 0) {
+      const rows = await prisma.eventInstance.findMany({
+        where: { externalEventId: { in: ids } },
+        select: { externalEventId: true, source: true },
+      });
+      const byExtId = new Map(rows.map((r) => [r.externalEventId, r.source]));
+      enriched = sliced.map((e) => ({
+        ...e,
+        source: byExtId.get(e.internal_id ?? e.id) ?? null,
+      }));
+    }
+  } catch {
+    // DB unavailable — silently continue without source enrichment
+  }
+
   return NextResponse.json({
-    events: all.slice(0, limit),
+    events: enriched,
     sources: sources.map((s) => s.label),
     errors,
     fetchedAt: new Date().toISOString(),

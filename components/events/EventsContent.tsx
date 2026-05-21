@@ -8,6 +8,8 @@ import { useEmHealth } from "@/lib/api/em-health";
 import { fetchJson } from "@/lib/api/client";
 import type { EventsResponse, EventContract } from "@/lib/api/types";
 import { CandidateTrackingTab } from "./CandidateTrackingTab";
+import { useApp } from "@/lib/i18n";
+import { classifySource, DIRECTION_META } from "@/lib/events/event-direction";
 
 // /events — 事件
 //
@@ -47,6 +49,7 @@ void INNGEST_REAL_SHORTS;
 export function EventsContent() {
   const router = useRouter();
   const sp = useSearchParams();
+  const { t, lang } = useApp();
 
   const filterName = sp.get("name");
   const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d";
@@ -56,12 +59,20 @@ export function EventsContent() {
   // URL state and filtering logic are wired so we can flip the disable bit
   // when the team's ready to QA it.
   const regFilter = (sp.get("reg") ?? "all") as "all" | "registered" | "unregistered";
+  const dirFilter = (sp.get("dir") ?? "all") as "all" | "in" | "out";
 
   const setUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(sp.toString());
     mut(next);
     router.replace(`/events${next.toString() ? `?${next.toString()}` : ""}`);
   }, [router, sp]);
+
+  const setDirFilter = React.useCallback((next: "all" | "in" | "out") => {
+    setUrl((p) => {
+      if (next === "all") p.delete("dir");
+      else p.set("dir", next);
+    });
+  }, [setUrl]);
 
   const { events, error, lastFetchAt, connected } = useInngestEvents({
     intervalMs: 2000,
@@ -84,9 +95,13 @@ export function EventsContent() {
         if (regFilter === "registered" && !isReg) return false;
         if (regFilter === "unregistered" && isReg) return false;
       }
+      // Direction filter — stream view only
+      if (dirFilter !== "all") {
+        if (classifySource(e.source) !== dirFilter) return false;
+      }
       return true;
     });
-  }, [events, windowId, regFilter, registry]);
+  }, [events, windowId, regFilter, registry, dirFilter]);
 
   const selected = React.useMemo(() => {
     if (!selectedId) return filtered[0] ?? null;
@@ -149,6 +164,35 @@ export function EventsContent() {
             </span>
           )}
           <div className="flex-1" />
+          {view === "stream" && (
+            <div className="flex items-center gap-1">
+              {(["all", "in", "out"] as const).map((d) => {
+                const active = dirFilter === d;
+                const label = d === "all"
+                  ? t("em_dir_all")
+                  : lang === "zh" ? DIRECTION_META[d].zh : DIRECTION_META[d].en;
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDirFilter(d)}
+                    className="cursor-pointer rounded-full transition-colors"
+                    style={{
+                      padding: "2px 9px",
+                      fontSize: 10.5,
+                      border: "1px solid",
+                      borderColor: active ? "var(--c-accent)" : "var(--c-line)",
+                      background: active ? "var(--c-accent-bg)" : "transparent",
+                      color: active ? "var(--c-accent)" : "var(--c-ink-3)",
+                    }}
+                    title={d !== "all" ? t(`em_dir_tip_${d}`) : undefined}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <RegistrationFilter value={regFilter} disabled />
           <WindowSelector value={windowId} onChange={(v) => setUrl((p) => v === "1h" ? p.delete("window") : p.set("window", v))} />
         </div>
@@ -164,9 +208,10 @@ export function EventsContent() {
         <div className="overflow-auto border-r border-line">
           <div
             className="grid gap-4 text-ink-3 border-b border-line sticky top-0 bg-bg z-10"
-            style={{ gridTemplateColumns: "120px minmax(0, 1.4fr) 84px minmax(0, 1fr)", padding: "10px 24px", fontSize: 11.5 }}
+            style={{ gridTemplateColumns: "120px 76px minmax(0, 1.4fr) 84px minmax(0, 1fr)", padding: "10px 24px", fontSize: 11.5 }}
           >
             <span>接收时间</span>
+            <span>方向</span>
             <span>事件名</span>
             <span>注册</span>
             <span>触发的 agent</span>
@@ -188,7 +233,7 @@ export function EventsContent() {
                 className="w-full grid items-center gap-4 border-b border-line transition-colors text-left"
                 style={{
                   padding: "11px 24px",
-                  gridTemplateColumns: "120px minmax(0, 1.4fr) 84px minmax(0, 1fr)",
+                  gridTemplateColumns: "120px 76px minmax(0, 1.4fr) 84px minmax(0, 1fr)",
                   background: isSelected ? "var(--c-panel)" : "transparent",
                   cursor: "pointer",
                 }}
@@ -196,6 +241,7 @@ export function EventsContent() {
                 <span className="text-ink-3 tabular-nums" style={{ fontSize: 11.5 }}>
                   {fmtTime(e.received_at)}
                 </span>
+                <DirectionIndicator source={e.source} t={t} lang={lang} />
                 <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }}>
                   {e.name}
                 </span>
@@ -416,6 +462,33 @@ function PayloadViewer({ event, contract, setUrl }: { event: InngestEventRow; co
         </div>
       )}
     </div>
+  );
+}
+
+// ── Direction indicator ───────────────────────────────────────────
+
+function DirectionIndicator({ source, t, lang }: { source: string | null | undefined; t: (k: string) => string; lang: "zh" | "en" }) {
+  const dir = classifySource(source);
+  const meta = DIRECTION_META[dir];
+  const label = lang === "zh" ? meta.zh : meta.en;
+  const arrow = meta.arrow === "in" ? "↓" : meta.arrow === "out" ? "↑" : "·";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full"
+      style={{
+        padding: "1px 7px 1px 5px",
+        fontSize: 10,
+        color: meta.color,
+        background: "color-mix(in oklab, " + meta.color + " 12%, transparent)",
+        border: "1px solid color-mix(in oklab, " + meta.color + " 25%, transparent)",
+        fontWeight: 500,
+        flexShrink: 0,
+      }}
+      title={`${label} · source=${source ?? "(none)"}`}
+    >
+      <span style={{ fontFamily: "var(--f-mono)", lineHeight: 1 }}>{arrow}</span>
+      <span>{label}</span>
+    </span>
   );
 }
 

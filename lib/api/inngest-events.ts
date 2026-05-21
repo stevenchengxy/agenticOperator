@@ -9,6 +9,9 @@ export type InngestEventRow = {
   ts?: number;
   received_at?: string;
   _source?: string;
+  /** EventInstance.source value — e.g. "raas-bridge", "rpa.matchResumeAgent", "manual.test-trigger".
+   *  Populated by the API route when the event can be correlated to an EventInstance row. */
+  source?: string | null;
 };
 
 export type InngestEventsResponse = {
