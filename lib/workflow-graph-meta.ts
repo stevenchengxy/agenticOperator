@@ -1,5 +1,6 @@
 import type { IcName } from '@/components/shared/Ic';
 import workflowJson from './workflow-canonical.json';
+import { AGENT_MAP } from './agent-mapping';
 
 // ─── Canonical workflow types (sourced from allmetaOntology) ──────────────────
 
@@ -61,7 +62,7 @@ export const CANONICAL_WORKFLOW: WorkflowJsonNode[] = workflowJson as WorkflowJs
 export type NodeKind = 'trigger' | 'agent' | 'branch' | 'hitl' | 'guard' | 'done';
 
 /** wsIds owned by resume-parser-agent (real deployed Inngest functions). */
-const RPA_OWNED_WSIDS = new Set(['4', '9-1', '10']);
+const RPA_OWNED_WSIDS = new Set(['4', '9-1', '10', '10-5']);
 
 export type WorkflowNode = {
   id: string;
@@ -99,9 +100,9 @@ export type WorkflowEdge = {
   eventName?: string;
 };
 
-// 2200×800 viewBox — expanded for 8-column left-to-right divergent tree.
-export const GRAPH_VIEWBOX = '0 0 2200 800' as const;
-export const GRAPH_WIDTH = 2200 as const;
+// 2350×800 viewBox — expanded for 8-column left-to-right divergent tree with RuleCheck injected.
+export const GRAPH_VIEWBOX = '0 0 2350 800' as const;
+export const GRAPH_WIDTH = 2350 as const;
 export const GRAPH_HEIGHT = 800 as const;
 
 // ── NODE_LAYOUT ───────────────────────────────────────────────────────────────
@@ -140,22 +141,25 @@ const NODE_LAYOUT: NodeLayout[] = [
   { id: 'resumeParser',     wsId: '9-1',   x: 920,  y: 400, kind: 'agent',   icon: 'cpu'      },
   { id: 'resumeFixer',      wsId: '9-2',   x: 920,  y: 560, kind: 'hitl',    icon: 'user'     },
 
+  // ── Col 4.5: RULE CHECK (AO-owned, not in canonical JSON) ────────────────
+  { id: 'ruleCheck',        wsId: '10-5',  x: 1070, y: 400, kind: 'agent',   icon: 'shield'   },
+
   // ── Col 5: MATCHING ──────────────────────────────────────────────────────
-  { id: 'matcher',          wsId: '10',    x: 1220, y: 400, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'matcher',          wsId: '10',    x: 1370, y: 400, kind: 'agent',   icon: 'sparkle'  },
 
   // ── Col 6: INTERVIEW & EVAL ──────────────────────────────────────────────
-  { id: 'interviewInviter', wsId: '11-1',  x: 1520, y: 240, kind: 'agent',   icon: 'mail'     },
-  { id: 'aiInterviewer',    wsId: '11-2',  x: 1520, y: 400, kind: 'hitl',    icon: 'sparkle'  },
-  { id: 'evaluator',        wsId: '12',    x: 1520, y: 560, kind: 'agent',   icon: 'cpu'      },
+  { id: 'interviewInviter', wsId: '11-1',  x: 1670, y: 240, kind: 'agent',   icon: 'mail'     },
+  { id: 'aiInterviewer',    wsId: '11-2',  x: 1670, y: 400, kind: 'hitl',    icon: 'sparkle'  },
+  { id: 'evaluator',        wsId: '12',    x: 1670, y: 560, kind: 'agent',   icon: 'cpu'      },
 
   // ── Col 7: PACKAGE ───────────────────────────────────────────────────────
-  { id: 'resumeRefiner',    wsId: '13',    x: 1820, y: 160, kind: 'agent',   icon: 'sparkle'  },
-  { id: 'packageBuilder',   wsId: '14-1',  x: 1820, y: 320, kind: 'agent',   icon: 'book'     },
-  { id: 'packageFiller',    wsId: '14-2',  x: 1820, y: 480, kind: 'hitl',    icon: 'user'     },
-  { id: 'packageReviewer',  wsId: '15',    x: 1820, y: 640, kind: 'hitl',    icon: 'shield'   },
+  { id: 'resumeRefiner',    wsId: '13',    x: 1970, y: 160, kind: 'agent',   icon: 'sparkle'  },
+  { id: 'packageBuilder',   wsId: '14-1',  x: 1970, y: 320, kind: 'agent',   icon: 'book'     },
+  { id: 'packageFiller',    wsId: '14-2',  x: 1970, y: 480, kind: 'hitl',    icon: 'user'     },
+  { id: 'packageReviewer',  wsId: '15',    x: 1970, y: 640, kind: 'hitl',    icon: 'shield'   },
 
   // ── Col 8: SUBMIT ────────────────────────────────────────────────────────
-  { id: 'portalSubmitter',  wsId: '16',    x: 2080, y: 400, kind: 'agent',   icon: 'mail'     },
+  { id: 'portalSubmitter',  wsId: '16',    x: 2230, y: 400, kind: 'agent',   icon: 'mail'     },
 ];
 
 // ── Build NODES from layout + canonical JSON ──────────────────────────────────
@@ -185,6 +189,7 @@ const TITLE_BY_WSID: Record<string, string> = {
   '8':     'ResumeCollector',
   '9-1':   'ResumeParser',
   '9-2':   'ResumeFixer',
+  '10-5':  'RuleCheck',
   '10':    'Matcher',
   '11-1':  'InterviewInviter',
   '11-2':  'AIInterviewer',
@@ -232,6 +237,8 @@ const EDGE_LABEL_MAP: Record<string, string> = {
   'MATCH_PASSED_NEED_INTERVIEW': '需面试',
   'MATCH_PASSED_NO_INTERVIEW':   '免面',
   'MATCH_FAILED':                '不匹配',
+  'MATCH_RULE_CHECK_PASSED':     '规则通过',
+  'MATCH_RULE_CHECK_FAILED':     '规则拦截',
   'PACKAGE_MISSING_INFO':        '缺信息',
 };
 
@@ -247,49 +254,77 @@ function isExceptionalEvent(eventName: string): boolean {
   );
 }
 
+/**
+ * Returns event wiring for a node used in edge-building.
+ *
+ * Priority:
+ * - `triggers`: AGENT_MAP takes precedence (kept in sync with live Inngest impl).
+ *   This ensures nodes like Matcher (wsId 10) correctly subscribe to
+ *   MATCH_RULE_CHECK_PASSED rather than the stale RESUME_PROCESSED in canonical JSON.
+ * - `emits`: Canonical JSON takes precedence for canonical nodes (exact ontology spec).
+ *   Synthetic AO nodes (not in canonical JSON, e.g. RuleCheck wsId 10-5) fall back
+ *   to AGENT_MAP. `synthetic` flag distinguishes the two: only synthetic-node terminal
+ *   exceptional events get dangling dashed edges (canonical terminal events like
+ *   MATCH_FAILED stay off the canvas as before).
+ */
+function getEdgeMeta(layout: NodeLayout): { triggers: string[]; emits: string[]; synthetic: boolean } {
+  const agentMeta = AGENT_MAP.find((a) => a.wsId === layout.wsId);
+  const canon = CANONICAL_BY_WSID.get(layout.wsId);
+
+  // triggers: prefer AGENT_MAP (live event wiring); fall back to canonical
+  const triggers = agentMeta?.triggersEvents ?? canon?.trigger ?? [];
+
+  // emits + synthetic flag: canonical nodes use canonical spec; synthetic nodes use AGENT_MAP
+  if (canon) {
+    return { triggers, emits: canon.triggered_event, synthetic: false };
+  }
+  return { triggers, emits: agentMeta?.emitsEvents ?? [], synthetic: true };
+}
+
 function buildEdges(): WorkflowEdge[] {
   const edges: WorkflowEdge[] = [];
 
-  // Build a map: eventName → list of node ids that consume it
   const CONSUMER_BY_EVENT: Map<string, string[]> = new Map();
   for (const layout of NODE_LAYOUT) {
     if (layout.wsId === 'trig') continue;
-    const canonical = CANONICAL_BY_WSID.get(layout.wsId);
-    if (!canonical) continue;
-    for (const ev of canonical.trigger) {
+    const { triggers } = getEdgeMeta(layout);
+    for (const ev of triggers) {
       if (!CONSUMER_BY_EVENT.has(ev)) CONSUMER_BY_EVENT.set(ev, []);
       CONSUMER_BY_EVENT.get(ev)!.push(layout.id);
     }
   }
 
-  // Synthetic trigger node → nodes subscribed to SCHEDULED_SYNC
   const externalTriggerEvents = ['SCHEDULED_SYNC'];
   for (const ev of externalTriggerEvents) {
     for (const consumerId of CONSUMER_BY_EVENT.get(ev) ?? []) {
-      edges.push({
-        from: 'trig',
-        to: consumerId,
-        eventName: ev,
-        dashed: false,
-      });
+      edges.push({ from: 'trig', to: consumerId, eventName: ev, dashed: false });
     }
   }
 
-  // For each emitting node, find consumers of its emitted events
   for (const layout of NODE_LAYOUT) {
     if (layout.wsId === 'trig') continue;
-    const canonical = CANONICAL_BY_WSID.get(layout.wsId);
-    if (!canonical) continue;
-
-    for (const emittedEvent of canonical.triggered_event) {
+    const { emits, synthetic } = getEdgeMeta(layout);
+    for (const emittedEvent of emits) {
       const consumers = CONSUMER_BY_EVENT.get(emittedEvent) ?? [];
-      for (const consumerId of consumers) {
-        const dashed = isExceptionalEvent(emittedEvent);
+      if (consumers.length > 0) {
+        for (const consumerId of consumers) {
+          const dashed = isExceptionalEvent(emittedEvent);
+          edges.push({
+            from: layout.id,
+            to: consumerId,
+            eventName: emittedEvent,
+            dashed,
+            label: EDGE_LABEL_MAP[emittedEvent],
+          });
+        }
+      } else if (synthetic && isExceptionalEvent(emittedEvent)) {
+        // AO synthetic node emits a terminal exceptional event with no graph consumer.
+        // Emit a dangling dashed edge (`to: ''`) — visual rendering skips the arrowhead.
         edges.push({
           from: layout.id,
-          to: consumerId,
+          to: '',
           eventName: emittedEvent,
-          dashed,
+          dashed: true,
           label: EDGE_LABEL_MAP[emittedEvent],
         });
       }
@@ -318,10 +353,9 @@ function computeTerminalEvents(): Set<string> {
   const consumed = new Set<string>();
   for (const layout of NODE_LAYOUT) {
     if (layout.wsId === 'trig') continue;
-    const c = CANONICAL_BY_WSID.get(layout.wsId);
-    if (!c) continue;
-    for (const ev of c.triggered_event) allEmits.add(ev);
-    for (const ev of c.trigger) consumed.add(ev);
+    const { triggers, emits } = getEdgeMeta(layout);
+    for (const ev of emits) allEmits.add(ev);
+    for (const ev of triggers) consumed.add(ev);
   }
   const terminal = new Set<string>();
   for (const ev of allEmits) {

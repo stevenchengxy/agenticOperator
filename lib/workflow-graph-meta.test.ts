@@ -2,17 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { NODES, EDGES, nodeById, GRAPH_VIEWBOX, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, TERMINAL_EVENTS } from './workflow-graph-meta';
 
 describe('workflow-graph-meta', () => {
-  it('viewBox is 2200x800 (8-column left-to-right divergent tree)', () => {
-    expect(GRAPH_VIEWBOX).toBe('0 0 2200 800');
-    expect(GRAPH_WIDTH).toBe(2200);
+  it('viewBox is 2350x800 (8-column tree with RuleCheck injected)', () => {
+    expect(GRAPH_VIEWBOX).toBe('0 0 2350 800');
+    expect(GRAPH_WIDTH).toBe(2350);
     expect(GRAPH_HEIGHT).toBe(800);
   });
 
-  it('all edge endpoints resolve to a real node', () => {
+  it('all edge endpoints resolve to a real node (terminal dashed edges may have empty to)', () => {
     const ids = new Set(NODES.map(n => n.id));
     for (const e of EDGES) {
       expect(ids.has(e.from), `edge ${e.from}->${e.to}: from missing`).toBe(true);
-      expect(ids.has(e.to),   `edge ${e.from}->${e.to}: to missing`).toBe(true);
+      // Terminal dashed edges (e.g. MATCH_RULE_CHECK_FAILED) may have no consumer node.
+      if (e.to !== '') {
+        expect(ids.has(e.to), `edge ${e.from}->${e.to}: to missing`).toBe(true);
+      }
     }
   });
 
@@ -33,17 +36,16 @@ describe('workflow-graph-meta', () => {
     expect(nodeById('does-not-exist')).toBeUndefined();
   });
 
-  it('has 23 nodes (22 real agents + 1 trigger)', () => {
-    // 22 from canonical JSON + 1 synthetic trig = 23.
-    // reClarifier (3-2) added per canonical JSON; MatchReviewer removed (not in spec).
-    expect(NODES).toHaveLength(23);
+  it('has 24 nodes (22 canonical + ruleCheck synthetic + trig)', () => {
+    expect(NODES).toHaveLength(24);
+    expect(nodeById('ruleCheck')?.wsId).toBe('10-5');
   });
 
-  it('has 28 edges derived from canonical JSON event flow', () => {
-    // Auto-built from triggered_event → trigger mappings in workflow-canonical.json.
-    // MATCH_FAILED is terminal in the canonical spec (no downstream consumer), so
-    // matcher fans to 2 edges instead of the previous 3 (which included MatchReviewer).
-    expect(EDGES).toHaveLength(28);
+  it('has 30 edges (canonical flow + RuleCheck edges incl. terminal FAILED)', () => {
+    // Original 28 edges from canonical JSON, minus the direct resumeParser→matcher edge
+    // (RESUME_PROCESSED), plus: resumeParser→ruleCheck, ruleCheck→matcher (PASSED),
+    // and ruleCheck→'' (FAILED terminal dashed edge) = 28 - 1 + 1 + 1 + 1 = 30.
+    expect(EDGES).toHaveLength(30);
   });
 
   it('every non-dashed edge has an eventName populated', () => {
@@ -115,21 +117,38 @@ describe('workflow-graph-meta', () => {
     expect(edge?.eventName).toBe('CLARIFICATION_INCOMPLETE');
   });
 
+  it('ruleCheck has both PASSED and FAILED outbound edges', () => {
+    const out = EDGES.filter(e => e.from === 'ruleCheck');
+    const events = out.map(e => e.eventName).sort();
+    expect(events).toContain('MATCH_RULE_CHECK_PASSED');
+    expect(events).toContain('MATCH_RULE_CHECK_FAILED');
+    const failedEdge = out.find(e => e.eventName === 'MATCH_RULE_CHECK_FAILED');
+    expect(failedEdge?.dashed).toBe(true);
+  });
+
+  it('resumeParser → ruleCheck edge exists (replacing direct → matcher)', () => {
+    const direct = EDGES.find(e => e.from === 'resumeParser' && e.to === 'matcher');
+    expect(direct).toBeUndefined();
+    const viaRC = EDGES.find(e => e.from === 'resumeParser' && e.to === 'ruleCheck');
+    expect(viaRC?.eventName).toBe('RESUME_PROCESSED');
+  });
+
   it('canonical JSON is loaded with all 22 workflow nodes', () => {
     expect(CANONICAL_WORKFLOW).toHaveLength(22);
-    // Every NODE_LAYOUT wsId (except trig) should resolve in CANONICAL_WORKFLOW
+    // Every NODE_LAYOUT wsId (except trig and AO-owned synthetic nodes) should resolve in CANONICAL_WORKFLOW
+    const SYNTHETIC_WSIDS = new Set(['trig', '10-5']);
     const canonicalIds = new Set(CANONICAL_WORKFLOW.map(n => n.id));
-    const nonTrigNodes = NODES.filter(n => n.wsId !== 'trig');
+    const nonTrigNodes = NODES.filter(n => !SYNTHETIC_WSIDS.has(n.wsId));
     for (const n of nonTrigNodes) {
       expect(canonicalIds.has(n.wsId), `wsId ${n.wsId} (${n.id}) not in canonical JSON`).toBe(true);
     }
   });
 
-  it('deployed nodes are exactly the 3 RPA-owned wsIds', () => {
+  it('deployed nodes are 4 RPA-owned wsIds (incl. RuleCheck)', () => {
     const deployed = NODES.filter(n => n.deployment === 'deployed');
-    expect(deployed).toHaveLength(3);
+    expect(deployed).toHaveLength(4);
     const wsIds = deployed.map(n => n.wsId).sort();
-    expect(wsIds).toEqual(['10', '4', '9-1']);
+    expect(wsIds).toEqual(['10', '10-5', '4', '9-1']);
   });
 
   it('no node centers within 80px of each other (overlap check)', () => {
