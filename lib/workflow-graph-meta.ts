@@ -25,7 +25,12 @@ export const CANONICAL_WORKFLOW: WorkflowJsonNode[] = workflowJson as WorkflowJs
 
 // ─── Graph layout + node type ─────────────────────────────────────────────────
 //
-// 22 real workflow nodes + 1 synthetic `trig` node for the external trigger.
+// 23 real workflow nodes + 1 synthetic `trig` node = 24 nodes total.
+// The 23 real nodes are: reqSync, manualEntry, reqAnalyzer, clarifier,
+// reClarifier, jdGenerator, jdReviewer, taskAssigner, publisher, manualPublish,
+// resumeCollector, resumeParser, resumeFixer, ruleCheck, matcher,
+// interviewInviter, aiInterviewer, evaluator, resumeRefiner, packageBuilder,
+// packageFiller, packageReviewer, portalSubmitter.
 // NODES + EDGES are derived programmatically from CANONICAL_WORKFLOW combined
 // with the visual layout table (NODE_LAYOUT) below.
 //
@@ -38,24 +43,22 @@ export const CANONICAL_WORKFLOW: WorkflowJsonNode[] = workflowJson as WorkflowJs
 //   stubbed     — AO-main stub-factory handles it
 //   conceptual  — actor=Human in canonical JSON; no Inngest function exists
 //
-// ViewBox: 1920×720 — extra canvas gives breathing room for HITL branches.
+// ViewBox: 2350×800 — expanded canvas for 8-column divergent tree with RuleCheck injected.
 //
-// Layout overview (left-to-right main path, fallbacks below/offset):
+// Layout overview (8 vertical columns, main spine at y=400):
 //
-//   Row A (y=100): trig → reqSync → reqAnalyzer → clarifier → jdGenerator
-//                 → jdReviewer → taskAssigner → publisher → resumeCollector
-//                 → resumeParser → matcher (x=1820; fits within 1920 viewBox)
-//
-//   Row B (y=460): portalSubmitter ← packageReviewer ← packageBuilder ←
-//                 resumeRefiner ← evaluator ← aiInterviewer ← interviewInviter
-//                 (uniformly ~180px spaced; interviewInviter x=1820 aligned with matcher)
-//
-//   HITL offsets (y=280 row, 4 nodes):
-//     manualEntry    (x=400,  y=280) — directly below reqAnalyzer(400,100); short vertical edge
-//     reClarifier    (x=580,  y=280) — CLARIFICATION_INCOMPLETE → CLARIFICATION_RETRY
-//     manualPublish  (x=1300, y=280) — fallback: CHANNEL_PUBLISHED_FAILED
-//     resumeFixer    (x=1700, y=280) — fallback: RESUME_PARSE_ERROR
-//     packageFiller  (x=1100, y=620) — fallback: PACKAGE_MISSING_INFO
+//   Col 1 (x=100):  trig (y=400)
+//   Col 2 (x=320):  reqSync (y=100), manualEntry (y=220), reqAnalyzer (y=340),
+//                   clarifier (y=460), reClarifier (y=580)
+//   Col 3 (x=620):  jdGenerator (y=140), jdReviewer (y=260), taskAssigner (y=380),
+//                   publisher (y=500), manualPublish (y=620)
+//   Col 4 (x=920):  resumeCollector (y=240), resumeParser (y=400), resumeFixer (y=560)
+//   Col 4.5 (x=1070): ruleCheck (y=400) — AO-owned guard, not in canonical JSON
+//   Col 5 (x=1370): matcher (y=400)
+//   Col 6 (x=1670): interviewInviter (y=240), aiInterviewer (y=400), evaluator (y=560)
+//   Col 7 (x=1970): resumeRefiner (y=160), packageBuilder (y=320), packageFiller (y=480),
+//                   packageReviewer (y=640)
+//   Col 8 (x=2230): portalSubmitter (y=400) — fits within 2350 viewBox
 //
 // ─────────────────────────────────────────────────────────────────────────────
 

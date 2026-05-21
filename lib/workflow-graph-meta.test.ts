@@ -180,5 +180,6 @@ describe('workflow-graph-meta', () => {
     // MATCH_FAILED has no consumer in canonical JSON — MatchReviewer was removed
     // TERMINAL_EVENTS should be non-empty (there are several terminal states in the workflow)
     expect(TERMINAL_EVENTS.size).toBeGreaterThan(0);
+    expect(TERMINAL_EVENTS.has('MATCH_RULE_CHECK_FAILED'), 'MATCH_RULE_CHECK_FAILED should be terminal (no consumer)').toBe(true);
   });
 });
