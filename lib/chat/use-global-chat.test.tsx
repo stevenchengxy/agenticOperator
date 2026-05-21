@@ -91,4 +91,12 @@ describe("useGlobalChat", () => {
     act(() => result.current.replaceLastAssistant({ role: "assistant", content: "final answer" }));
     expect(result.current.currentSession.messages[1]?.content).toBe("final answer");
   });
+
+  it("auto-title respects codepoints (emoji not split)", () => {
+    const { result } = renderHook(() => useGlobalChat());
+    // 33 emoji — should truncate to 32 + ellipsis without breaking a surrogate pair
+    const msg = "🚀".repeat(33);
+    act(() => result.current.appendMessage({ role: "user", content: msg }));
+    expect(result.current.currentSession.title).toBe("🚀".repeat(32) + "…");
+  });
 });

@@ -52,7 +52,9 @@ function save(state: Persisted): void {
 function autoTitle(messages: ChatMessage[]): string {
   const firstUser = messages.find((m) => m.role === "user");
   if (!firstUser) return "新会话";
-  return firstUser.content.slice(0, 32) + (firstUser.content.length > 32 ? "…" : "");
+  // Spread iterates Unicode codepoints (handles surrogate pairs / emoji correctly).
+  const chars = [...firstUser.content];
+  return chars.slice(0, 32).join("") + (chars.length > 32 ? "…" : "");
 }
 
 export function useGlobalChat() {
