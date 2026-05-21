@@ -114,14 +114,18 @@ async function runToolLoop(
         if (toolSources) sources.push(...toolSources);
         let serialized = JSON.stringify(result);
         if (serialized.length > MAX_TOOL_RESULT_BYTES) {
-          serialized = serialized.slice(0, MAX_TOOL_RESULT_BYTES) + '"...truncated":true}';
+          serialized = serialized.slice(0, MAX_TOOL_RESULT_BYTES);
+          // LLM will see a possibly-truncated JSON prefix; better than malformed JSON.
         }
         conversation.push({ role: "tool", tool_call_id: tc.id, content: serialized });
       } catch (e) {
+        const detail = (e as Error).message;
+        // Log full error server-side; expose sanitized text to the LLM.
+        console.error(`[chat/trace] tool ${tc.function.name} failed:`, detail);
         conversation.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: JSON.stringify({ error: (e as Error).message }),
+          content: JSON.stringify({ error: `tool execution failed: ${tc.function.name}` }),
         });
       }
     }

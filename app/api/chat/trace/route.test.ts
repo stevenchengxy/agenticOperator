@@ -145,4 +145,40 @@ describe("POST /api/chat/trace", () => {
     const res = await POST(makeReq({ messages: [{ role: "user", content: "x" }] }));
     expect(res.status).toBe(502);
   });
+
+  it("after MAX_TOOL_TURNS still asking for tools, returns degraded synthesis reply", async () => {
+    (isGatewayConfigured as any).mockReturnValue(true);
+    (pickGateway as any).mockReturnValue({ baseURL: "http://fake", apiKey: "fake-key", model: "x" });
+    (findTool as any).mockReturnValue({
+      name: "searchRuns",
+      execute: vi.fn().mockResolvedValue({ result: { runs: [], total: 0 }, sources: [] }),
+    });
+
+    // Every call: if `tools` is present (tool-loop turns), keep requesting tool calls.
+    // If `tools` is absent/undefined (synthesis call has no tools key), return the degraded reply.
+    _state.create.mockImplementation(({ tools }: any) => {
+      if (tools === undefined) {
+        return Promise.resolve({
+          choices: [{ message: { role: "assistant", content: "(已达到最大工具调用轮数,以下是部分结果)", tool_calls: [] } }],
+          model: "x",
+        });
+      }
+      return Promise.resolve({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{ id: `c${Math.random()}`, type: "function", function: { name: "searchRuns", arguments: "{}" } }],
+          },
+        }],
+        model: "x",
+      });
+    });
+
+    const res = await POST(makeReq({ messages: [{ role: "user", content: "loop forever" }] }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reply.content).toContain("最大工具调用轮数");
+    expect(body.toolCallsExecuted).toBeGreaterThanOrEqual(4);
+  });
 });
