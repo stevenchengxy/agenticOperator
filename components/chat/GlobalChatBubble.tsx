@@ -31,7 +31,9 @@ export function GlobalChatBubble() {
           background: "var(--c-accent)",
           color: "var(--c-bg)",
           border: "none",
-          zIndex: 50,
+          // z-60: above modal drawers (z-50) so the chat is reachable while
+          // inspecting a run / audit / etc.
+          zIndex: 60,
           display: "grid",
           placeItems: "center",
         }}
@@ -48,7 +50,9 @@ export function GlobalChatBubble() {
             bottom: 92,
             width: 480,
             height: 620,
-            zIndex: 50,
+            // z-60: above modal drawers (z-50) so the chat is reachable while
+            // inspecting a run / audit / etc.
+            zIndex: 60,
             background: "var(--c-surface)",
           }}
         >

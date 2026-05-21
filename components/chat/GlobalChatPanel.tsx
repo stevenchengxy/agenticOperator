@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import { useApp } from "@/lib/i18n";
 import { useGlobalChat } from "@/lib/chat/use-global-chat";
 import { usePageContext } from "@/lib/chat/page-context";
@@ -8,15 +9,14 @@ import { Badge, Btn } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import type { ChatMessage, ChatSource, GlobalChatRequest, GlobalChatResponse } from "@/lib/chat/types";
 
-const SUGGESTIONS: string[] = [
-  "字节跳动最近 24h 几条 rule 拦了?",
-  "JDGenerator 最近哪些 run 失败了?",
-  "DLQ 现在有多少条?",
-  "candidate XXX 走到哪一步了?",
-];
-
 export function GlobalChatPanel({ scope = "bubble" }: { scope?: "bubble" | "full" }) {
   const { t } = useApp();
+  const suggestions = [
+    t("chat_suggestion_1"),
+    t("chat_suggestion_2"),
+    t("chat_suggestion_3"),
+    t("chat_suggestion_4"),
+  ];
   const chat = useGlobalChat();
   const pageContext = usePageContext();
   const [input, setInput] = React.useState("");
@@ -90,7 +90,7 @@ export function GlobalChatPanel({ scope = "bubble" }: { scope?: "bubble" | "full
           <div>
             <div className="text-[12px] text-ink-3 mb-2">{t("chat_empty_hint")}</div>
             <div className="flex flex-col gap-1">
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -105,7 +105,7 @@ export function GlobalChatPanel({ scope = "bubble" }: { scope?: "bubble" | "full
           </div>
         )}
         {messages.map((m, i) => (
-          <Bubble key={i} message={m} sources={sourcesPerMessage[i]} />
+          <Bubble key={i} message={m} sources={sourcesPerMessage[i]} userLabel={t("chat_role_user")} />
         ))}
         {busy && (
           <div className="text-[11px] text-ink-3 mt-2 flex items-center gap-1.5">
@@ -156,12 +156,12 @@ export function GlobalChatPanel({ scope = "bubble" }: { scope?: "bubble" | "full
   );
 }
 
-function Bubble({ message, sources }: { message: ChatMessage; sources?: ChatSource[] }) {
+function Bubble({ message, sources, userLabel }: { message: ChatMessage; sources?: ChatSource[]; userLabel: string }) {
   const isUser = message.role === "user";
   return (
     <div className="mb-2.5 last:mb-0">
       <div className="text-[10px] mono mb-0.5" style={{ color: isUser ? "var(--c-ink-3)" : "var(--c-accent)" }}>
-        {isUser ? "你" : "AI"}
+        {isUser ? userLabel : "AI"}
       </div>
       <div
         className={`rounded-md text-[12.5px] leading-relaxed ${
@@ -175,9 +175,15 @@ function Bubble({ message, sources }: { message: ChatMessage; sources?: ChatSour
         <div className="flex flex-wrap gap-1 mt-1">
           {sources.map((s, i) =>
             s.url ? (
-              <a key={i} href={s.url} className="no-underline">
-                <Badge variant="info" className="text-[9.5px]">{s.tool} · {s.label}</Badge>
-              </a>
+              s.url.startsWith("/") ? (
+                <Link key={i} href={s.url} className="no-underline">
+                  <Badge variant="info" className="text-[9.5px]">{s.tool} · {s.label}</Badge>
+                </Link>
+              ) : (
+                <a key={i} href={s.url} className="no-underline" target="_blank" rel="noreferrer">
+                  <Badge variant="info" className="text-[9.5px]">{s.tool} · {s.label}</Badge>
+                </a>
+              )
             ) : (
               <Badge key={i} variant="info" className="text-[9.5px]">{s.tool} · {s.label}</Badge>
             ),

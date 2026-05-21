@@ -1002,6 +1002,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_send: "发送",
     chat_send_fail: "发送失败",
     chat_new_session: "新建会话",
+    chat_suggestion_1: "字节跳动最近 24h 几条 rule 拦了?",
+    chat_suggestion_2: "JDGenerator 最近哪些 run 失败了?",
+    chat_suggestion_3: "DLQ 现在有多少条?",
+    chat_suggestion_4: "最近一周哪些事件触发了 MATCH_FAILED?",
+    chat_role_user: "你",
   },
   en: {
     brand: "Agentic Operator",
@@ -1999,6 +2004,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_send: "Send",
     chat_send_fail: "Send failed",
     chat_new_session: "New session",
+    chat_suggestion_1: "Any rule fails for ByteDance in last 24h?",
+    chat_suggestion_2: "Which JDGenerator runs failed recently?",
+    chat_suggestion_3: "How many entries in DLQ right now?",
+    chat_suggestion_4: "Which events triggered MATCH_FAILED this week?",
+    chat_role_user: "You",
   },
 };
 
