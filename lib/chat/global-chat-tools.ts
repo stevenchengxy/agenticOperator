@@ -16,7 +16,7 @@
 // - RuleCheckAudit: all fields are snake_case (audit_id, client_name, etc.).
 
 import { prisma } from "@/server/db";
-import { searchEntitiesNeo4j } from "@/lib/allmeta-client";
+import { searchEntitiesNeo4j, resolveEntityNames } from "@/lib/allmeta-client";
 import type { ToolDef, ChatSource } from "./types";
 
 // ---------- helpers ----------
@@ -373,6 +373,13 @@ const searchAudits: ToolDef = {
       orderBy: { created_at: "desc" },
       take,
     });
+
+    // Enrich with candidate displayName from Neo4j (best-effort; failures = no enrichment)
+    const candidateIds = rows.map((r) => r.candidate_id).filter((x): x is string => !!x);
+    const nameMap = candidateIds.length > 0
+      ? await resolveEntityNames("Candidate", candidateIds).catch(() => new Map<string, string>())
+      : new Map<string, string>();
+
     return {
       result: {
         audits: rows.map((r) => ({
@@ -381,6 +388,7 @@ const searchAudits: ToolDef = {
           client_name: r.client_name ?? null,
           job_requisition_id: r.job_requisition_id,
           candidate_id: r.candidate_id,
+          candidate_name: nameMap.get(r.candidate_id ?? "") ?? null,
           rules_evaluated: r.rules_evaluated,
           failure_reasons: r.failure_reasons,
           created_at: r.created_at.toISOString(),

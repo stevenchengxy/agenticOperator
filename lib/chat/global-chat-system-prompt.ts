@@ -1,5 +1,10 @@
 import type { PageContext } from "./types";
 
+// Candidate name enrichment rule — kept as a plain string outside the template
+// literal to avoid oxc mis-parsing curly-brace placeholders as template expressions.
+const CANDIDATE_NAME_RULE =
+  "- 引用候选人时:如果 tool 结果里有 `candidate_name`,**用 markdown link** `[姓名](/entities/candidate/<id>)`;**绝对不要**写成 `候选人 <id前缀>` 这种纯 ID 形式。如果只有 id 没有 name,fallback 用 `候选人 <id后8位>` 但要提醒用户名字未解析。";
+
 export function buildSystemPrompt(pageContext?: PageContext): string {
   const ctxLine = pageContextLine(pageContext);
   return `你是 Agentic Operator 的全局追踪助手。你能查询的范围:
@@ -15,6 +20,8 @@ export function buildSystemPrompt(pageContext?: PageContext): string {
 - 这是只读端点。用户问"如何 replay / cancel / 改",答"目前未开放,建议去 /monitor 手动操作"。
 - 用户提到的 ID(run id / audit id / candidate id / event name)优先以工具查询验证存在;不存在直接说明。
 - 回答带 markdown link:run 用 [R-xxx](/monitor?run=R-xxx),audit 用 [A-xxx](/rule-check?view=audits&auditId=A-xxx),candidate 用 [候选人名](/entities/candidate/X)。
+${CANDIDATE_NAME_RULE}
+- 引用 JR 时:用 \`[JRQ-...]\` 链接到 \`/monitor?...\` 或 audit 详情,不要只输出 raw id。
 
 回答风格:
 - 第一句结论,后面才是证据。

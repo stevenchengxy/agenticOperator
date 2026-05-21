@@ -12,6 +12,7 @@ vi.mock("@/server/db", () => ({
 
 vi.mock("@/lib/allmeta-client", () => ({
   searchEntitiesNeo4j: vi.fn(),
+  resolveEntityNames: vi.fn(),
 }));
 
 global.fetch = vi.fn();
@@ -253,6 +254,8 @@ describe("searchEvents tool", () => {
 
 describe("searchAudits tool", () => {
   it("filters by decision", async () => {
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockResolvedValue(new Map());
     (prisma.ruleCheckAudit.findMany as any).mockResolvedValue([
       {
         audit_id: "A-1",
@@ -272,6 +275,8 @@ describe("searchAudits tool", () => {
   });
 
   it("applies client filter to where clause", async () => {
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockResolvedValue(new Map());
     (prisma.ruleCheckAudit.findMany as any).mockResolvedValue([]);
     await byName("searchAudits").execute({ client: "字节跳动" });
     const where = (prisma.ruleCheckAudit.findMany as any).mock.calls[0][0].where;
@@ -279,6 +284,8 @@ describe("searchAudits tool", () => {
   });
 
   it("applies candidateId filter to where clause", async () => {
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockResolvedValue(new Map());
     (prisma.ruleCheckAudit.findMany as any).mockResolvedValue([]);
     await byName("searchAudits").execute({ candidateId: "C-abc" });
     const where = (prisma.ruleCheckAudit.findMany as any).mock.calls[0][0].where;
@@ -286,6 +293,8 @@ describe("searchAudits tool", () => {
   });
 
   it("adds source URL to audits", async () => {
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockResolvedValue(new Map());
     (prisma.ruleCheckAudit.findMany as any).mockResolvedValue([
       {
         audit_id: "A-2",
@@ -300,6 +309,47 @@ describe("searchAudits tool", () => {
     ]);
     const { sources } = await byName("searchAudits").execute({});
     expect(sources?.[0]?.url).toMatch(/rule-check/);
+  });
+
+  it("enriches candidate_name from Neo4j when resolver returns a name", async () => {
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockResolvedValue(new Map([["C-007", "张伟"]]));
+    (prisma.ruleCheckAudit.findMany as any).mockResolvedValue([
+      {
+        audit_id: "A-3",
+        decision: "FAIL",
+        client_name: "TechCorp",
+        job_requisition_id: "JR-007",
+        candidate_id: "C-007",
+        rules_evaluated: 3,
+        failure_reasons: '["R-001"]',
+        created_at: new Date("2026-05-21T00:00:00Z"),
+      },
+    ]);
+    const { result } = await byName("searchAudits").execute({ decision: "FAIL" });
+    expect((result as any).audits[0].candidate_name).toBe("张伟");
+    expect((result as any).audits[0].candidate_id).toBe("C-007");
+  });
+
+  it("sets candidate_name to null and still returns results when resolver throws", async () => {
+    const { resolveEntityNames } = await import("@/lib/allmeta-client");
+    (resolveEntityNames as any).mockRejectedValue(new Error("Neo4j unreachable"));
+    (prisma.ruleCheckAudit.findMany as any).mockResolvedValue([
+      {
+        audit_id: "A-4",
+        decision: "PASS",
+        client_name: "AnotherCorp",
+        job_requisition_id: "JR-008",
+        candidate_id: "C-008",
+        rules_evaluated: 2,
+        failure_reasons: "[]",
+        created_at: new Date("2026-05-21T01:00:00Z"),
+      },
+    ]);
+    const { result } = await byName("searchAudits").execute({ decision: "PASS" });
+    expect((result as any).audits).toHaveLength(1);
+    expect((result as any).audits[0].candidate_name).toBeNull();
+    expect((result as any).audits[0].audit_id).toBe("A-4");
   });
 });
 

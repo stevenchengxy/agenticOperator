@@ -258,3 +258,39 @@ export async function searchEntitiesNeo4j(
     return [];
   }
 }
+
+/**
+ * Resolve display names for a batch of entity ids.
+ * Uses searchEntitiesNeo4j with q=id and exact-id matching.
+ * Returns a Map<id, displayName>. Missing ids are simply absent from the map.
+ * Failures degrade silently (returns whatever resolved before the failure).
+ */
+export async function resolveEntityNames(
+  type: string,
+  ids: string[],
+  opts: CommonOpts = {},
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  const unique = Array.from(new Set(ids.filter((x): x is string => typeof x === "string" && x.length > 0)));
+  // Bounded concurrency 5 to avoid hammering the API
+  const CONC = 5;
+  for (let i = 0; i < unique.length; i += CONC) {
+    const slice = unique.slice(i, i + CONC);
+    const results = await Promise.all(
+      slice.map(async (id) => {
+        try {
+          const hits = await searchEntitiesNeo4j({ type, q: id, limit: 1 }, opts);
+          const match = hits.find((h) => h.id === id) ?? hits[0];
+          return match ? ([id, match.displayName] as const) : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const r of results) {
+      if (r) out.set(r[0], r[1]);
+    }
+  }
+  return out;
+}

@@ -32,6 +32,7 @@ export function GlobalChatPanel({
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [justSent, setJustSent] = React.useState(false);
   const [sourcesPerMessage, setSourcesPerMessage] = React.useState<Record<number, ChatSource[]>>({});
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -50,6 +51,8 @@ export function GlobalChatPanel({
       chat.appendMessage(userMsg);
       setInput("");
       setBusy(true);
+      setJustSent(true);
+      setTimeout(() => setJustSent(false), 400);
       setErr(null);
       try {
         const reqBody: GlobalChatRequest = {
@@ -89,7 +92,7 @@ export function GlobalChatPanel({
     : null;
 
   return (
-    <div className="flex flex-col h-full bg-surface">
+    <div className="flex flex-col h-full" style={{ background: "linear-gradient(180deg, var(--c-surface) 0%, color-mix(in oklab, var(--c-surface) 92%, var(--c-accent) 8%) 100%)" }}>
       {/* Header */}
       <div
         className="flex items-center gap-3 border-b border-line"
@@ -98,10 +101,10 @@ export function GlobalChatPanel({
         <div
           className="rounded-full grid place-items-center text-white"
           style={{
-            width: 30,
-            height: 30,
-            background: "var(--c-accent)",
-            boxShadow: "0 2px 6px color-mix(in oklab, var(--c-accent) 30%, transparent)",
+            width: 32,
+            height: 32,
+            background: "linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-2) 100%)",
+            boxShadow: "0 2px 8px color-mix(in oklab, var(--c-accent) 28%, transparent)",
             flexShrink: 0,
           }}
         >
@@ -111,29 +114,60 @@ export function GlobalChatPanel({
           <div className="text-[13px] font-semibold text-ink-1 leading-tight">{t("chat_header_title")}</div>
           <div className="text-[10.5px] text-ink-3 leading-tight mt-0.5">{t("chat_header_subtitle")}</div>
         </div>
-        {messages.length > 0 && (
-          <button
-            type="button"
-            onClick={chat.newSession}
-            className="text-ink-3 hover:text-ink-1 cursor-pointer bg-transparent border-0 rounded-md transition-colors"
-            style={{ padding: "5px 8px", fontSize: 11 }}
-            title={t("chat_new_session")}
-          >
-            <Ic.plus />
-          </button>
-        )}
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-ink-3 hover:text-ink-1 cursor-pointer bg-transparent border-0 rounded-md transition-colors"
-            style={{ padding: "5px 6px" }}
-            title={t("chat_close")}
-            aria-label={t("chat_close")}
-          >
-            <Ic.cross />
-          </button>
-        )}
+        <div className="flex items-center gap-0.5">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={chat.newSession}
+              className="rounded-md cursor-pointer transition-colors flex items-center justify-center"
+              style={{
+                width: 28,
+                height: 28,
+                background: "transparent",
+                color: "var(--c-ink-3)",
+                border: "none",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--c-panel)";
+                e.currentTarget.style.color = "var(--c-ink-1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "var(--c-ink-3)";
+              }}
+              title={t("chat_new_session")}
+              aria-label={t("chat_new_session")}
+            >
+              <Ic.plus />
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md cursor-pointer transition-colors flex items-center justify-center"
+              style={{
+                width: 28,
+                height: 28,
+                background: "transparent",
+                color: "var(--c-ink-3)",
+                border: "none",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--c-panel)";
+                e.currentTarget.style.color = "var(--c-ink-1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "var(--c-ink-3)";
+              }}
+              title={t("chat_close")}
+              aria-label={t("chat_close")}
+            >
+              <Ic.cross />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Context pill */}
@@ -165,6 +199,7 @@ export function GlobalChatPanel({
             key={i}
             message={m}
             sources={sourcesPerMessage[i]}
+            flyIn={i === messages.length - 1 && m.role === "user" && justSent}
           />
         ))}
         {busy && <TypingIndicator label={t("chat_thinking")} />}
@@ -188,7 +223,7 @@ export function GlobalChatPanel({
       {/* Input */}
       <div className="border-t border-line bg-surface" style={{ padding: "10px 12px" }}>
         <div
-          className="flex items-center gap-1 rounded-full"
+          className={`flex items-center gap-1 rounded-full ${justSent ? "chat-input-sending" : ""}`}
           style={{
             border: "1px solid var(--c-line)",
             background: "var(--c-panel)",
@@ -313,19 +348,21 @@ function EmptyState({
   );
 }
 
-function MessageRow({ message, sources }: { message: ChatMessage; sources?: ChatSource[] }) {
+function MessageRow({ message, sources, flyIn }: { message: ChatMessage; sources?: ChatSource[]; flyIn?: boolean }) {
   const isUser = message.role === "user";
   return (
-    <div className={`flex gap-2 mb-4 chat-message-in ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+    <div className={`flex gap-2 mb-4 ${flyIn ? "chat-send-fly" : "chat-message-in"} ${isUser ? "flex-row-reverse" : "flex-row"}`}>
       {!isUser && (
         <div
-          className="rounded-full grid place-items-center text-white flex-shrink-0"
+          className="rounded-full grid place-items-center flex-shrink-0"
           style={{
-            width: 26,
-            height: 26,
-            background: "var(--c-accent)",
+            width: 28,
+            height: 28,
+            background: "linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-2) 100%)",
+            color: "white",
             fontSize: 11,
             marginTop: 2,
+            boxShadow: "0 2px 6px color-mix(in oklab, var(--c-accent) 22%, transparent)",
           }}
           aria-hidden="true"
         >
@@ -394,8 +431,13 @@ function TypingIndicator({ label }: { label: string }) {
   return (
     <div className="flex gap-2 mb-3 chat-message-in items-center">
       <div
-        className="rounded-full grid place-items-center text-white flex-shrink-0"
-        style={{ width: 26, height: 26, background: "var(--c-accent)" }}
+        className="rounded-full grid place-items-center flex-shrink-0"
+        style={{
+          width: 28,
+          height: 28,
+          background: "linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-2) 100%)",
+          color: "white",
+        }}
         aria-hidden="true"
       >
         <Ic.sparkle />
