@@ -213,3 +213,48 @@ export async function ping(opts: CommonOpts = {}): Promise<{ ok: boolean }> {
     return { ok: false };
   }
 }
+
+// ──────────────────────────────────────────────────────────────
+//  Entity search (read-only, used by global tracing chatbot)
+// ──────────────────────────────────────────────────────────────
+
+export type EntitySearchResult = {
+  id: string;
+  displayName: string;
+  [k: string]: unknown;
+};
+
+/**
+ * GET /api/v1/ontology/instances/{label}?domain=...&q=...&limit=...
+ *
+ * Thin read-only helper for global-chat-tools. Returns an array of matching
+ * entity instances from Neo4j via Allmeta. On any error (network / 4xx / 5xx)
+ * returns an empty array so the chatbot degrades gracefully.
+ */
+export async function searchEntitiesNeo4j(
+  { type, q, limit = 10 }: { type: string; q: string; limit?: number },
+  opts: CommonOpts = {},
+): Promise<EntitySearchResult[]> {
+  const domain = opts.domain ?? DEFAULT_DOMAIN;
+  const label = encodeURIComponent(type);
+  const qs = new URLSearchParams({
+    domain,
+    q,
+    limit: String(Math.min(limit, 30)),
+  }).toString();
+  const path = `/api/v1/ontology/instances/${label}?${qs}`;
+  try {
+    const res = await doRequest<{ items?: EntitySearchResult[]; data?: EntitySearchResult[] } | EntitySearchResult[]>(
+      'GET',
+      path,
+      undefined,
+      opts,
+    );
+    if (Array.isArray(res)) return res;
+    if (Array.isArray((res as any).items)) return (res as any).items;
+    if (Array.isArray((res as any).data)) return (res as any).data;
+    return [];
+  } catch {
+    return [];
+  }
+}
