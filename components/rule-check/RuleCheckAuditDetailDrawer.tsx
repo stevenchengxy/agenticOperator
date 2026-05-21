@@ -28,6 +28,40 @@ type OntologyRuleResponse =
 
 type Tab = "prompt" | "rules" | "response" | "instances";
 
+const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
+
+function DrawerSection({
+  title,
+  hint,
+  action,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-6">
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <div className="flex items-baseline gap-2.5">
+          <h3
+            className="m-0 text-ink-1"
+            style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, letterSpacing: "-0.005em" }}
+          >
+            {title}
+          </h3>
+          {hint && <span className="text-ink-3" style={{ fontSize: 11.5 }}>{hint}</span>}
+        </div>
+        {action}
+      </div>
+      <div className="border border-line rounded" style={{ background: "var(--c-surface)", padding: "12px 14px" }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 export function RuleCheckAuditDetailDrawer({
   auditId,
   onClose,
@@ -112,6 +146,14 @@ export function RuleCheckAuditDetailDrawer({
             title={t("rc_drawer_neo4j_title")}
             cypher={`MATCH (a:RuleCheckAudit {audit_id: "${auditId}"})\nOPTIONAL MATCH (a)-[r]->(n)\nRETURN a, r, n`}
           />
+          <Btn
+            size="sm"
+            onClick={onReplay}
+            disabled={isReplaying}
+            title="重新发送此 audit 的源事件,等候新的 audit"
+          >
+            {isReplaying ? "重跑中…" : "🔁 Replay"}
+          </Btn>
           <Btn size="sm" onClick={onClose}>
             {t("rc_drawer_close")}
           </Btn>
@@ -146,8 +188,6 @@ export function RuleCheckAuditDetailDrawer({
           <>
             <DetailHeader
               detail={data.detail}
-              onReplay={onReplay}
-              isReplaying={isReplaying}
             />
             {replayMsg ? (
               <div
@@ -199,24 +239,20 @@ export function RuleCheckAuditDetailDrawer({
 
 function DetailHeader({
   detail,
-  onReplay,
-  isReplaying,
 }: {
   detail: RuleCheckAuditDetail;
-  onReplay: () => void;
-  isReplaying: boolean;
 }) {
   // A5 — 一句话决策摘要(给 leader / 客户最直观看的)
   const summary = buildDecisionSummary(detail);
   return (
     <>
-      <DecisionBanner detail={detail} summary={summary} onReplay={onReplay} isReplaying={isReplaying} />
+      <DecisionBanner detail={detail} summary={summary} />
       <div
         className="border-b border-line bg-panel grid"
         style={{
-          padding: "12px 18px",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: "8px 18px",
+          padding: "18px 22px",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          gap: "16px 28px",
         }}
       >
       <Kv label="decision">
@@ -265,29 +301,49 @@ function DetailHeader({
       <Kv label="trace_id">
         <span className="mono text-[11px]">{detail.trace_id || "—"}</span>
       </Kv>
-      {detail.failure_reasons.length > 0 ? (
-        <div className="col-span-4 mt-2">
-          <span className="hint">failure_reasons</span>
-          <div
-            className="mono text-[11.5px] text-err"
-            style={{ marginTop: 2 }}
-          >
-            {detail.failure_reasons.join(", ")}
-          </div>
-        </div>
-      ) : null}
-      {detail.parse_error ? (
-        <div className="col-span-4 mt-2">
-          <span className="hint">parse_error</span>
-          <div
-            className="mono text-[11px] text-warn"
-            style={{ marginTop: 2 }}
-          >
-            {detail.parse_error}
-          </div>
-        </div>
-      ) : null}
       </div>
+      {detail.failure_reasons.length > 0 && (
+        <div
+          className="border-b border-line"
+          style={{
+            padding: "12px 22px",
+            borderLeft: "3px solid var(--c-err)",
+            background: "var(--c-err-bg)",
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+          }}
+        >
+          <Ic.alert />
+          <div className="min-w-0 flex-1">
+            <div className="hint" style={{ color: "var(--c-err)" }}>failure reasons</div>
+            <div className="mono text-[12px] text-err" style={{ marginTop: 4, lineHeight: 1.5 }}>
+              {detail.failure_reasons.join("、")}
+            </div>
+          </div>
+        </div>
+      )}
+      {detail.parse_error && (
+        <div
+          className="border-b border-line"
+          style={{
+            padding: "12px 22px",
+            borderLeft: "3px solid var(--c-warn)",
+            background: "var(--c-warn-bg)",
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+          }}
+        >
+          <Ic.alert />
+          <div className="min-w-0 flex-1">
+            <div className="hint" style={{ color: "oklch(0.45 0.14 75)" }}>parse error</div>
+            <div className="mono text-[11px]" style={{ color: "oklch(0.45 0.14 75)", marginTop: 4, lineHeight: 1.5 }}>
+              {detail.parse_error}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -296,13 +352,9 @@ function DetailHeader({
 function DecisionBanner({
   detail,
   summary,
-  onReplay,
-  isReplaying,
 }: {
   detail: RuleCheckAuditDetail;
   summary: string;
-  onReplay: () => void;
-  isReplaying: boolean;
 }) {
   const pass = detail.decision === "PASS";
   const bgColor = pass
@@ -311,40 +363,38 @@ function DecisionBanner({
   const borderColor = pass ? "var(--c-ok)" : "var(--c-err)";
   return (
     <div
-      className="border-b border-line flex items-center gap-4"
+      className="border-b border-line flex items-center gap-5"
       style={{
-        padding: "14px 22px",
+        padding: "20px 22px",
         background: bgColor,
         borderLeft: `4px solid ${borderColor}`,
       }}
     >
       <div
-        className="font-bold tracking-tight"
+        className="tabular-nums"
         style={{
-          fontSize: 28,
+          fontFamily: SERIF,
+          fontSize: 36,
+          fontWeight: 500,
           color: borderColor,
-          minWidth: 90,
+          minWidth: 120,
           lineHeight: 1,
+          letterSpacing: "-0.02em",
         }}
       >
         {detail.decision}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] text-ink-1" style={{ lineHeight: 1.5 }}>
+        <div className="text-ink-1" style={{ fontSize: 14, lineHeight: 1.55 }}>
           {summary}
         </div>
-        <div
-          className="text-ink-3 mono text-[10.5px] mt-1 truncate"
-          style={{ marginTop: 4 }}
-        >
+        <div className="text-ink-3 mono text-[11px] mt-2 truncate">
           {detail.candidate_id?.slice(0, 8)} · {detail.job_requisition_id?.split("-").pop() || "?"}
           {detail.client_name ? ` · ${detail.client_name}` : ""}
           {detail.business_group ? ` × ${detail.business_group}` : ""}
         </div>
       </div>
-      <Btn size="sm" onClick={onReplay} disabled={isReplaying}>
-        {isReplaying ? "重跑中…" : "🔁 Replay"}
-      </Btn>
+      {/* Replay button moved to the top toolbar */}
     </div>
   );
 }
@@ -363,8 +413,13 @@ function buildDecisionSummary(detail: RuleCheckAuditDetail): string {
 function Kv({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="hint">{label}</div>
-      <div className="text-ink-1 flex items-center gap-2 truncate" style={{ marginTop: 2 }}>
+      <div
+        className="text-ink-3"
+        style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}
+      >
+        {label}
+      </div>
+      <div className="text-ink-1 flex items-center gap-2 truncate" style={{ marginTop: 6, fontSize: 13 }}>
         {children}
       </div>
     </div>
@@ -385,12 +440,13 @@ function TabBtn({
       onClick={onClick}
       className="text-[12.5px] border-0 bg-transparent cursor-pointer"
       style={{
-        padding: "10px 0 9px",
+        padding: "12px 0 10px",
         color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
         borderBottom: active
-          ? "2px solid var(--c-accent)"
-          : "2px solid transparent",
-        fontWeight: active ? 600 : 400,
+          ? "1.5px solid var(--c-ink-1)"
+          : "1.5px solid transparent",
+        fontWeight: active ? 500 : 400,
+        fontSize: 13,
       }}
     >
       {children}
