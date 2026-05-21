@@ -8,8 +8,12 @@ import type {
   JourneyAgentRollup,
 } from "@/app/api/entities/[type]/[id]/journey/route";
 import type { EntitySummaryResponse } from "@/app/api/entities/[type]/[id]/route";
+import type { CandidateTrackingResponse } from "@/app/api/events/candidates/route";
 import { EntityHeader } from "./EntityHeader";
 import { EntityTimeline } from "./EntityTimeline";
+import { PipelineRibbon } from "@/components/events/PipelineRibbon";
+import { type PipelineStage } from "@/lib/events/pipeline-stages";
+import { useApp } from "@/lib/i18n";
 
 type Density = "compact" | "full";
 
@@ -23,6 +27,7 @@ export function EntityJourneyContent({
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const { t, lang } = useApp();
   const density: Density = (searchParams.get("density") as Density) ?? "compact";
   const days = clamp(
     Number.parseInt(searchParams.get("days") ?? "", 10) || 30,
@@ -34,6 +39,10 @@ export function EntityJourneyContent({
   const [journey, setJourney] = React.useState<JourneyResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
+  const [candidateEvents, setCandidateEvents] = React.useState<{
+    events_by_name: Record<string, number>;
+    latest_stage: PipelineStage;
+  } | null>(null);
 
   React.useEffect(() => {
     let alive = true;
@@ -63,6 +72,23 @@ export function EntityJourneyContent({
     };
   }, [type, id, days]);
 
+  React.useEffect(() => {
+    if (type !== "Candidate") return;
+    let alive = true;
+    fetchJson<CandidateTrackingResponse>(`/api/events/candidates?windowHours=${days * 24}&limit=200`)
+      .then((r) => {
+        if (!alive) return;
+        const mine = r.candidates.find((c) => c.candidate_id === id);
+        if (mine) {
+          setCandidateEvents({ events_by_name: mine.events_by_name, latest_stage: mine.latest_stage });
+        } else {
+          setCandidateEvents({ events_by_name: {}, latest_stage: "other" });
+        }
+      })
+      .catch(() => { /* silent — ribbon just won't render */ });
+    return () => { alive = false; };
+  }, [type, id, days]);
+
   const setQuery = React.useCallback(
     (next: Record<string, string>) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -86,6 +112,21 @@ export function EntityJourneyContent({
         onDaysChange={(d) => setQuery({ days: String(d) })}
         onDensityChange={(d) => setQuery({ density: d })}
       />
+      {type === "Candidate" && candidateEvents && Object.keys(candidateEvents.events_by_name).length > 0 && (
+        <div className="border-b border-line bg-surface" style={{ padding: "16px 32px" }}>
+          <div
+            className="uppercase tracking-wide mb-3"
+            style={{ fontSize: 11.5, fontWeight: 500, letterSpacing: "0.05em", color: "var(--c-ink-3)" }}
+          >
+            {t("entity_journey_pipeline_title")}
+          </div>
+          <PipelineRibbon
+            current={candidateEvents.latest_stage}
+            eventsByName={candidateEvents.events_by_name}
+            lang={lang}
+          />
+        </div>
+      )}
       <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: "240px 1fr" }}>
         <aside className="border-r border-line bg-surface overflow-auto">
           <AgentSidebar agents={journey?.agentSummary ?? []} loading={loading} />

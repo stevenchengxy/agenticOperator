@@ -833,6 +833,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_filter_all: "全部",
     rc_loading: "加载中…",
     rc_clear_filters: "清空筛选",
+    rc_loaded_of_total: "已加载 {loaded} / {total} 条",
+    entity_journey_pipeline_title: "招聘流程进度",
     rc_empty_no_neo4j_title: "Neo4j 未配置",
     rc_empty_no_neo4j_hint:
       "设置 NEO4J_INSTANCE_URI / RAAS_LINKS_NEO4J_URI + USER + PASSWORD 后,matchResumeAgent 跑过的 rule-check 审计会自动写入并在这里显示。",
@@ -1873,6 +1875,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_filter_all: "All",
     rc_loading: "Loading…",
     rc_clear_filters: "Clear filters",
+    rc_loaded_of_total: "Loaded {loaded} of {total}",
+    entity_journey_pipeline_title: "Pipeline progress",
     rc_empty_no_neo4j_title: "Neo4j not configured",
     rc_empty_no_neo4j_hint:
       "Once NEO4J_INSTANCE_URI / RAAS_LINKS_NEO4J_URI + USER + PASSWORD are set, every rule-check audit from matchResumeAgent will land here.",

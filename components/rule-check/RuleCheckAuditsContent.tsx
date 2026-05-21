@@ -3,7 +3,7 @@ import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
-import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
+import { Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import type {
   RuleCheckAuditListResponse,
@@ -12,10 +12,12 @@ import type {
 import type { RuleCheckStatsResponse } from "@/app/api/rule-check-audits/stats/route";
 import { RuleCheckAuditDetailDrawer } from "./RuleCheckAuditDetailDrawer";
 
+const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
+
 export function RuleCheckAuditsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const decision = searchParams.get("decision") ?? "";
   const client = searchParams.get("client") ?? "";
   const jrId = searchParams.get("jrId") ?? "";
@@ -39,7 +41,7 @@ export function RuleCheckAuditsContent() {
       .finally(() => setLoading(false));
   }, [decision, client, jrId]);
 
-  // B4 — 价值锚 stats(独立 fetch,带 7d 窗口)
+  // value-anchor stats (7d window)
   React.useEffect(() => {
     fetchJson<RuleCheckStatsResponse>("/api/rule-check-audits/stats?days=7")
       .then(setStats)
@@ -64,26 +66,24 @@ export function RuleCheckAuditsContent() {
     router.replace(`/rule-check${sp.toString() ? "?" + sp.toString() : ""}`);
   };
 
+  const hasFilters = !!(decision || client || jrId);
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* B4 — value-anchor banner */}
+      {/* Serif KPI banner */}
       {stats && stats.total > 0 ? <ValueAnchorBanner stats={stats} t={t} /> : null}
 
-      {/* header + filters */}
-      <div
-        className="border-b border-line bg-surface flex items-center"
-        style={{ padding: "14px 22px", gap: 18 }}
-      >
-        <div>
-          <div className="text-[15px] font-semibold tracking-tight">
+      {/* Filter strip — horizontal row */}
+      <div className="border-b border-line bg-surface flex items-center gap-3" style={{ padding: "12px 26px" }}>
+        <div className="flex-1">
+          <div className="text-[14px] font-semibold text-ink-1" style={{ fontFamily: SERIF }}>
             {t("rc_audits_title")}
           </div>
-          <div className="text-ink-3 text-[12px] mt-px">
+          <div className="text-[11.5px] text-ink-3 mt-0.5">
             {t("rc_audits_sub")}
             {data ? ` · ${data.total.toLocaleString()} ${t("rc_count_unit")}` : ""}
           </div>
         </div>
-        <div className="flex-1" />
         <FilterSelect
           label={t("rc_filter_decision")}
           value={decision}
@@ -106,8 +106,15 @@ export function RuleCheckAuditsContent() {
           onChange={(v) => setFilter("jrId", v)}
           placeholder="JR_..."
         />
+        {hasFilters && (
+          <Btn size="sm" variant="ghost" onClick={() => router.replace("/rule-check?view=audits")}>
+            {t("rc_clear_filters")}
+          </Btn>
+        )}
       </div>
-      <div className="flex-1 overflow-auto" style={{ padding: "16px 22px" }}>
+
+      {/* Audit list */}
+      <div className="flex-1 overflow-auto" style={{ padding: "16px 26px 40px" }}>
         {loading && !data ? (
           <EmptyState title={t("rc_loading")} hint="" />
         ) : data?.meta.not_configured ? (
@@ -139,27 +146,23 @@ export function RuleCheckAuditsContent() {
             }
           />
         ) : (
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th style={{ width: 150 }}>{t("rc_col_time")}</th>
-                <th style={{ width: 70 }}>{t("rc_col_decision")}</th>
-                <th style={{ width: 130 }}>{t("rc_col_client_bg")}</th>
-                <th>{t("rc_col_candidate_jr")}</th>
-                <th style={{ width: 90 }}>{t("rc_col_flags")}</th>
-                <th style={{ width: 110 }}>{t("rc_col_llm_model")}</th>
-                <th style={{ width: 90 }}>{t("rc_col_duration")}</th>
-                <th style={{ width: 110 }}>{t("rc_col_rule_source")}</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            <div className="flex flex-col gap-1">
               {data.rows.map((r) => (
-                <AuditRow key={r.audit_id} row={r} onOpen={openDetail} t={t} />
+                <AuditCard key={r.audit_id} row={r} onOpen={openDetail} t={t} lang={lang} />
               ))}
-            </tbody>
-          </table>
+            </div>
+            {data.rows.length > 0 && data.total > data.rows.length && (
+              <div className="text-[11px] text-ink-3 text-center mt-4">
+                {t("rc_loaded_of_total")
+                  .replace("{loaded}", String(data.rows.length))
+                  .replace("{total}", String(data.total))}
+              </div>
+            )}
+          </>
         )}
       </div>
+
       {openAuditId ? (
         <RuleCheckAuditDetailDrawer
           auditId={openAuditId}
@@ -170,89 +173,71 @@ export function RuleCheckAuditsContent() {
   );
 }
 
-// B4 — value-anchor banner
+// ── Serif KPI banner ─────────────────────────────────────────────────────────
+
 function ValueAnchorBanner({ stats, t }: { stats: RuleCheckStatsResponse; t: (k: string) => string }) {
   const pct = stats.total > 0 ? Math.round((stats.fail / stats.total) * 100) : 0;
   return (
-    <div
-      className="border-b border-line"
-      style={{
-        padding: "12px 22px",
-        background: "color-mix(in oklab, var(--c-accent) 5%, var(--c-bg))",
-        display: "grid",
-        gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-        gap: 16,
-      }}
-    >
-      <Stat
-        label={t("rc_stat_audits_7d")}
-        value={stats.total.toLocaleString()}
-        sub={`PASS ${stats.pass} · FAIL ${stats.fail}`}
-      />
-      <Stat
-        label={t("rc_stat_blocked")}
-        value={`${stats.blocked_robohire_calls}`}
-        sub={`${t("rc_stat_blocked_sub_pre")} ${pct}% · ${t("rc_stat_blocked_sub_post")}`}
-        accent="err"
-      />
-      <Stat
-        label={t("rc_stat_savings")}
-        value={`$${stats.estimated_robohire_savings_usd.toFixed(2)}`}
-        sub={t("rc_stat_savings_sub")}
-        accent="ok"
-      />
-      <Stat
-        label={t("rc_stat_llm_duration")}
-        value={`${(stats.avg_llm_duration_ms / 1000).toFixed(1)}s`}
-        sub={`${(stats.total_prompt_tokens / 1000).toFixed(1)}K + ${(stats.total_completion_tokens / 1000).toFixed(1)}K tokens`}
-      />
-      <Stat
-        label={t("rc_stat_top_fail_rules")}
-        value={
-          stats.top_failure_rules
-            .slice(0, 3)
-            .map((r) => r.rule_id)
-            .join(" · ") || "—"
-        }
-        sub={stats.top_failure_rules
-          .slice(0, 3)
-          .map((r) => `${r.rule_id}(${r.count})`)
-          .join(", ")}
-      />
+    <div className="border-b border-line" style={{ padding: "20px 26px", background: "var(--c-bg)" }}>
+      <div
+        className="grid gap-x-10 gap-y-4"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
+      >
+        <Kpi
+          label={t("rc_stat_audits_7d")}
+          value={stats.total.toLocaleString()}
+          sub={`PASS ${stats.pass} · FAIL ${stats.fail}`}
+        />
+        <Kpi
+          label={t("rc_stat_blocked")}
+          value={`${stats.blocked_robohire_calls}`}
+          sub={`${pct}% 拦截率`}
+          tone="err"
+        />
+        <Kpi
+          label={t("rc_stat_savings")}
+          value={`$${stats.estimated_robohire_savings_usd.toFixed(2)}`}
+          sub={t("rc_stat_savings_sub")}
+          tone="ok"
+        />
+        <Kpi
+          label={t("rc_stat_llm_duration")}
+          value={`${(stats.avg_llm_duration_ms / 1000).toFixed(1)}s`}
+          sub={`${(stats.total_prompt_tokens / 1000).toFixed(1)}K + ${(stats.total_completion_tokens / 1000).toFixed(1)}K tokens`}
+        />
+        <Kpi
+          label={t("rc_stat_top_fail_rules")}
+          value={stats.top_failure_rules[0]?.rule_id ?? "—"}
+          sub={stats.top_failure_rules.slice(0, 3).map((r) => `${r.rule_id}(${r.count})`).join(", ")}
+        />
+      </div>
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: "ok" | "err";
-}) {
-  const valueColor =
-    accent === "ok" ? "var(--c-ok)" : accent === "err" ? "var(--c-err)" : "var(--c-ink-1)";
+function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "ok" | "err" }) {
+  const color = tone === "ok" ? "var(--c-ok)" : tone === "err" ? "var(--c-err)" : "var(--c-ink-1)";
   return (
-    <div>
-      <div className="hint">{label}</div>
+    <div className="min-w-0">
+      <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500, color: "var(--c-ink-3)" }}>
+        {label}
+      </div>
       <div
-        className="mono"
-        style={{ fontSize: 17, fontWeight: 600, color: valueColor, marginTop: 2 }}
+        className="tabular-nums truncate"
+        style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1.1, color, marginTop: 6 }}
       >
         {value}
       </div>
-      {sub ? (
-        <div className="text-ink-3 text-[10.5px] mono" style={{ marginTop: 2 }}>
+      {sub && (
+        <div className="text-ink-3 mono" style={{ fontSize: 11, marginTop: 4 }}>
           {sub}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
+
+// ── Filter helpers ───────────────────────────────────────────────────────────
 
 function FilterInput({
   label,
@@ -309,48 +294,86 @@ function FilterSelect({
   );
 }
 
-function AuditRow({
+// ── Audit card ────────────────────────────────────────────────────────────────
+
+function AuditCard({
   row,
   onOpen,
   t: _t,
+  lang,
 }: {
   row: RuleCheckAuditRow;
   onOpen: (auditId: string) => void;
   t: (k: string) => string;
+  lang: "zh" | "en";
 }) {
-  const t = row.created_at ? new Date(row.created_at) : null;
-  const time = t
-    ? `${t.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" })} ${t.toLocaleTimeString(undefined, { hour12: false })}`
-    : "—";
-  const decisionVariant: "ok" | "err" = row.decision === "PASS" ? "ok" : "err";
+  const pass = row.decision === "PASS";
+  const accent = pass ? "var(--c-ok)" : "var(--c-err)";
   return (
-    <tr
-      className="cursor-pointer hover:bg-panel"
+    <button
+      type="button"
       onClick={() => onOpen(row.audit_id)}
+      className="text-left cursor-pointer rounded-lg transition-all"
+      style={{
+        padding: "12px 14px",
+        background: "var(--c-surface)",
+        border: "1px solid var(--c-line)",
+        borderLeft: `3px solid ${accent}`,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--c-panel)";
+        e.currentTarget.style.transform = "translateY(-1px)";
+        e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "var(--c-surface)";
+        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.boxShadow = "none";
+      }}
     >
-      <td className="mono text-[11px] text-ink-2">{time}</td>
-      <td>
-        <Badge variant={decisionVariant}>{row.decision}</Badge>
-      </td>
-      <td className="mono text-[11.5px] text-ink-1">
-        {row.client_name || "—"}
-        {row.business_group ? ` × ${row.business_group}` : ""}
-      </td>
-      <td className="mono text-[11px] text-ink-2 truncate max-w-[400px]">
-        <span className="text-ink-1">{row.candidate_id || "—"}</span>
-        <span className="text-ink-3"> / </span>
-        <span>{row.job_requisition_id || "—"}</span>
-      </td>
-      <td className="mono text-[11px] text-ink-2">
-        {row.n_flags > 0 ? `${row.n_flags}/${row.rules_evaluated}` : `0/${row.rules_evaluated}`}
-      </td>
-      <td className="mono text-[10.5px] text-ink-3">{row.llm_model || "—"}</td>
-      <td className="mono text-[11px] text-ink-2">
-        {row.llm_duration_ms ? `${row.llm_duration_ms}ms` : "—"}
-      </td>
-      <td>
-        <Badge variant="default">{row.rule_source}</Badge>
-      </td>
-    </tr>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <span
+            className="rounded-full font-mono text-[11px] flex-shrink-0"
+            style={{
+              padding: "2px 9px",
+              background: pass ? "var(--c-ok-bg)" : "var(--c-err-bg)",
+              color: accent,
+              fontWeight: 600,
+            }}
+          >
+            {row.decision}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] text-ink-1 truncate" style={{ fontFamily: SERIF, fontWeight: 500 }}>
+              {row.client_name || "—"}{row.business_group ? ` × ${row.business_group}` : ""}
+            </div>
+            <div className="text-[10.5px] text-ink-3 mono truncate mt-0.5">
+              {row.candidate_id || "—"} → {row.job_requisition_id || "—"}
+            </div>
+          </div>
+        </div>
+        <div className="text-[11px] text-ink-3 text-right flex-shrink-0">
+          <div className="mono">{formatRelative(row.created_at, lang)}</div>
+          <div className="mono mt-0.5 text-ink-4">
+            {row.n_flags > 0 ? `${row.n_flags}/${row.rules_evaluated}` : `0/${row.rules_evaluated}`} flags
+            {row.llm_duration_ms ? ` · ${row.llm_duration_ms}ms` : ""}
+          </div>
+        </div>
+      </div>
+    </button>
   );
+}
+
+function formatRelative(iso: string | null | undefined, lang: "zh" | "en"): string {
+  if (!iso) return "—";
+  const then = new Date(iso).getTime();
+  const diffMin = Math.floor((Date.now() - then) / 60_000);
+  if (diffMin < 1) return lang === "zh" ? "刚刚" : "just now";
+  if (diffMin < 60) return lang === "zh" ? `${diffMin}分钟前` : `${diffMin}m ago`;
+  const h = Math.floor(diffMin / 60);
+  if (h < 24) return lang === "zh" ? `${h}小时前` : `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return lang === "zh" ? `${d}天前` : `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
