@@ -7,6 +7,7 @@ import { useInngestEvents, type InngestEventRow } from "@/lib/api/inngest-events
 import { useEmHealth } from "@/lib/api/em-health";
 import { fetchJson } from "@/lib/api/client";
 import type { EventsResponse, EventContract } from "@/lib/api/types";
+import { CandidateTrackingTab } from "./CandidateTrackingTab";
 
 // /events — 事件
 //
@@ -50,7 +51,7 @@ export function EventsContent() {
   const filterName = sp.get("name");
   const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d";
   const selectedId = sp.get("id");
-  const view = (sp.get("view") ?? "stream") as "stream" | "dlq";
+  const view = (sp.get("view") ?? "stream") as "stream" | "dlq" | "candidates";
   // registration filter — disabled in UI for now (development), but the
   // URL state and filtering logic are wired so we can flip the disable bit
   // when the team's ready to QA it.
@@ -113,9 +114,13 @@ export function EventsContent() {
         {/* view toggle: stream vs DLQ */}
         <div className="flex items-center gap-1 mt-4">
           <ViewToggle
-            value={view}
+            value={view === "candidates" ? "stream" : view}
             dlqCount={dlq.total}
             onChange={(v) => setUrl((p) => v === "stream" ? p.delete("view") : p.set("view", v))}
+          />
+          <CandidatesToggleBtn
+            active={view === "candidates"}
+            onClick={() => setUrl((p) => view === "candidates" ? p.delete("view") : p.set("view", "candidates"))}
           />
         </div>
 
@@ -149,7 +154,9 @@ export function EventsContent() {
         </div>
       </div>
 
-      {view === "dlq" ? (
+      {view === "candidates" ? (
+        <CandidateTrackingTab />
+      ) : view === "dlq" ? (
         <DlqView dlq={dlq} />
       ) : (
       /* main split: list left, payload right */
@@ -782,6 +789,26 @@ function ViewToggle({
         </button>
       ))}
     </div>
+  );
+}
+
+function CandidatesToggleBtn({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="transition-colors rounded flex items-center gap-1.5"
+      style={{
+        padding: "5px 12px",
+        fontSize: 13,
+        color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
+        background: active ? "var(--c-panel)" : "transparent",
+        fontWeight: active ? 500 : 400,
+        border: active ? "1px solid var(--c-line)" : "1px solid transparent",
+        marginLeft: 4,
+      }}
+    >
+      候选人追踪
+    </button>
   );
 }
 
