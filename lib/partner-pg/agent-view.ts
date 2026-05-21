@@ -170,6 +170,16 @@ const MAX_FILTER_FETCH = 500;
  *
  * 可选 resumeFilename 仍然做 F2 fuzzy match(零回归 fallback)。
  */
+/**
+ * @deprecated 2026-05-21 — RAAS partner clarified the correct truth source
+ * for "员工在招岗位" is `requirement_claim` (recruiter claim relationship),
+ * NOT `spec.hsm_employee_id` + posting existence. Old logic returned
+ * draft/pending postings too, which surfaces as "RAAS 看不到我们做的匹配".
+ *
+ * Use `getRecruitingJobsAsRequirements` from `./recruiting-jobs` instead.
+ * This function is retained only for transitional rollback safety and
+ * will be deleted in a follow-up PR once the new path is stable in prod.
+ */
 export async function getHsmJobPostingsAsRequirements(
   opts: AgentViewOptions,
 ): Promise<AgentViewResult> {

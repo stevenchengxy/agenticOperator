@@ -22,10 +22,8 @@ import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
 import { extractDims } from '@/lib/rule-check/ontology';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
-import {
-  getRequirementsAgentView,
-  getHsmJobPostingsAsRequirements,
-} from '@/lib/partner-pg/agent-view';
+import { getRequirementsAgentView } from '@/lib/partner-pg/agent-view';
+import { getRecruitingJobsAsRequirements } from '@/lib/partner-pg/recruiting-jobs';
 import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
 /**
  * RequirementsAgentViewItem stays loose (Record<string, unknown>) here on
@@ -136,37 +134,43 @@ export async function ruleCheckAgentHandler({
       }
       return [merged];
     }
-    // 2026-05-20 path B 改造:不再扫 claimer 的 requirement_claim,
-    // 改成"HSM 名下有 Job_Posting 才匹配"——
-    //   - 没 Job_Posting → 停止匹配(JR 还是草稿,不该 rule-check)
-    //   - 有 Job_Posting → 反推 JR,逐一 rule-check
+    // 2026-05-21 path B 收敛 — 按 RAAS partner 契约:
+    //   - 真相源 = requirement_claim 表(recruiter 认领关系,不是 spec.hsm_*)
+    //   - 招聘中 = job_posting.publish_status IN ('distributed','published')
+    //   - 单条 SQL,JR + posting + claim 一起 JOIN 出来
+    //   - draft / pending / closed 全过滤掉,只跑真的发布的岗位
+    //
+    // 实现:lib/partner-pg/recruiting-jobs.ts → getRecruitingJobsAsRequirements
+    // 是适配层,把 partner spec 的 RecruitingJobRow[] 摊平成
+    // AgentViewItem[],下游 helper 不用改。
     const resumeFilenameRaw =
       typeof data.filename === 'string' && data.filename.trim()
         ? data.filename.trim()
         : undefined;
     logger.info(
-      `[${AGENT_NAME}] path-B HSM Job_Postings lookup · hsm=${employeeId}` +
+      `[${AGENT_NAME}] path-B recruiting JR lookup · recruiter_employee_id=${employeeId}` +
         (resumeFilenameRaw ? ` · resume_filename="${resumeFilenameRaw}"` : ''),
     );
-    const r = await getHsmJobPostingsAsRequirements({
-      claimerEmployeeId: employeeId, // HSM employee_id, 字段复用
+    const r = await getRecruitingJobsAsRequirements({
+      claimerEmployeeId: employeeId,
       resumeFilename: resumeFilenameRaw,
     });
     if ((r.items?.length ?? 0) === 0) {
       logger.warn(
-        `[${AGENT_NAME}] path-B HSM ${employeeId} 名下 0 个 Job_Posting,停止匹配`,
+        `[${AGENT_NAME}] path-B recruiter ${employeeId} 名下 0 个 published 岗位,停止匹配`,
       );
       return [] as RequirementsAgentViewItem[];
     }
-    const recruiting = (r.items ?? []).filter((it) =>
-      isRecruitingStatus(it as unknown as RequirementsAgentViewItem),
-    );
-    const matchable = recruiting.filter((it) =>
+    // hasMatchableContent 仍然保留 — partner spec 已经按 publish_status 过滤
+    // 掉草稿/未发布的,但 JR 还可能缺业务内容(空 job_responsibility 等),
+    // hasMatchableContent 是最后一道防线。isRecruitingStatus 不再需要 —
+    // 上游已经按 publish_status 严格筛了。
+    const matchable = (r.items ?? []).filter((it) =>
       hasMatchableContent(it as unknown as RequirementsAgentViewItem),
     );
     logger.info(
-      `[${AGENT_NAME}] path-B HSM has ${r.items?.length ?? 0} Job_Posting → ` +
-        `${recruiting.length} recruiting JR · ${matchable.length} matchable`,
+      `[${AGENT_NAME}] path-B recruiter has ${r.items?.length ?? 0} published JR → ` +
+        `${matchable.length} matchable`,
     );
     return matchable as unknown as RequirementsAgentViewItem[];
   });
@@ -180,7 +184,7 @@ export async function ruleCheckAgentHandler({
       requested_count: 0,
       reason:
         linkedJrId === null
-          ? 'no-job-postings-under-hsm'
+          ? 'no-published-jr-claimed-by-recruiter'
           : 'no-matchable-requirements',
     };
   }

@@ -3,6 +3,8 @@ import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
+import { InngestDlqTab } from "./InngestDlqTab";
+import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, deploymentKind, displayName as agentDisplayName } from "@/lib/agent-mapping";
 import { WSID_TO_INNGEST_SLUG } from "@/lib/api/inngest-live-overlay";
 import {
@@ -42,22 +44,30 @@ const REAL_AGENT_SHORTS = DEPLOYED_AGENT_SHORTS;
 
 type StatusFilter = "all" | RunStatus;
 type WindowId = "1h" | "24h" | "7d";
+type TabId = "runs" | "dlq";
 
 export function MonitorContent() {
   const router = useRouter();
   const sp = useSearchParams();
+  const { t } = useApp();
 
   const agentFilter = sp.get("agent");
   const statusFilter = (sp.get("status") ?? "all") as StatusFilter;
   const windowId = (sp.get("window") ?? "24h") as WindowId;
   const eventName = sp.get("event");
   const runIdParam = sp.get("run");
+  const tab: TabId = (sp.get("tab") === "dlq" ? "dlq" : "runs");
 
   const setUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(sp.toString());
     mut(next);
     router.replace(`/monitor${next.toString() ? `?${next.toString()}` : ""}`);
   }, [router, sp]);
+
+  const setTab = (next: TabId) => setUrl((p) => {
+    if (next === "runs") p.delete("tab");
+    else p.set("tab", next);
+  });
 
   const agentSlug = React.useMemo(() => {
     if (!agentFilter) return null;
@@ -157,50 +167,81 @@ export function MonitorContent() {
         </div>
       </div>
 
-      {/* infrastructure status — preserved per user request 2026-05-19 */}
-      <div style={{ padding: "16px 32px 0" }}>
-        <div className="text-ink-3 mb-2 flex items-baseline gap-2" style={{ fontSize: 12 }}>
-          基础设施
-        </div>
-        <SystemStatusCards />
-      </div>
-
-      {/* secondary filter toolbar */}
-      <div className="flex items-center gap-3 mt-4 flex-wrap" style={{ padding: "10px 32px", fontSize: 12.5 }}>
-        <span className="text-ink-3">智能体</span>
-        <AgentFilter
-          value={agentFilter}
-          onChange={(v) => setUrl((p) => v ? p.set("agent", v) : p.delete("agent"))}
-        />
-        {(agentFilter || eventName || statusFilter !== "all") && (
+      {/* tab nav */}
+      <div className="flex items-center gap-1 border-b border-line" style={{ padding: "0 32px" }}>
+        {(["runs", "dlq"] as TabId[]).map((id) => (
           <button
-            onClick={() => setUrl((p) => { p.delete("agent"); p.delete("event"); p.delete("status"); })}
-            className="text-ink-3 hover:text-ink-1"
+            key={id}
+            onClick={() => setTab(id)}
+            className="transition-colors"
+            style={{
+              padding: "10px 14px",
+              borderBottom: tab === id ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
+              color: tab === id ? "var(--c-ink-1)" : "var(--c-ink-3)",
+              fontWeight: tab === id ? 500 : 400,
+              fontSize: 13,
+              marginBottom: -1,
+            }}
           >
-            清空筛选
+            {t(id === "runs" ? "monitor_tab_runs" : "monitor_tab_dlq")}
           </button>
-        )}
-        {eventName && (
-          <span className="inline-flex items-center gap-1.5 text-ink-2 rounded border border-line bg-surface" style={{ padding: "3px 9px", fontSize: 12 }}>
-            <span className="text-ink-3">事件</span> {eventName}
-            <button onClick={() => setUrl((p) => p.delete("event"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
-          </span>
-        )}
+        ))}
       </div>
 
-      <div className="flex-1 min-h-0" style={{ padding: "8px 32px 48px" }}>
-        {runs === null && (
-          <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
-        )}
-        {runs !== null && filtered.length === 0 && (
-          <div className="text-ink-3 text-[13px] text-center py-16">
-            没有匹配当前筛选的运行记录
+      {tab === "runs" && (
+        <>
+          {/* infrastructure status — preserved per user request 2026-05-19 */}
+          <div style={{ padding: "16px 32px 0" }}>
+            <div className="text-ink-3 mb-2 flex items-baseline gap-2" style={{ fontSize: 12 }}>
+              基础设施
+            </div>
+            <SystemStatusCards />
           </div>
-        )}
-        {runs !== null && filtered.length > 0 && (
-          <RunsList runs={filtered} initialExpandedId={runIdParam} />
-        )}
-      </div>
+
+          {/* secondary filter toolbar */}
+          <div className="flex items-center gap-3 mt-4 flex-wrap" style={{ padding: "10px 32px", fontSize: 12.5 }}>
+            <span className="text-ink-3">智能体</span>
+            <AgentFilter
+              value={agentFilter}
+              onChange={(v) => setUrl((p) => v ? p.set("agent", v) : p.delete("agent"))}
+            />
+            {(agentFilter || eventName || statusFilter !== "all") && (
+              <button
+                onClick={() => setUrl((p) => { p.delete("agent"); p.delete("event"); p.delete("status"); })}
+                className="text-ink-3 hover:text-ink-1"
+              >
+                清空筛选
+              </button>
+            )}
+            {eventName && (
+              <span className="inline-flex items-center gap-1.5 text-ink-2 rounded border border-line bg-surface" style={{ padding: "3px 9px", fontSize: 12 }}>
+                <span className="text-ink-3">事件</span> {eventName}
+                <button onClick={() => setUrl((p) => p.delete("event"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
+              </span>
+            )}
+          </div>
+
+          <div className="flex-1 min-h-0" style={{ padding: "8px 32px 48px" }}>
+            {runs === null && (
+              <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
+            )}
+            {runs !== null && filtered.length === 0 && (
+              <div className="text-ink-3 text-[13px] text-center py-16">
+                没有匹配当前筛选的运行记录
+              </div>
+            )}
+            {runs !== null && filtered.length > 0 && (
+              <RunsList runs={filtered} initialExpandedId={runIdParam} />
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === "dlq" && (
+        <div style={{ padding: "20px 32px" }}>
+          <InngestDlqTab />
+        </div>
+      )}
     </div>
   );
 }

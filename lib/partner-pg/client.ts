@@ -3,6 +3,14 @@
 // Connection pool to partner's Postgres at 192.168.1.103:5432/raas_db.
 // Singleton — reuse across all agents and all Inngest steps.
 //
+// HMR-safe: in Next.js dev mode the module is re-evaluated on every file
+// change, which would otherwise leak a new pg.Pool per HMR cycle. We
+// stash the pool on globalThis under a guarded key so re-imports reuse
+// the same pool (and only in dev — production keeps strict module-local
+// state). Verified by the partner spec's acceptance criteria:
+//   "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE …
+//    不持续增长"
+//
 // Per 2026-05-20 dual-write decision: AO writes directly to partner's
 // Postgres, replacing the RAAS HTTP API. See:
 //   docs/superpowers/specs/2026-05-20-ao-direct-dual-write-event-flow.md
@@ -11,7 +19,12 @@
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { currentLogger } from '@/lib/agent-logger';
 
-let pool: Pool | null = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var __raasPgPool: Pool | undefined;
+}
+
+let pool: Pool | null = globalThis.__raasPgPool ?? null;
 
 // First non-empty line of the SQL (collapsed) — used as the apiCall label so
 // "pg.SELECT candidate_id FROM candidate WHERE …" shows up grouped in logs.
@@ -57,27 +70,43 @@ async function loggedQuery<T extends QueryResultRow = QueryResultRow>(
   }
 }
 
+function readPgUrl(): string | null {
+  // RAAS_PG_URL is the partner-contract canonical name (per 2026-05-21
+  // recruiting-jobs spec). RAAS_POSTGRES_URL is our legacy name, kept as
+  // fallback so existing deployments don't have to flip env in lock-step.
+  return (
+    process.env.RAAS_PG_URL?.trim() ||
+    process.env.RAAS_POSTGRES_URL?.trim() ||
+    null
+  );
+}
+
 function getPool(): Pool {
   if (pool) return pool;
-  const url = process.env.RAAS_POSTGRES_URL?.trim();
+  const url = readPgUrl();
   if (!url) {
-    throw new Error('[partner-pg] RAAS_POSTGRES_URL not set in env');
+    throw new Error('[partner-pg] RAAS_PG_URL / RAAS_POSTGRES_URL not set in env');
   }
   pool = new Pool({
     connectionString: url,
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
+    statement_timeout: 5_000,
   });
   pool.on('error', (err) => {
     // eslint-disable-next-line no-console
     console.error('[partner-pg] idle client error:', err.message);
   });
+  if (process.env.NODE_ENV !== 'production') {
+    // Survive Next.js HMR re-imports — see header comment.
+    globalThis.__raasPgPool = pool;
+  }
   return pool;
 }
 
 export function isPartnerPgConfigured(): boolean {
-  return !!process.env.RAAS_POSTGRES_URL?.trim();
+  return !!readPgUrl();
 }
 
 export async function query<T extends QueryResultRow = QueryResultRow>(
@@ -147,5 +176,8 @@ export async function close(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = null;
+    if (process.env.NODE_ENV !== 'production') {
+      globalThis.__raasPgPool = undefined;
+    }
   }
 }
