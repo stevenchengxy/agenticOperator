@@ -991,6 +991,17 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_anchor_candidate_note: "snapshot 派生 flags + name/gender/birth_date(剔除 PII)",
     rc_anchor_resume_note: "companies / skills(拍平)/ highest_degree 等",
     rc_anchor_jr_note: "must_have_skills / work_years / salary_range 等",
+
+    // Global chat bubble (Task γ.D)
+    chat_open: "打开追踪助手",
+    chat_close: "关闭",
+    chat_context_label: "当前页面",
+    chat_empty_hint: "问我关于 run / event / audit / 候选人的问题。AI 会用工具查实数据。",
+    chat_thinking: "AI 思考中…",
+    chat_input_placeholder: "问任何问题…",
+    chat_send: "发送",
+    chat_send_fail: "发送失败",
+    chat_new_session: "新建会话",
   },
   en: {
     brand: "Agentic Operator",
@@ -1977,6 +1988,17 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_anchor_candidate_note: "snapshot-derived flags + name/gender/birth_date (PII stripped)",
     rc_anchor_resume_note: "companies / skills (flattened) / highest_degree etc.",
     rc_anchor_jr_note: "must_have_skills / work_years / salary_range etc.",
+
+    // Global chat bubble (Task γ.D)
+    chat_open: "Open tracing assistant",
+    chat_close: "Close",
+    chat_context_label: "Current page",
+    chat_empty_hint: "Ask about runs, events, audits, or candidates. AI calls tools to look up real data.",
+    chat_thinking: "AI is thinking…",
+    chat_input_placeholder: "Ask anything…",
+    chat_send: "Send",
+    chat_send_fail: "Send failed",
+    chat_new_session: "New session",
   },
 };
 

@@ -3,6 +3,7 @@ import React from "react";
 import { AppBar } from "./AppBar";
 import { LeftNav } from "./LeftNav";
 import { CommandPalette } from "./CommandPalette";
+import { GlobalChatBubble } from "@/components/chat/GlobalChatBubble";
 
 export function Shell({
   crumbs = [],
@@ -38,6 +39,7 @@ export function Shell({
           {directionTag}
         </div>
       )}
+      <GlobalChatBubble />
       <CommandPalette open={open} onClose={() => setOpen(false)} />
     </div>
   );
