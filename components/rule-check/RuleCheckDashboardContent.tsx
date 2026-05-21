@@ -2,6 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { fetchJson } from "@/lib/api/client";
+import { useApp } from "@/lib/i18n";
 
 // Rule Check Dashboard (陈洋 macro view).
 // Per Kenny / 2026-05-13 review:
@@ -65,11 +66,21 @@ type MatrixRule = {
   not_applicable: number;
 };
 
+type OntologyRulesResponse = {
+  ok: true;
+  rules: Array<{ id: string; name?: string; severity?: string; applicableDepartment?: string }>;
+  source: "ontology-api" | "json-fallback";
+  fetched_at: string;
+  api_error?: string;
+};
+
 export function RuleCheckDashboardContent() {
+  const { t } = useApp();
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [audits, setAudits] = React.useState<AuditListRow[] | null>(null);
   const [details, setDetails] = React.useState<Record<string, AuditDetail | "error">>({});
   const [matrix, setMatrix] = React.useState<{ rules: MatrixRule[]; total_audits: number } | null>(null);
+  const [ontology, setOntology] = React.useState<OntologyRulesResponse | null>(null);
   const [windowDays, setWindowDays] = React.useState<7 | 30 | 90>(7);
   const [auditLimit, setAuditLimit] = React.useState(12);
 
@@ -87,6 +98,22 @@ export function RuleCheckDashboardContent() {
       .catch(() => { if (!cancel) setAudits(null); });
     return () => { cancel = true; };
   }, [windowDays, auditLimit]);
+
+  // Fetch ontology full rule set with 30s polling
+  React.useEffect(() => {
+    let cancel = false;
+    async function load() {
+      try {
+        const r = await fetchJson<OntologyRulesResponse>("/api/ontology/rules");
+        if (!cancel) setOntology(r);
+      } catch {
+        if (!cancel) setOntology(null);
+      }
+    }
+    load();
+    const timer = setInterval(load, 30_000); // 30s polling
+    return () => { cancel = true; clearInterval(timer); };
+  }, []);
 
   // Fetch per-audit flags for the grid cells
   React.useEffect(() => {
@@ -115,12 +142,33 @@ export function RuleCheckDashboardContent() {
 
   // Build the grid: rule_id × audit_id → result
   const grid = React.useMemo(() => {
-    if (!audits || !matrix) return null;
-    const ruleOrder = [...matrix.rules]
-      .sort((a, b) => {
-        if (a.fail !== b.fail) return b.fail - a.fail;
-        return b.total - a.total;
-      });
+    if (!audits || !matrix || !ontology) return null;
+
+    // Build per-rule audit counts from matrix for the badge data
+    const matrixByRuleId = new Map(matrix.rules.map((r) => [r.rule_id, r]));
+
+    // Rows = ontology full set (including dead rules)
+    const rows: MatrixRule[] = ontology.rules.map((or) => {
+      const m = matrixByRuleId.get(or.id);
+      return {
+        rule_id: or.id,
+        rule_name: m?.rule_name ?? or.name ?? or.id,
+        total: m?.total ?? 0,
+        pass: m?.pass ?? 0,
+        fail: m?.fail ?? 0,
+        not_applicable: m?.not_applicable ?? 0,
+      };
+    });
+
+    // Sort: dead rules sink to bottom; among the rest, by fail desc then total desc
+    rows.sort((a, b) => {
+      const aDead = a.total === 0 ? 1 : 0;
+      const bDead = b.total === 0 ? 1 : 0;
+      if (aDead !== bDead) return aDead - bDead;
+      if (a.fail !== b.fail) return b.fail - a.fail;
+      return b.total - a.total;
+    });
+
     const cellByRuleAudit = new Map<string, Map<string, string>>();
     for (const a of audits) {
       const d = details[a.audit_id];
@@ -130,8 +178,8 @@ export function RuleCheckDashboardContent() {
         cellByRuleAudit.get(f.rule_id)!.set(a.audit_id, f.result);
       }
     }
-    return { rules: ruleOrder, cells: cellByRuleAudit };
-  }, [audits, matrix, details]);
+    return { rules: rows, cells: cellByRuleAudit };
+  }, [audits, matrix, ontology, details]);
 
   const passRate = stats && stats.total > 0 ? (stats.pass / stats.total) * 100 : null;
   const lowCoverage = (matrix?.rules ?? []).filter(
@@ -152,6 +200,24 @@ export function RuleCheckDashboardContent() {
         <WindowToggle value={windowDays} onChange={setWindowDays} />
       </div>
 
+      {/* Fallback warn badge */}
+      {ontology?.source === "json-fallback" && (
+        <div
+          className="border border-line rounded inline-flex items-center gap-2"
+          style={{
+            padding: "6px 10px",
+            background: "var(--c-warn-bg)",
+            color: "oklch(0.45 0.14 75)",
+            fontSize: 12,
+            alignSelf: "flex-start",
+          }}
+          title={ontology.api_error}
+        >
+          <span>⚠</span>
+          <span>{t("rc_rules_fallback_warn")}</span>
+        </div>
+      )}
+
       {/* KPI strip */}
       <div className="grid gap-x-8 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
         <Kpi label="审计总数" value={stats?.total != null ? String(stats.total) : "—"} />
@@ -159,6 +225,15 @@ export function RuleCheckDashboardContent() {
         <Kpi label="失败" value={stats?.fail != null ? String(stats.fail) : "—"} tone={stats && stats.fail > 0 ? "err" : "muted"} />
         <Kpi label="拦截的 RoboHire 调用" value={stats?.blocked_robohire_calls != null ? String(stats.blocked_robohire_calls) : "—"} tone="ok" sub={stats ? `节省 $${stats.estimated_robohire_savings_usd.toFixed(2)}` : undefined} />
         <Kpi label="覆盖的 rules" value={matrix ? String(matrix.rules.length) : "—"} sub={lowCoverage.length > 0 ? `${lowCoverage.length} 条低覆盖` : undefined} />
+        {ontology && matrix ? (
+          <Kpi
+            label={t("rc_kpi_coverage")}
+            value={`${Math.round((matrix.rules.length / Math.max(1, ontology.rules.length)) * 100)}%`}
+            sub={`${matrix.rules.length}/${ontology.rules.length}`}
+          />
+        ) : (
+          <Kpi label={t("rc_kpi_coverage")} value="—" />
+        )}
       </div>
 
       {/* The hero grid — rules × audits */}
@@ -174,7 +249,7 @@ export function RuleCheckDashboardContent() {
         }
       >
         {grid && audits ? (
-          <RuleAuditGrid grid={grid} audits={audits} />
+          <RuleAuditGrid grid={grid} audits={audits} t={t} />
         ) : (
           <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>加载中…</div>
         )}
@@ -247,10 +322,11 @@ const CELL_STYLE: Record<string, { bg: string; fg: string; symbol: string; label
 const MISSING_CELL = { bg: "transparent", fg: "var(--c-ink-4)", symbol: "·", label: "无数据" };
 
 function RuleAuditGrid({
-  grid, audits,
+  grid, audits, t,
 }: {
   grid: { rules: MatrixRule[]; cells: Map<string, Map<string, string>> };
   audits: AuditListRow[];
+  t: (k: string) => string;
 }) {
   const cellSize = 22;
   const cellGap = 2;
@@ -305,13 +381,21 @@ function RuleAuditGrid({
           <Link
             href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
             className="flex items-baseline gap-2 truncate hover:bg-panel transition-colors rounded"
-            style={{ padding: "2px 6px", textDecoration: "none" }}
+            style={{ padding: "2px 6px", textDecoration: "none", opacity: r.total === 0 ? 0.55 : 1 }}
             title={r.rule_name}
           >
             <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 11, minWidth: 48 }}>
               {r.rule_id}
             </code>
             <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.rule_name}</span>
+            {r.total === 0 && (
+              <span
+                className="tabular-nums"
+                style={{ fontSize: 9.5, color: "var(--c-ink-4)", marginLeft: "auto", letterSpacing: "0.05em", textTransform: "uppercase" }}
+              >
+                {t("rc_rule_dead")}
+              </span>
+            )}
           </Link>
           {audits.map((a) => {
             const cell = grid.cells.get(r.rule_id)?.get(a.audit_id);

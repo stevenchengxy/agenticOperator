@@ -859,6 +859,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_rule_def_load_err: "读取出错",
     rc_rule_def_loading: "加载中…",
     rc_rule_def_load_failed: "加载失败",
+    rc_rule_dead: "未触发",
+    rc_kpi_coverage: "规则覆盖率",
+    rc_rules_fallback_warn: "Ontology API 不可达 · 使用本地 JSON",
+    rc_rules_source_api: "ontology-api 实时",
+    rc_rules_source_fallback: "JSON fallback",
     // drawer — header + tabs
     rc_drawer_title: "Rule Check 审计",
     rc_drawer_close: "关闭 (Esc)",
@@ -1724,6 +1729,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_rule_def_load_err: "Read error",
     rc_rule_def_loading: "Loading…",
     rc_rule_def_load_failed: "Load failed",
+    rc_rule_dead: "never fired",
+    rc_kpi_coverage: "rule coverage",
+    rc_rules_fallback_warn: "Ontology API unreachable · using local JSON",
+    rc_rules_source_api: "live ontology-api",
+    rc_rules_source_fallback: "JSON fallback",
     // drawer — header + tabs
     rc_drawer_title: "Rule Check Audit",
     rc_drawer_close: "Close (Esc)",
