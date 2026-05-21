@@ -30,6 +30,12 @@ type Tab = "prompt" | "rules" | "response" | "instances";
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
+// DrawerSection shell — defined here for use by the 4 tab bodies but not
+// yet wired in. Wrapping the existing PromptTab / RulesTab / ResponseTab /
+// InstancesTab content in this shell creates double-border / double-padding
+// regressions because each tab already manages its own section chrome.
+// Deferred: tabs need a structural pass (extract section bodies, drop their
+// inline headers) before this shell can be applied uniformly.
 function DrawerSection({
   title,
   hint,
