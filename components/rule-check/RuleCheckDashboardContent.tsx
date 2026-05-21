@@ -391,7 +391,7 @@ function RuleAuditGrid({
             {r.total === 0 && (
               <span
                 className="tabular-nums"
-                style={{ fontSize: 9.5, color: "var(--c-ink-4)", marginLeft: "auto", letterSpacing: "0.05em", textTransform: "uppercase" }}
+                style={{ fontSize: 9.5, color: "var(--c-ink-4)", marginLeft: "auto", letterSpacing: "0.05em" }}
               >
                 {t("rc_rule_dead")}
               </span>
