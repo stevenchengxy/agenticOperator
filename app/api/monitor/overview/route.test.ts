@@ -40,9 +40,9 @@ describe('GET /api/monitor/overview', () => {
       queueDepth: 0,
     });
     expect(Array.isArray(j.nodes)).toBe(true);
-    expect(j.nodes.length).toBe(23); // matches workflow-graph-meta NODES (22 agents + 1 trigger)
+    expect(j.nodes.length).toBe(24); // matches workflow-graph-meta NODES (22 canonical agents + ruleCheck + trig)
     expect(Array.isArray(j.edges)).toBe(true);
-    expect(j.edges.length).toBe(28); // matches workflow-graph-meta EDGES.length
+    expect(j.edges.length).toBe(30); // matches workflow-graph-meta EDGES.length (28 prior + 2 ruleCheck out)
     expect(Array.isArray(j.failures)).toBe(true);
     expect(Array.isArray(j.hitl)).toBe(true);
     expect(Array.isArray(j.recentRuns)).toBe(true);
