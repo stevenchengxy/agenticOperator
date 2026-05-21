@@ -66,6 +66,7 @@ export function LeftNav() {
     { type: "item", id: "overview",   icon: "grid",     label: t("nav_overview"), href: "/overview" },
     { type: "item", id: "fleet",      icon: "cpu",      label: t("nav_fleet"), count: "22", href: "/fleet" },
     { type: "item", id: "monitor",    icon: "gauge",    label: t("nav_monitor"), count: monitorCount, href: "/monitor" },
+    { type: "item", id: "chat",       icon: "chat",     label: t("nav_trace_chat"), href: "/chat" },
     { type: "item", id: "behavior",   icon: "sparkle",  label: t("nav_behavior"), count: behaviorCount, href: "/behavior" },
     { type: "item", id: "inbox",      icon: "user",     label: t("nav_inbox"), count: inboxCount, href: "/inbox" },
     { type: "item", id: "events",     icon: "bolt",     label: t("nav_events"), href: "/events" },

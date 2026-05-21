@@ -1007,6 +1007,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_suggestion_3: "DLQ 现在有多少条?",
     chat_suggestion_4: "最近一周哪些事件触发了 MATCH_FAILED?",
     chat_role_user: "你",
+
+    // Global chat full-screen page (Task γ.E)
+    nav_trace_chat: "追踪助手",
+    chat_direction_tag: "Direction D — 跨域追踪",
+    chat_history_title: "会话历史",
+    chat_history_empty: "暂无历史会话",
+    chat_history_delete: "删除",
+    chat_history_delete_confirm: "删除此会话?",
   },
   en: {
     brand: "Agentic Operator",
@@ -2009,6 +2017,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_suggestion_3: "How many entries in DLQ right now?",
     chat_suggestion_4: "Which events triggered MATCH_FAILED this week?",
     chat_role_user: "You",
+
+    // Global chat full-screen page (Task γ.E)
+    nav_trace_chat: "Tracing Assistant",
+    chat_direction_tag: "Direction D — Cross-domain tracing",
+    chat_history_title: "Session history",
+    chat_history_empty: "No history yet",
+    chat_history_delete: "Delete",
+    chat_history_delete_confirm: "Delete this session?",
   },
 };
 
