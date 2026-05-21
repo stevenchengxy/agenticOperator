@@ -876,7 +876,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_tab_response: "LLM Response",
     rc_tab_instances: "实例数据",
     // drawer — i18n cleanup (Task 3.2)
-    rc_replay: "Replay",
+    rc_replay: "重跑",
     rc_replay_title: "重新发送此 audit 的源事件,等候新的 audit",
     rc_replay_running: "重跑中…",
     rc_failure_reasons_label: "失败原因",
