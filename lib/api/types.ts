@@ -13,11 +13,11 @@ export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'retry
 
 export type EventKind = 'trigger' | 'domain' | 'error' | 'gate';
 
-export type AlertCategory = 'sla' | 'rate' | 'quality' | 'infra' | 'dlq';
+export type AlertCategory = 'sla' | 'rate' | 'quality' | 'infra' | 'dlq' | 'behavior';
 export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low';
 
 export type ApiMeta = {
-  partial?: ('ws' | 'em')[];
+  partial?: ('ws' | 'em' | 'behavior')[];
   generatedAt: string;
 };
 
