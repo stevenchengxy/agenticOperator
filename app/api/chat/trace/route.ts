@@ -1,4 +1,7 @@
-// POST /api/chat/trace — global tracing chatbot endpoint.
+// POST /api/chat/trace — global tracing chatbot endpoint (SSE streaming).
+//
+// Returns a text/event-stream response. Each SSE line is a JSON-encoded
+// StreamEvent. Validation errors (400) still return plain JSON.
 //
 // Tool-using LLM scoped to read-only data across runs / events / audits /
 // entities / DLQ / event-chains. Sister to /api/agents/:short/chat (agent-
@@ -13,8 +16,8 @@ import type {
   ChatMessage,
   ChatSource,
   GlobalChatRequest,
-  GlobalChatResponse,
   PageContext,
+  StreamEvent,
 } from "@/lib/chat/types";
 
 const MAX_TOOL_TURNS = 4;
@@ -31,126 +34,190 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "BAD_REQUEST", message: "messages[] required" }, { status: 400 });
   }
 
-  try {
-    if (!isGatewayConfigured()) {
-      return NextResponse.json<GlobalChatResponse>({
-        reply: { role: "assistant", content: "LLM gateway 未配置 · 请联系管理员设置 OPENAI_API_KEY 或等价 env。" },
-        sources: [],
-      });
-    }
-    const result = await runToolLoop(body.messages, body.pageContext);
-    return NextResponse.json(result);
-  } catch (e) {
-    return NextResponse.json(
-      { error: "LLM_FAILED", message: (e as Error).message },
-      { status: 502 },
-    );
+  if (!isGatewayConfigured()) {
+    return makeSseResponse(async (emit) => {
+      emit({ type: "text_chunk", content: "LLM gateway 未配置 · 请联系管理员设置 OPENAI_API_KEY 或等价 env。" });
+      emit({ type: "done", toolCallsExecuted: 0 });
+    });
   }
+
+  return makeSseResponse(async (emit) => {
+    try {
+      await runStreamingToolLoop(body.messages, body.pageContext, emit);
+    } catch (e) {
+      emit({ type: "error", message: (e as Error).message });
+    }
+  });
 }
 
-async function runToolLoop(
+function makeSseResponse(handler: (emit: (e: StreamEvent) => void) => Promise<void>): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (e: StreamEvent) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
+      };
+      try {
+        await handler(emit);
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+type AccumulatedToolCall = {
+  id?: string;
+  name?: string;
+  args: string;
+};
+
+async function runStreamingToolLoop(
   messages: ChatMessage[],
-  pageContext?: PageContext,
-): Promise<GlobalChatResponse> {
+  pageContext: PageContext | undefined,
+  emit: (e: StreamEvent) => void,
+): Promise<void> {
   const cfg = pickGateway();
   const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
   const sources: ChatSource[] = [];
   let toolCallsExecuted = 0;
+  let modelUsed: string | undefined;
 
-  // Build initial conversation: system + user-supplied history
-  const conversation: OpenAI.ChatCompletionMessageParam[] = [
+  const conversation: any[] = [
     { role: "system", content: buildSystemPrompt(pageContext) },
-    ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenAI.ChatCompletionMessageParam),
+    ...messages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    const completion = await client.chat.completions.create({
+    const stream = await client.chat.completions.create({
       model: cfg.model,
       messages: conversation,
-      tools: TOOL_SCHEMAS as OpenAI.ChatCompletionTool[],
+      tools: TOOL_SCHEMAS as any,
       tool_choice: "auto",
+      stream: true,
       temperature: 0.2,
       max_tokens: 700,
     });
-    const choice = completion.choices[0];
-    if (!choice) break;
-    const msg = choice.message;
 
-    const toolCalls = msg.tool_calls ?? [];
-    if (toolCalls.length === 0) {
-      // Final assistant message
-      return {
-        reply: { role: "assistant", content: msg.content ?? "" },
-        sources,
-        modelUsed: cfg.model,
-        toolCallsExecuted,
-      };
+    let assistantContent = "";
+    const toolCallsAcc = new Map<number, AccumulatedToolCall>();
+
+    for await (const part of stream) {
+      modelUsed = (part as any).model ?? modelUsed;
+      const delta = (part.choices?.[0]?.delta) as any;
+      if (!delta) continue;
+
+      if (typeof delta.content === "string" && delta.content.length > 0) {
+        assistantContent += delta.content;
+        emit({ type: "text_chunk", content: delta.content });
+      }
+
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx: number = tc.index ?? 0;
+          let acc = toolCallsAcc.get(idx);
+          if (!acc) {
+            acc = { args: "" };
+            toolCallsAcc.set(idx, acc);
+          }
+          if (tc.id) acc.id = tc.id;
+          if (tc.function?.name) acc.name = tc.function.name;
+          if (typeof tc.function?.arguments === "string") acc.args += tc.function.arguments;
+        }
+      }
     }
 
-    // Push assistant message with tool_calls
-    conversation.push(msg as OpenAI.ChatCompletionMessageParam);
+    if (toolCallsAcc.size === 0) {
+      // Done — final assistant message already streamed via text_chunk events.
+      // If we ran out of turns without getting a text response, emit synthesis message.
+      if (!assistantContent && turn === MAX_TOOL_TURNS - 1) {
+        emit({ type: "text_chunk", content: "(已达到最大工具调用轮数,以下是部分结果)" });
+      }
+      break;
+    }
 
-    // Dispatch each tool sequentially
-    for (const tc of toolCalls) {
-      if (tc.type !== "function") continue;
-      const tool = findTool(tc.function.name);
+    // We had tool calls. Push assistant message with tool_calls to conversation.
+    const toolCallsArr = Array.from(toolCallsAcc.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, acc]) => ({
+        id: acc.id ?? `call_${Math.random().toString(36).slice(2, 8)}`,
+        type: "function" as const,
+        function: { name: acc.name ?? "", arguments: acc.args },
+      }));
+
+    conversation.push({
+      role: "assistant",
+      content: assistantContent || null,
+      tool_calls: toolCallsArr,
+    });
+
+    // Execute each tool, push result back
+    for (const call of toolCallsArr) {
+      emit({ type: "tool_call_start", name: call.function.name, args: safeJsonParse(call.function.arguments) });
+      const tool = findTool(call.function.name);
       if (!tool) {
         conversation.push({
           role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: `unknown tool: ${tc.function.name}` }),
+          tool_call_id: call.id,
+          content: JSON.stringify({ error: `unknown tool: ${call.function.name}` }),
         });
+        emit({ type: "tool_call_done", name: call.function.name, ms: 0, resultPreview: "(unknown tool)" });
         continue;
       }
-      let parsed: unknown;
+      const start = Date.now();
       try {
-        parsed = JSON.parse(tc.function.arguments || "{}");
-      } catch {
-        parsed = {};
-      }
-      try {
+        const parsed = safeJsonParse(call.function.arguments) ?? {};
         const { result, sources: toolSources } = await tool.execute(parsed);
         toolCallsExecuted += 1;
         if (toolSources) sources.push(...toolSources);
         let serialized = JSON.stringify(result);
-        if (serialized.length > MAX_TOOL_RESULT_BYTES) {
-          serialized = serialized.slice(0, MAX_TOOL_RESULT_BYTES);
-          // LLM will see a possibly-truncated JSON prefix; better than malformed JSON.
-        }
-        conversation.push({ role: "tool", tool_call_id: tc.id, content: serialized });
+        if (serialized.length > MAX_TOOL_RESULT_BYTES) serialized = serialized.slice(0, MAX_TOOL_RESULT_BYTES);
+        conversation.push({ role: "tool", tool_call_id: call.id, content: serialized });
+        emit({
+          type: "tool_call_done",
+          name: call.function.name,
+          ms: Date.now() - start,
+          resultPreview: summarizeResult(result),
+        });
       } catch (e) {
-        const detail = (e as Error).message;
-        // Log full error server-side; expose sanitized text to the LLM.
-        console.error(`[chat/trace] tool ${tc.function.name} failed:`, detail);
+        console.error(`[chat/trace] tool ${call.function.name} failed:`, (e as Error).message);
         conversation.push({
           role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: `tool execution failed: ${tc.function.name}` }),
+          tool_call_id: call.id,
+          content: JSON.stringify({ error: `tool execution failed: ${call.function.name}` }),
         });
+        emit({ type: "tool_call_done", name: call.function.name, ms: Date.now() - start, resultPreview: "(failed)" });
       }
     }
+    // Loop continues — next iteration gets the tool results in conversation.
   }
 
-  // Tool budget exhausted — make one final synthesis call
-  const final = await client.chat.completions.create({
-    model: cfg.model,
-    messages: [
-      ...conversation,
-      {
-        role: "user",
-        content: "(System: tool budget exceeded. Synthesize a final answer from what you've gathered.)",
-      },
-    ],
-    temperature: 0.2,
-    max_tokens: 500,
-  });
-  return {
-    reply: {
-      role: "assistant",
-      content: final.choices[0]?.message?.content ?? "(已达到最大工具调用轮数,以下是部分结果)",
-    },
-    sources,
-    modelUsed: cfg.model,
-    toolCallsExecuted,
-  };
+  if (sources.length > 0) {
+    emit({ type: "sources", items: sources });
+  }
+  emit({ type: "done", modelUsed, toolCallsExecuted });
+}
+
+function safeJsonParse(s: string): unknown {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+function summarizeResult(r: unknown): string {
+  if (r == null) return "";
+  if (typeof r === "object") {
+    const obj = r as Record<string, unknown>;
+    if (typeof obj.total === "number") return `${obj.total} rows`;
+    if (Array.isArray(obj.runs)) return `${obj.runs.length} runs`;
+    if (Array.isArray(obj.audits)) return `${obj.audits.length} audits`;
+    if (Array.isArray(obj.events)) return `${obj.events.length} events`;
+    if (Array.isArray(obj.entities)) return `${obj.entities.length} entities`;
+  }
+  return "(ok)";
 }

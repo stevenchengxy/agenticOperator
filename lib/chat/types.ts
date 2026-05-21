@@ -50,3 +50,11 @@ export type GlobalChatResponse = {
   modelUsed?: string;
   toolCallsExecuted?: number;
 };
+
+export type StreamEvent =
+  | { type: "tool_call_start"; name: string; args: unknown }
+  | { type: "tool_call_done"; name: string; ms: number; resultPreview?: string }
+  | { type: "text_chunk"; content: string }
+  | { type: "sources"; items: ChatSource[] }
+  | { type: "done"; modelUsed?: string; toolCallsExecuted: number }
+  | { type: "error"; message: string };

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { StreamEvent } from "@/lib/chat/types";
 
 // Per-test completion create mock, accessed via stable object reference.
 const _state = { create: vi.fn() };
@@ -42,11 +43,61 @@ function makeReq(body: object): Request {
   });
 }
 
+/** Build an async iterable from an array — simulates OpenAI SSE stream chunks. */
+function asyncIterable<T>(arr: T[]): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator]() {
+      let i = 0;
+      return {
+        async next() {
+          if (i >= arr.length) return { value: undefined as T, done: true };
+          return { value: arr[i++]!, done: false };
+        },
+      };
+    },
+  };
+}
+
+/** Read a streaming SSE Response and collect all events. */
+async function readSse(res: Response): Promise<StreamEvent[]> {
+  const events: StreamEvent[] = [];
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      events.push(JSON.parse(line.slice(5).trim()) as StreamEvent);
+    }
+  }
+  return events;
+}
+
+function setupGatewayMock(create: ReturnType<typeof vi.fn>) {
+  (isGatewayConfigured as any).mockReturnValue(true);
+  (pickGateway as any).mockReturnValue({
+    baseURL: "http://fake",
+    apiKey: "fake-key",
+    model: "test-model",
+  });
+  _state.create.mockImplementation(create);
+}
+
 describe("POST /api/chat/trace", () => {
+  // ── Validation errors: still plain JSON ──────────────────────────────
+
   it("returns 400 when messages missing", async () => {
     (isGatewayConfigured as any).mockReturnValue(true);
     const res = await POST(makeReq({}));
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("BAD_REQUEST");
   });
 
   it("returns 400 on invalid JSON body", async () => {
@@ -58,36 +109,62 @@ describe("POST /api/chat/trace", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("BAD_REQUEST");
   });
 
-  it("returns gateway-not-configured reply when gateway off", async () => {
+  // ── Gateway not configured: still returns SSE with text chunk ────────
+
+  it("streams a gateway-not-configured message when gateway off", async () => {
     (isGatewayConfigured as any).mockReturnValue(false);
     const res = await POST(makeReq({ messages: [{ role: "user", content: "hi" }] }));
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.reply.content).toContain("LLM");
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const events = await readSse(res);
+    const chunk = events.find((e): e is { type: "text_chunk"; content: string } => e.type === "text_chunk");
+    expect(chunk?.content).toContain("LLM");
+    expect(events.some((e) => e.type === "done")).toBe(true);
   });
 
-  it("returns assistant reply on simple message (no tool calls)", async () => {
-    (isGatewayConfigured as any).mockReturnValue(true);
-    (pickGateway as any).mockReturnValue({
-      baseURL: "http://fake",
-      apiKey: "fake-key",
-      model: "gemini-3-flash",
-    });
-    _state.create.mockResolvedValue({
-      choices: [{ message: { role: "assistant", content: "hello back", tool_calls: [] } }],
-      model: "gemini-3-flash",
-    });
+  // ── Simple text streaming (no tool calls) ────────────────────────────
+
+  it("streams text_chunk events for a simple reply", async () => {
+    setupGatewayMock(() =>
+      asyncIterable([
+        { choices: [{ delta: { content: "hello" } }] },
+        { choices: [{ delta: { content: " world" } }] },
+        { choices: [{ delta: {}, finish_reason: "stop" }] },
+      ]),
+    );
     const res = await POST(makeReq({ messages: [{ role: "user", content: "hi" }] }));
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.reply.content).toBe("hello back");
-    expect(body.toolCallsExecuted).toBe(0);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const events = await readSse(res);
+    const texts = events
+      .filter((e): e is { type: "text_chunk"; content: string } => e.type === "text_chunk")
+      .map((e) => e.content)
+      .join("");
+    expect(texts).toBe("hello world");
+    const done = events.find((e) => e.type === "done") as { type: "done"; toolCallsExecuted: number } | undefined;
+    expect(done).toBeDefined();
+    expect(done?.toolCallsExecuted).toBe(0);
   });
 
-  it("dispatches tool call and feeds result back", async () => {
-    (isGatewayConfigured as any).mockReturnValue(true);
+  it("emits no sources event when no tools were called", async () => {
+    setupGatewayMock(() =>
+      asyncIterable([
+        { choices: [{ delta: { content: "ok" } }] },
+        { choices: [{ delta: {} }] },
+      ]),
+    );
+    const res = await POST(makeReq({ messages: [{ role: "user", content: "hi" }] }));
+    const events = await readSse(res);
+    expect(events.some((e) => e.type === "sources")).toBe(false);
+  });
+
+  // ── Tool call dispatch ───────────────────────────────────────────────
+
+  it("emits tool_call_start / tool_call_done around a tool call", async () => {
     (findTool as any).mockReturnValue({
       name: "searchRuns",
       execute: vi.fn().mockResolvedValue({
@@ -95,58 +172,120 @@ describe("POST /api/chat/trace", () => {
         sources: [{ tool: "searchRuns", label: "R-1", url: "/monitor?run=R-1" }],
       }),
     });
-    _state.create
-      .mockResolvedValueOnce({
+
+    // First stream: tool_calls chunks (no content), then stop
+    const firstStream = asyncIterable([
+      {
         choices: [{
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [{ id: "call_1", type: "function", function: { name: "searchRuns", arguments: '{"agent":"X"}' } }],
+          delta: {
+            tool_calls: [{ index: 0, id: "call_1", function: { name: "searchRun", arguments: '{"age' } }],
           },
         }],
-        model: "x",
-      })
-      .mockResolvedValueOnce({
-        choices: [{ message: { role: "assistant", content: "Found 1 run.", tool_calls: [] } }],
-        model: "x",
-      });
-    (pickGateway as any).mockReturnValue({ baseURL: "http://fake", apiKey: "fake-key", model: "x" });
+      },
+      {
+        choices: [{
+          delta: {
+            tool_calls: [{ index: 0, function: { arguments: 'nt":"X"}' } }],
+          },
+        }],
+      },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ]);
+    // Second stream: text response
+    const secondStream = asyncIterable([
+      { choices: [{ delta: { content: "Found 1 run." } }] },
+      { choices: [{ delta: {} }] },
+    ]);
+
+    let callCount = 0;
+    setupGatewayMock(() => {
+      return callCount++ === 0 ? firstStream : secondStream;
+    });
 
     const res = await POST(makeReq({ messages: [{ role: "user", content: "any runs for X?" }] }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.reply.content).toBe("Found 1 run.");
-    expect(body.sources).toEqual(expect.arrayContaining([expect.objectContaining({ tool: "searchRuns" })]));
-    expect(body.toolCallsExecuted).toBe(1);
+    const events = await readSse(res);
+
+    expect(events.some((e) => e.type === "tool_call_start")).toBe(true);
+    expect(events.some((e) => e.type === "tool_call_done")).toBe(true);
+    const done = events.find((e) => e.type === "done") as { type: "done"; toolCallsExecuted: number } | undefined;
+    expect(done?.toolCallsExecuted).toBe(1);
+    const texts = events
+      .filter((e): e is { type: "text_chunk"; content: string } => e.type === "text_chunk")
+      .map((e) => e.content)
+      .join("");
+    expect(texts).toBe("Found 1 run.");
+  });
+
+  it("emits sources event when tools return sources", async () => {
+    (findTool as any).mockReturnValue({
+      name: "searchRuns",
+      execute: vi.fn().mockResolvedValue({
+        result: { runs: [], total: 0 },
+        sources: [{ tool: "searchRuns", label: "R-2", url: "/monitor?run=R-2" }],
+      }),
+    });
+
+    let callCount = 0;
+    setupGatewayMock(() => {
+      if (callCount++ === 0) {
+        return asyncIterable([
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "searchRuns", arguments: "{}" } }] } }] },
+          { choices: [{ delta: {} }] },
+        ]);
+      }
+      return asyncIterable([
+        { choices: [{ delta: { content: "done" } }] },
+        { choices: [{ delta: {} }] },
+      ]);
+    });
+
+    const res = await POST(makeReq({ messages: [{ role: "user", content: "x" }] }));
+    const events = await readSse(res);
+    const sourcesEvt = events.find((e) => e.type === "sources") as { type: "sources"; items: unknown[] } | undefined;
+    expect(sourcesEvt).toBeDefined();
+    expect(sourcesEvt?.items).toHaveLength(1);
   });
 
   it("handles unknown tool name gracefully", async () => {
-    (isGatewayConfigured as any).mockReturnValue(true);
     (findTool as any).mockReturnValue(undefined); // tool not found
-    _state.create
-      .mockResolvedValueOnce({
-        choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "bogus", arguments: "{}" } }] } }],
-        model: "x",
-      })
-      .mockResolvedValueOnce({
-        choices: [{ message: { role: "assistant", content: "tool not found, sorry", tool_calls: [] } }],
-        model: "x",
-      });
-    (pickGateway as any).mockReturnValue({ baseURL: "http://fake", apiKey: "fake-key", model: "x" });
+
+    let callCount = 0;
+    setupGatewayMock(() => {
+      if (callCount++ === 0) {
+        return asyncIterable([
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "bogus", arguments: "{}" } }] } }] },
+          { choices: [{ delta: {} }] },
+        ]);
+      }
+      return asyncIterable([
+        { choices: [{ delta: { content: "tool not found, sorry" } }] },
+        { choices: [{ delta: {} }] },
+      ]);
+    });
+
     const res = await POST(makeReq({ messages: [{ role: "user", content: "x" }] }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.reply.content).toContain("tool not found");
+    const events = await readSse(res);
+    const toolDone = events.find((e) => e.type === "tool_call_done") as any;
+    expect(toolDone?.resultPreview).toBe("(unknown tool)");
+    const texts = events
+      .filter((e): e is { type: "text_chunk"; content: string } => e.type === "text_chunk")
+      .map((e) => e.content)
+      .join("");
+    expect(texts).toContain("tool not found");
   });
 
-  it("returns 502 when pickGateway throws", async () => {
+  it("emits error event when pickGateway throws", async () => {
     (isGatewayConfigured as any).mockReturnValue(true);
     (pickGateway as any).mockImplementation(() => { throw new Error("no LLM"); });
     const res = await POST(makeReq({ messages: [{ role: "user", content: "x" }] }));
-    expect(res.status).toBe(502);
+    // SSE response — need to read the stream
+    expect(res.status).toBe(200);
+    const events = await readSse(res);
+    const errEvt = events.find((e) => e.type === "error") as { type: "error"; message: string } | undefined;
+    expect(errEvt?.message).toContain("no LLM");
   });
 
-  it("after MAX_TOOL_TURNS still asking for tools, returns degraded synthesis reply", async () => {
+  it("after MAX_TOOL_TURNS still requesting tools, stops and emits done", async () => {
     (isGatewayConfigured as any).mockReturnValue(true);
     (pickGateway as any).mockReturnValue({ baseURL: "http://fake", apiKey: "fake-key", model: "x" });
     (findTool as any).mockReturnValue({
@@ -154,31 +293,18 @@ describe("POST /api/chat/trace", () => {
       execute: vi.fn().mockResolvedValue({ result: { runs: [], total: 0 }, sources: [] }),
     });
 
-    // Every call: if `tools` is present (tool-loop turns), keep requesting tool calls.
-    // If `tools` is absent/undefined (synthesis call has no tools key), return the degraded reply.
-    _state.create.mockImplementation(({ tools }: any) => {
-      if (tools === undefined) {
-        return Promise.resolve({
-          choices: [{ message: { role: "assistant", content: "(已达到最大工具调用轮数,以下是部分结果)", tool_calls: [] } }],
-          model: "x",
-        });
-      }
-      return Promise.resolve({
-        choices: [{
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [{ id: `c${Math.random()}`, type: "function", function: { name: "searchRuns", arguments: "{}" } }],
-          },
-        }],
-        model: "x",
-      });
-    });
+    // Every call keeps requesting tool_calls (loop forever scenario)
+    _state.create.mockImplementation(() =>
+      asyncIterable([
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: `c${Math.random()}`, function: { name: "searchRuns", arguments: "{}" } }] } }] },
+        { choices: [{ delta: {} }] },
+      ]),
+    );
 
     const res = await POST(makeReq({ messages: [{ role: "user", content: "loop forever" }] }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.reply.content).toContain("最大工具调用轮数");
-    expect(body.toolCallsExecuted).toBeGreaterThanOrEqual(4);
+    const events = await readSse(res);
+    const done = events.find((e) => e.type === "done") as { type: "done"; toolCallsExecuted: number } | undefined;
+    expect(done).toBeDefined();
+    expect(done?.toolCallsExecuted).toBeGreaterThanOrEqual(4);
   });
 });

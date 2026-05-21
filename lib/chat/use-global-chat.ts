@@ -78,6 +78,19 @@ export function useGlobalChat() {
     });
   }, []);
 
+  const appendToLastAssistant = useCallback((chunk: string) => {
+    setState((s) => {
+      const msgs = [...s.current.messages];
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === "assistant") {
+        msgs[msgs.length - 1] = { ...last, content: last.content + chunk };
+      } else {
+        msgs.push({ role: "assistant", content: chunk });
+      }
+      return { ...s, current: { ...s.current, messages: msgs, updatedAt: new Date().toISOString() } };
+    });
+  }, []);
+
   const replaceLastAssistant = useCallback((m: ChatMessage) => {
     setState((s) => {
       const msgs = [...s.current.messages];
@@ -132,6 +145,7 @@ export function useGlobalChat() {
     currentSession: state.current,
     sessions: state.sessions,
     appendMessage,
+    appendToLastAssistant,
     replaceLastAssistant,
     clearCurrent,
     newSession,

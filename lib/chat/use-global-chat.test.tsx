@@ -92,6 +92,22 @@ describe("useGlobalChat", () => {
     expect(result.current.currentSession.messages[1]?.content).toBe("final answer");
   });
 
+  it("appendToLastAssistant appends chunks to a single assistant message", () => {
+    const { result } = renderHook(() => useGlobalChat());
+    act(() => result.current.appendToLastAssistant("Hello"));
+    act(() => result.current.appendToLastAssistant(" world"));
+    expect(result.current.currentSession.messages).toHaveLength(1);
+    expect(result.current.currentSession.messages[0]?.content).toBe("Hello world");
+    expect(result.current.currentSession.messages[0]?.role).toBe("assistant");
+  });
+
+  it("appendToLastAssistant creates a new assistant msg if the last is user", () => {
+    const { result } = renderHook(() => useGlobalChat());
+    act(() => result.current.appendMessage({ role: "user", content: "hi" }));
+    act(() => result.current.appendToLastAssistant("Hello"));
+    expect(result.current.currentSession.messages).toHaveLength(2);
+  });
+
   it("auto-title respects codepoints (emoji not split)", () => {
     const { result } = renderHook(() => useGlobalChat());
     // 33 emoji — should truncate to 32 + ellipsis without breaking a surrogate pair

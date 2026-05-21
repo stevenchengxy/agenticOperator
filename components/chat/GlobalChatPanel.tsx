@@ -10,7 +10,7 @@ import type {
   ChatMessage,
   ChatSource,
   GlobalChatRequest,
-  GlobalChatResponse,
+  StreamEvent,
 } from "@/lib/chat/types";
 
 export function GlobalChatPanel({
@@ -34,6 +34,7 @@ export function GlobalChatPanel({
   const [err, setErr] = React.useState<string | null>(null);
   const [justSent, setJustSent] = React.useState(false);
   const [sourcesPerMessage, setSourcesPerMessage] = React.useState<Record<number, ChatSource[]>>({});
+  const [activeTool, setActiveTool] = React.useState<{ name: string; startedAt: number } | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -51,9 +52,10 @@ export function GlobalChatPanel({
       chat.appendMessage(userMsg);
       setInput("");
       setBusy(true);
+      setErr(null);
       setJustSent(true);
       setTimeout(() => setJustSent(false), 400);
-      setErr(null);
+
       try {
         const reqBody: GlobalChatRequest = {
           messages: [...historyBeforeAppend, userMsg],
@@ -64,17 +66,62 @@ export function GlobalChatPanel({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(reqBody),
         });
-        const data = (await res.json()) as GlobalChatResponse & { error?: string; message?: string };
-        if (!res.ok || data.error) throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
-        chat.appendMessage({ role: "assistant", content: data.reply.content });
-        const assistantIdx = historyBeforeAppend.length + 1;
-        if (data.sources?.length) {
-          setSourcesPerMessage((s) => ({ ...s, [assistantIdx]: data.sources }));
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let assistantStarted = false;
+        let assistantIdx = -1;
+        let collectedSources: ChatSource[] | null = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine.startsWith("data:")) continue;
+            const payload = trimmedLine.slice(5).trim();
+            if (!payload) continue;
+            let evt: StreamEvent;
+            try { evt = JSON.parse(payload) as StreamEvent; } catch { continue; }
+
+            switch (evt.type) {
+              case "text_chunk":
+                if (!assistantStarted) {
+                  assistantStarted = true;
+                  assistantIdx = historyBeforeAppend.length + 1;
+                }
+                chat.appendToLastAssistant(evt.content);
+                break;
+              case "tool_call_start":
+                setActiveTool({ name: evt.name, startedAt: Date.now() });
+                break;
+              case "tool_call_done":
+                setActiveTool(null);
+                break;
+              case "sources":
+                collectedSources = evt.items;
+                break;
+              case "done":
+                if (collectedSources && assistantIdx >= 0) {
+                  setSourcesPerMessage((s) => ({ ...s, [assistantIdx]: collectedSources! }));
+                }
+                break;
+              case "error":
+                throw new Error(evt.message);
+            }
+          }
         }
       } catch (e) {
         setErr((e as Error).message ?? t("chat_send_fail"));
       } finally {
         setBusy(false);
+        setActiveTool(null);
       }
     },
     [busy, chat, pageContext, t],
@@ -200,9 +247,16 @@ export function GlobalChatPanel({
             message={m}
             sources={sourcesPerMessage[i]}
             flyIn={i === messages.length - 1 && m.role === "user" && justSent}
+            streaming={busy && i === messages.length - 1 && m.role === "assistant"}
           />
         ))}
-        {busy && <TypingIndicator label={t("chat_thinking")} />}
+        {busy && (
+          activeTool ? (
+            <ToolCallIndicator name={activeTool.name} t={t} />
+          ) : !messages.some((m, i) => i === messages.length - 1 && m.role === "assistant") ? (
+            <TypingIndicator label={t("chat_thinking")} />
+          ) : null
+        )}
         {err && (
           <div
             className="mt-3 rounded-lg flex items-start gap-2"
@@ -348,7 +402,17 @@ function EmptyState({
   );
 }
 
-function MessageRow({ message, sources, flyIn }: { message: ChatMessage; sources?: ChatSource[]; flyIn?: boolean }) {
+function MessageRow({
+  message,
+  sources,
+  flyIn,
+  streaming,
+}: {
+  message: ChatMessage;
+  sources?: ChatSource[];
+  flyIn?: boolean;
+  streaming?: boolean;
+}) {
   const isUser = message.role === "user";
   return (
     <div className={`flex gap-2 mb-4 ${flyIn ? "chat-send-fly" : "chat-message-in"} ${isUser ? "flex-row-reverse" : "flex-row"}`}>
@@ -385,7 +449,10 @@ function MessageRow({ message, sources, flyIn }: { message: ChatMessage; sources
           {isUser ? (
             <div className="whitespace-pre-wrap">{message.content}</div>
           ) : (
-            <Markdown compact>{message.content}</Markdown>
+            <>
+              <Markdown compact>{message.content}</Markdown>
+              {streaming && <span className="chat-streaming-cursor" />}
+            </>
           )}
         </div>
         {sources && sources.length > 0 && (
@@ -467,6 +534,53 @@ function TypingIndicator({ label }: { label: string }) {
           ))}
         </span>
         <span className="text-[11px] text-ink-3">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function ToolCallIndicator({ name, t }: { name: string; t: (k: string) => string }) {
+  return (
+    <div className="flex gap-2 mb-3 items-center chat-message-in">
+      <div
+        className="rounded-full grid place-items-center text-white flex-shrink-0"
+        style={{
+          width: 28,
+          height: 28,
+          background: "linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-2) 100%)",
+          fontSize: 11,
+        }}
+        aria-hidden="true"
+      >
+        <Ic.sparkle />
+      </div>
+      <div
+        className="rounded-2xl flex items-center gap-2 chat-message-in"
+        style={{
+          padding: "8px 12px",
+          background: "var(--c-accent-bg)",
+          border: "1px solid var(--c-accent-line)",
+          borderTopLeftRadius: 4,
+          color: "var(--c-accent)",
+          fontSize: 11.5,
+        }}
+      >
+        <span className="flex gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="chat-typing-dot rounded-full"
+              style={{
+                width: 4,
+                height: 4,
+                background: "var(--c-accent)",
+                display: "inline-block",
+                animationDelay: `${i * 160}ms`,
+              }}
+            />
+          ))}
+        </span>
+        <span className="mono">{t("chat_tool_running").replace("{name}", name)}</span>
       </div>
     </div>
   );
