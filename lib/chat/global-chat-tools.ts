@@ -56,7 +56,7 @@ const searchRuns: ToolDef = {
         properties: {
           agent: {
             type: "string",
-            description: "Filter by trigger event name prefix (e.g. 'RESUME_'). Not a direct agent field on WorkflowRun.",
+            description: "Canonical agent short name (e.g. 'JDGenerator', 'Matcher'). Joins via AgentEpisode.agentName.",
           },
           status: {
             type: "string",
@@ -80,18 +80,51 @@ const searchRuns: ToolDef = {
     const i = (input ?? {}) as Record<string, unknown>;
     const take = clamp(i.limit, 1, 50, 20);
     const since = resolveSince(i.since);
+
+    // Agent filter: WorkflowRun has no agentName. Find run IDs via AgentEpisode.agentName.
     const where: Record<string, unknown> = {};
-    // WorkflowRun has no agentName; map 'agent' param to triggerEvent prefix search
-    if (typeof i.agent === "string") where.triggerEvent = { contains: i.agent };
+    if (typeof i.agent === "string" && i.agent.trim().length > 0) {
+      const episodes = await prisma.agentEpisode.findMany({
+        where: { agentName: i.agent },
+        select: { runId: true },
+        distinct: ["runId"],
+        take: 200, // upper bound; matches realistic run volume per agent
+      });
+      const runIds = episodes.map((e) => e.runId).filter((x): x is string => !!x);
+      if (runIds.length === 0) {
+        // No runs for this agent → return empty without doing a runs query
+        return {
+          result: { runs: [], total: 0 },
+          sources: [],
+        };
+      }
+      where.id = { in: runIds };
+    }
+
     if (typeof i.status === "string") where.status = i.status;
     if (typeof i.eventName === "string") where.triggerEvent = i.eventName;
     if (since) where.startedAt = { gte: since };
-    const rows = await prisma.workflowRun.findMany({
+
+    const runs = await prisma.workflowRun.findMany({
       where,
       orderBy: { startedAt: "desc" },
       take,
     });
-    const sources: ChatSource[] = rows.slice(0, 5).map((r) => ({
+
+    // If asking for failed runs, fetch their first failed step's error message in one query
+    let errorByRunId: Map<string, string> = new Map();
+    if (i.status === "failed" && runs.length > 0) {
+      const failedSteps = await prisma.workflowStep.findMany({
+        where: { runId: { in: runs.map((r) => r.id) }, status: "failed" },
+        select: { runId: true, error: true, startedAt: true },
+        orderBy: { startedAt: "asc" },
+      });
+      for (const s of failedSteps) {
+        if (!errorByRunId.has(s.runId) && s.error) errorByRunId.set(s.runId, s.error);
+      }
+    }
+
+    const sources: ChatSource[] = runs.slice(0, 5).map((r) => ({
       tool: "searchRuns",
       label: `${r.triggerEvent} · ${r.status}`,
       ref: r.id,
@@ -99,7 +132,7 @@ const searchRuns: ToolDef = {
     }));
     return {
       result: {
-        runs: rows.map((r) => ({
+        runs: runs.map((r) => ({
           id: r.id,
           status: r.status,
           triggerEvent: r.triggerEvent,
@@ -109,8 +142,9 @@ const searchRuns: ToolDef = {
             r.completedAt
               ? r.completedAt.getTime() - r.startedAt.getTime()
               : null,
+          error: errorByRunId.get(r.id),
         })),
-        total: rows.length,
+        total: runs.length,
       },
       sources,
     };

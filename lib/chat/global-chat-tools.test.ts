@@ -58,6 +58,7 @@ describe("searchRuns tool", () => {
         completedAt: new Date("2026-05-20T10:01:00Z"),
       },
     ]);
+    (prisma.workflowStep.findMany as any).mockResolvedValue([]);
     const { result, sources } = await byName("searchRuns").execute({
       status: "failed",
       limit: 10,
@@ -86,6 +87,61 @@ describe("searchRuns tool", () => {
     await byName("searchRuns").execute({ since: "-24h" });
     const where = (prisma.workflowRun.findMany as any).mock.calls[0][0].where;
     expect(where.startedAt?.gte).toBeInstanceOf(Date);
+  });
+
+  it("filters by AgentEpisode.agentName via JOIN when agent is provided", async () => {
+    (prisma.agentEpisode.findMany as any).mockResolvedValue([{ runId: "R-1" }]);
+    (prisma.workflowRun.findMany as any).mockResolvedValue([
+      {
+        id: "R-1",
+        triggerEvent: "REQUIREMENT_CLARIFIED",
+        status: "completed",
+        startedAt: new Date("2026-05-20T09:00:00Z"),
+        completedAt: new Date("2026-05-20T09:02:00Z"),
+      },
+    ]);
+    const { result } = await byName("searchRuns").execute({ agent: "JDGenerator" });
+    // agentEpisode.findMany must be called with agentName filter
+    const epCall = (prisma.agentEpisode.findMany as any).mock.calls[0][0];
+    expect(epCall.where).toMatchObject({ agentName: "JDGenerator" });
+    // workflowRun.findMany must be called with id: { in: ['R-1'] }
+    const runCall = (prisma.workflowRun.findMany as any).mock.calls[0][0];
+    expect(runCall.where).toMatchObject({ id: { in: ["R-1"] } });
+    expect((result as any).runs).toHaveLength(1);
+    expect((result as any).runs[0].id).toBe("R-1");
+  });
+
+  it("returns empty without querying workflowRun when agent has no matching episodes", async () => {
+    (prisma.agentEpisode.findMany as any).mockResolvedValue([]);
+    const { result } = await byName("searchRuns").execute({ agent: "NoSuchAgent" });
+    expect((result as any).runs).toHaveLength(0);
+    expect((result as any).total).toBe(0);
+    // workflowRun.findMany should NOT be called
+    expect(prisma.workflowRun.findMany).not.toHaveBeenCalled();
+  });
+
+  it("fetches first failed step error when status=failed and surfaces it on run", async () => {
+    (prisma.workflowRun.findMany as any).mockResolvedValue([
+      {
+        id: "R-2",
+        triggerEvent: "RESUME_PROCESSED",
+        status: "failed",
+        startedAt: new Date("2026-05-20T11:00:00Z"),
+        completedAt: new Date("2026-05-20T11:00:30Z"),
+      },
+    ]);
+    (prisma.workflowStep.findMany as any).mockResolvedValue([
+      {
+        runId: "R-2",
+        error: "LLM rate limit exceeded",
+        startedAt: new Date("2026-05-20T11:00:10Z"),
+      },
+    ]);
+    const { result } = await byName("searchRuns").execute({ status: "failed" });
+    // workflowStep.findMany should be called with correct filter
+    const stepCall = (prisma.workflowStep.findMany as any).mock.calls[0][0];
+    expect(stepCall.where).toMatchObject({ runId: { in: ["R-2"] }, status: "failed" });
+    expect((result as any).runs[0].error).toBe("LLM rate limit exceeded");
   });
 });
 
