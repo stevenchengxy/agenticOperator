@@ -98,12 +98,12 @@ export function RuleCheckAuditDetailDrawer({
         method: "POST",
       });
       if (r.ok) {
-        setReplayMsg(`已重发 — 新 event ${r.new_event_id?.slice(0, 12)}…(等 30-60s 看新 audit)`);
+        setReplayMsg(t("rc_replay_ok").replace("{id}", r.new_event_id?.slice(0, 12) ?? ""));
       } else {
-        setReplayMsg(`重发失败: ${r.error}`);
+        setReplayMsg(t("rc_replay_fail").replace("{error}", r.error ?? ""));
       }
     } catch (e) {
-      setReplayMsg(`重发出错: ${(e as Error).message.slice(0, 80)}`);
+      setReplayMsg(t("rc_replay_err").replace("{msg}", (e as Error).message.slice(0, 80)));
     } finally {
       setIsReplaying(false);
       setTimeout(() => setReplayMsg(null), 8000);
@@ -150,9 +150,9 @@ export function RuleCheckAuditDetailDrawer({
             size="sm"
             onClick={onReplay}
             disabled={isReplaying}
-            title="重新发送此 audit 的源事件,等候新的 audit"
+            title={t("rc_replay_title")}
           >
-            {isReplaying ? "重跑中…" : "🔁 Replay"}
+            {isReplaying ? t("rc_replay_running") : `🔁 ${t("rc_replay")}`}
           </Btn>
           <Btn size="sm" onClick={onClose}>
             {t("rc_drawer_close")}
@@ -242,8 +242,9 @@ function DetailHeader({
 }: {
   detail: RuleCheckAuditDetail;
 }) {
+  const { t } = useApp();
   // A5 — 一句话决策摘要(给 leader / 客户最直观看的)
-  const summary = buildDecisionSummary(detail);
+  const summary = buildDecisionSummary(detail, t);
   return (
     <>
       <DecisionBanner detail={detail} summary={summary} />
@@ -291,9 +292,15 @@ function DetailHeader({
       <Kv label="rules_evaluated">
         <span
           className="mono text-[11.5px]"
-          title={`ontology ${detail.rules_total_in_ontology} 条 → 经 client/business_group filter → LLM 应用 ${detail.rules_evaluated} 条 → 其中 ${detail.flags.filter((f) => f.applicable).length} 条 applicable=true、${detail.flags.filter((f) => !f.applicable).length} 条 applicable=false`}
+          title={t("rc_rules_evaluated_title")
+            .replace("{total}", String(detail.rules_total_in_ontology))
+            .replace("{evaluated}", String(detail.rules_evaluated))
+            .replace("{applicable}", String(detail.flags.filter((f) => f.applicable).length))
+            .replace("{not_applicable}", String(detail.flags.filter((f) => !f.applicable).length))}
         >
-          ontology {detail.rules_total_in_ontology} → 评估 {detail.rules_evaluated}
+          {t("rc_rules_evaluated_label")
+            .replace("{total}", String(detail.rules_total_in_ontology))
+            .replace("{evaluated}", String(detail.rules_evaluated))}
           {" → "}applicable={detail.flags.filter((f) => f.applicable).length} · NOT_APPLICABLE={detail.flags.filter((f) => !f.applicable).length}
         </span>
         <Badge variant="default">{detail.rule_source}</Badge>
@@ -316,7 +323,7 @@ function DetailHeader({
         >
           <Ic.alert />
           <div className="min-w-0 flex-1">
-            <div className="hint" style={{ color: "var(--c-err)" }}>failure reasons</div>
+            <div className="hint" style={{ color: "var(--c-err)" }}>{t("rc_failure_reasons_label")}</div>
             <div className="mono text-[12px] text-err" style={{ marginTop: 4, lineHeight: 1.5 }}>
               {detail.failure_reasons.join("、")}
             </div>
@@ -337,7 +344,7 @@ function DetailHeader({
         >
           <Ic.alert />
           <div className="min-w-0 flex-1">
-            <div className="hint" style={{ color: "oklch(0.45 0.14 75)" }}>parse error</div>
+            <div className="hint" style={{ color: "oklch(0.45 0.14 75)" }}>{t("rc_parse_error_label")}</div>
             <div className="mono text-[11px]" style={{ color: "oklch(0.45 0.14 75)", marginTop: 4, lineHeight: 1.5 }}>
               {detail.parse_error}
             </div>
@@ -399,15 +406,20 @@ function DecisionBanner({
   );
 }
 
-function buildDecisionSummary(detail: RuleCheckAuditDetail): string {
+function buildDecisionSummary(
+  detail: RuleCheckAuditDetail,
+  t: (k: string) => string,
+): string {
   if (detail.decision === "PASS") {
-    return `所有底线规则放行(评估 ${detail.rules_evaluated}/${detail.rules_total_in_ontology} 条)。下一步:发 MATCH_RULE_CHECK_PASSED 事件 → matchResume 调 RoboHire /match-resume`;
+    return t("rc_decision_summary_pass")
+      .replace("{evaluated}", String(detail.rules_evaluated))
+      .replace("{total}", String(detail.rules_total_in_ontology));
   }
   // FAIL
   const reasons = detail.failure_reasons.length
     ? detail.failure_reasons.join("、")
-    : "(LLM 解析失败)";
-  return `底线规则触发 FAIL → 中止流程,跳过 matchResume。命中:${reasons}`;
+    : t("rc_decision_summary_llm_parse_err");
+  return t("rc_decision_summary_fail").replace("{reasons}", reasons);
 }
 
 function Kv({ label, children }: { label: string; children: React.ReactNode }) {
@@ -438,7 +450,7 @@ function TabBtn({
   return (
     <button
       onClick={onClick}
-      className="text-[12.5px] border-0 bg-transparent cursor-pointer"
+      className="border-0 bg-transparent cursor-pointer"
       style={{
         padding: "12px 0 10px",
         color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
@@ -461,6 +473,7 @@ function TabBtn({
  * 数据来源:`audit.filtered_out_rules`(由 applyClientFilterWithReasons 抓取)。
  */
 function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   const filteredOut = detail.filtered_out_rules ?? [];
 
@@ -480,8 +493,8 @@ function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
   const ontologyTotal = detail.rules_total_in_ontology;
   const evaluatedCount = detail.rules_evaluated;
   const filteredCount = filteredOut.length;
-  const clientId = detail.client_name || '(未知)';
-  const businessGroup = detail.business_group || '(未指定)';
+  const clientId = detail.client_name || "?";
+  const businessGroup = detail.business_group || "?";
 
   return (
     <div className="border border-line rounded-sm bg-panel">
@@ -493,20 +506,23 @@ function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
       >
         <div>
           <div className="hint" style={{ marginBottom: 4 }}>
-            🔍 规则抓取链路证明 · 喂给 LLM 之前的 client/department filter
+            🔍 {t("rc_filter_chain_title")}
           </div>
           <div className="mono text-[12px] text-ink-1">
-            ontology <b>{ontologyTotal}</b> 条
-            {' → '} 跳过 <b>{filteredCount}</b> 条
-            {' → '} 喂给 LLM <b>{evaluatedCount}</b> 条
+            {t("rc_filter_chain_summary")
+              .replace("{total}", String(ontologyTotal))
+              .replace("{filtered}", String(filteredCount))
+              .replace("{evaluated}", String(evaluatedCount))}
             {' '}
             <span className="text-ink-3">
-              (本 audit 维度:client_id=<span className="text-ink-1">{clientId}</span> · business_group=<span className="text-ink-1">{businessGroup}</span>)
+              {t("rc_filter_chain_dim")
+                .replace("{client}", clientId)
+                .replace("{bg}", businessGroup)}
             </span>
           </div>
         </div>
         <span className="mono text-[11px] text-ink-3">
-          点击{open ? '收起' : '展开'} {filteredCount > 0 ? `(${filteredCount} 条跳过明细)` : ''}
+          {open ? t("rc_show_less") : t("rc_show_more")} {filteredCount > 0 ? `(${filteredCount})` : ''}
         </span>
       </button>
       {open && filteredOut.length > 0 ? (
@@ -517,12 +533,12 @@ function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
               <div key={category} style={{ padding: "8px 14px", borderBottom: "1px solid var(--c-line)" }}>
                 <div className="hint" style={{ marginBottom: 6 }}>
                   {category === 'executor'
-                    ? `executor ≠ Agent (${rules.length} 条) — 这些规则由人工执行,不属于 rule-check LLM 范围`
+                    ? t("rc_filtered_executor_detail").replace("{count}", String(rules.length))
                     : category === 'client'
-                      ? `applicableClient 不匹配 (${rules.length} 条) — 这些规则只适用于其他客户`
+                      ? t("rc_filtered_client_detail").replace("{count}", String(rules.length))
                       : category === 'department'
-                        ? `applicableDepartment 不匹配 (${rules.length} 条) — 这些规则只适用于其他部门 / business_group`
-                        : `其他 (${rules.length} 条)`}
+                        ? t("rc_filtered_department_detail").replace("{count}", String(rules.length))
+                        : t("rc_filtered_other_detail").replace("{count}", String(rules.length))}
                 </div>
                 <div className="flex flex-col" style={{ gap: 6 }}>
                   {rules.map((f) => (
@@ -548,7 +564,7 @@ function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
                           {f.reason}
                         </div>
                         <div className="mono text-[10.5px] text-ink-4" style={{ marginTop: 2 }}>
-                          ontology 标注:applicableClient="{f.applicable_client}" · applicableDepartment="{f.applicable_department}" · executor="{f.executor}"
+                          applicableClient="{f.applicable_client}" · applicableDepartment="{f.applicable_department}" · executor="{f.executor}"
                         </div>
                       </div>
                     </div>
@@ -559,7 +575,7 @@ function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
         </div>
       ) : open ? (
         <div className="hint" style={{ padding: "10px 14px", borderTop: "1px solid var(--c-line)" }}>
-          (本 audit 没有任何规则被过滤掉 — ontology 全部 {ontologyTotal} 条都喂给了 LLM)
+          {t("rc_filter_chain_empty").replace("{total}", String(ontologyTotal))}
         </div>
       ) : null}
     </div>
@@ -667,13 +683,14 @@ function ViewToggle({
 }
 
 function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
   if (detail.flags.length === 0) {
     return (
       <>
         <CandidateProfileCard detail={detail} />
         <EmptyState
-          title="无规则评估记录"
-          hint="本条 audit 的 LLM 解析失败,没有任何 rule_flags 输出。"
+          title={t("rc_no_rules_title")}
+          hint={t("rc_no_rules_hint")}
           variant="info"
         />
       </>
@@ -681,7 +698,7 @@ function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
   }
   // 候选人 + JD 上下文 — 让每条 flag 的"对决策影响"文案能引用具体姓名/岗位,
   // 而不是冷冰冰的"无负面影响"。
-  const ctx = deriveCandidateContext(detail);
+  const ctx = deriveCandidateContext(detail, t);
 
   // 分两段:
   //   ① applicable=true(规则被实际评估) — 按 FAIL→PASS→其他 排序,详情卡展开
@@ -710,7 +727,7 @@ function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
       {orderedApplicable.length > 0 ? (
         <>
           <div className="hint" style={{ marginTop: 4, marginBottom: 2 }}>
-            已评估规则({orderedApplicable.length} 条 · applicable=true)
+            {t("rc_rules_evaluated_section").replace("{count}", String(orderedApplicable.length))}
           </div>
           {orderedApplicable.map((f) => (
             <InferenceChainCard
@@ -744,7 +761,10 @@ type CandidateContext = {
   failureRuleIds: Set<string>; // 这次决策被 failure_reasons 命中的 rule_id (取 "<rule_id>:..." 前缀)
 };
 
-function deriveCandidateContext(detail: RuleCheckAuditDetail): CandidateContext {
+function deriveCandidateContext(
+  detail: RuleCheckAuditDetail,
+  t: (k: string) => string,
+): CandidateContext {
   const r = (detail.parsed_resume_full ?? {}) as Record<string, unknown>;
   const j = (detail.job_requisition_full ?? {}) as Record<string, unknown>;
   const failureRuleIds = new Set<string>();
@@ -755,8 +775,8 @@ function deriveCandidateContext(detail: RuleCheckAuditDetail): CandidateContext 
     if (ruleId) failureRuleIds.add(ruleId.trim());
   }
   return {
-    name: pickStr(r.name) || "(候选人)",
-    jrTitle: pickStr(j.client_job_title) || "(本岗位)",
+    name: pickStr(r.name) || t("rc_candidate_no_name"),
+    jrTitle: pickStr(j.client_job_title) || t("rc_jr_no_title"),
     failureRuleIds,
   };
 }
@@ -767,6 +787,7 @@ function deriveCandidateContext(detail: RuleCheckAuditDetail): CandidateContext 
  * 用户看到这个面板,就知道"规则 10-29 在 ontology 里,但本次 applicable=false"。
  */
 function RuleFetchProvenanceCard({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
   const applicableCount = detail.flags.filter((f) => f.applicable).length;
   const notApplicableCount = detail.flags.filter((f) => !f.applicable).length;
   const ontologyCount = detail.rules_total_in_ontology;
@@ -775,10 +796,10 @@ function RuleFetchProvenanceCard({ detail }: { detail: RuleCheckAuditDetail }) {
 
   const sourceTag =
     detail.rule_source === "neo4j-direct"
-      ? "Neo4j 直连 — 实时跟 ontology 同步"
+      ? t("rc_provenance_neo4j_direct")
       : detail.rule_source === "ontology-api"
-        ? "Allmeta Ontology HTTP API — partner 远程"
-        : "JSON 静态副本 — 兜底,跟主仓 rules.json 一致";
+        ? t("rc_provenance_ontology_api")
+        : t("rc_provenance_json_fallback");
 
   return (
     <div
@@ -786,7 +807,7 @@ function RuleFetchProvenanceCard({ detail }: { detail: RuleCheckAuditDetail }) {
       style={{ padding: "10px 14px" }}
     >
       <div className="hint" style={{ marginBottom: 6 }}>
-        🔍 规则抓取链路 — 证明本次 audit 看过全部 {ontologyCount} 条 ontology 规则
+        🔍 {t("rc_provenance_title").replace("{total}", String(ontologyCount))}
       </div>
       <div
         className="grid items-center"
@@ -797,18 +818,24 @@ function RuleFetchProvenanceCard({ detail }: { detail: RuleCheckAuditDetail }) {
         }}
       >
         <span className="mono text-ink-1 font-semibold">{ontologyCount}</span>
-        <span className="text-ink-3">ontology 规则总数</span>
+        <span className="text-ink-3">{t("rc_provenance_ontology_label")}</span>
         <span className="text-ink-3">→</span>
         <span className="mono text-ink-1 font-semibold">{evaluatedCount}</span>
-        <span className="text-ink-3">经 client/business_group filter 后</span>
+        <span className="text-ink-3">{t("rc_provenance_filtered_label")}</span>
         <span className="text-ink-3">→</span>
         <span className="mono text-ink-1 font-semibold">{applicableCount}</span>
       </div>
       <div className="mono text-[11px] text-ink-3" style={{ marginTop: 6 }}>
-        过滤掉 {filteredOut} 条(applicableClient / department 不匹配本 audit) · 评估的 {evaluatedCount} 条里 {applicableCount} 条 applicable=true、{notApplicableCount} 条 NOT_APPLICABLE
+        {t("rc_provenance_summary")
+          .replace("{filtered}", String(filteredOut))
+          .replace("{evaluated}", String(evaluatedCount))
+          .replace("{applicable}", String(applicableCount))
+          .replace("{not_applicable}", String(notApplicableCount))}
       </div>
       <div className="mono text-[11px] text-ink-3" style={{ marginTop: 4 }}>
-        数据来源:<span className="text-ink-1">{detail.rule_source}</span> — {sourceTag}
+        {t("rc_provenance_source")
+          .replace("{source}", detail.rule_source)
+          .replace("{tag}", sourceTag)}
       </div>
     </div>
   );
@@ -828,6 +855,7 @@ function NotApplicableRulesSection({
   flags: RuleCheckAuditDetail["flags"];
   ctx: CandidateContext;
 }) {
+  const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   const recoveredCount = flags.filter((f) => f.from_raw_fallback).length;
   return (
@@ -840,19 +868,19 @@ function NotApplicableRulesSection({
       >
         <div className="min-w-0 flex-1">
           <span className="hint">
-            {open ? "▾" : "▸"} 不适用规则({flags.length} 条 · applicable=false,LLM 评估了触发条件但不触发)
+            {open ? "▾" : "▸"} {t("rc_na_rules_section").replace("{count}", String(flags.length))}
           </span>
           {recoveredCount > 0 ? (
             <div
               className="mono text-[10.5px] text-warn"
               style={{ marginTop: 2 }}
-              title="这些条目早期 writer 把 applicable=false 过滤掉了,本次从 llm_raw_text 兜底回填"
+              title={t("rc_na_fallback_title")}
             >
-              ⓘ 其中 {recoveredCount} 条由 llm_raw_text 兜底回填(DB 漏写)
+              ⓘ {t("rc_na_rules_raw_fallback").replace("{count}", String(recoveredCount))}
             </div>
           ) : null}
         </div>
-        <span className="mono text-[11px] text-ink-3">点击{open ? "收起" : "展开"}</span>
+        <span className="mono text-[11px] text-ink-3">{open ? t("rc_show_less") : t("rc_show_more")}</span>
       </button>
       {open ? (
         <div className="flex flex-col" style={{ padding: "4px 0 8px" }}>
@@ -874,20 +902,20 @@ function NotApplicableRulesSection({
                       <span
                         className="mono text-[9.5px] text-warn border border-warn rounded-sm"
                         style={{ padding: "1px 4px" }}
-                        title="DB 漏写,从 llm_raw_text 兜底回填"
+                        title={t("rc_na_raw_fallback_tag_title")}
                       >
                         raw fallback
                       </span>
                     ) : null}
                   </div>
                   <div className="text-[11.5px] text-ink-2" style={{ marginTop: 2, lineHeight: 1.55 }}>
-                    <span className="text-ink-3">LLM 判定:</span>
-                    {f.evidence || "(LLM 未给 evidence — 触发条件未满足)"}
+                    <span className="text-ink-3">{t("rc_na_rule_llm_verdict")}</span>
+                    {f.evidence || t("rc_evidence_no_llm_short")}
                   </div>
                   <div className="text-[11px] text-ink-3" style={{ marginTop: 2, lineHeight: 1.5 }}>
-                    候选人 <span className="text-ink-1">{ctx.name}</span> 在岗位{" "}
-                    <span className="text-ink-1">{ctx.jrTitle}</span>{" "}
-                    上不触发此规则 → 跳过判定,不参与底线决策。
+                    {t("rc_na_rule_not_triggered")
+                      .replace("{name}", ctx.name)
+                      .replace("{jr}", ctx.jrTitle)}
                   </div>
                 </div>
               </div>
@@ -906,6 +934,7 @@ function NotApplicableRulesSection({
  * 一目了然显示"这是谁,跟岗位匹不匹"。
  */
 function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
   const r = (detail.parsed_resume_full ?? {}) as Record<string, unknown>;
   const j = (detail.job_requisition_full ?? {}) as Record<string, unknown>;
 
@@ -929,7 +958,7 @@ function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
 
   // experience
   const exp = Array.isArray(r.experience) ? (r.experience as Array<Record<string, unknown>>) : [];
-  const totalYears = exp.length > 0 ? `${exp.length} 段 (近 ${exp.slice(0, 3).map((e) => `${pickStr(e.company) || '?'}/${pickStr(e.role) || pickStr(e.title) || '?'}`).join(' / ')})` : null;
+  const totalYears = exp.length > 0 ? `${exp.length} (${exp.slice(0, 3).map((e) => `${pickStr(e.company) || '?'}/${pickStr(e.role) || pickStr(e.title) || '?'}`).join(' / ')})` : null;
 
   // JR 画像
   const jrTitle = pickStr(j.client_job_title);
@@ -952,13 +981,13 @@ function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
         gap: "10px 18px",
       }}
     >
-      {/* 候选人画像 */}
+      {/* Candidate profile */}
       <div>
         <div className="hint" style={{ marginBottom: 6 }}>
-          👤 候选人画像
+          👤 {t("rc_candidate_profile_title")}
         </div>
         <div className="text-[13px] text-ink-1 font-semibold" style={{ marginBottom: 4 }}>
-          {name || "(无姓名)"}
+          {name || t("rc_candidate_no_name")}
           {gender ? ` · ${gender}` : ""}
           {marital ? ` · ${marital}` : ""}
           {nationality ? ` · ${nationality}` : ""}
@@ -966,7 +995,7 @@ function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
         <div className="text-[11.5px] text-ink-2" style={{ lineHeight: 1.6 }}>
           {degree || school || major ? (
             <div>
-              <span className="hint">学历:</span> {degree}
+              <span className="hint">{t("rc_edu_label")}</span> {degree}
               {school ? ` · ${school}` : ""}
               {major ? ` · ${major}` : ""}
               {eduEnd ? ` · ${eduStart || "?"} → ${eduEnd}` : ""}
@@ -974,7 +1003,7 @@ function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
           ) : null}
           {totalYears ? (
             <div>
-              <span className="hint">经历:</span> {totalYears}
+              <span className="hint">{t("rc_exp_label")}</span> {totalYears}
             </div>
           ) : null}
           {address || phone ? (
@@ -985,36 +1014,36 @@ function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
           ) : null}
           {expectedSalary ? (
             <div>
-              <span className="hint">期望薪资:</span> {expectedSalary}
+              <span className="hint">{t("rc_salary_label")}</span> {expectedSalary}
             </div>
           ) : null}
         </div>
       </div>
 
-      {/* JR 画像 */}
+      {/* Position profile */}
       <div>
         <div className="hint" style={{ marginBottom: 6 }}>
-          💼 岗位画像
+          💼 {t("rc_jr_profile_title")}
         </div>
         <div className="text-[13px] text-ink-1 font-semibold" style={{ marginBottom: 4 }}>
-          {jrTitle || "(无岗位名)"}
+          {jrTitle || t("rc_jr_no_title")}
           {jrDept ? ` · ${jrDept}` : ""}
         </div>
         <div className="text-[11.5px] text-ink-2" style={{ lineHeight: 1.6 }}>
-          {jrCity ? <div><span className="hint">城市:</span> {jrCity}</div> : null}
-          {jrSalary ? <div><span className="hint">薪资范围:</span> {jrSalary}</div> : null}
-          {jrDegreeReq ? <div><span className="hint">学历要求:</span> {jrDegreeReq}</div> : null}
+          {jrCity ? <div><span className="hint">{t("rc_city_label")}</span> {jrCity}</div> : null}
+          {jrSalary ? <div><span className="hint">{t("rc_salary_range_label")}</span> {jrSalary}</div> : null}
+          {jrDegreeReq ? <div><span className="hint">{t("rc_degree_req_label")}</span> {jrDegreeReq}</div> : null}
           <div className="text-ink-3">
             client_id: {detail.client_name || "?"}{detail.business_group ? ` × ${detail.business_group}` : ""}
           </div>
         </div>
       </div>
 
-      {/* 匹配冲突高亮(从 failure_reasons 提炼)*/}
+      {/* Gating rule conflicts (from failure_reasons) */}
       {detail.failure_reasons.length > 0 ? (
         <div style={{ gridColumn: "1 / -1", paddingTop: 4, borderTop: "1px solid var(--c-line)" }}>
           <div className="hint" style={{ marginBottom: 4 }}>
-            ⚠ 命中底线规则(决定整体 FAIL):
+            ⚠ {t("rc_failure_hit")}
           </div>
           <div className="text-[12px] text-err" style={{ lineHeight: 1.5 }}>
             {detail.failure_reasons.join(" · ")}
@@ -1054,6 +1083,7 @@ function InferenceChainCard({
   auditId: string;
   ctx: CandidateContext;
 }) {
+  const { t } = useApp();
   const isBottomLine = flag.severity === "terminal" || flag.severity === "needs_human";
   const isFail = flag.result === "FAIL";
   const blocks = isBottomLine && isFail;
@@ -1078,6 +1108,7 @@ function InferenceChainCard({
     name: ctx.name,
     jrTitle: ctx.jrTitle,
     evidence: flag.evidence,
+    t,
   });
 
   return (
@@ -1098,7 +1129,7 @@ function InferenceChainCard({
         </span>
         <span title={`ontology severity: ${flag.severity}`}>
           <Badge variant={isBottomLine ? "err" : "default"}>
-            {flag.severity === "flag_only" ? "提示" : "底线"}
+            {flag.severity === "flag_only" ? t("rc_flag_severity_tip") : t("rc_flag_severity_bottomline")}
           </Badge>
         </span>
         <Badge variant={flag.result === "PASS" ? "ok" : flag.result === "FAIL" ? "err" : "default"}>
@@ -1106,21 +1137,21 @@ function InferenceChainCard({
         </Badge>
         <Neo4jLinkBtn
           label="🔗"
-          title="查这条规则的 ontology 节点 + 该候选人的 JR 关系"
           cypher={`MATCH (r:Rule {id: "${flag.rule_id}"})\nRETURN r`}
         />
       </div>
 
-      {/* 候选人 + JD 上下文一行 — 提醒用户"这是 <name> 在 <jrTitle> 上的判定"  */}
+      {/* Candidate + JD context row */}
       <div
         className="text-[11px] text-ink-3"
         style={{ padding: "6px 14px 0", lineHeight: 1.5 }}
       >
-        候选人 <span className="text-ink-1">{ctx.name}</span> 在岗位{" "}
-        <span className="text-ink-1">{ctx.jrTitle}</span> 上的判定
+        {t("rc_candidate_context_line")
+          .replace("{name}", ctx.name)
+          .replace("{jr}", ctx.jrTitle)}
       </div>
 
-      {/* 因果链:3 步(简化版,去掉冗余的"触发条件"步)*/}
+      {/* Inference chain: 3 steps */}
       <div className="flex flex-col" style={{ padding: "10px 14px", gap: 6 }}>
         {flag.applicable ? (
           <>
@@ -1129,24 +1160,24 @@ function InferenceChainCard({
               label="LLM evidence"
               ok={flag.result === "PASS"}
               warn={flag.result === "FAIL"}
-              content={flag.evidence || "(LLM 未给 evidence)"}
+              content={flag.evidence || t("rc_evidence_no_llm")}
             />
             <ChainStep
               step="2"
-              label={isBottomLine ? "底线规则 · next_action" : "提示规则 · next_action"}
+              label={isBottomLine ? t("rc_flag_step2_bottomline") : t("rc_flag_step2_tip")}
               ok={flag.next_action === "continue"}
               warn={flag.next_action === "block"}
               content={
                 flag.next_action === "block"
-                  ? "阻断:写入 failure_reasons → 跳过 matchResume"
+                  ? t("rc_chain_step2_block")
                   : flag.next_action === "continue"
-                    ? "继续:不进 failure_reasons"
-                    : flag.next_action || "(未给)"
+                    ? t("rc_chain_step2_continue")
+                    : flag.next_action || t("rc_chain_step2_not_given")
               }
             />
             <ChainStep
               step="3"
-              label="对整体决策的影响"
+              label={t("rc_chain_step3_label")}
               ok={!blocks}
               warn={blocks}
               content={impactSentence}
@@ -1155,9 +1186,11 @@ function InferenceChainCard({
         ) : (
           <ChainStep
             step="—"
-            label="不适用"
+            label={t("rc_chain_na_label")}
             ok
-            content={`本规则在 ${ctx.name} × ${ctx.jrTitle} 场景的触发条件不满足,无需评估`}
+            content={t("rc_chain_na_content")
+              .replace("{name}", ctx.name)
+              .replace("{jr}", ctx.jrTitle)}
           />
         )}
       </div>
@@ -1181,24 +1214,33 @@ function buildImpactSentence(args: {
   name: string;
   jrTitle: string;
   evidence: string;
+  t: (k: string) => string;
 }): string {
-  const { blocks, isFail, isBottomLine, isFailureCause, name, jrTitle, evidence } = args;
-  const ev = summarizeEvidence(evidence);
+  const { blocks, isFail, isBottomLine, isFailureCause, name, jrTitle, evidence, t } = args;
+  const ev = summarizeEvidence(evidence, t);
   if (blocks) {
-    // 阻断:底线 + FAIL,这条规则就是整体 FAIL 的原因
-    const cause = isFailureCause ? "★ 命中 failure_reasons" : "★ 底线规则失败";
-    return `${cause}:${name} 在 ${jrTitle} 上不满足底线 — ${ev}。触发整体 FAIL → emit MATCH_FAILED(含 rule_check_decision=FAIL),跳过 matchResume,不进 Robohire 打分。`;
+    const key = isFailureCause ? "rc_impact_bottomline_fail_cause" : "rc_impact_bottomline_fail";
+    return t(key)
+      .replace("{name}", name)
+      .replace("{jr}", jrTitle)
+      .replace("{ev}", ev);
   }
   if (isFail) {
-    // flag_only FAIL — 仅 augmentation 标注
-    return `提示规则失败:${name} 在 ${jrTitle} 上存在 ${ev},但 severity=flag_only,只在 resume_augmentation 用 ✗ 标注,不影响整体推进。`;
+    return t("rc_impact_flag_only_fail")
+      .replace("{name}", name)
+      .replace("{jr}", jrTitle)
+      .replace("{ev}", ev);
   }
   if (isBottomLine) {
-    // 底线 + PASS
-    return `底线规则放行:${name} 在 ${jrTitle} 上通过此条 — ${ev}。不进 failure_reasons,允许继续推进 matchResume。`;
+    return t("rc_impact_bottomline_pass")
+      .replace("{name}", name)
+      .replace("{jr}", jrTitle)
+      .replace("{ev}", ev);
   }
-  // 提示 + PASS
-  return `提示规则通过:${name} 在 ${jrTitle} 上无 ${ev || "异常"},augmentation 用 ✓ 标注。`;
+  return t("rc_impact_flag_only_pass")
+    .replace("{name}", name)
+    .replace("{jr}", jrTitle)
+    .replace("{ev}", ev || "");
 }
 
 /**
@@ -1207,8 +1249,8 @@ function buildImpactSentence(args: {
  *   - 取头一句(到第一个句号 / 分号 / 换行)
  *   - 超长截到 80 字加 …
  */
-function summarizeEvidence(evidence: string): string {
-  if (!evidence) return "(LLM 未给 evidence)";
+function summarizeEvidence(evidence: string, t: (k: string) => string): string {
+  if (!evidence) return t("rc_evidence_no_llm");
   let s = evidence.trim().replace(/^候选人[^,。:]{1,6}[,。:]?\s*/, "");
   const cut = s.search(/[。;\n]/);
   if (cut > 0) s = s.slice(0, cut);
@@ -1257,13 +1299,14 @@ function ChainStep({
 }
 
 function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
   return (
     <div className="flex flex-col gap-4">
       <CandidateProfileCard detail={detail} />
       {detail.resume_augmentation ? (
         <div>
           <div className="hint flex items-center" style={{ gap: 8, marginBottom: 6 }}>
-            <span>Resume Augmentation (Kenny §3,注入 Robohire resume 顶部)</span>
+            <span>{t("rc_resume_aug_title")}</span>
             <CopyBtn text={detail.resume_augmentation} />
           </div>
           <pre
@@ -1288,7 +1331,7 @@ function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
           className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
           style={{ padding: "12px 14px" }}
         >
-          {detail.llm_raw_text ?? "(no raw text saved — audit 在 llm_raw_text 字段加入前写入)"}
+          {detail.llm_raw_text ?? t("rc_llm_raw_missing")}
         </pre>
       </div>
     </div>
@@ -1296,10 +1339,7 @@ function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
 }
 
 function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
-  // 3 段:
-  //   ① 经 Allmeta API 拿到的实时 Neo4j 数据(证明 Allmeta 路径通)
-  //   ② full snapshot(LLM 决策时看到的 input,从 audit 当时存的 JSON 取)
-  //   ③ Bolt 直接查的 anchor 精简版(老路径,验证用)
+  const { t } = useApp();
   const fullMissing =
     detail.parsed_resume_full === null && detail.job_requisition_full === null;
   return (
@@ -1311,37 +1351,35 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
           className="hint flex items-center"
           style={{ gap: 8, marginBottom: 8 }}
         >
-          <span>决策时完整 Input(LLM 实际看到的数据)</span>
+          <span>{t("rc_instances_full_input_title")}</span>
         </div>
         {fullMissing ? (
           <div
             className="border border-line bg-panel rounded-sm text-[11.5px] text-ink-2"
             style={{ padding: "10px 14px", lineHeight: 1.6 }}
           >
-            <span className="text-warn font-semibold">⚠ 这条 audit 没保存完整 input</span>
-            {" — "}创建时间早于 Q1 改动(audit 节点新增 <code>parsed_resume_json</code> / <code>job_requisition_json</code> 字段)。
+            <span className="text-warn font-semibold">⚠ {t("rc_instances_full_missing_warn")}</span>
+            {" — "}{t("rc_instances_full_missing_body")}
             <br />
             <span className="text-ink-3">
-              改动后产生的 audit 会显示完整 JSON。需要的话可点上方
-              <strong> 🔁 Replay </strong>
-              重发同一份 input 产生新 audit。
+              {t("rc_instances_full_missing_new")} <strong> 🔁 {t("rc_replay")} </strong>
             </span>
             <br />
             <span className="text-ink-3">
-              下方 Neo4j Anchor 精简版仍可看(name / 公司 / 学历 / JD 关键字段)。
+              {t("rc_instances_full_missing_anchor")}
             </span>
           </div>
         ) : (
           <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <InstanceCard
-              title="Parsed Resume(完整)"
+              title={t("rc_instance_parsed_resume_title")}
               data={detail.parsed_resume_full}
-              note="来自 RESUME_PROCESSED.parsed.data,Robohire 解析的全字段"
+              note={t("rc_instance_parsed_resume_note")}
             />
             <InstanceCard
-              title="Job Requisition(完整)"
+              title={t("rc_instance_jr_title")}
               data={detail.job_requisition_full}
-              note="来自 RAAS getRequirementsAgentView 单条 item"
+              note={t("rc_instance_jr_note")}
             />
           </div>
         )}
@@ -1351,23 +1389,23 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
           className="hint flex items-center"
           style={{ gap: 8, marginBottom: 8 }}
         >
-          <span>Neo4j Anchor 节点(图查询友好的精简版)</span>
+          <span>{t("rc_anchor_title")}</span>
         </div>
         <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <InstanceCard
             title=":Candidate"
             data={detail.candidate_snapshot}
-            note="snapshot 派生 flags + name/gender/birth_date(剔除 PII)"
+            note={t("rc_anchor_candidate_note")}
           />
           <InstanceCard
             title=":Resume"
             data={detail.resume_snapshot}
-            note="companies / skills(拍平)/ highest_degree 等"
+            note={t("rc_anchor_resume_note")}
           />
           <InstanceCard
             title=":JobRequisition"
             data={detail.jr_snapshot}
-            note="must_have_skills / work_years / salary_range 等"
+            note={t("rc_anchor_jr_note")}
           />
         </div>
       </div>
@@ -1380,6 +1418,7 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
  * 证明 AO 在用 Allmeta API 路径(不是直连 Bolt)。每条带可粘 Cypher。
  */
 function AllmetaLiveSnapshot({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
   const targets = [
     { label: 'Candidate', pk: detail.candidate_id, displayName: ':Candidate' },
     { label: 'Resume', pk: detail.resume_id, displayName: ':Resume' },
@@ -1391,7 +1430,7 @@ function AllmetaLiveSnapshot({ detail }: { detail: RuleCheckAuditDetail }) {
         className="hint flex items-center"
         style={{ gap: 8, marginBottom: 8 }}
       >
-        <span>🛰️ Allmeta API 实时读 Neo4j(证明 AO ↔ Allmeta ↔ Neo4j 路径打通)</span>
+        <span>🛰️ {t("rc_allmeta_title")}</span>
       </div>
       <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
         {targets.map((t) => (
@@ -1428,6 +1467,7 @@ function AllmetaInstanceCard({
   pk: string;
   title: string;
 }) {
+  const { t } = useApp();
   const [data, setData] = React.useState<AllmetaCardResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
 
@@ -1458,7 +1498,7 @@ function AllmetaInstanceCard({
           <>
             <Badge variant="ok">Allmeta OK</Badge>
             <span className="text-ink-3 text-[10px]">
-              {Object.keys(data.instance).length} 字段
+              {t("rc_allmeta_fields").replace("{count}", String(Object.keys(data.instance).length))}
             </span>
             <CopyBtn text={JSON.stringify(data.instance, null, 2)} />
           </>
@@ -1467,13 +1507,13 @@ function AllmetaInstanceCard({
         ) : null}
       </div>
       <div className="mono text-[10px] text-ink-3" style={{ marginBottom: 6 }}>
-        pk: {pk?.slice(0, 36) || "(无)"}
+        pk: {pk?.slice(0, 36) || t("rc_allmeta_no_pk")}
       </div>
 
       {loading ? (
-        <div className="text-ink-3 text-[11px]">查询中…</div>
+        <div className="text-ink-3 text-[11px]">{t("rc_allmeta_loading")}</div>
       ) : !data ? (
-        <div className="text-ink-3 text-[11px]">未关联</div>
+        <div className="text-ink-3 text-[11px]">{t("rc_cell_unloaded")}</div>
       ) : data.ok ? (
         <>
           <pre
@@ -1491,7 +1531,7 @@ function AllmetaInstanceCard({
               borderRadius: 3,
             }}
           >
-            <div className="text-ink-3 mb-1">📋 验证 Cypher(粘到 Neo4j Browser):</div>
+            <div className="text-ink-3 mb-1">📋 {t("rc_allmeta_cypher_label")}</div>
             <CypherSnippet cypher={data.verify.cypher} />
             <div className="mt-2 text-ink-3 text-[9.5px]">
               Allmeta API: {data.verify.api_path}
@@ -1512,7 +1552,7 @@ function AllmetaInstanceCard({
               className="mono text-[10px] text-ink-3"
               style={{ marginTop: 6, padding: "6px 8px", background: "var(--c-bg)", borderRadius: 3 }}
             >
-              <div className="text-ink-3 mb-1">📋 直接查 Neo4j 验证:</div>
+              <div className="text-ink-3 mb-1">📋 {t("rc_allmeta_direct_label")}</div>
               <CypherSnippet cypher={data.verify.cypher} />
             </div>
           ) : null}
@@ -1545,6 +1585,7 @@ function InstanceCard({
   data: Record<string, unknown> | null;
   note?: string;
 }) {
+  const { t } = useApp();
   const text = data ? JSON.stringify(data, null, 2) : "";
   return (
     <div
@@ -1560,7 +1601,7 @@ function InstanceCard({
           <>
             <span className="text-ink-3">·</span>
             <span className="text-ink-3 text-[10px]">
-              {Object.keys(data).length} 字段
+              {t("rc_allmeta_fields").replace("{count}", String(Object.keys(data).length))}
             </span>
             <CopyBtn text={text} />
           </>
@@ -1575,7 +1616,7 @@ function InstanceCard({
         </div>
       ) : null}
       {!data ? (
-        <div className="text-ink-3 text-[11.5px]">未关联</div>
+        <div className="text-ink-3 text-[11.5px]">{t("rc_cell_unloaded")}</div>
       ) : (
         <pre
           className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap"
@@ -1606,12 +1647,13 @@ function Neo4jLinkBtn({
   title?: string;
   cypher: string;
 }) {
+  const { t } = useApp();
   const [copied, setCopied] = React.useState(false);
   const browserUrl =
     process.env.NEXT_PUBLIC_NEO4J_BROWSER_URL || "http://localhost:7475/browser/";
   return (
     <button
-      title={title || "复制 Cypher + 跳 Neo4j Browser"}
+      title={title || t("rc_neo4j_default_title")}
       onClick={(e) => {
         e.stopPropagation();
         navigator.clipboard?.writeText(cypher);
@@ -1622,12 +1664,13 @@ function Neo4jLinkBtn({
       className="mono text-[10.5px] border border-line bg-panel text-ink-2 rounded-sm cursor-pointer hover:bg-surface hover:text-ink-1"
       style={{ padding: "4px 8px" }}
     >
-      {copied ? "✓ cypher 已复制,粘贴运行" : label}
+      {copied ? t("rc_copied_cypher") : label}
     </button>
   );
 }
 
 function CopyBtn({ text }: { text: string }) {
+  const { t } = useApp();
   const [copied, setCopied] = React.useState(false);
   return (
     <button
@@ -1639,7 +1682,7 @@ function CopyBtn({ text }: { text: string }) {
       className="mono text-[10.5px] text-ink-3 border-0 bg-transparent cursor-pointer hover:text-ink-1"
       style={{ padding: 0 }}
     >
-      {copied ? "✓ 已复制" : "复制"}
+      {copied ? t("rc_copied_btn") : t("rc_copy_btn")}
     </button>
   );
 }
@@ -1750,40 +1793,40 @@ function RuleDefinitionBody({
           className="mono text-[10px] text-ink-3"
           title={
             source === "ontology-api"
-              ? "Allmeta Ontology HTTP API — GET /api/v1/ontology/rules/{ruleId}?domain=RAAS-v1"
-              : "API 不可达 / 配置缺失,降级读 lib/rule-check/rules.json"
+              ? t("rc_rule_source_api_detail")
+              : t("rc_rule_source_fallback_detail")
           }
         >
-          数据来源:{source}
+          {t("rc_rule_source_label").replace("{source}", source)}
         </span>
       </div>
       <div className="text-[12.5px] text-ink-1 font-semibold">
-        {rule.businessLogicRuleName || "(规则无 businessLogicRuleName)"}
+        {rule.businessLogicRuleName || t("rc_rule_no_name")}
       </div>
-      <RuleField label="触发条件 (submissionCriteria)" value={rule.submissionCriteria} />
+      <RuleField label={t("rc_rule_field_trigger")} value={rule.submissionCriteria} />
       <RuleField
-        label="判定逻辑 (standardizedLogicRule)"
+        label={t("rc_rule_field_logic")}
         value={rule.standardizedLogicRule}
         mono
       />
       {rule.businessBackgroundReason ? (
         <RuleField
-          label="业务背景 (businessBackgroundReason)"
+          label={t("rc_rule_field_bg")}
           value={rule.businessBackgroundReason}
         />
       ) : null}
       {rule.specificScenarioStage ? (
         <RuleField
-          label="场景阶段 (specificScenarioStage)"
+          label={t("rc_rule_field_stage")}
           value={rule.specificScenarioStage}
         />
       ) : null}
       {rule.ruleSource ? (
-        <RuleField label="规则来源 (ruleSource)" value={rule.ruleSource} />
+        <RuleField label={t("rc_rule_field_source")} value={rule.ruleSource} />
       ) : null}
       {rule.relatedEntities && rule.relatedEntities.length > 0 ? (
         <RuleField
-          label="关联实体 (relatedEntities)"
+          label={t("rc_rule_field_entities")}
           value={rule.relatedEntities.join(" · ")}
         />
       ) : null}
