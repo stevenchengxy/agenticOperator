@@ -3,7 +3,8 @@ import React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AGENT_MAP, INNGEST_REAL_SHORTS, deploymentKind, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
-import { useInngestEvents, type InngestEventRow } from "@/lib/api/inngest-events";
+import { useInngestEventsStream } from "@/lib/api/inngest-events-stream";
+import type { InngestEventRow } from "@/lib/api/inngest-events";
 import { useEmHealth } from "@/lib/api/em-health";
 import { fetchJson } from "@/lib/api/client";
 import type { EventsResponse, EventContract } from "@/lib/api/types";
@@ -74,11 +75,12 @@ export function EventsContent() {
     });
   }, [setUrl]);
 
-  const { events, error, lastFetchAt, connected } = useInngestEvents({
-    intervalMs: 2000,
-    limit: 200,
-    name: filterName ?? undefined,
-  });
+  const { events: rawEvents, error, lastFetchAt, connected } = useInngestEventsStream();
+  // SSE stream doesn't accept a name param — filter client-side when active
+  const events = React.useMemo(() => {
+    if (!filterName) return rawEvents;
+    return rawEvents.filter((e) => e.name === filterName);
+  }, [rawEvents, filterName]);
   const emHealth = useEmHealth();
   const { registry, syncing, refreshRegistry, syncNow } = useEventRegistry();
   const dlq = useDlq(view === "dlq");
