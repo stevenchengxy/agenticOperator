@@ -175,7 +175,7 @@ describe("getRunDetail tool", () => {
         agentName: "ResumeParser",
         runId: "R-1",
         modelUsed: "gemini-3-flash",
-        tokenUsage: '{"prompt":10,"completion":5,"total":15}',
+        tokenUsage: JSON.stringify({ prompt: 10, completion: 5, total: 15 }),
         durationMs: 100,
       },
     ]);
@@ -185,6 +185,15 @@ describe("getRunDetail tool", () => {
     expect((result as any).steps[0].stepName).toBe("parse-resume");
     expect((result as any).episodes).toHaveLength(1);
     expect((result as any).episodes[0].modelUsed).toBe("gemini-3-flash");
+    expect((result as any).episodes[0].tokenUsage).toEqual({ prompt: 10, completion: 5, total: 15 });
+  });
+
+  it("getRunDetail handles malformed tokenUsage gracefully", async () => {
+    (prisma.workflowRun.findMany as any).mockResolvedValue([{ id: "R-x", triggerEvent: "X", status: "completed", startedAt: new Date() }]);
+    (prisma.workflowStep.findMany as any).mockResolvedValue([]);
+    (prisma.agentEpisode.findMany as any).mockResolvedValue([{ stepIdx: 0, modelUsed: "x", tokenUsage: "{malformed", durationMs: 1 }]);
+    const { result } = await byName("getRunDetail").execute({ runId: "R-x" });
+    expect((result as any).episodes[0].tokenUsage).toBeNull();
   });
 
   it("returns null run when not found", async () => {
@@ -358,6 +367,13 @@ describe("searchDLQ tool", () => {
     (global.fetch as any).mockResolvedValue({ ok: false, json: async () => ({}) });
     const { result } = await byName("searchDLQ").execute({});
     expect((result as any).items).toHaveLength(0);
+  });
+
+  it("returns error result on fetch network failure", async () => {
+    (global.fetch as any).mockRejectedValue(new Error("ECONNREFUSED"));
+    const { result } = await byName("searchDLQ").execute({});
+    expect((result as any).items).toEqual([]);
+    expect((result as any).error).toContain("unreachable");
   });
 
   it("clamps limit to max 50", async () => {

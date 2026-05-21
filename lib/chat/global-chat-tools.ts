@@ -208,13 +208,19 @@ const getRunDetail: ToolDef = {
           durationMs: s.durationMs ?? null,
           error: s.error ?? null,
         })),
-        episodes: episodes.map((e) => ({
-          id: e.id,
-          agentName: e.agentName,
-          modelUsed: e.modelUsed ?? null,
-          tokenUsage: e.tokenUsage ?? null,
-          durationMs: e.durationMs,
-        })),
+        episodes: episodes.map((e) => {
+          let tokenUsage: unknown = null;
+          if (e.tokenUsage) {
+            try { tokenUsage = JSON.parse(e.tokenUsage); } catch { tokenUsage = null; }
+          }
+          return {
+            id: e.id,
+            agentName: e.agentName,
+            modelUsed: e.modelUsed ?? null,
+            tokenUsage,
+            durationMs: e.durationMs,
+          };
+        }),
       },
       sources: run
         ? [
@@ -470,8 +476,13 @@ const searchDLQ: ToolDef = {
     const take = clamp(i.limit, 1, 50, 20);
     const base =
       process.env.AO_INTERNAL_BASE_URL ?? "http://localhost:3002";
-    const res = await fetch(`${base}/api/inngest-admin/dlq`);
-    if (!res.ok) return { result: { items: [], total: 0 } };
+    let res: Response;
+    try {
+      res = await fetch(`${base}/api/inngest-admin/dlq`);
+    } catch (e) {
+      return { result: { items: [], total: 0, error: "DLQ endpoint unreachable" }, sources: [] };
+    }
+    if (!res.ok) return { result: { items: [], total: 0, error: `DLQ endpoint returned ${res.status}` }, sources: [] };
     const body = await res.json();
     const items = ((body.dlq ?? []) as unknown[]).slice(0, take);
     return {
@@ -513,7 +524,10 @@ const getEventChain: ToolDef = {
                 type: "string",
                 description: "candidate | jrId | uploadId | eventId",
               },
-              value: { type: "string" },
+              value: {
+                type: "string",
+                description: "Entity id for substring match against payloadSummary (best-effort; short ids like '001' may produce false positives)",
+              },
             },
             required: ["type", "value"],
           },
