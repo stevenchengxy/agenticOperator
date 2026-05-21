@@ -216,6 +216,22 @@ export const Ic = {
       <path d="M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6l-4 3V3Z" />
     </svg>
   ),
+  trash: (p: P) => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M2 4h12M6 4V2.5h4V4M3.5 4l.7 9.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.5 4" />
+    </svg>
+  ),
+  pin: (p: P) => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M8 14s5-5 5-9a5 5 0 1 0-10 0c0 4 5 9 5 9z" />
+      <circle cx="8" cy="5" r="1.5" />
+    </svg>
+  ),
+  link: (p: P) => (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M7 9a2.5 2.5 0 0 1 0-3.5l2-2a2.5 2.5 0 1 1 3.5 3.5l-1 1M9 7a2.5 2.5 0 0 1 0 3.5l-2 2a2.5 2.5 0 0 1-3.5-3.5l1-1" />
+    </svg>
+  ),
 };
 
 export type IcName = keyof typeof Ic;
