@@ -148,7 +148,7 @@ export function RuleCheckAuditDetailDrawer({
             <div className="mono text-[11px] text-ink-3 truncate">{auditId}</div>
           </div>
           <Neo4jLinkBtn
-            label="🔗 Neo4j"
+            label="🔗 图引擎"
             title={t("rc_drawer_neo4j_title")}
             cypher={`MATCH (a:RuleCheckAudit {audit_id: "${auditId}"})\nOPTIONAL MATCH (a)-[r]->(n)\nRETURN a, r, n`}
           />
@@ -1645,7 +1645,7 @@ function InstanceCard({
  * 短期方案,UX 不完美但比"无源可追"好。长期方案是写个 mini graph viewer。
  */
 function Neo4jLinkBtn({
-  label = "🔗 Neo4j",
+  label = "🔗 图引擎",
   title,
   cypher,
 }: {
