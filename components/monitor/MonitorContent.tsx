@@ -75,6 +75,7 @@ export function MonitorContent() {
   }, [agentFilter]);
 
   const [runs, setRuns] = React.useState<RunRow[] | null>(null);
+  const [runsError, setRunsError] = React.useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -85,16 +86,30 @@ export function MonitorContent() {
           ? `/api/inngest-admin/runs?fn=${encodeURIComponent(agentSlug)}&limit=200`
           : `/api/inngest-admin/runs?limit=200`;
         const res = await fetch(url);
-        if (!res.ok) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const msg = (body as { message?: string }).message ?? `HTTP ${res.status}`;
+          setRunsError(msg);
+          // Keep the previously loaded runs visible (don't blank out the list on a transient hiccup)
+          if (runs === null) setRuns([]);
+          return;
+        }
         const body = await res.json();
         if (cancelled) return;
         setRuns(body.runs ?? []);
+        setRunsError(null);
         setLastRefresh(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
-      } catch { /* soft */ }
+      } catch (e) {
+        if (cancelled) return;
+        setRunsError((e as Error).message ?? "请求失败");
+        if (runs === null) setRuns([]);
+      }
     }
     load();
     const timer = setInterval(load, 5000);
     return () => { cancelled = true; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentSlug]);
 
   const filtered = React.useMemo(() => {
@@ -222,12 +237,35 @@ export function MonitorContent() {
           </div>
 
           <div className="flex-1 min-h-0" style={{ padding: "8px 32px 48px" }}>
-            {runs === null && (
+            {runsError && (
+              <div
+                className="mb-3 rounded-lg flex items-start gap-2.5"
+                style={{
+                  padding: "10px 14px",
+                  background: "var(--c-warn-bg)",
+                  border: "1px solid color-mix(in oklab, var(--c-warn) 35%, transparent)",
+                  color: "oklch(0.45 0.14 75)",
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ flexShrink: 0 }}>⚠</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">Inngest dev server 暂时不可达 · 显示的是缓存数据</div>
+                  <div className="mono text-[11px] opacity-80 mt-0.5 truncate" title={runsError}>{runsError}</div>
+                </div>
+              </div>
+            )}
+            {runs === null && !runsError && (
               <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
             )}
-            {runs !== null && filtered.length === 0 && (
+            {runs !== null && filtered.length === 0 && !runsError && (
               <div className="text-ink-3 text-[13px] text-center py-16">
                 没有匹配当前筛选的运行记录
+              </div>
+            )}
+            {runs !== null && filtered.length === 0 && runsError && (
+              <div className="text-ink-3 text-[13px] text-center py-8">
+                等待 Inngest dev server 恢复…
               </div>
             )}
             {runs !== null && filtered.length > 0 && (

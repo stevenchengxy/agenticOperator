@@ -53,9 +53,29 @@ export type InngestRun = {
   event_id?: string;
 };
 
+/**
+ * Fail-fast timeout for any call to the Inngest dev server. When the dev
+ * server is unhealthy (GraphQL endpoint hangs even though /health is fine)
+ * we want callers — especially polling-driven UI like /monitor — to see a
+ * concrete error within seconds, not hang forever in "Loading…" state.
+ */
+const INNGEST_FETCH_TIMEOUT_MS = 5000;
+
+function timeoutSignal(parent?: AbortSignal): AbortSignal {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error(`Inngest dev server timeout after ${INNGEST_FETCH_TIMEOUT_MS}ms`)), INNGEST_FETCH_TIMEOUT_MS);
+  if (parent) {
+    if (parent.aborted) ctrl.abort(parent.reason);
+    else parent.addEventListener('abort', () => ctrl.abort(parent.reason), { once: true });
+  }
+  // Best-effort timer cleanup when caller aborts first
+  ctrl.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+  return ctrl.signal;
+}
+
 async function restGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const url = `${BASE}${path}`;
-  const res = await fetch(url, { signal });
+  const res = await fetch(url, { signal: timeoutSignal(signal) });
   if (!res.ok) {
     throw new Error(`Inngest REST ${res.status} ${path}`);
   }
@@ -81,6 +101,7 @@ async function gql<T>(query: string, variables?: Record<string, unknown>): Promi
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables }),
+    signal: timeoutSignal(),
   });
   const body = await res.json();
   if (body.errors) {
