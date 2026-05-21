@@ -97,7 +97,7 @@ export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
 
   return (
     <div className="border-b border-line mx-3 my-3 p-3 rounded-md bg-panel">
-      <div className="text-[11px] text-ink-3 uppercase mb-2 tracking-wide">Inngest 实时</div>
+      <div className="text-[11px] text-ink-3 uppercase mb-2 tracking-wide">事件引擎实时</div>
 
       {/* Trigger event */}
       <div className="mb-3">

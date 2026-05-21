@@ -73,7 +73,7 @@ const ALERTS: AlertRow[] = [
   },
   {
     id: "AL-1039",
-    title: "Inngest 队列 backlog 偏高",
+    title: "事件引擎队列 backlog 偏高",
     rule: "queue.depth > 500 for 10m",
     sev: "P3",
     state: "ack",

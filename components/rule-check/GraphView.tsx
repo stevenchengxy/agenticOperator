@@ -139,7 +139,7 @@ function NodeDetailPanel({ kind, label, data, neo4jUrl, onClose }: {
         <div className="flex items-center gap-3 text-[11px]">
           {neo4jUrl
             ? <a href={neo4jUrl} target="_blank" rel="noreferrer" className="text-[color:var(--c-accent)] underline">↗ Open in Neo4j</a>
-            : <span className="text-ink-4" title="Neo4j browser link not available for this node type">↗ Neo4j</span>}
+            : <span className="text-ink-4" title="图引擎浏览器链接对此节点类型不可用">↗ 图引擎</span>}
           <button onClick={onClose} className="text-ink-3 hover:text-ink-1">× close</button>
         </div>
       </div>

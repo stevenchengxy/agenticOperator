@@ -843,7 +843,7 @@ function DataWritesSummary({
           stepFallback={pgFromSteps}
         />
         <Neo4jLiveColumn
-          title="Neo4j (via allmeta · 实时反查)"
+          title="图引擎 (via allmeta · 实时反查)"
           loading={live.loading}
           error={live.error}
           entities={live.neoEntities}

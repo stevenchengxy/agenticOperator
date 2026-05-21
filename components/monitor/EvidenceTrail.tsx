@@ -141,7 +141,7 @@ function EvidenceCard({ row }: { row: EvidenceRow }) {
           </div>
           {row.allmeta_neo4j && (
             <div>
-              <div className="text-ink-4 uppercase text-[10px] mb-0.5">Neo4j Cypher (copy + paste 到 http://localhost:7475/browser/):</div>
+              <div className="text-ink-4 uppercase text-[10px] mb-0.5">图引擎 Cypher (copy + paste 到 http://localhost:7475/browser/):</div>
               <pre className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap break-words bg-bg/40 border border-line rounded px-2 py-1 select-all">{row.allmeta_neo4j}</pre>
             </div>
           )}

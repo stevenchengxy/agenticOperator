@@ -652,7 +652,7 @@ function EmStatusBar({
       </span>
       <span className="flex items-center gap-1.5">
         <span className="rounded-full" style={{ width: 6, height: 6, background: neo4jColor }} />
-        <span className="text-ink-3">Neo4j (Ontology)</span>
+        <span className="text-ink-3">图引擎 (Ontology)</span>
         <span className="text-ink-1">{neo4jReachable ? "可达" : "不可达"}</span>
       </span>
       <span>

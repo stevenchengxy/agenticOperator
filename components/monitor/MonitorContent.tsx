@@ -250,7 +250,7 @@ export function MonitorContent() {
               >
                 <span style={{ flexShrink: 0 }}>⚠</span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium">Inngest dev server 暂时不可达 · 显示的是缓存数据</div>
+                  <div className="font-medium">事件引擎暂时不可达 · 显示的是缓存数据</div>
                   <div className="mono text-[11px] opacity-80 mt-0.5 truncate" title={runsError}>{runsError}</div>
                 </div>
               </div>
