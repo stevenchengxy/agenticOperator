@@ -26,10 +26,18 @@ export type WriteCandidateInput = {
   parsed: Record<string, unknown>;
 };
 
+export type WriteCandidateResult = WriteResult & {
+  /** True when name fell back to the '未命名候选人' placeholder (parser missed). */
+  nameWasPlaceholder?: boolean;
+  /** What the parser actually provided (for diagnostics). */
+  parsedNameRaw?: string | null;
+};
+
 export async function writeCandidateInstance(
   input: WriteCandidateInput,
-): Promise<WriteResult> {
+): Promise<WriteCandidateResult> {
   const p = input.parsed;
+  const parsedName = nonEmptyString(p.name);
   const phone =
     nonEmptyString(p.phone) ??
     nonEmptyString(p.mobile) ??
@@ -42,7 +50,7 @@ export async function writeCandidateInstance(
   const payload = compact({
     candidate_id: input.candidate_id,
     employee_id: nonEmptyString(input.employee_id),
-    name: nonEmptyString(p.name) ?? '未命名候选人',
+    name: parsedName ?? '未命名候选人',
     phone,
     email: nonEmptyString(p.email),
     gender: nonEmptyString(p.gender),
@@ -58,5 +66,10 @@ export async function writeCandidateInstance(
     work_years: workYears,
   });
 
-  return safeWriteInstance('Candidate', payload);
+  const result = await safeWriteInstance('Candidate', payload);
+  return {
+    ...result,
+    nameWasPlaceholder: !parsedName,
+    parsedNameRaw: typeof p.name === 'string' ? p.name : null,
+  };
 }

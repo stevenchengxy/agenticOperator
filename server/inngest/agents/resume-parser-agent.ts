@@ -34,6 +34,7 @@ import {
 import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
+import { prisma } from '@/server/db';
 
 // Local alias mirroring the RoboHire parse-resume `data` shape that we
 // historically imported from raas-api-client.ts. After the 2026-05-20
@@ -269,8 +270,31 @@ export const resumeParserAgent = inngest.createFunction(
         employee_id: employeeId,
         parsed: parsed as unknown as Record<string, unknown>,
       });
-      if (r.ok) logger.info(`[resume-persist] ✓ allmeta wrote Candidate ${saveResult.candidate_id}`);
-      else logger.warn(`[resume-persist] allmeta Candidate write failed: ${r.error}`);
+      if (r.ok) {
+        logger.info(`[resume-persist] ✓ allmeta wrote Candidate ${saveResult.candidate_id}`);
+        if (r.nameWasPlaceholder) {
+          logger.warn(
+            `[resume-persist] name parse miss → fallback '未命名候选人' candidate_id=${saveResult.candidate_id} parsed_name_raw=${JSON.stringify(r.parsedNameRaw)}`,
+          );
+          // Fire-and-forget observability event — never break the agent run
+          prisma.agentActivity.create({
+            data: {
+              runId: runId ?? null,
+              nodeId: '9-1',
+              agentName: 'ResumeParser',
+              type: 'warn',
+              narrative: `候选人名字解析失败 → fallback '未命名候选人' (candidate_id=${saveResult.candidate_id})`,
+              metadata: JSON.stringify({
+                kind: 'name_parse_miss',
+                candidate_id: saveResult.candidate_id,
+                parsed_name_raw: r.parsedNameRaw,
+              }),
+            },
+          }).catch(() => { /* never break the agent run on observability */ });
+        }
+      } else {
+        logger.warn(`[resume-persist] allmeta Candidate write failed: ${r.error}`);
+      }
       return r;
     });
     await step.run(`write-resume-neo4j-${stepKeyForNeo4j}`, async () => {
