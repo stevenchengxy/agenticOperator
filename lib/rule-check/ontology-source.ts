@@ -7,7 +7,7 @@
 // — Phase 3 推他加 gating_severity 时一并解决)。
 //
 // 策略:
-//   1. ONTOLOGY_API_{BASE,TOKEN} 任一缺失 → 直接 JSON fallback
+//   1. ALLMETA_BASE_URL / ALLMETA_API_KEY 任一缺失 → 直接 JSON fallback
 //   2. 调叶洋的 fetchAction() → 成功:用 API 的 rule_id whitelist
 //                                + JSON 的 metadata 拼出 Rule[]
 //                              失败:log warning + JSON fallback
@@ -39,8 +39,8 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
   const jsonRules = loadAllRules();
 
   // 1. Env 检查 — 没配 API base / token 直接 fallback,不产生网络请求
-  const apiBase = process.env.ONTOLOGY_API_BASE;
-  const apiToken = process.env.ONTOLOGY_API_TOKEN;
+  const apiBase = process.env.ALLMETA_BASE_URL;
+  const apiToken = process.env.ALLMETA_API_KEY;
   if (!apiBase || !apiToken) {
     return { rules: jsonRules, source: 'json-fallback' };
   }

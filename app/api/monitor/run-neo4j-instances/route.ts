@@ -15,12 +15,12 @@ import { getInstance } from '@/lib/allmeta-client';
 import { query as pgQuery } from '@/lib/partner-pg/client';
 
 function isAllmetaConfigured(): boolean {
-  return !!(process.env.ALLMETA_BASE_URL ?? process.env.ONTOLOGY_API_BASE);
+  return !!process.env.ALLMETA_BASE_URL;
 }
 
-const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? process.env.ONTOLOGY_API_BASE ?? 'http://localhost:3500';
-const ALLMETA_TOKEN = process.env.ALLMETA_API_KEY ?? process.env.ONTOLOGY_API_TOKEN ?? '';
-const ALLMETA_DOMAIN = process.env.ALLMETA_DOMAIN ?? process.env.ONTOLOGY_API_DOMAIN ?? 'RAAS-v1';
+const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? 'http://localhost:3500';
+const ALLMETA_TOKEN = process.env.ALLMETA_API_KEY ?? '';
+const ALLMETA_DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
 
 /** Fallback for ruleCheck path B: list all CMRs by candidate_id via allmeta filter. */
 async function listCMRsByCandidate(candidateId: string): Promise<Array<Record<string, unknown>>> {

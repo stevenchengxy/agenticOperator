@@ -5,7 +5,7 @@
 // without re-fetching the whole action.
 //
 // Resolution order (mirrors fetchRulesForMatchResume in lib/rule-check/ontology-source.ts):
-//   1. ONTOLOGY_API_BASE + ONTOLOGY_API_TOKEN configured →
+//   1. ALLMETA_BASE_URL + ALLMETA_API_KEY configured →
 //      fetch the matchResume action via fetchAction(), intersect by rule_id,
 //      hydrate metadata from JSON (the JSON file remains source-of-truth for
 //      fields like applicableDepartment / standardizedLogicRule until allmeta
@@ -38,8 +38,8 @@ export async function GET(
   const jsonRules = loadAllRules();
   const fromJson = jsonRules.find((r) => r.id === ruleId);
 
-  const apiBase = process.env.ONTOLOGY_API_BASE;
-  const apiToken = process.env.ONTOLOGY_API_TOKEN;
+  const apiBase = process.env.ALLMETA_BASE_URL;
+  const apiToken = process.env.ALLMETA_API_KEY;
 
   if (!apiBase || !apiToken) {
     if (fromJson) {

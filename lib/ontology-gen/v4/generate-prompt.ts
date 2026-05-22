@@ -63,7 +63,7 @@ export async function generatePrompt(
     actionRef: opts.actionRef,
     domain,
     apiBase: opts.apiBase,
-    apiToken: opts.apiToken ?? process.env["ONTOLOGY_API_TOKEN"] ?? "",
+    apiToken: opts.apiToken ?? process.env["ALLMETA_API_KEY"] ?? "",
     timeoutMs: opts.timeoutMs,
   });
 

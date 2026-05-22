@@ -15,30 +15,30 @@ import { fetchRulesForMatchResume } from './ontology-source';
 
 const mockFetchAction = vi.mocked(fetchAction);
 
-const ORIGINAL_BASE = process.env.ONTOLOGY_API_BASE;
-const ORIGINAL_TOKEN = process.env.ONTOLOGY_API_TOKEN;
+const ORIGINAL_BASE = process.env.ALLMETA_BASE_URL;
+const ORIGINAL_TOKEN = process.env.ALLMETA_API_KEY;
 
 afterEach(() => {
   mockFetchAction.mockReset();
-  if (ORIGINAL_BASE === undefined) delete process.env.ONTOLOGY_API_BASE;
-  else process.env.ONTOLOGY_API_BASE = ORIGINAL_BASE;
-  if (ORIGINAL_TOKEN === undefined) delete process.env.ONTOLOGY_API_TOKEN;
-  else process.env.ONTOLOGY_API_TOKEN = ORIGINAL_TOKEN;
+  if (ORIGINAL_BASE === undefined) delete process.env.ALLMETA_BASE_URL;
+  else process.env.ALLMETA_BASE_URL = ORIGINAL_BASE;
+  if (ORIGINAL_TOKEN === undefined) delete process.env.ALLMETA_API_KEY;
+  else process.env.ALLMETA_API_KEY = ORIGINAL_TOKEN;
 });
 
 describe('fetchRulesForMatchResume — env gating', () => {
-  it('no ONTOLOGY_API_BASE → JSON fallback, no API call', async () => {
-    delete process.env.ONTOLOGY_API_BASE;
-    process.env.ONTOLOGY_API_TOKEN = 'tok';
+  it('no ALLMETA_BASE_URL → JSON fallback, no API call', async () => {
+    delete process.env.ALLMETA_BASE_URL;
+    process.env.ALLMETA_API_KEY = 'tok';
     const out = await fetchRulesForMatchResume();
     expect(out.source).toBe('json-fallback');
     expect(out.rules.length).toBeGreaterThan(0);
     expect(mockFetchAction).not.toHaveBeenCalled();
   });
 
-  it('no ONTOLOGY_API_TOKEN → JSON fallback, no API call', async () => {
-    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
-    delete process.env.ONTOLOGY_API_TOKEN;
+  it('no ALLMETA_API_KEY → JSON fallback, no API call', async () => {
+    process.env.ALLMETA_BASE_URL = 'http://localhost:3500';
+    delete process.env.ALLMETA_API_KEY;
     const out = await fetchRulesForMatchResume();
     expect(out.source).toBe('json-fallback');
     expect(mockFetchAction).not.toHaveBeenCalled();
@@ -47,8 +47,8 @@ describe('fetchRulesForMatchResume — env gating', () => {
 
 describe('fetchRulesForMatchResume — API path', () => {
   beforeEach(() => {
-    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
-    process.env.ONTOLOGY_API_TOKEN = 'tok';
+    process.env.ALLMETA_BASE_URL = 'http://localhost:3500';
+    process.env.ALLMETA_API_KEY = 'tok';
   });
 
   it('API success + rule_ids match JSON → source=ontology-api, no drift', async () => {
@@ -175,8 +175,8 @@ describe('fetchRulesForMatchResume — API path', () => {
 
 describe('fetchRulesForMatchResume — grouped steps', () => {
   it('emits steps[] with order, name, description, condition, rules', async () => {
-    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
-    process.env.ONTOLOGY_API_TOKEN = 'tok';
+    process.env.ALLMETA_BASE_URL = 'http://localhost:3500';
+    process.env.ALLMETA_API_KEY = 'tok';
     mockFetchAction.mockResolvedValueOnce({
       actionSteps: [
         {
@@ -210,7 +210,7 @@ describe('fetchRulesForMatchResume — grouped steps', () => {
   });
 
   it('omits steps[] when falling back to JSON', async () => {
-    delete process.env.ONTOLOGY_API_BASE; // forces fallback
+    delete process.env.ALLMETA_BASE_URL; // forces fallback
     const out = await fetchRulesForMatchResume();
     expect(out.source).toBe('json-fallback');
     expect(out.steps).toBeUndefined();

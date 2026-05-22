@@ -7,8 +7,8 @@ describe('instance-client', () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
-    process.env.ONTOLOGY_API_TOKEN = 'test-token';
+    process.env.ALLMETA_BASE_URL = 'http://localhost:3500';
+    process.env.ALLMETA_API_KEY = 'test-token';
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -111,14 +111,14 @@ describe('instance-client', () => {
   });
 
   describe('config errors', () => {
-    it('throws if ONTOLOGY_API_BASE is missing', async () => {
-      delete process.env.ONTOLOGY_API_BASE;
-      await expect(getInstance('Candidate', 'x')).rejects.toThrow(/ONTOLOGY_API_BASE/);
+    it('throws if ALLMETA_BASE_URL is missing', async () => {
+      delete process.env.ALLMETA_BASE_URL;
+      await expect(getInstance('Candidate', 'x')).rejects.toThrow(/ALLMETA_BASE_URL/);
     });
 
-    it('throws if ONTOLOGY_API_TOKEN is missing', async () => {
-      delete process.env.ONTOLOGY_API_TOKEN;
-      await expect(getInstance('Candidate', 'x')).rejects.toThrow(/ONTOLOGY_API_TOKEN/);
+    it('throws if ALLMETA_API_KEY is missing', async () => {
+      delete process.env.ALLMETA_API_KEY;
+      await expect(getInstance('Candidate', 'x')).rejects.toThrow(/ALLMETA_API_KEY/);
     });
   });
 });

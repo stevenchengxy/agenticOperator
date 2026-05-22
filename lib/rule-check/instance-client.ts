@@ -2,21 +2,21 @@
 // Used by lib/rule-check/graph-context.ts (pre-fetch bundle + tool dispatcher).
 //
 // Env-driven config:
-//   ONTOLOGY_API_BASE — e.g. "http://localhost:3500"
-//   ONTOLOGY_API_TOKEN — bearer
+//   ALLMETA_BASE_URL — e.g. "http://localhost:3500"
+//   ALLMETA_API_KEY — bearer
 //
 // All endpoints scope to the RAAS-v1 domain (matches what fetchAction uses).
 
 const DOMAIN = 'RAAS-v1';
 
 function getConfig(): { base: string; token: string } {
-  const base = process.env.ONTOLOGY_API_BASE;
+  const base = process.env.ALLMETA_BASE_URL;
   if (!base) {
-    throw new Error('ONTOLOGY_API_BASE is not configured');
+    throw new Error('ALLMETA_BASE_URL is not configured');
   }
-  const token = process.env.ONTOLOGY_API_TOKEN;
+  const token = process.env.ALLMETA_API_KEY;
   if (!token) {
-    throw new Error('ONTOLOGY_API_TOKEN is not configured');
+    throw new Error('ALLMETA_API_KEY is not configured');
   }
   return { base: base.replace(/\/+$/, ''), token };
 }

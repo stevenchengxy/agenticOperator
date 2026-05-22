@@ -32,7 +32,7 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const label = (url.searchParams.get('label') ?? '').trim();
   const pk = (url.searchParams.get('pk') ?? '').trim();
-  const domain = (url.searchParams.get('domain') ?? process.env.ONTOLOGY_API_DOMAIN ?? 'RAAS-v1').trim();
+  const domain = (url.searchParams.get('domain') ?? process.env.ALLMETA_DOMAIN ?? 'RAAS-v1').trim();
 
   if (!label || !pk) {
     return NextResponse.json({ ok: false, reason: 'missing_label_or_pk' }, { status: 400 });

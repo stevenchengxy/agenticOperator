@@ -30,12 +30,12 @@ beforeEach(() => {
   mGetInst.mockReset();
   mListInst.mockReset();
   mListLinks.mockReset();
-  process.env.ONTOLOGY_API_BASE = 'http://localhost:3500';
-  process.env.ONTOLOGY_API_TOKEN = 'tok';
+  process.env.ALLMETA_BASE_URL = 'http://localhost:3500';
+  process.env.ALLMETA_API_KEY = 'tok';
 });
 afterEach(() => {
-  delete process.env.ONTOLOGY_API_BASE;
-  delete process.env.ONTOLOGY_API_TOKEN;
+  delete process.env.ALLMETA_BASE_URL;
+  delete process.env.ALLMETA_API_KEY;
 });
 
 function fakeInput(): RuleCheckInput {

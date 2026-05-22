@@ -291,15 +291,15 @@ async function resolveClientName(
 // ──────────────────────────────────────────────────────────────────────
 
 export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<RuleFetchResult> {
-  const apiBase = (process.env.ONTOLOGY_API_BASE ?? '').replace(/\/+$/, '');
-  const apiToken = process.env.ONTOLOGY_API_TOKEN ?? '';
-  const domain = process.env.ONTOLOGY_API_DOMAIN ?? 'RAAS-v1';
+  const apiBase = (process.env.ALLMETA_BASE_URL ?? '').replace(/\/+$/, '');
+  const apiToken = process.env.ALLMETA_API_KEY ?? '';
+  const domain = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
 
   if (!apiBase) {
-    throw new RuleFetchApiError('ONTOLOGY_API_BASE env not configured');
+    throw new RuleFetchApiError('ALLMETA_BASE_URL env not configured');
   }
   if (!apiToken) {
-    throw new RuleFetchApiError('ONTOLOGY_API_TOKEN env not configured');
+    throw new RuleFetchApiError('ALLMETA_API_KEY env not configured');
   }
 
   // 1) 解析 client name
