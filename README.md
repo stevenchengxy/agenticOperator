@@ -184,45 +184,87 @@ Open <http://localhost:3002> — you'll land on `/fleet`. All pages render with 
 
 Use the language toggle (中文 / EN) and theme toggle (sun / moon) top-right. Press **⌘K** anywhere for the command palette.
 
-### Full local stack — agents fire end-to-end
+### Choose a deployment topology FIRST
 
-Start dependencies in this order:
+| | Topology A — Solo dev | Topology B — Partner deploy |
+|---|---|---|
+| Where AO runs | Your laptop | Inside partner's infrastructure |
+| Inngest | You run a dedicated `inngest-cli dev` on your machine | Use partner's existing Inngest server — register AO with it |
+| Bridge (`§10`) | Optional — enable to pull/push real partner events | **Never** — one Inngest, events flow directly |
+| Partner Postgres / Neo4j / MinIO | Optional, remote over VPN | Usually configure — they're internal hostnames |
+| Best for | Iterating on AO code with isolated event flow | Production-style use where AO is one SDK among N |
+
+The `.env.example` file walks through both topologies inline.
+
+### Topology A — Full local stack
 
 ```bash
-# 1. Inngest dev server (NATIVE on host — do NOT use Docker; see CLAUDE.md memory)
+# 1. Inngest dev server (NATIVE on host — NOT Docker; see CLAUDE.md memory)
 node_modules/.bin/inngest-cli dev --host 0.0.0.0 &
 
-# 2. Allmeta Studio (separate repo — provides rules + entity instances on :3500)
+# 2. Allmeta Studio (separate repo — rules + entity instances on :3500)
 #    cd ~/allmetaOntology/apps/studio && npm run dev
 
-# 3. Local Neo4j (optional — for AO-local writes; AO can also write to RAAS-shared)
+# 3. Local Neo4j (optional — only for audit graph features)
 #    docker run -d --name ao-neo4j -p 7475:7474 -p 7688:7687 \
 #      -e NEO4J_AUTH=neo4j/testpassword123 neo4j:5
 
-# 4. Next dev — registers AO agents with Inngest on boot
+# 4. AO Next dev — registers AO agents with Inngest on boot
 npm run dev
+
+# 5. Trigger SDK registration (run once after Next dev is up; see §"Register SDK")
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"url":"http://localhost:3002/api/inngest"}' \
+  http://localhost:8288/fn/register
 ```
 
-Then trigger an event to test the pipeline (e.g. POST a `REQUIREMENT_LOGGED` from Inngest dashboard) and watch `/monitor` populate with runs.
+Then go to <http://localhost:8288> (Inngest dashboard) → "Send event" → emit a `REQUIREMENT_LOGGED` to test the pipeline. `/monitor` will populate.
 
-### Configuration
+### Topology B — Deploy AO inside partner infrastructure
 
-`.env.example` is the canonical template. Sections are organized by subsystem; copy the whole file to `.env.local` and fill in only what you need:
+```bash
+# 1. Skip starting inngest-cli — use partner's existing Inngest
+# 2. Edit .env.local: point INNGEST_DEV / INNGEST_BASE_URL at partner's Inngest URL
+#    Set INNGEST_EVENT_KEY / INNGEST_SIGNING_KEY to whatever partner configured
+#    Set INNGEST_SERVE_HOST to AO's reachable address from Inngest's view
+# 3. Leave §10 RAAS bridge entirely commented out — bridge is Topology A only
+# 4. AO Next dev — registers with partner's Inngest on boot
+npm run dev
+# 5. Tell partner's Inngest about AO (one-time):
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"url":"http://<ao-hostname>:3002/api/inngest"}' \
+  <partner-inngest-url>/fn/register
+```
 
-| Section | When to configure |
-|---|---|
-| 1. Persistence | Always (Prisma needs `DATABASE_URL`) |
-| 2. Logger output | Recommended (per-agent log files) |
-| 3. Inngest dev | Required for any agent to run |
-| 4. LLM gateway | Required for rule-check + tracing chatbot |
-| 5. RoboHire | Required for resume parsing + matching |
-| 6. RAAS partner | Required for partner-pg dual-write + event bridge |
-| 7. Neo4j (graph engine) | Required for rule-check + audit drawer instance panel |
-| 8. Allmeta Ontology | Required for rule fetch + entity name resolution |
-| 9. MinIO | Required for resume file storage |
-| 10. P3 sidecars | Required only if running legacy EM/WS as separate services |
+### Register the AO SDK with Inngest
 
-Without an entry, the matching feature degrades to "warn banner + empty state" — never crashes.
+After Next dev is up, the Inngest server needs to know AO's SDK URL. Three ways:
+
+1. **Inngest dashboard** (easiest) — visit `http://<inngest>:8288/apps`, click "Sync new app", enter the SDK URL (`http://localhost:3002/api/inngest` in Topology A).
+2. **`/fn/register` POST** — see commands above.
+3. **PUT to SDK** — `curl -X PUT http://localhost:3002/api/inngest` triggers the SDK to push its function metadata to Inngest.
+
+Re-run after: adding a new agent, changing a trigger event name, or restarting Inngest dev (memory-mode loses registrations).
+
+### Configuration cheatsheet
+
+`.env.example` is the canonical template. Three tiers:
+
+| Tier | Section | What happens if missing |
+|---|---|---|
+| **MUST** | 1. Persistence (SQLite) | AO won't boot |
+| **MUST** | 2. Logger dir | Agents fail to write per-call logs |
+| **MUST** | 3. Inngest | Agents can't register / dispatch |
+| **MUST** | 4. LLM gateway | rule-check + chatbot show "未配置" banner |
+| RECOMMENDED | 5. Allmeta Studio | rule-check falls back to bundled rules.json; candidate displays raw ID |
+| RECOMMENDED | 6. RoboHire | resume parsing + match-resume fail per-call |
+| OPTIONAL | 7. Neo4j direct | audit drawer's "graph engine snapshot" panel stays empty |
+| OPTIONAL | 8. Partner Postgres | partner-pg writes fail per-call |
+| OPTIONAL | 9. MinIO | resume binary fetches fail per-call |
+| OPTIONAL | 10. RAAS bridge | **Topology A only** — leave off in Topology B |
+| OPTIONAL | 11. P3 sidecars | only needed if running legacy WS/EM as separate services |
+
+Without an OPTIONAL entry, the matching feature degrades to "warn banner + empty state" — never crashes.
 
 ---
 
