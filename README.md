@@ -257,12 +257,10 @@ Re-run after: adding a new agent, changing a trigger event name, or whenever Inn
 | **MUST** | 4. LLM gateway | rule-check + chatbot show "未配置" banner |
 | **MUST** | 5. Allmeta Studio | rule-check falls back to bundled rules.json; candidate displays raw ID |
 | **MUST** | 6. RoboHire | resume parsing + match-resume fail per-call |
-| OPTIONAL | 7. Partner Postgres | partner-pg writes fail per-call |
-| OPTIONAL | 8. MinIO | resume binary fetches fail per-call |
+| **MUST** | 7. Partner Postgres | dual-write fails — no candidate / match data lands on partner side |
+| **MUST** | 8. MinIO | RESUME_DOWNLOADED stalls at the parser — no candidate downstream |
 | Rarely | 9. Direct Neo4j (bolt://) | one niche rule-check audit graph feature inactive; everything else still works |
 | Rarely | 10. P3 sidecars | only needed if running legacy WS/EM as separate services |
-
-Without an OPTIONAL / Rarely entry, the matching feature degrades to "warn banner + empty state" — never crashes.
 
 ---
 
