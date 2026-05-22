@@ -25,7 +25,14 @@ REQUIREMENT_SYNCED → ANALYSIS_COMPLETED → JD_GENERATED → CHANNEL_PUBLISHED
 
 Each transition is an event; each event has publishers, subscribers, retry policy, SLA and audit trail. The console makes that fabric **legible at a glance** — what's running, what's stuck, where money is being spent, what humans need to approve next.
 
-This repository is the **frontend** — Next.js + TypeScript + Tailwind, using hard-coded mock data. There is no backend yet; the UI is wired to demonstrate the full information architecture and visual language so it can be plugged into a real event bus (Inngest, Temporal or self-hosted Kafka) and Agent runtime (LangGraph, custom) when those are ready.
+This repository is the **operator console + agent runtime** — a Next.js app that:
+
+- Renders the full operator UI (Fleet / Workflow / Monitor / Events / Rule Check / Alerts / Tracing Chatbot)
+- Hosts the actual Inngest agent functions (`server/inngest/agents/*`) — JD generation, resume parsing, rule check, candidate matching — that consume events and call RoboHire / LLM gateway / Neo4j / Postgres
+- Exposes ~30 read APIs under `app/api/*` for the UI to query runs, events, audits, candidates
+- Bridges with the partner RAAS Postgres + Inngest + MinIO over LAN
+
+What started as a frontend mock is now a working end-to-end agent platform. Frontend-only mode (no backend env configured) still works for visual review — every external integration fails soft with a warning banner instead of crashing.
 
 ---
 
@@ -42,16 +49,20 @@ Agentic Operator answers all four with one IA: **events as the universal substra
 
 ---
 
-## Six views, one fabric
+## The console views
 
-| Path | Direction | Audience | What you do here |
-|---|---|---|---|
-| `/fleet` | **A · Fleet Command** | All Ops | Mission-control dashboard. KPI strip, full agent table, alert rail, activity feed, compliance scorecard, pipeline funnel. The default landing page. |
-| `/workflow` | **B · Workflow Canvas** | Platform engineers | Visual orchestration. Trigger → agents → branches → guardrails → human-in-the-loop → terminal. SVG graph with live packet animation; click any node to inspect tools, permissions, retry policy, SLA. |
-| `/live` | **C · Live Run Theatre** | On-call recruiters | Single-run forensics. Swimlane timeline (one row per agent), decision stream with confidence scores, full call-tree trace, anomaly panel for triage. |
-| `/events` | **D · Event Manager** | Engineers / Auditors | Inngest-style event bus. Registry grouped by stage, six tabs per event (Overview, Schema, Subscribers, Runs, History, Logs), live event firehose. |
-| `/alerts` | **Alerts** | On-call | Triage-first incident view. KPIs (firing/ack/MTTR/noise), severity facets, table → 4-tab detail (Timeline, Related events, Rule definition, Runbook), on-call rota, silences. |
-| `/datasources` | **Data Sources** | Platform / Compliance | All 24 external connectors — ATS systems, job boards, LLM vendors, vector DB, messaging, storage, identity. Health, throughput, field mappings, credentials, webhook deliveries, audit log. |
+| Path | Audience | What you do here |
+|---|---|---|
+| `/fleet` | All Ops | Mission control — KPI strip, agent table, alert rail, activity feed, compliance scorecard, pipeline funnel. Default landing page. |
+| `/workflow` | Platform engineers | Visual orchestration. SVG topology of all 24+ agents + 30+ events, color-coded by deployment status (real / shell / conceptual). |
+| `/monitor` | On-call recruiters | Run-level execution view — live runs, status filter chips, expand any run to see step trace + token usage + AI summary. DLQ tab + 5s timeout banner when event engine is unhealthy. |
+| `/events` | Engineers / Auditors | Event bus — three tabs: live stream (SSE), DLQ, **candidate tracking** (per-candidate pipeline progress + JR linkage). Direction chip on every row: 📥 received vs 📤 published. |
+| `/rule-check` | Compliance / Recruiters | Two layers: rule×audit grid Dashboard (full ontology set + dead-rule badges) + Audits list with rich detail drawer (User Prompt / Rule Flags / LLM Response / Instances tabs). |
+| `/alerts` | On-call | Unified alerts feed (SLA + DLQ + infra + behavior). Severity facets, ack workflow. |
+| `/chat` | All Ops | Tracing chatbot full-screen page — natural language Q&A across runs / events / audits / candidates. Backed by 7 read-only tools (no raw Cypher/SQL). Also available as a floating bubble on every page. |
+| `/entities/[type]/[id]` | Recruiters | Per-entity journey — pipeline progress ribbon (7 stages) + per-event timeline. |
+| `/datasources` | Platform / Compliance | All external connectors — ATS, job boards, LLM vendors, vector DB, messaging, storage, identity. Health, throughput, field mappings. |
+| `/audit` | Compliance | Read-only audit log of every AuditLog (Manage axis writes) + agent activity. |
 
 Every view shares one **AppBar** (logo, breadcrumbs, ⌘K command palette, realtime status pill, **language switcher (中文 / EN)**, **theme toggle (light / dark)**, alerts bell, avatar) and one **LeftNav** grouped by Operate / Build / Govern.
 
@@ -71,34 +82,65 @@ Typography: Inter for UI, JetBrains Mono for IDs / latency / payloads / event na
 
 ---
 
-## Architecture (frontend)
+## Architecture
 
 ```
 app/
-  layout.tsx              wraps the tree in AppProvider (lang + theme + i18n)
+  layout.tsx              wraps tree in AppProvider (lang + theme + i18n)
   page.tsx                redirects / → /fleet
   <route>/page.tsx        thin: <Shell><FooContent /></Shell>
+  api/
+    inngest/route.ts      Inngest serve adapter — registers all agent functions
+    inngest-admin/        proxies to Inngest dev /v0/gql + /v1/* (runs, events, DLQ)
+    monitor/              /monitor aggregations (overview, queue, failures)
+    events/               candidate-tracking aggregation + SSE stream
+    ontology/rules/       allmeta-backed rule list (with JSON fallback)
+    rule-check-audits/    audit list + detail + replay
+    chat/trace/           tracing chatbot — POST, SSE streaming + tool loop
+    agents/[short]/chat/  agent-scoped chatbot
+    manage/runs/[id]/     cancel · pause · replay (writes + AuditLog)
+    alerts/               unified alerts (SLA + DLQ + infra + behavior)
+    behavior/             read MONITOR_ALERT rows for /alerts feed
+    allmeta/              instance read-through to Studio API
 components/
-  shared/
-    Shell.tsx             AppBar + LeftNav + CommandPalette + direction tag
-    AppBar.tsx            search · language toggle · theme toggle · avatar
-    LeftNav.tsx           routes, active highlight, counts
-    CommandPalette.tsx    ⌘K global launcher
-    atoms.tsx             StatusDot · Spark · Metric · Badge · Btn · Card
-    Ic.tsx                inline-SVG icon set (~30 icons)
-  fleet/                  Fleet view content
-  workflow/               Workflow canvas (SVG node graph)
-  live/                   Live run + swimlane + decision stream
-  events/                 Event registry + 6-tab detail + live firehose
-  alerts/                 Alerts triage
-  datasources/            24 connector grid + 6-tab detail
+  shared/                 Shell, AppBar, LeftNav, CommandPalette, atoms, Ic
+  fleet/ workflow/ monitor/ events/ rule-check/ entity/ chat/ alerts/
+  manage/                 ConfirmActionModal (typed-keyword gate)
+server/
+  inngest/
+    client.ts             inngest SDK client
+    functions.ts          allFunctions = real + stub + behavior
+    agents/
+      resume-parser-agent.ts   RESUME_DOWNLOADED → RESUME_PROCESSED
+      create-jd-agent.ts       REQUIREMENT_LOGGED → JD_GENERATED
+      rule-check-agent.ts      RESUME_PROCESSED → MATCH_RULE_CHECK_*
+      match-resume-agent.ts    MATCH_RULE_CHECK_PASSED → MATCH_*
+      monitor-agent.ts         Behavior axis — cron, 6 detection rules
+      manager-agent.ts         Behavior axis — auto-response decisions
+      stub-factory.ts          synthesize stub agents for un-deployed wsIds
+    raas-bridge.ts        pull events FROM partner Inngest INTO AO
+  em/                     EventManager — em.publish, sync worker, registry
+  llm/
+    gateway.ts            pickGateway() — AI_BASE_URL/AI_API_KEY routing
+  clients/                neo4j, ws, em
+  manage/audit.ts         AuditLog writer for Manage axis
 lib/
-  i18n.tsx                AppProvider · zh/en dictionary · localStorage persist
-  events-catalog.ts       28-event Inngest-style catalog
-design_handoff_agentic_operator/   Original design references (do not import)
+  chat/                   tool layer + types + system prompt + useGlobalChat hook
+  rule-check/             runner, ontology-source, prompt, llm, audit-writer
+  partner-pg/             direct Postgres writes (replaces RAAS HTTP API)
+  events/                 pipeline-stages, event-direction classifier
+  monitor/                aggregations, run-token-usage
+  allmeta-client.ts       Studio API + name resolution
+  inngest-admin-client.ts Inngest dev GraphQL/REST wrapper (with 5s timeout)
+  i18n.tsx                AppProvider + zh/en dictionary
+  workflow-graph-meta.ts  canonical workflow topology (24 nodes, derived edges)
+prisma/
+  schema.prisma           Prisma models (WorkflowRun, EventInstance, RuleCheckAudit,
+                          BehaviorAlert, AuditLog, AgentEpisode, ...)
+  migrations/
 ```
 
-The UI is **client-rendered** (`"use client"` at the top of every route) because all interactivity — theme, language, command palette, live stream simulation — is browser-state. There are no API routes; data is hard-coded in each `*Content.tsx`.
+Every route is `"use client"` because theme / language / command palette / SSE chat are browser state. The API routes under `app/api/*` are server-side (Prisma + Inngest + LLM calls). Inngest agent functions live in `server/inngest/agents/` and consume events emitted by `em.publish` + bridged from partner RAAS.
 
 For a more detailed working contract see [CLAUDE.md](CLAUDE.md).
 
@@ -106,42 +148,81 @@ For a more detailed working contract see [CLAUDE.md](CLAUDE.md).
 
 ## Tech stack
 
-- **Framework:** Next.js 16.2 (App Router · Turbopack)
-- **Runtime:** React 19.2 · Node ≥ 22 (developed against Node 25)
-- **Language:** TypeScript 5 (strict)
-- **Styling:** Tailwind CSS 4.2 — CSS-first config via `@theme inline` over OKLCH variables
-- **State:** React Context (no global store needed at this fidelity)
-- **Icons:** inline SVGs (zero icon-library dependency)
-- **i18n:** custom flat-dictionary `t()` hook with `localStorage` persistence
+**Frontend**
+- Next.js 16.2 (App Router · Turbopack) · React 19.2 · Node ≥ 22
+- TypeScript 5 strict · Tailwind CSS 4.2 (CSS-first config, OKLCH tokens)
+- React Context + custom flat-dictionary i18n with localStorage persist
+- Inline SVG icon set (zero icon-library dependency)
 
-The deployed version intentionally has **zero backend dependencies** so it can be hosted as a static export, run in a corporate VPN, or embedded in an internal portal with no infra setup.
+**Backend (in-process — same Next app)**
+- [Inngest](https://www.inngest.com) v4.3 — event-driven agent runtime; dev server runs as `inngest-cli` natively on the host
+- [Prisma](https://www.prisma.io) 6 + SQLite (default) or Postgres (prod) — `WorkflowRun`, `EventInstance`, `RuleCheckAudit`, `BehaviorAlert`, `AuditLog`, ~20 models total
+- [OpenAI SDK](https://github.com/openai/openai-node) routed via OpenAI-compatible gateway (new-api proxy in dev) → Gemini / GPT / etc.
+- [Neo4j JS driver](https://neo4j.com/developer/javascript/) — two instances (AO-local + RAAS-shared)
+- [MinIO client](https://github.com/minio/minio-js) — partner shared S3-compatible object store
+- Vitest + happy-dom for unit tests (~150 tests across chat / events / workflow / ontology)
+
+**External integrations**
+- Partner RAAS Postgres (direct dual-write) + RAAS Inngest (event bridge in/out)
+- [Allmeta Ontology Studio](https://github.com/yuhancheng/allmetaOntology) (HTTP, port 3500) — rule + entity instance source of truth
+- [RoboHire](https://robohire.io) — production resume parser + match-resume backend
 
 ---
 
 ## Getting started
 
+### Minimum (frontend-only) — render the UI, no agents fire
+
 ```bash
-# install
 npm install
-
-# dev — runs on port 3002, NOT 3000
-npm run dev
-
-# production build (also typechecks + lints)
-npm run build
-npm run start
-
-# lint only
-npm run lint
+cp .env.example .env.local        # required by Prisma client init even in UI-only mode
+npx prisma generate
+npm run dev                       # port 3002, NOT 3000
 ```
 
-Then open <http://localhost:3002> — you'll land on `/fleet`.
+Open <http://localhost:3002> — you'll land on `/fleet`. All pages render with empty data; integration warnings show inline (e.g. "事件引擎暂时不可达").
 
-Use the language toggle (中文 / EN) and theme toggle (sun / moon) in the top-right to verify both modes render correctly. Press **⌘K** (or **Ctrl+K**) anywhere to open the command palette.
+Use the language toggle (中文 / EN) and theme toggle (sun / moon) top-right. Press **⌘K** anywhere for the command palette.
+
+### Full local stack — agents fire end-to-end
+
+Start dependencies in this order:
+
+```bash
+# 1. Inngest dev server (NATIVE on host — do NOT use Docker; see CLAUDE.md memory)
+node_modules/.bin/inngest-cli dev --host 0.0.0.0 &
+
+# 2. Allmeta Studio (separate repo — provides rules + entity instances on :3500)
+#    cd ~/allmetaOntology/apps/studio && npm run dev
+
+# 3. Local Neo4j (optional — for AO-local writes; AO can also write to RAAS-shared)
+#    docker run -d --name ao-neo4j -p 7475:7474 -p 7688:7687 \
+#      -e NEO4J_AUTH=neo4j/testpassword123 neo4j:5
+
+# 4. Next dev — registers AO agents with Inngest on boot
+npm run dev
+```
+
+Then trigger an event to test the pipeline (e.g. POST a `REQUIREMENT_LOGGED` from Inngest dashboard) and watch `/monitor` populate with runs.
 
 ### Configuration
 
-Copy `.env.example` to `.env.local`. **The current frontend reads no environment variables**; the file is a scaffold for the eventual backend / LLM gateway integration. Existing scripts on `npm run dev` will work without touching it.
+`.env.example` is the canonical template. Sections are organized by subsystem; copy the whole file to `.env.local` and fill in only what you need:
+
+| Section | When to configure |
+|---|---|
+| 1. Persistence | Always (Prisma needs `DATABASE_URL`) |
+| 2. Logger output | Recommended (per-agent log files) |
+| 3. Inngest dev | Required for any agent to run |
+| 4. LLM gateway | Required for rule-check + tracing chatbot |
+| 5. RoboHire | Required for resume parsing + matching |
+| 6. RAAS partner | Required for partner-pg dual-write + event bridge |
+| 7. Neo4j (graph engine) | Required for rule-check + audit drawer instance panel |
+| 8. Allmeta Ontology | Required for rule fetch + entity name resolution |
+| 9. MinIO | Required for resume file storage |
+| 10. P3 sidecars | Required only if running legacy EM/WS as separate services |
+
+Without an entry, the matching feature degrades to "warn banner + empty state" — never crashes.
 
 ---
 
