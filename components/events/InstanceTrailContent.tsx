@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
+import { getInngestUrlClient } from "@/lib/inngest-url-client";
 import type { EventInstanceDetail } from "@/app/api/em/event-instances/[id]/route";
 
 // /events/:name/instances/:id
@@ -274,7 +275,7 @@ function Trail({ data }: { data: EventInstanceDetail }) {
           <Muted className="mt-1">
             完整原文存于 Inngest（
             <a
-              href={`http://localhost:8288/stream/${encodeURIComponent(data.externalEventId ?? data.id)}`}
+              href={`${getInngestUrlClient()}/stream/${encodeURIComponent(data.externalEventId ?? data.id)}`}
               target="_blank"
               rel="noreferrer"
               className="text-ink-3 underline hover:text-ink-1"

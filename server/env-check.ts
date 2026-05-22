@@ -33,6 +33,10 @@ const RECOMMENDED = [
     reason: "Inngest dev/shared server URL. Without it, event-driven flows are inert.",
   },
   {
+    name: "NEXT_PUBLIC_INNGEST_URL",
+    reason: "Browser-side Inngest URL (dashboard links). Set equal to INNGEST_BASE_URL.",
+  },
+  {
     name: "ALLMETA_BASE_URL",
     reason: "Allmeta Studio (Neo4j HTTP layer). Rule-check + entity names degrade without it.",
   },

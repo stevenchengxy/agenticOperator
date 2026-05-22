@@ -214,8 +214,8 @@ async function probeInngest(): Promise<SubsystemHealth> {
       label: 'Inngest Dev Server',
       state: 'down',
       lastUpdate: probeTime,
-      metrics: [{ label: 'endpoint', value: 'localhost:8288' }],
-      detail: 'Local Inngest dev server. Used by the workflow event bus.',
+      metrics: [{ label: 'endpoint', value: displayEndpoint }],
+      detail: 'Shared Inngest server (configured via INNGEST_BASE_URL).',
     };
   }
 }

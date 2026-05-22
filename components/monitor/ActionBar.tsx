@@ -2,6 +2,7 @@
 import React from "react";
 import { ClaudeButton } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { getInngestUrlClient } from "@/lib/inngest-url-client";
 
 const TEST_EVENTS = [
   {
@@ -96,7 +97,7 @@ export function ActionBar({
       </div>
 
       <a
-        href="http://localhost:8288"
+        href={getInngestUrlClient()}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center gap-1.5 rounded-[8px] border border-claude-line bg-claude-surface text-claude-ink-1 hover:bg-claude-panel px-3 py-1.5 text-[12.5px] no-underline"

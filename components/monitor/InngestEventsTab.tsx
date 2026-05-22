@@ -72,12 +72,13 @@ export function InngestEventsTab() {
   async function fetchRunsFor(eventId: string) {
     if (runsByEvent.has(eventId)) return;
     try {
-      const inngestBase = 'http://localhost:8288'; // dev only; in prod swap to env
-      const r = await fetch(`${inngestBase}/v1/events/${eventId}/runs`);
+      // Route via our own /api proxy so the URL resolves server-side from
+      // INNGEST_BASE_URL — partner deploys on LAN don't have localhost:8288.
+      const r = await fetch(`/api/inngest-events/${encodeURIComponent(eventId)}/runs`);
       const b = await r.json();
       setRunsByEvent((prev) => {
         const next = new Map(prev);
-        next.set(eventId, b.data ?? []);
+        next.set(eventId, b.runs ?? []);
         return next;
       });
     } catch {
