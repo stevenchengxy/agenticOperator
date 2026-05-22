@@ -676,7 +676,7 @@ function CenterEmpty({ hasRuns }: { hasRuns: boolean }) {
         hint={
           hasRuns
             ? "运行记录的核心问题：那次运行发生了什么。点击左侧任意一行看 step 时间线、实时日志、AI 总结。"
-            : "/api/runs 当前没返回任何 run。等真实事件触发或先去 /agent-demo 触一次。"
+            : "/api/runs 当前没返回任何 run。等真实事件触发或在 Inngest 控制台手动 send 一次。"
         }
       />
     </div>

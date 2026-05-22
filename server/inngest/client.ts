@@ -220,6 +220,14 @@ export type MatchRuleCheckPassedData = {
   job_requisition: Record<string, unknown>;
   /** Parsed resume(可能为 null,如果 RoboHire parse 之后没拿到)。 */
   parsed_resume: Record<string, unknown> | null;
+  /**
+   * RoboHire `/parse-resume` 抽出的 PDF 纯文本(`rawText`,落到 partner
+   * `resume.parsed_content` 列)。matchResume 第二段用它作为
+   * `/match-resume` 的 `resume` 参数,代替把 `parsed_resume` 整段 JSON
+   * stringify。Null 时(RoboHire 没返回 rawText)matchResume 兜底回 JSON 模式。
+   * 2026-05-21 partner contract change。
+   */
+  parsed_content: string | null;
   /** runtime_context 透传(主要 traceId)。 */
   runtime_context: RuleCheckRuntimeContext;
 };

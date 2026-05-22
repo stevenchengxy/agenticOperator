@@ -24,6 +24,14 @@ export type ParsedResumeResult = {
   resume_id: string;
   /** RoboHire-shape parsed_data (raw_parse_result column). May be null if parse failed/未跑. */
   data: Record<string, unknown> | null;
+  /**
+   * Plain PDF text (`parsed_content` column). This is RoboHire's `rawText`
+   * field captured at parse time; written by lib/partner-pg/candidates.ts.
+   * Partner contract (2026-05-21): matchResume should pass this verbatim as
+   * the `resume` parameter to /match-resume instead of stringifying the
+   * structured JSON. Null when RoboHire didn't return rawText.
+   */
+  parsed_content: string | null;
   /** Optional snapshot of candidate fields at time of parse (name / phone / email). */
   candidate_snapshot?: {
     name: string | null;
@@ -60,6 +68,7 @@ export async function getParsedResume(
       r.candidate_id,
       r.resume_id,
       r.raw_parse_result AS data,
+      r.parsed_content,
       r.file_name,
       r.file_type,
       r.file_size,
@@ -82,6 +91,7 @@ export async function getParsedResume(
     candidate_id: string;
     resume_id: string;
     data: Record<string, unknown> | null;
+    parsed_content: string | null;
     file_name: string | null;
     file_type: string | null;
     file_size: number | null;
@@ -103,6 +113,7 @@ export async function getParsedResume(
     candidate_id: row.candidate_id,
     resume_id: row.resume_id,
     data: row.data,
+    parsed_content: row.parsed_content,
     candidate_snapshot: {
       name: row.c_name,
       phone: row.c_phone,

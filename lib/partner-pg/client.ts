@@ -35,6 +35,99 @@ function sqlLabel(text: string): string {
   return `pg.${verb} ${oneLine.slice(0, 60)}`;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Failure reporting
+//
+// When partner Postgres is unreachable (host down, port firewalled, pool
+// timeout) the bare pg-pool stack trace that bubbles up to Inngest's
+// terminal logger lacks the context that makes the problem actionable:
+// which host:port is dead, which JR / candidate we were processing,
+// which agent is calling us. `reportPgFailure` consolidates that view.
+// ──────────────────────────────────────────────────────────────────────
+
+let cachedHostPort: string | null = null;
+function pgHostPort(): string {
+  if (cachedHostPort) return cachedHostPort;
+  const url = readPgUrl();
+  if (!url) return '?';
+  try {
+    const u = new URL(url);
+    cachedHostPort = `${u.hostname}:${u.port || '5432'}`;
+  } catch {
+    cachedHostPort = '?';
+  }
+  return cachedHostPort;
+}
+
+/**
+ * Map common pg / node-net errors to a one-word kind + human-readable hint
+ * so the terminal banner reads cleanly without grep-ing stack traces.
+ */
+function classifyPgError(err: unknown): { kind: string; hint: string } {
+  const e = err as { code?: string; message?: string };
+  const code = e?.code ?? '';
+  const msg = e?.message ?? String(err);
+  if (code === 'ECONNREFUSED' || /ECONNREFUSED/i.test(msg))
+    return { kind: 'ECONNREFUSED', hint: 'Postgres 拒绝连接 — 服务可能未启动或端口未监听' };
+  if (code === 'ETIMEDOUT' || /timeout/i.test(msg))
+    return { kind: 'ETIMEDOUT', hint: 'TCP 连接超时 — 网络不通 / 防火墙拦截 / RAAS 主机不可达' };
+  if (code === 'ENOTFOUND' || /ENOTFOUND/i.test(msg))
+    return { kind: 'ENOTFOUND', hint: 'DNS 解析失败 — RAAS_PG_URL host 拼错或域名不存在' };
+  if (code === 'ECONNRESET' || /Connection terminated/i.test(msg))
+    return { kind: 'ECONNRESET', hint: 'Postgres 提前断开 — 服务重启 / 连接被 server 主动 kill' };
+  if (code === '28P01' || /password authentication failed/i.test(msg))
+    return { kind: 'AUTH', hint: 'Postgres 拒绝鉴权 — RAAS_PG_URL 用户名/密码错' };
+  if (code === '3D000' || /database .* does not exist/i.test(msg))
+    return { kind: 'NODB', hint: 'database 不存在 — RAAS_PG_URL 的 db 名错了' };
+  if (/Connection terminated due to connection timeout/i.test(msg))
+    return { kind: 'POOL_ACQUIRE_TIMEOUT', hint: 'pg-pool 拿不到连接 — server 不可达 (5s 超时)' };
+  return { kind: code || 'PgError', hint: msg.slice(0, 200) };
+}
+
+type FailureCtx = {
+  phase: 'acquire' | 'query' | 'tx-query' | 'tx-begin' | 'idle';
+  label: string;
+  durationMs?: number;
+  sql?: string;
+  params?: unknown[];
+};
+
+/**
+ * Emit one consolidated banner per partner-pg failure:
+ *   - terminal console.error so the dev sees it without opening log files
+ *   - structured apiCall into the per-agent file log (anchors carry jr/candidate)
+ * Both paths share the same classification + host:port + agent context.
+ */
+function reportPgFailure(err: unknown, ctx: FailureCtx): void {
+  const { kind, hint } = classifyPgError(err);
+  const host = pgHostPort();
+  const logger = currentLogger();
+  const dur = ctx.durationMs != null ? `${ctx.durationMs}ms` : '?';
+  const sqlPreview = ctx.sql ? ` sql="${ctx.sql.replace(/\s+/g, ' ').slice(0, 80)}…"` : '';
+  // Console banner: 3 lines, scannable.
+  //   ✗ partner-pg <phase> <label> host=H:P dur=Xms kind=ETIMEDOUT
+  //     hint: 中文一句话
+  //     sql: "SELECT …"   (only on query/tx-query phases)
+  // eslint-disable-next-line no-console
+  console.error(
+    `\x1b[31m[partner-pg] ✗ ${ctx.phase} ${ctx.label} · host=${host} dur=${dur} kind=${kind}\x1b[0m\n` +
+      `  hint: ${hint}` +
+      (sqlPreview ? `\n  ${sqlPreview.trim()}` : ''),
+  );
+  // Structured file log entry — same classification, plus anchors via logger ctx.
+  logger?.event('pg.failure', {
+    phase: ctx.phase,
+    label: ctx.label,
+    host,
+    kind,
+    hint,
+    duration_ms: ctx.durationMs,
+    sql: ctx.sql ? ctx.sql.slice(0, 800) : undefined,
+    params: ctx.params,
+    error: (err as Error)?.message,
+  });
+}
+
 async function loggedQuery<T extends QueryResultRow = QueryResultRow>(
   exec: (text: string, params?: unknown[]) => Promise<QueryResult<T>>,
   text: string,
@@ -59,12 +152,20 @@ async function loggedQuery<T extends QueryResultRow = QueryResultRow>(
     });
     return r;
   } catch (err) {
+    const durationMs = Date.now() - start;
     logger.apiCall(sqlLabel(text), {
       url: inTx ? 'partner-pg://tx-query' : 'partner-pg://query',
       method: 'POST',
       request: { sql: text.length > 800 ? text.slice(0, 800) + '…' : text, params, in_tx: inTx },
-      durationMs: Date.now() - start,
+      durationMs,
       error: (err as Error).message,
+    });
+    reportPgFailure(err, {
+      phase: inTx ? 'tx-query' : 'query',
+      label: sqlLabel(text),
+      durationMs,
+      sql: text,
+      params,
     });
     throw err;
   }
@@ -95,8 +196,7 @@ function getPool(): Pool {
     statement_timeout: 5_000,
   });
   pool.on('error', (err) => {
-    // eslint-disable-next-line no-console
-    console.error('[partner-pg] idle client error:', err.message);
+    reportPgFailure(err, { phase: 'idle', label: 'idle-client-error' });
   });
   if (process.env.NODE_ENV !== 'production') {
     // Survive Next.js HMR re-imports — see header comment.
@@ -133,7 +233,18 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 export async function withTx<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const c = await getPool().connect();
+  const acquireStart = Date.now();
+  let c: PoolClient;
+  try {
+    c = await getPool().connect();
+  } catch (err) {
+    reportPgFailure(err, {
+      phase: 'acquire',
+      label: 'pool.connect',
+      durationMs: Date.now() - acquireStart,
+    });
+    throw err;
+  }
   const txStart = Date.now();
   const logger = currentLogger();
   // Proxy the client so the body's c.query(...) gets the same telemetry as

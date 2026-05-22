@@ -7,8 +7,63 @@
 // 仍走 RAAS API Server,因为它们写 Postgres,RAAS 是 source of truth。
 //
 // 见 docs/superpowers/specs/2026-05-19-rule-check-independent-agent-design.md §3。
+//
+// 2026-05-21 — 每次 RoboHire 调用通过 currentLogger().apiCall(...) 落 file
+// log 一行,terminal 同步 echo。这样 matchResume / parseResume / generateJd
+// 的完整 request + response JSON 都能事后查。
+
+import { currentLogger } from './agent-logger';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+/** Shared apiCall wrapper — logs request + response (or error) for every RoboHire op. */
+async function instrumentedFetch<T>(
+  label: string,
+  url: string,
+  method: 'GET' | 'POST',
+  request: unknown,
+  fetchFn: () => Promise<Response>,
+  parse: (res: Response) => Promise<T>,
+): Promise<T> {
+  const logger = currentLogger();
+  const start = Date.now();
+  let res: Response;
+  try {
+    res = await fetchFn();
+  } catch (err) {
+    logger?.apiCall(label, {
+      url,
+      method,
+      request,
+      durationMs: Date.now() - start,
+      error: (err as Error).message,
+    });
+    throw err;
+  }
+  const status = res.status;
+  // We need to read the body once for both logging and the caller's parser.
+  // Clone the response so the parse() helper sees a fresh stream.
+  const cloned = res.clone();
+  let responseBody: unknown = null;
+  try {
+    responseBody = await cloned.json();
+  } catch {
+    try {
+      responseBody = await cloned.text();
+    } catch {
+      responseBody = null;
+    }
+  }
+  logger?.apiCall(label, {
+    url,
+    method,
+    request,
+    status,
+    durationMs: Date.now() - start,
+    response: responseBody,
+  });
+  return parse(res);
+}
 
 function config(): { baseUrl: string; apiKey: string; timeoutMs: number } {
   const baseUrl = process.env.ROBOHIRE_API_BASE_URL?.trim();
@@ -89,19 +144,26 @@ export async function parseResumeDirect(
   };
   if (opts.traceId) headers['X-Trace-Id'] = opts.traceId;
 
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/api/v1/parse-resume`, {
-      method: 'POST',
-      headers,
-      body: form,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
-    });
-  } catch (e) {
-    throw new RobohireApiError(0, 'NETWORK', `parse-resume fetch failed: ${(e as Error).message}`);
-  }
-
-  return handleJsonResponse<RobohireParseResumeResponse>(res, 'parse-resume');
+  const url = `${baseUrl}/api/v1/parse-resume`;
+  // Logged request body is a metadata-only summary (we can't serialize the
+  // multipart form bytes meaningfully; PDF blob would dump base64 noise).
+  const requestSummary = { filename, pdf_bytes: pdf.length, trace_id: opts.traceId ?? null };
+  return instrumentedFetch(
+    'RoboHire.parseResume',
+    url,
+    'POST',
+    requestSummary,
+    () =>
+      fetch(url, {
+        method: 'POST',
+        headers,
+        body: form,
+        signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
+      }).catch((e) => {
+        throw new RobohireApiError(0, 'NETWORK', `parse-resume fetch failed: ${(e as Error).message}`);
+      }),
+    (res) => handleJsonResponse<RobohireParseResumeResponse>(res, 'parse-resume'),
+  );
 }
 
 // ─── match-resume ───────────────────────────────────────────────
@@ -140,19 +202,23 @@ export async function matchResumeDirect(
   };
   if (opts.traceId) headers['X-Trace-Id'] = opts.traceId;
 
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/api/v1/match-resume`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
-    });
-  } catch (e) {
-    throw new RobohireApiError(0, 'NETWORK', `match-resume fetch failed: ${(e as Error).message}`);
-  }
-
-  return handleJsonResponse<RobohireMatchResumeResponse>(res, 'match-resume');
+  const url = `${baseUrl}/api/v1/match-resume`;
+  return instrumentedFetch(
+    'RoboHire.matchResume',
+    url,
+    'POST',
+    input,
+    () =>
+      fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
+      }).catch((e) => {
+        throw new RobohireApiError(0, 'NETWORK', `match-resume fetch failed: ${(e as Error).message}`);
+      }),
+    (res) => handleJsonResponse<RobohireMatchResumeResponse>(res, 'match-resume'),
+  );
 }
 
 // ─── jobs/generate-jd ───────────────────────────────────────────
@@ -211,19 +277,23 @@ export async function generateJdDirect(
   };
   if (opts.traceId) headers['X-Trace-Id'] = opts.traceId;
 
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/api/v1/jobs/generate-jd`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
-    });
-  } catch (e) {
-    throw new RobohireApiError(0, 'NETWORK', `jobs/generate-jd fetch failed: ${(e as Error).message}`);
-  }
-
-  return handleJsonResponse<RobohireGenerateJdResponse>(res, 'jobs/generate-jd');
+  const url = `${baseUrl}/api/v1/jobs/generate-jd`;
+  return instrumentedFetch(
+    'RoboHire.generateJd',
+    url,
+    'POST',
+    input,
+    () =>
+      fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
+      }).catch((e) => {
+        throw new RobohireApiError(0, 'NETWORK', `jobs/generate-jd fetch failed: ${(e as Error).message}`);
+      }),
+    (res) => handleJsonResponse<RobohireGenerateJdResponse>(res, 'jobs/generate-jd'),
+  );
 }
 
 // ─── shared response handler ────────────────────────────────────

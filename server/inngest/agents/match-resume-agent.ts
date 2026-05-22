@@ -85,7 +85,19 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
     };
   }
 
-  const resumeText = buildResumeTextFromParsed(data.parsed_resume);
+  // 2026-05-21 partner contract: pass PDF plain text (parsed_content /
+  // RoboHire rawText) as the `resume` parameter. Falls back to the legacy
+  // stringified-JSON shape only when parsed_content is missing (e.g. older
+  // resume rows from before partner started writing the column, or RoboHire
+  // didn't return rawText for that PDF).
+  const parsedContent =
+    typeof data.parsed_content === 'string' && data.parsed_content.trim().length > 0
+      ? data.parsed_content
+      : null;
+  const resumeText = parsedContent ?? buildResumeTextFromParsed(data.parsed_resume);
+  const resumeSource: 'parsed_content' | 'parsed_resume_json' = parsedContent
+    ? 'parsed_content'
+    : 'parsed_resume_json';
   const jdText = flattenRequirementForMatch(req);
 
   if (!resumeText.trim()) {
@@ -97,8 +109,15 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
   const matchResult = await step.run(`match-${stepKey}`, async () => {
     logger.info(
       `[${AGENT_NAME}] calling RoboHire /match-resume · jr=${data.job_requisition_id} ` +
-        `jd_chars=${jdText.length} resume_chars=${resumeText.length}`,
+        `jd_chars=${jdText.length} resume_chars=${resumeText.length} resume_src=${resumeSource}`,
     );
+    fileLogger.event('match.input', {
+      job_requisition_id: data.job_requisition_id,
+      candidate_id: candidateId || undefined,
+      resume_chars: resumeText.length,
+      resume_src: resumeSource,
+      jd_chars: jdText.length,
+    });
     try {
       const r = await matchResumeDirect(
         { resume: resumeText, jd: jdText },

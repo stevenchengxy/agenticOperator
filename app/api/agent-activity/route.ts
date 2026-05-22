@@ -1,12 +1,11 @@
-// Lightweight activity feed for the demo page.
+// Lightweight activity feed used by /fleet's AgentDetailPanel.
 //
 // Returns the most-recent AgentActivity rows for one agent name from
-// data/ao.db (in-process prisma). Used by /agent-demo to render the
-// live log without needing SSE wiring.
+// data/ao.db (in-process prisma), without needing SSE wiring.
 //
 // Curl:
-//   curl http://localhost:3002/api/agent-activity?agent=SampleResumeParser
-//   curl http://localhost:3002/api/agent-activity?agent=SampleResumeParser&limit=20
+//   curl http://localhost:3002/api/agent-activity?agent=Matcher
+//   curl http://localhost:3002/api/agent-activity?agent=Matcher&limit=20
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";

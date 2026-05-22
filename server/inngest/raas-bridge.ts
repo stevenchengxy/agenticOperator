@@ -141,7 +141,7 @@ async function tick(): Promise<void> {
         }
 
         // Keep the legacy AgentActivity row for backwards-compat with the
-        // existing /agent-demo + /events stream views. Once those views
+        // /events stream view + /fleet AgentDetailPanel. Once those views
         // migrate to read EventInstance directly we can drop this.
         await prisma.agentActivity
           .create({

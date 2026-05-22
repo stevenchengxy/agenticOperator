@@ -50,6 +50,106 @@ function jsonReplacer(_key: string, value: unknown): unknown {
   return value;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Terminal echo — mirrors every event/apiCall line to stdout so the dev
+// sees full input / output / response JSON live in the dev server log,
+// not just buried in logs/*.log. The file write is the source of truth;
+// the terminal line is a convenience preview. Set AO_TERMINAL_LOG=0 to
+// disable (useful when running CI where stdout floods the build log).
+// ──────────────────────────────────────────────────────────────────────
+
+const TERMINAL_LOG_ENABLED = process.env.AO_TERMINAL_LOG !== '0';
+
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  magenta: '\x1b[35m',
+};
+
+function colorForKind(kind: string): string {
+  if (kind.includes('error') || kind.includes('failure') || kind.includes('failed')) return ANSI.red;
+  if (kind.includes('done') || kind.endsWith('.ok') || kind.includes('passed')) return ANSI.green;
+  if (kind.startsWith('emit.')) return ANSI.magenta;
+  if (kind.startsWith('api.') || kind.startsWith('pg.')) return ANSI.yellow;
+  return ANSI.cyan;
+}
+
+function shortAnchors(anchors?: Record<string, string | null | undefined>): string {
+  if (!anchors) return '';
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(anchors)) {
+    if (!v) continue;
+    // Truncate UUIDs / long ids to first 8 chars for readability.
+    const short = v.length > 24 ? `${v.slice(0, 8)}…` : v;
+    parts.push(`${k.replace('_id', '')}=${short}`);
+  }
+  return parts.length ? ` ${ANSI.dim}${parts.join(' ')}${ANSI.reset}` : '';
+}
+
+function compactJson(v: unknown): string {
+  try {
+    return JSON.stringify(v, (_k, val) => {
+      // Keep strings full for terminal — caller may need to see RoboHire
+      // response in full. If too long for screen they can grep file log.
+      return val;
+    });
+  } catch {
+    return '"[unserializable]"';
+  }
+}
+
+function prettyJson(v: unknown): string {
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return '"[unserializable]"';
+  }
+}
+
+function echoToTerminal(ctx: AgentLoggerCtx, kind: string, payload: unknown): void {
+  if (!TERMINAL_LOG_ENABLED) return;
+  const color = colorForKind(kind);
+  const prefix = `${color}[${ctx.agent}/${kind}]${ANSI.reset}`;
+  const anchors = shortAnchors(ctx.anchors);
+
+  // api.* kinds carry {url, method, request, response, status, durationMs}.
+  // Render as a multi-line block so request + response are scannable.
+  const looksLikeApiCall =
+    kind.startsWith('api.') &&
+    payload != null &&
+    typeof payload === 'object' &&
+    ('request' in (payload as object) || 'response' in (payload as object));
+
+  if (looksLikeApiCall) {
+    const p = payload as Record<string, unknown>;
+    const meta = `${p.method ?? '?'} ${p.url ?? '?'} → ${p.status ?? '-'} (${p.durationMs ?? '?'}ms)`;
+    // eslint-disable-next-line no-console
+    console.log(`${prefix}${anchors} ${ANSI.dim}${meta}${ANSI.reset}`);
+    if (p.error) {
+      // eslint-disable-next-line no-console
+      console.log(`  ${ANSI.red}error:${ANSI.reset} ${p.error}`);
+    }
+    if (p.request !== undefined) {
+      // eslint-disable-next-line no-console
+      console.log(`  ${ANSI.dim}request:${ANSI.reset} ${prettyJson(p.request)}`);
+    }
+    if (p.response !== undefined) {
+      // eslint-disable-next-line no-console
+      console.log(`  ${ANSI.dim}response:${ANSI.reset} ${prettyJson(p.response)}`);
+    }
+    return;
+  }
+
+  // Default: single compact line, full JSON payload.
+  // eslint-disable-next-line no-console
+  console.log(`${prefix}${anchors} ${compactJson(payload)}`);
+}
+
 export type AgentLoggerCtx = {
   agent: string;
   runId: string;
@@ -93,6 +193,11 @@ export function createAgentLogger(ctx: AgentLoggerCtx): AgentLogger {
       .catch((err) => {
         console.error(`[agent-logger:${ctx.agent}] write failed:`, (err as Error).message);
       });
+    // 2026-05-21 — mirror to terminal so the dev sees入参/出参/response JSON
+    // without grepping log files. Compact one-line for normal events;
+    // multi-line pretty-printed for api.* kinds (which carry request +
+    // response objects that are most useful read top-to-bottom).
+    echoToTerminal(ctx, kind, payload);
   };
 
   return {

@@ -195,6 +195,13 @@ export async function ruleCheckAgentHandler({
       ? ((data.parsed as Record<string, unknown>).data as Record<string, unknown> | undefined) ??
         null
       : null;
+  // parsed_content (PDF rawText) — matchResume 第二段用作 /match-resume 的
+  // resume 参数。fat-event 时从 parsed.data.rawText 提取;thin-event 时
+  // 走下方 back-pull 一起从 partner-pg 拉。Null 兜底由 match-resume 处理。
+  let parsedContent: string | null = (() => {
+    const v = parsedData?.rawText ?? parsedData?.raw_text;
+    return typeof v === 'string' && v.length > 0 ? v : null;
+  })();
 
   if (!parsedData) {
     if (!candidateId || !resumeId) {
@@ -202,7 +209,7 @@ export async function ruleCheckAgentHandler({
         `[${AGENT_NAME}] thin RESUME_PROCESSED missing candidate_id or resume_id — cannot back-pull parsed`,
       );
     }
-    parsedData = await step.run('fetch-parsed-resume', async () => {
+    const pulled = await step.run('fetch-parsed-resume', async () => {
       const r = await getParsedResume(candidateId, resumeId);
       if (!r) {
         throw new NonRetriableError(
@@ -211,10 +218,13 @@ export async function ruleCheckAgentHandler({
       }
       logger.info(
         `[${AGENT_NAME}] thin-event back-pull OK · candidate_id=${candidateId} ` +
-          `resume_id=${resumeId} data_keys=${Object.keys(r.data ?? {}).length}`,
+          `resume_id=${resumeId} data_keys=${Object.keys(r.data ?? {}).length} ` +
+          `parsed_content_len=${r.parsed_content?.length ?? 0}`,
       );
-      return r.data ?? {};
+      return { data: r.data ?? {}, parsed_content: r.parsed_content };
     });
+    parsedData = pulled.data;
+    parsedContent = pulled.parsed_content;
   }
 
   const bypass = process.env.RULE_CHECK_BYPASS === 'true';
@@ -275,6 +285,7 @@ export async function ruleCheckAgentHandler({
         audit: bypassAudit,
         job_requisition: req as unknown as Record<string, unknown>,
         parsed_resume: parsedData ?? null,
+        parsed_content: parsedContent,
         runtime_context: runtimeContext,
       };
       await step.sendEvent(`emit-bypass-passed-${stepKey}`, {
@@ -467,6 +478,7 @@ export async function ruleCheckAgentHandler({
         audit,
         job_requisition: req as unknown as Record<string, unknown>,
         parsed_resume: parsedData ?? null,
+        parsed_content: parsedContent,
         runtime_context: runtimeContext,
       };
       await step.sendEvent(`emit-passed-${stepKey}`, {
