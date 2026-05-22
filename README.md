@@ -211,29 +211,139 @@ Use the language toggle (中文 / EN) and theme toggle (sun / moon) top-right. P
 - **Allmeta is the only Neo4j path** — AO calls Studio over HTTP, Studio owns the Neo4j connection. AO does not need bolt:// credentials.
 - **Other partner systems** (Postgres for dual-write, MinIO for resume files, RoboHire for parsing) are direct integrations — set URL + key only if you use them.
 
-### Run AO end-to-end
+### Deployment — full step-by-step
+
+Follow in order. Skip optional steps only if you're sure you don't need that feature.
+
+#### Step 1 · Install AO
 
 ```bash
-# 1. Install + configure
+git clone <repo>
+cd agenticOperator
 npm install
 cp .env.example .env.local
-# Edit .env.local with values from partner (shared Inngest URL/keys,
-# Allmeta token, RoboHire key, LLM gateway key, etc.).
-# All MUST CONFIGURE sections need real values; OPTIONAL sections can stay commented.
-
-# 2. Prepare AO's own sqlite
-npx prisma migrate dev
-
-# 3. Start the Next dev server
-npm run dev                                              # port 3002
-
-# 4. Register AO's SDK with the shared Inngest (one-time, see below)
-curl -X POST -H 'Content-Type: application/json' \
-  -d '{"url":"http://<this-machine-ip>:3002/api/inngest"}' \
-  <shared-inngest-url>/fn/register
 ```
 
-Then trigger a test event from the Inngest dashboard (`<shared-inngest-url>/`) and watch `/monitor` populate with runs.
+Edit `.env.local`: fill in **every MUST section** (1–8). Values you'll need from your team:
+- Shared Inngest URL + event/signing keys
+- LLM gateway URL + API key
+- Allmeta Studio URL + token
+- RoboHire API key
+- Partner Postgres connection string
+- MinIO endpoint + access keys
+
+#### Step 2 · Deploy AO's own database (SQLite)
+
+AO uses Prisma + SQLite for its own operational state — run logs, audit tables, behavior alerts, etc. **Zero external DB server needed**; everything lands in a local file.
+
+```bash
+npx prisma generate                # generates the Prisma Client (./node_modules/.prisma)
+npx prisma db push                 # creates ./data/ao.db with all 31 tables
+```
+
+`db push` reads `prisma/schema.prisma` and creates the tables directly. There are no migration files in this repo — the schema is the source of truth, and `db push` is the standard dev workflow for this kind of setup.
+
+To verify:
+```bash
+ls -lh data/ao.db                  # should exist, ~200KB empty
+npx prisma studio                  # GUI to browse the tables (optional)
+```
+
+To wipe and start over (loses local data):
+```bash
+rm data/ao.db
+npx prisma db push
+```
+
+#### Step 3 · Verify partner Postgres schema exists
+
+AO writes business data directly into partner's Postgres via `lib/partner-pg/`. The schema is **owned and maintained by the RAAS team** — AO assumes these tables already exist. Without them, rule-check + match-resume will fail with "relation does not exist" errors.
+
+Required tables on partner side:
+- `candidate`
+- `candidate_match_result`
+- `candidate_match_result_runtime_state`
+- `job_posting`
+- `job_requisition`
+- `resume`
+- `resume_upload_runtime`
+
+Sanity check:
+```bash
+psql "$RAAS_POSTGRES_URL" -c "\dt candidate*"
+psql "$RAAS_POSTGRES_URL" -c "\dt resume*"
+```
+
+If any table is missing, coordinate with the RAAS team to deploy their schema migration before continuing.
+
+#### Step 4 · Run Allmeta Ontology Studio
+
+Studio is a separate Next.js app in `~/allmetaOntology/apps/studio`. It owns the Neo4j connection — AO calls Studio over HTTP, never touches Neo4j directly.
+
+```bash
+cd ~/allmetaOntology/apps/studio
+npm install
+cp .env.example .env.local         # Studio has its own env
+# Edit .env.local with the Neo4j URL/user/password
+npm run dev                        # Studio on :3500
+```
+
+Health check from AO's machine:
+```bash
+curl http://<studio-host>:3500/api/v1/ontology/actions
+# 200 (with data) or 401 (auth required) means Studio is up
+```
+
+Without Studio, rule-check falls back to the bundled `lib/rule-check/rules.json` (older snapshot), candidates / JRs show as raw IDs in the chatbot, and the audit drawer's live snapshot panel stays empty.
+
+#### Step 5 · Connect to the shared Inngest
+
+Either:
+- Use partner's existing shared Inngest (recommended): set `INNGEST_*` in `.env.local` to point at it
+- OR run a local `inngest-cli` for solo dev: `node_modules/.bin/inngest-cli dev --host 0.0.0.0 &`
+
+Health check:
+```bash
+curl http://<inngest-host>:8288/health
+# 200 means the Inngest dev server is up
+```
+
+#### Step 6 · (Optional) Local Neo4j for audit graph features
+
+99% of AO works without direct Neo4j — only one niche feature (rule-check writing audit nodes via bolt://) uses it. Skip this step unless you need it.
+
+```bash
+docker run -d --name ao-neo4j \
+  -p 7475:7474 -p 7688:7687 \
+  -e NEO4J_AUTH=neo4j/testpassword123 \
+  neo4j:5
+```
+
+Then uncomment §9 in `.env.local` with the same credentials.
+
+#### Step 7 · Start AO Next dev server
+
+```bash
+npm run dev                        # port 3002
+```
+
+Open <http://localhost:3002> — you'll land on `/fleet`. Check `/monitor` to see infrastructure status.
+
+#### Step 8 · Register AO's SDK with the shared Inngest
+
+The Inngest server needs to know AO's SDK URL so it can call back with events. One-time:
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"url":"http://<this-machine-ip>:3002/api/inngest"}' \
+  http://<inngest-host>:8288/fn/register
+```
+
+Verify in Inngest dashboard at `http://<inngest-host>:8288/apps` — you should see `agentic-operator-main` with 5+ functions listed.
+
+#### Step 9 · Trigger a test event
+
+From the Inngest dashboard "Send event" panel, fire a `REQUIREMENT_LOGGED` (full pipeline trigger) or `RESUME_DOWNLOADED` (triggers rule-check directly). Watch `/monitor` populate with run records, then drill into one to see the trace.
 
 ### Register the AO SDK with Inngest
 
