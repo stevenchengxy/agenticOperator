@@ -215,45 +215,47 @@ Use the language toggle (中文 / EN) and theme toggle (sun / moon) top-right. P
 
 Follow in order. Skip optional steps only if you're sure you don't need that feature.
 
-#### Step 1 · Install AO
+#### Step 1 · Install AO + one-shot setup
 
 ```bash
 git clone <repo>
 cd agenticOperator
 npm install
-cp .env.example .env.local
+cp .env.example .env.local         # then edit it — fill in every MUST section (1–8)
+npm run setup                      # env check + prisma generate + db push
 ```
 
-Edit `.env.local`: fill in **every MUST section** (1–8). Values you'll need from your team:
-- Shared Inngest URL + event/signing keys
-- LLM gateway URL + API key
-- Allmeta Studio URL + token
-- RoboHire API key
-- Partner Postgres connection string
-- MinIO endpoint + access keys
+`npm run setup` is idempotent — safe to re-run after editing `.env.local`. It does:
 
-#### Step 2 · Deploy AO's own database (SQLite)
+1. **Node ≥ 22 check** — refuses to continue on older Node (nvm install 22).
+2. **`.env.local` scaffold** — copies `.env.example` if missing.
+3. **Env preflight** — prints a `✓ / ✗` table of required + recommended vars; flags placeholder values like `<shared-inngest-host>`.
+4. **`data/` + `logs/` dirs** — auto-creates so SQLite + agent-logger don't error.
+5. **`prisma generate`** — emits the Prisma Client to `./node_modules/.prisma`.
+6. **`prisma db push`** — materializes `./data/ao.db` with all 31 tables straight from `prisma/schema.prisma`. **No migrations folder** — the schema is the source of truth.
 
-AO uses Prisma + SQLite for its own operational state — run logs, audit tables, behavior alerts, etc. **Zero external DB server needed**; everything lands in a local file.
+Values you'll need from your team:
+- Shared Inngest URL + event/signing keys (`INNGEST_BASE_URL`, `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`)
+- LLM gateway URL + API key (`AI_BASE_URL` + `AI_API_KEY`, or fallback `OPENAI_API_KEY`)
+- Allmeta Studio URL + token (`ALLMETA_BASE_URL`, `ALLMETA_API_KEY`)
+- RoboHire API key (`ROBOHIRE_API_KEY`)
+- Partner Postgres connection string (`RAAS_POSTGRES_URL`)
+- MinIO endpoint + access keys (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`)
+
+#### Step 2 · Verify the SQLite DB
 
 ```bash
-npx prisma generate                # generates the Prisma Client (./node_modules/.prisma)
-npx prisma db push                 # creates ./data/ao.db with all 31 tables
-```
-
-`db push` reads `prisma/schema.prisma` and creates the tables directly. There are no migration files in this repo — the schema is the source of truth, and `db push` is the standard dev workflow for this kind of setup.
-
-To verify:
-```bash
-ls -lh data/ao.db                  # should exist, ~200KB empty
+ls -lh data/ao.db                  # should exist after Step 1, ~200KB empty
 npx prisma studio                  # GUI to browse the tables (optional)
 ```
 
 To wipe and start over (loses local data):
 ```bash
-rm data/ao.db
-npx prisma db push
+npm run db:reset                   # rm data/ao.db && prisma db push
 ```
+
+> **Common error: `Cannot find module 'dotenv/config'` when running `npx prisma db push` manually.**
+> Cause: `npm install --omit=dev` or `NODE_ENV=production npm install` was used and skipped the dotenv install. Fix: run plain `npm install` so all dependencies land, then re-run `npm run setup`.
 
 #### Step 3 · Verify partner Postgres schema exists
 
@@ -362,7 +364,7 @@ Re-run after: adding a new agent, changing a trigger event name, or whenever Inn
 | Tier | Section | What happens if missing |
 |---|---|---|
 | **MUST** | 1. Persistence (SQLite) | AO won't boot |
-| **MUST** | 2. Logger dir | Agents fail to write per-call logs |
+| optional | 2. Logger dir | defaults to `./logs`, auto-created |
 | **MUST** | 3. Shared Inngest | Agents can't register / dispatch |
 | **MUST** | 4. LLM gateway | rule-check + chatbot show "未配置" banner |
 | **MUST** | 5. Allmeta Studio | rule-check falls back to bundled rules.json; candidate displays raw ID |
@@ -371,6 +373,8 @@ Re-run after: adding a new agent, changing a trigger event name, or whenever Inn
 | **MUST** | 8. MinIO | RESUME_DOWNLOADED stalls at the parser — no candidate downstream |
 | Rarely | 9. Direct Neo4j (bolt://) | one niche rule-check audit graph feature inactive; everything else still works |
 | Rarely | 10. P3 sidecars | only needed if running legacy WS/EM as separate services |
+
+The `npm run setup` script's preflight (and `server/init.ts`'s boot probe) prints a `✓ / ✗` table of every required + recommended var on first load. Placeholder values like `<shared-inngest-host>` or `replace-with-…` count as missing.
 
 ---
 

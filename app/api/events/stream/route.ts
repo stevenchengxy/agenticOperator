@@ -19,8 +19,9 @@
 //   data: {"type":"heartbeat"}
 
 import { prisma } from "@/server/db";
+import { getInngestUrl } from "@/lib/inngest-url";
 
-const LOCAL_INNGEST = process.env.INNGEST_LOCAL_URL ?? "http://localhost:8288";
+const LOCAL_INNGEST = getInngestUrl();
 
 const POLL_INTERVAL_MS = 1500;
 const HEARTBEAT_INTERVAL_MS = 25_000;

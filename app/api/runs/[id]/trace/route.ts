@@ -18,8 +18,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { normalizeKind } from "@/lib/api/activity-types";
+import { getInngestUrl } from "@/lib/inngest-url";
 
-const LOCAL_INNGEST = process.env.INNGEST_LOCAL_URL ?? "http://localhost:8288";
+const LOCAL_INNGEST = getInngestUrl();
 const RAAS_INNGEST = process.env.RAAS_INNGEST_URL ?? "";
 
 type RouteCtx = { params: Promise<{ id: string }> };

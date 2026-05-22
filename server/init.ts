@@ -3,12 +3,20 @@
 
 import { startRaasBridge } from "./inngest/raas-bridge";
 import { startEventDefinitionSync } from "./em/sync/event-definition-sync";
+import { checkEnv, printEnvCheck } from "./env-check";
 
 let _booted = false;
 
 export function bootOnce(): void {
   if (_booted) return;
   _booted = true;
+  // Env preflight — print a status table on first boot so partners can see
+  // immediately which vars are missing. Doesn't throw on missing RECOMMENDED
+  // vars; each subsystem (Inngest, Allmeta, MinIO…) handles its own absence.
+  const result = checkEnv();
+  if (!result.ok || result.recommended.some((r) => !r.present)) {
+    printEnvCheck(result);
+  }
   // Bridge is gated on RAAS_BRIDGE_ENABLED=1 — see raas-bridge.ts.
   startRaasBridge();
   // Neo4j → EventDefinition sync. Gated on NEO4J_SYNC_ENABLED=1 and

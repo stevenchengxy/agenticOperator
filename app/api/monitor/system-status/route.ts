@@ -182,12 +182,16 @@ async function buildNeo4jHealth(): Promise<SubsystemHealth> {
 
 async function probeInngest(): Promise<SubsystemHealth> {
   const probeTime = new Date().toISOString();
+  const { getInngestUrl } = await import('@/lib/inngest-url');
+  const base = getInngestUrl();
+  // Strip protocol for the display label so the metrics row stays compact.
+  const displayEndpoint = base.replace(/^https?:\/\//, '');
   try {
     const ac = new AbortController();
     const timeout = setTimeout(() => ac.abort(), 1_000);
     let ok = false;
     try {
-      const res = await fetch('http://localhost:8288/health', {
+      const res = await fetch(`${base}/health`, {
         signal: ac.signal,
         cache: 'no-store',
       });
@@ -201,8 +205,8 @@ async function probeInngest(): Promise<SubsystemHealth> {
       label: 'Inngest Dev Server',
       state: ok ? 'healthy' : 'down',
       lastUpdate: probeTime,
-      metrics: [{ label: 'endpoint', value: 'localhost:8288' }],
-      detail: 'Local Inngest dev server. Used by the workflow event bus.',
+      metrics: [{ label: 'endpoint', value: displayEndpoint }],
+      detail: 'Shared Inngest server (configured via INNGEST_BASE_URL).',
     };
   } catch {
     return {

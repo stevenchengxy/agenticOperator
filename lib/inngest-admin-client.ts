@@ -10,9 +10,10 @@
 //   - pause / resume a function (where supported)
 //
 // In prod this would point at Inngest Cloud's REST API instead; the env var
-// `INNGEST_ADMIN_URL` controls the base URL.
+// `INNGEST_BASE_URL` controls the base URL.
 
-const BASE = process.env.INNGEST_ADMIN_URL ?? 'http://localhost:8288';
+import { getInngestUrl } from './inngest-url';
+const BASE = getInngestUrl();
 
 // ★ Monitoring scope filter:
 //   AO 的监控页面只关心 agentic-operator-main app 的 functions,

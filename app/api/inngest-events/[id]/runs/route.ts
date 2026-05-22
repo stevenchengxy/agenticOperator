@@ -10,8 +10,9 @@
 // records them, which can lag the event by ~1s).
 
 import { NextResponse } from "next/server";
+import { getInngestUrl } from "@/lib/inngest-url";
 
-const LOCAL_INNGEST = process.env.INNGEST_LOCAL_URL ?? "http://localhost:8288";
+const LOCAL_INNGEST = getInngestUrl();
 
 export type EventRunRow = {
   run_id: string;

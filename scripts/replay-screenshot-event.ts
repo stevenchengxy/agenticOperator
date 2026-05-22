@@ -19,7 +19,10 @@ const SCREENSHOT_EVENT = {
   },
 };
 
-const INNGEST = process.env.INNGEST_BASE_URL ?? 'http://10.100.0.70:8288';
+const INNGEST =
+  process.env.INNGEST_BASE_URL ??
+  process.env.INNGEST_DEV ??
+  'http://localhost:8288';
 
 const client = new Inngest({
   id: 'replay-tester',

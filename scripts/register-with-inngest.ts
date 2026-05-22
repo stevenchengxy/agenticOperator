@@ -20,7 +20,10 @@ config({ path: path.resolve(process.cwd(), ".env.local") });
 config({ path: path.resolve(process.cwd(), ".env") });
 
 async function main(): Promise<void> {
-  const base = process.env.INNGEST_BASE_URL ?? "http://10.100.0.70:8288";
+  const base =
+    process.env.INNGEST_BASE_URL ??
+    process.env.INNGEST_DEV ??
+    "http://localhost:8288";
   const lanIp = process.env.AO_LAN_IP ?? "127.0.0.1";
   const port = process.env.AO_PORT ?? "3002";
   const callback = `http://${lanIp}:${port}/api/inngest`;

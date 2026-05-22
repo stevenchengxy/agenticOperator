@@ -11,8 +11,9 @@
 
 import { prisma } from "../db";
 import { em } from "../em";
+import { getRaasInngestUrl } from "@/lib/inngest-url";
 
-const SHARED_URL = process.env.RAAS_INNGEST_URL ?? "http://10.100.0.70:8288";
+const SHARED_URL = getRaasInngestUrl();
 const POLL_INTERVAL = Number(process.env.RAAS_BRIDGE_POLL_INTERVAL_MS ?? 5000);
 const EVENT_NAMES = (process.env.RAAS_BRIDGE_EVENTS ?? "RESUME_DOWNLOADED")
   .split(",")
