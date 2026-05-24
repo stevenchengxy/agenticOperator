@@ -28,6 +28,15 @@ export type AgentMeta = {
    * Shells (registered via stub-factory) use `short` directly.
    */
   inngestName?: string;
+  /**
+   * Explicit Inngest function id override. Use ONLY when an agent's
+   * Inngest function id can't be derived from `short` via the two
+   * conventions in lib/inngest-registry.ts (stub-factory `agent.<short>`
+   * or real-agent kebab `<kebab-short>-agent`). The 4 real agents'
+   * file names map cleanly to kebab IDs, but they predate the convention
+   * so we annotate explicitly for clarity + zero ambiguity.
+   */
+  inngestId?: string;
 };
 
 export const AGENT_MAP: AgentMeta[] = [
@@ -36,23 +45,23 @@ export const AGENT_MAP: AgentMeta[] = [
   { short: 'ReqAnalyzer',      wsId: '2',       stage: 'requirement', kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v2.1.0', triggersEvents: ['REQUIREMENT_SYNCED', 'REQUIREMENT_LOGGED'],       emitsEvents: ['ANALYSIS_COMPLETED', 'ANALYSIS_BLOCKED'],                                   terminal: false },
   { short: 'Clarifier',        wsId: '3',       stage: 'requirement', kind: 'hybrid', ownerTeam: 'HSM·澄清',  version: 'v1.2.0', triggersEvents: ['ANALYSIS_COMPLETED'],                             emitsEvents: ['CLARIFICATION_INCOMPLETE', 'CLARIFICATION_READY'],                          terminal: false },
   { short: 'ReClarifier',      wsId: '3-2',     stage: 'requirement', kind: 'hitl',   ownerTeam: 'HSM·澄清',  version: 'v1.0.0', triggersEvents: ['CLARIFICATION_INCOMPLETE'],                       emitsEvents: ['CLARIFICATION_RETRY'],                                                      terminal: false },
-  { short: 'JDGenerator',      wsId: '4',       stage: 'jd',          kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v1.9.4', triggersEvents: ['CLARIFICATION_READY', 'JD_REJECTED'],             emitsEvents: ['JD_GENERATED'],                                                             terminal: false, inngestName: 'Create JD Agent' },
+  { short: 'JDGenerator',      wsId: '4',       stage: 'jd',          kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v1.9.4', triggersEvents: ['CLARIFICATION_READY', 'JD_REJECTED'],             emitsEvents: ['JD_GENERATED'],                                                             terminal: false, inngestName: 'Create JD Agent', inngestId: 'create-jd-agent' },
   { short: 'JDReviewer',       wsId: '5',       stage: 'jd',          kind: 'hitl',   ownerTeam: 'HSM·交付',  version: 'v1.0.0', triggersEvents: ['JD_GENERATED'],                                   emitsEvents: ['JD_APPROVED', 'JD_REJECTED'],                                               terminal: false },
   { short: 'TaskAssigner',     wsId: '6',       stage: 'jd',          kind: 'auto',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['JD_APPROVED'],                                    emitsEvents: ['TASK_ASSIGNED'],                                                            terminal: false },
   { short: 'Publisher',        wsId: '7-1',     stage: 'jd',          kind: 'auto',   ownerTeam: '招聘运营', version: 'v1.2.0', triggersEvents: ['TASK_ASSIGNED'],                                  emitsEvents: ['CHANNEL_PUBLISHED', 'CHANNEL_PUBLISHED_FAILED'],                            terminal: true  },
   { short: 'ManualPublish',    wsId: '7-2',     stage: 'jd',          kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['CHANNEL_PUBLISHED_FAILED'],                       emitsEvents: ['CHANNEL_PUBLISHED'],                                                        terminal: false },
   { short: 'ResumeCollector',  wsId: '8',       stage: 'resume',      kind: 'hybrid', ownerTeam: '招聘运营', version: 'v3.0.1', triggersEvents: ['CHANNEL_PUBLISHED'],                              emitsEvents: ['RESUME_DOWNLOADED'],                                                        terminal: false },
-  { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false, inngestName: 'Resume Parser Agent' },
+  { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false, inngestName: 'Resume Parser Agent', inngestId: 'resume-parser-agent' },
   { short: 'ResumeFixer',      wsId: '9-2',     stage: 'resume',      kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['RESUME_PARSE_ERROR'],                             emitsEvents: ['RESUME_PROCESSED'],                                                         terminal: false },
   // 2026-05-19 consolidation: matchResume 收敛成只订 MATCH_RULE_CHECK_PASSED;
   // 第一段(RESUME_PROCESSED → 拉 JR + 派发)整段并进 RuleCheck。
   // wsId 保持 '10' / '10-5' 以兼容 monitor / topology / workflow-graph 现有节点 ID;
   // 与 partner actions_v0_1_002 的 10-1 / 10-2 在事件名级别对齐(triggers / emits)。
-  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v3.0.0', triggersEvents: ['MATCH_RULE_CHECK_PASSED'],                       emitsEvents: ['MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false, inngestName: 'Match Resume Agent' },
+  { short: 'Matcher',          wsId: '10',      stage: 'match',       kind: 'auto',   ownerTeam: '招聘运营', version: 'v3.0.0', triggersEvents: ['MATCH_RULE_CHECK_PASSED'],                       emitsEvents: ['MATCH_PASSED_NEED_INTERVIEW', 'MATCH_PASSED_NO_INTERVIEW', 'MATCH_FAILED'], terminal: false, inngestName: 'Match Resume Agent', inngestId: 'match-resume-agent' },
   // RuleCheck — independent Inngest function. 直接订 RESUME_PROCESSED,
   // 内部 fan-out per JR. 重派场景由 partner 重发 RESUME_PROCESSED 触发,无额外订阅。
   // 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
-  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v2.0.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: ['MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED'],                        terminal: false, inngestName: 'Rule Check Agent' },
+  { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v2.0.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: ['MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED'],                        terminal: false, inngestName: 'Rule Check Agent', inngestId: 'rule-check-agent' },
   // MatchReviewer (wsId 10-HITL) removed: not in authoritative workflow JSON.
   // MATCH_FAILED is terminal in the canonical workflow spec.
   { short: 'InterviewInviter', wsId: '11-1',    stage: 'interview',   kind: 'auto',   ownerTeam: '技术招聘', version: 'v0.7.2', triggersEvents: ['MATCH_PASSED_NEED_INTERVIEW'],                    emitsEvents: ['INTERVIEW_INVITATION_SENT'],                                                terminal: true  },
