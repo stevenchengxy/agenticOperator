@@ -48,7 +48,12 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
     // We deliberately don't throw — callers want partial data over no UI.
   }
 
-  const liveByFnId = new Map(liveFns.map((f) => [f.id, f]));
+  // Inngest GraphQL returns `id` as an opaque UUID (e.g. "4f6676…") — the
+  // function id we care about is encoded in the slug as
+  // `<INNGEST_APP_PREFIX>-<fnId>`. Extract it so candidate matching (see
+  // candidateFnIds below) can join against AGENT_MAP.inngestId or the
+  // stub-factory `agent.<short>` convention.
+  const liveByFnId = new Map(liveFns.map((f) => [slugToFnId(f.slug), f]));
 
   const entries: LiveRegistryEntry[] = AGENT_MAP.map((a) => {
     const candidates = candidateFnIds(a);
@@ -63,11 +68,12 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
         inngestName: null,
       };
     }
+    const fnId = slugToFnId(hit.slug);
     return {
       short: a.short,
-      fnId: hit.id,
+      fnId,
       slug: hit.slug,
-      realness: hit.id.startsWith('agent.') ? ('shell' as const) : ('real' as const),
+      realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
       triggers: hit.triggers.map((t) => t.value),
       inngestName: hit.name,
     };
@@ -77,13 +83,14 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
   // shows up in /fleet without requiring AGENT_MAP to be edited first.
   const knownFnIds = new Set(entries.map((e) => e.fnId).filter(Boolean));
   for (const fn of liveFns) {
-    if (knownFnIds.has(fn.id)) continue;
-    const short = fn.id.replace(/^agent\./, '').replace(/-agent$/, '');
+    const fnId = slugToFnId(fn.slug);
+    if (knownFnIds.has(fnId)) continue;
+    const short = fnId.replace(/^agent\./, '').replace(/-agent$/, '');
     entries.push({
       short,
-      fnId: fn.id,
+      fnId,
       slug: fn.slug,
-      realness: fn.id.startsWith('agent.') ? 'shell' : 'real',
+      realness: fnId.startsWith('agent.') ? 'shell' : 'real',
       triggers: fn.triggers.map((t) => t.value),
       inngestName: fn.name,
     });
@@ -92,6 +99,22 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
   cached = { ts: Date.now(), entries };
   __setCachedRegistrySnapshot(entries);
   return entries;
+}
+
+// Inngest slugs come back as `<INNGEST_APP_PREFIX>-<fnId>`. The prefix is
+// `agentic-operator-main` for the default app id (see server/inngest/client.ts).
+// Strip it so consumers join against `fnId` (matches AGENT_MAP.inngestId
+// and the stub-factory `agent.<short>` convention).
+//
+// Edge cases:
+//   - Paused ghost rows from /api/inngest-admin/functions have `id: "paused:<slug>"`;
+//     since we key by slug here, ghost rows are also handled correctly.
+//   - If a function's slug doesn't carry the prefix (test fixture / future
+//     app rename), return the slug as-is — caller's candidate-id list will
+//     simply miss and the entry surfaces as "not in AGENT_MAP".
+const INNGEST_APP_PREFIX = 'agentic-operator-main-';
+function slugToFnId(slug: string): string {
+  return slug.startsWith(INNGEST_APP_PREFIX) ? slug.slice(INNGEST_APP_PREFIX.length) : slug;
 }
 
 function candidateFnIds(a: AgentMeta): string[] {

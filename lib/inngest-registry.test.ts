@@ -75,15 +75,34 @@ describe('fetchLiveRegistry', () => {
     expect(matcher?.fnId).toBe('match-resume-agent');
     expect(matcher?.realness).toBe('real');
   });
+
+  it('extracts fnId from slug — Inngest `id` is a UUID, not the function id', async () => {
+    // Real Inngest GraphQL response: id is a stable UUID; the function id
+    // we care about is encoded in slug after the app prefix.
+    mockListFunctions.mockResolvedValue([
+      {
+        id: '4f667637-588a-53bf-ab83-a9245a9f8acc',  // ← UUID, not 'create-jd-agent'
+        slug: 'agentic-operator-main-create-jd-agent',
+        name: 'Create JD Agent',
+        triggers: [{ value: 'JD_REJECTED' }],
+      },
+    ]);
+    const { fetchLiveRegistry } = await import('./inngest-registry');
+    const entries = await fetchLiveRegistry({ force: true });
+    const jd = entries.find(e => e.short === 'JDGenerator');
+    expect(jd?.fnId).toBe('create-jd-agent');       // extracted from slug
+    expect(jd?.slug).toBe('agentic-operator-main-create-jd-agent');
+    expect(jd?.realness).toBe('real');
+  });
 });
 
 describe('countByRealness', () => {
   beforeEach(() => { mockListFunctions.mockReset(); vi.resetModules(); });
   it('counts each realness bucket', async () => {
     mockListFunctions.mockResolvedValue([
-      { id: 'create-jd-agent',     slug: 'a', name: 'a', triggers: [] },
-      { id: 'resume-parser-agent', slug: 'b', name: 'b', triggers: [] },
-      { id: 'agent.reqsync',       slug: 'c', name: 'c', triggers: [] },
+      { id: 'uuid-1', slug: 'agentic-operator-main-create-jd-agent',     name: 'A', triggers: [] },
+      { id: 'uuid-2', slug: 'agentic-operator-main-resume-parser-agent', name: 'B', triggers: [] },
+      { id: 'uuid-3', slug: 'agentic-operator-main-agent.reqsync',       name: 'C', triggers: [] },
     ]);
     const { countByRealness } = await import('./inngest-registry');
     const c = await countByRealness();
