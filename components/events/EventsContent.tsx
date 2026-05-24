@@ -2,7 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AGENT_MAP, INNGEST_REAL_SHORTS, deploymentKind, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
+import { AGENT_MAP, deploymentKind, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
 import { useInngestEventsStream } from "@/lib/api/inngest-events-stream";
 import type { InngestEventRow } from "@/lib/api/inngest-events";
 import { useEmHealth } from "@/lib/api/em-health";
@@ -44,9 +44,6 @@ function subscribersOf(eventName: string): { short: string; isReal: boolean; kin
     return { short, isReal: kind === "real", kind };
   });
 }
-// keep import referenced for typecheck side-channels
-void INNGEST_REAL_SHORTS;
-
 export function EventsContent() {
   const router = useRouter();
   const sp = useSearchParams();

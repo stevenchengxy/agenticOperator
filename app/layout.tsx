@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AppProvider } from "@/lib/i18n";
+import { fetchLiveRegistry } from "@/lib/inngest-registry";
+
+// Fire-and-forget warm-up of the Inngest live registry cache. Sync helpers
+// in lib/agent-mapping.ts (isReal/isShell/deploymentKind) read the last
+// cached snapshot — first call returns 'unbuilt' until this populates it.
+// 5s registry cache prevents per-render Inngest hits. Per spec 2026-05-24.
+void fetchLiveRegistry().catch(() => {});
 
 export const metadata: Metadata = {
   title: "Agentic Operator · 智能体操作中枢",

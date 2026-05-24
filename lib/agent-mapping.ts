@@ -88,19 +88,22 @@ export function byWsId(id: string): AgentMeta | undefined {
   return AGENT_MAP.find((a) => a.wsId === id);
 }
 
-// Agents that have a real Inngest function registered in
-// server/inngest/functions.ts (production runtime in AO-main :3002).
-// All other AGENT_MAP entries are blueprint / stub.
-// See docs/workflow-agents-inngest-spec.md §10.
-export const INNGEST_REAL_SHORTS: ReadonlySet<string> = new Set([
-  'JDGenerator',   // create-jd-agent       (workflow #4)
-  'ResumeParser',  // resume-parser-agent   (workflow #9)
-  'Matcher',       // match-resume-agent    (workflow #10, dual-trigger)
-  'RuleCheck',     // rule-check-agent      (workflow #10.5)
-]);
+// Agent realness derivation moved to lib/inngest-registry.ts which queries
+// Inngest live. These sync helpers read the LAST cached snapshot of that
+// registry. First call returns 'unbuilt' until fetchLiveRegistry() populates
+// the cache; routine UI flow always reads /api/agents which forces the cache
+// fill in the server-side render path.
+//
+// The cache lives in lib/inngest-registry-cache.ts (one-direction import only)
+// to avoid a cycle (lib/inngest-registry.ts already imports AGENT_MAP from here).
+//
+// Per spec 2026-05-24 §3.3.
+
+import { __getCachedRegistrySnapshotSync } from '@/lib/inngest-registry-cache';
 
 export function isReal(short: string): boolean {
-  return INNGEST_REAL_SHORTS.has(short);
+  const snap = __getCachedRegistrySnapshotSync();
+  return snap.find((e) => e.short === short)?.realness === 'real';
 }
 
 /**
@@ -115,25 +118,19 @@ export function displayName(short: string): string {
 }
 
 // "Shell" = registered as an empty-shell Inngest function via stub-factory.
-// Every business agent with at least one trigger event is eligible. Chatbot
-// is excluded (no triggers, system meta). Real agents are excluded (they
-// have their own production-quality implementations).
-// See server/inngest/functions.ts — STUB_AGENTS=0 disables shell registration.
+// Per spec 2026-05-24, this is now derived from the live registry rather
+// than computed from AGENT_MAP heuristics.
 export function isShell(short: string): boolean {
-  if (isReal(short)) return false;
-  const meta = byShort(short);
-  if (!meta) return false;
-  if (meta.triggersEvents.length === 0) return false;
-  return true;
+  const snap = __getCachedRegistrySnapshotSync();
+  return snap.find((e) => e.short === short)?.realness === 'shell';
 }
 
 // Deployment kind for fleet / monitor UIs.
 //   real    — production Inngest function with full business logic
 //   shell   — registered empty-shell Inngest function (demo / placeholder)
-//   unbuilt — no Inngest function (Chatbot or anything without triggers)
+//   unbuilt — no Inngest function (or registry cache not yet populated)
 export type DeploymentKind = "real" | "shell" | "unbuilt";
 export function deploymentKind(short: string): DeploymentKind {
-  if (isReal(short)) return "real";
-  if (isShell(short)) return "shell";
-  return "unbuilt";
+  const snap = __getCachedRegistrySnapshotSync();
+  return snap.find((e) => e.short === short)?.realness ?? 'unbuilt';
 }

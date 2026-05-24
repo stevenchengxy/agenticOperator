@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { AGENT_MAP } from '@/lib/agent-mapping';
 import { displayKey } from '@/server/normalize/agents';
 import { wsClient } from '@/server/clients/ws';
+import { fetchLiveRegistry } from '@/lib/inngest-registry';
 import type { AgentsResponse, AgentRow } from '@/lib/api/types';
 
 export async function GET(_req: Request): Promise<Response> {
@@ -29,13 +30,20 @@ export async function GET(_req: Request): Promise<Response> {
 
   const wsDown = partial.includes('ws');
 
+  // Live Inngest registry — enriches each row with real-time realness/slug.
+  // When Inngest is unreachable, registry returns AGENT_MAP entries as unbuilt;
+  // we don't fail the request (UI shows pill in red, agents list still renders).
+  const registry = await fetchLiveRegistry();
+  const regByShort = new Map(registry.map((r) => [r.short, r]));
+
   const agents: AgentRow[] = AGENT_MAP.map((a) => {
+    const live = regByShort.get(a.short);
     const acts = activityByAgent[a.short] ?? [];
     return {
       short: a.short,
       wsId: a.wsId,
       displayName: displayKey(a.short),
-      inngestName: a.inngestName ?? a.short,
+      inngestName: live?.inngestName ?? a.inngestName ?? a.short,
       stage: a.stage,
       kind: a.kind,
       ownerTeam: a.ownerTeam,
@@ -47,8 +55,37 @@ export async function GET(_req: Request): Promise<Response> {
       costYuan: 0,
       lastActivityAt: wsDown ? null : (acts[0]?.createdAt ?? null),
       spark: Array(16).fill(0),
+      realness: live?.realness ?? 'unbuilt',
+      slug: live?.slug ?? null,
     };
   });
+
+  // Surface live Inngest functions not in AGENT_MAP — lets a brand-new
+  // agent appear in Fleet without an AGENT_MAP edit. Falls back to 'system'
+  // stage and '—' owner team so the row still renders.
+  const knownShorts = new Set(AGENT_MAP.map((a) => a.short));
+  for (const r of registry) {
+    if (knownShorts.has(r.short)) continue;
+    agents.push({
+      short: r.short,
+      wsId: r.fnId ?? r.short,
+      displayName: r.inngestName ?? r.short,
+      inngestName: r.inngestName ?? r.short,
+      stage: 'system',
+      kind: 'auto',
+      ownerTeam: '—',
+      version: '—',
+      status: null,
+      p50Ms: null,
+      runs24h: 0,
+      successRate: null,
+      costYuan: 0,
+      lastActivityAt: null,
+      spark: Array(16).fill(0),
+      realness: r.realness,
+      slug: r.slug,
+    });
+  }
 
   const body: AgentsResponse = {
     agents,

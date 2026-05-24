@@ -39,6 +39,11 @@ export type AgentRow = {
   costYuan: number;
   lastActivityAt: string | null;
   spark: number[];
+  /** Live realness from lib/inngest-registry.ts — reflects actual Inngest
+   *  registration state at request time, not static AGENT_MAP membership. */
+  realness: 'real' | 'shell' | 'unbuilt';
+  /** Inngest function slug for this agent; null when unbuilt. */
+  slug: string | null;
 };
 export type AgentsResponse = { agents: AgentRow[]; meta: ApiMeta };
 
