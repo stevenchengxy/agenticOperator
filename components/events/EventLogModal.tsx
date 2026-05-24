@@ -9,7 +9,8 @@ import {
   LIFECYCLE_LABEL,
   type LifecycleClassification,
 } from "@/lib/event-lifecycle";
-import { EVENT_CATALOG, kindDot } from "@/lib/events-catalog";
+import { kindDot } from "@/lib/events-catalog"; // helpers only — catalog is live via hook
+import { useEventCatalog } from "@/lib/hooks/useEventCatalog";
 import type { InngestEventRow } from "@/lib/api/inngest-events";
 import type { EventRunRow, EventRunsResponse } from "@/app/api/inngest-events/[id]/runs/route";
 
@@ -73,8 +74,9 @@ export function EventLogModal({ event, onClose }: Props) {
 
 function Header({ event, onClose }: { event: InngestEventRow; onClose: () => void }) {
   const cls = classifyEvent(event);
-  const def = EVENT_CATALOG.find((e) => e.name === event.name);
-  const dot = kindDot(def?.kind ?? "domain");
+  const { events } = useEventCatalog();
+  const def = events.find((e) => e.name === event.name);
+  const dot = kindDot((def?.kind ?? "domain") as "trigger" | "domain" | "error" | "gate");
   const ts = event.received_at
     ? new Date(event.received_at)
     : event.ts
