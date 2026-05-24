@@ -55,10 +55,9 @@ type FleetRow = {
 
 // Status answers "is this agent currently online?", not "have past runs
 // succeeded?". Run-level failures live in the 近期运行 column and detail page.
-function deriveStatus(realness: Realness, live: LiveAgentState | undefined): FleetStatus {
+function deriveStatus(realness: Realness, paused: boolean, live: LiveAgentState | undefined): FleetStatus {
   if (realness === "unbuilt") return "not_deployed";
-  // Shells register at Inngest startup just like real agents → deployed.
-  // For real agents: if the admin API is unreachable we assume deployed.
+  if (paused) return "paused";
   if (live?.paused) return "paused";
   return "deployed";
 }
@@ -93,10 +92,14 @@ function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>)
     const deployed = realness !== "unbuilt";
     const live = deployed ? liveByWsId.get(a.wsId) : undefined;
     const slug = a.slug ?? (deployed ? WSID_TO_INNGEST_SLUG[a.wsId] ?? null : null);
+    // `paused` comes from the API (which sources it from AgentConfig +
+    // registry), not from `live` — Inngest doesn't report paused functions
+    // so live?.paused would be undefined for the 19 paused shells.
+    const paused = a.paused;
 
     let lifecycle: Lifecycle;
     if (realness === "unbuilt") lifecycle = "draft";
-    else if (live?.paused) lifecycle = "paused";
+    else if (paused) lifecycle = "paused";
     else lifecycle = "active";
 
     return {
@@ -106,7 +109,7 @@ function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>)
       ownerTeam: a.ownerTeam,
       stage: a.stage,
       version: a.version,
-      status: deriveStatus(realness, live),
+      status: deriveStatus(realness, paused, live),
       lifecycle,
       realness,
       liveTotal: live?.total ?? null,
@@ -115,7 +118,7 @@ function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>)
       liveRunning: live?.running ?? null,
       successRate: live?.successRate ?? null,
       lastActiveAt: live?.latestStartedAt ?? null,
-      paused: live?.paused ?? false,
+      paused,
       slug,
     };
   });
@@ -155,7 +158,9 @@ export function FleetContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const group = (sp.get("group") ?? "team") as "team" | "status" | "stage" | "flat";
+  // Grouping chooser removed per user request — Fleet now always renders flat.
+  // Variable kept (assigned constant) so existing groupRows/render code is untouched.
+  const group: "team" | "status" | "stage" | "flat" = "flat";
   const statusFilter = (sp.get("status") ?? "all") as FilterId;
   const windowId = (sp.get("window") ?? "7d") as "7d" | "30d" | "90d";
 
@@ -172,7 +177,10 @@ export function FleetContent() {
   const [partial, setPartial] = React.useState(false);
   const { byWsId: liveByWsId, lastRefresh } = useInngestLiveOverlay();
 
-  React.useEffect(() => {
+  // Refetch /api/agents on mount, every 5s, AND on demand (after toggle).
+  // Without polling the "实装" count only reflected what was true at page-load
+  // time — pause/resume actions never moved the number.
+  const refetchAgents = React.useCallback(() => {
     fetchJson<AgentsResponse>("/api/agents")
       .then((res) => {
         if (res.meta.partial?.includes("ws")) setPartial(true);
@@ -180,15 +188,23 @@ export function FleetContent() {
       })
       .catch(() => {
         setPartial(true);
-        setAgentsRes({ agents: [], meta: { generatedAt: new Date().toISOString() } });
+        setAgentsRes((prev) => prev ?? { agents: [], meta: { generatedAt: new Date().toISOString() } });
       });
   }, []);
+
+  React.useEffect(() => {
+    refetchAgents();
+    const id = setInterval(refetchAgents, 5_000);
+    return () => clearInterval(id);
+  }, [refetchAgents]);
 
   const rows: FleetRow[] | null = agentsRes ? buildRows(agentsRes, liveByWsId) : null;
   const safeRows = rows ?? [];
 
-  // Local optimistic toggle ─ on Pause/Resume click we immediately reflect
-  // the new state, then the next overlay refresh confirms (every 5s).
+  // Local optimistic toggle — reflect new state immediately, then trigger an
+  // /api/agents refetch so the SummaryChip "实装" count moves within 200ms.
+  // (Without the explicit refetch, the count would only update on the next
+  // 5s poll tick.)
   const [optimisticPause, setOptimisticPause] = React.useState<Record<string, boolean>>({});
   const togglePause = React.useCallback(async (slug: string, next: boolean) => {
     setOptimisticPause((m) => ({ ...m, [slug]: next }));
@@ -198,11 +214,15 @@ export function FleetContent() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ paused: next }),
       });
+      refetchAgents();
+      // Clear optimistic override now that the server response will be authoritative.
+      setTimeout(() => {
+        setOptimisticPause((m) => { const c = { ...m }; delete c[slug]; return c; });
+      }, 1_500);
     } catch {
-      // revert optimistic state on failure
       setOptimisticPause((m) => { const c = { ...m }; delete c[slug]; return c; });
     }
-  }, []);
+  }, [refetchAgents]);
   // Apply optimistic overrides
   const effectiveRows = safeRows.map((r) => {
     if (!r.slug || !(r.slug in optimisticPause)) return r;
@@ -228,7 +248,9 @@ export function FleetContent() {
   const grouped = React.useMemo(() => groupRows(filtered, group), [filtered, group]);
 
   const total = effectiveRows.length;
-  const liveCount = effectiveRows.filter((r) => r.realness === "real").length;
+  // "实装" = currently online (registered AND not paused). Includes real + shell.
+  // Moves up/down when user clicks 上线/下线.
+  const liveCount = effectiveRows.filter((r) => r.realness !== "unbuilt" && !r.paused).length;
   const realRowsWithRuns = effectiveRows.filter((r) => r.realness === "real" && r.successRate != null);
   const aggSuccessRate = realRowsWithRuns.length
     ? realRowsWithRuns.reduce((sum, r) => sum + (r.successRate as number), 0) / realRowsWithRuns.length
@@ -238,8 +260,6 @@ export function FleetContent() {
 
   const setStatusFilter = (next: FilterId) =>
     setUrl((p) => { if (next === "all") p.delete("status"); else p.set("status", next); });
-  const setGroup = (next: typeof group) =>
-    setUrl((p) => { if (next === "team") p.delete("group"); else p.set("group", next); });
   const setWindow = (next: typeof windowId) =>
     setUrl((p) => { if (next === "7d") p.delete("window"); else p.set("window", next); });
 
@@ -314,19 +334,10 @@ export function FleetContent() {
         <PeriodDropdown value={windowId} onChange={setWindow} t={t} />
       </div>
 
-      {/* secondary toolbar — group + active-filter pill */}
+      {/* secondary toolbar — active-filter pill only.
+          Grouping chooser removed per user request: not enough rows to
+          justify 4 grouping modes; flat list reads cleaner. */}
       <div className="flex items-center gap-3 text-[12.5px]" style={{ padding: "10px 32px" }}>
-        <span className="text-ink-3">分组</span>
-        <SegLinks
-          options={[
-            { id: "team",   label: t("f2_group_by_team") },
-            { id: "stage",  label: t("f2_group_by_stage") },
-            { id: "status", label: t("f2_group_by_status") },
-            { id: "flat",   label: t("f2_group_flat") },
-          ]}
-          value={group}
-          onChange={(v) => setGroup(v as typeof group)}
-        />
         <div className="flex-1" />
         {statusFilter !== "all" && (
           <button
@@ -706,18 +717,23 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
 }
 
 function PauseToggleButton({ paused, onClick }: { paused: boolean; onClick: (e: React.MouseEvent) => void }) {
+  // Paused agents: button always visible (resume is the affordance the user
+  // is looking for). Running agents: button hover-only to keep the row calm.
+  const visibility = paused ? "opacity-100" : "opacity-0 group-hover:opacity-100";
   return (
     <button
       onClick={onClick}
-      title={paused ? "恢复运行" : "暂停"}
-      className="opacity-0 group-hover:opacity-100 rounded transition-all hover:bg-surface"
+      title={paused ? "上线 (恢复运行)" : "下线 (暂停)"}
+      className={`${visibility} rounded transition-all hover:bg-surface inline-flex items-center gap-1`}
       style={{
-        padding: "3px 5px",
-        border: "1px solid var(--c-line)",
+        padding: "3px 7px",
+        border: `1px solid ${paused ? "var(--c-ok)" : "var(--c-line)"}`,
         color: paused ? "var(--c-ok)" : "var(--c-ink-2)",
+        fontSize: 11,
       }}
     >
       {paused ? <Ic.play /> : <Ic.pause />}
+      <span>{paused ? "上线" : "下线"}</span>
     </button>
   );
 }

@@ -19,6 +19,7 @@
 
 import { listFunctions } from '@/lib/inngest-admin-client';
 import { AGENT_MAP, type AgentMeta } from '@/lib/agent-mapping';
+import { prisma } from '@/server/db';
 import { __setCachedRegistrySnapshot } from './inngest-registry-cache';
 
 export type Realness = 'real' | 'shell' | 'unbuilt';
@@ -28,12 +29,22 @@ export type LiveRegistryEntry = {
   fnId: string | null;
   slug: string | null;
   realness: Realness;
+  /** True iff the agent is registered (real or shell) but currently paused
+   *  (AgentConfig.enabled=false → serve handler drops it from Inngest).
+   *  When paused, `realness` is set to 'shell' / 'real' as if it were live,
+   *  and Fleet's PauseToggleButton can show the resume affordance. */
+  paused: boolean;
   triggers: string[];
   inngestName: string | null;
 };
 
 const CACHE_TTL_MS = 5_000;
 let cached: { ts: number; entries: LiveRegistryEntry[] } | null = null;
+
+// Inngest app id — slugs come back as `<INNGEST_APP_PREFIX><fnId>`.
+// Declared at module top so both the slug→fnId helper AND the paused-slug
+// builder can reference it without TDZ.
+const INNGEST_APP_PREFIX = 'agentic-operator-main-';
 
 export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<LiveRegistryEntry[]> {
   if (!opts?.force && cached && Date.now() - cached.ts < CACHE_TTL_MS) {
@@ -48,6 +59,21 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
     // We deliberately don't throw — callers want partial data over no UI.
   }
 
+  // Paused agents: AgentConfig.enabled=false → our serve handler drops them
+  // from Inngest registration so they never appear in listFunctions(). Without
+  // this query, the UI would render them as "未上线" with no resume affordance.
+  // We use the slug as key (AgentConfig.id == slug per agent-pause-guard.ts).
+  let pausedSlugs = new Set<string>();
+  try {
+    const paused = await prisma.agentConfig.findMany({
+      where: { enabled: false },
+      select: { id: true },
+    });
+    pausedSlugs = new Set(paused.map((p) => p.id));
+  } catch {
+    // DB unreachable — treat as no pauses (live state is then the truth).
+  }
+
   // Inngest GraphQL returns `id` as an opaque UUID (e.g. "4f6676…") — the
   // function id we care about is encoded in the slug as
   // `<INNGEST_APP_PREFIX>-<fnId>`. Extract it so candidate matching (see
@@ -58,24 +84,45 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
   const entries: LiveRegistryEntry[] = AGENT_MAP.map((a) => {
     const candidates = candidateFnIds(a);
     const hit = candidates.map((id) => liveByFnId.get(id)).find(Boolean);
-    if (!hit) {
+    if (hit) {
+      const fnId = slugToFnId(hit.slug);
       return {
         short: a.short,
-        fnId: null,
-        slug: null,
-        realness: 'unbuilt' as const,
-        triggers: [],
-        inngestName: null,
+        fnId,
+        slug: hit.slug,
+        realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
+        paused: false,
+        triggers: hit.triggers.map((t) => t.value),
+        inngestName: hit.name,
       };
     }
-    const fnId = slugToFnId(hit.slug);
+    // Not live — check whether this agent is paused (registered then disabled).
+    // Slug computation mirrors the stub-factory / explicit inngestId conventions
+    // used by app/api/inngest-admin/functions/route.ts::buildMonitoredFallback.
+    if ((a.triggersEvents ?? []).length > 0) {
+      const candidateSlugs = candidates.map((id) => `${INNGEST_APP_PREFIX}${id}`);
+      const pausedSlug = candidateSlugs.find((s) => pausedSlugs.has(s));
+      if (pausedSlug) {
+        const fnId = slugToFnId(pausedSlug);
+        return {
+          short: a.short,
+          fnId,
+          slug: pausedSlug,
+          realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
+          paused: true,
+          triggers: a.triggersEvents,
+          inngestName: a.inngestName ?? a.short,
+        };
+      }
+    }
     return {
       short: a.short,
-      fnId,
-      slug: hit.slug,
-      realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
-      triggers: hit.triggers.map((t) => t.value),
-      inngestName: hit.name,
+      fnId: null,
+      slug: null,
+      realness: 'unbuilt' as const,
+      paused: false,
+      triggers: [],
+      inngestName: null,
     };
   });
 
@@ -91,6 +138,7 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
       fnId,
       slug: fn.slug,
       realness: fnId.startsWith('agent.') ? 'shell' : 'real',
+      paused: false,
       triggers: fn.triggers.map((t) => t.value),
       inngestName: fn.name,
     });
@@ -101,8 +149,8 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
   return entries;
 }
 
-// Inngest slugs come back as `<INNGEST_APP_PREFIX>-<fnId>`. The prefix is
-// `agentic-operator-main` for the default app id (see server/inngest/client.ts).
+// Inngest slugs come back as `<INNGEST_APP_PREFIX><fnId>`. The prefix is
+// `agentic-operator-main-` for the default app id (see server/inngest/client.ts).
 // Strip it so consumers join against `fnId` (matches AGENT_MAP.inngestId
 // and the stub-factory `agent.<short>` convention).
 //
@@ -112,7 +160,6 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
 //   - If a function's slug doesn't carry the prefix (test fixture / future
 //     app rename), return the slug as-is — caller's candidate-id list will
 //     simply miss and the entry surfaces as "not in AGENT_MAP".
-const INNGEST_APP_PREFIX = 'agentic-operator-main-';
 function slugToFnId(slug: string): string {
   return slug.startsWith(INNGEST_APP_PREFIX) ? slug.slice(INNGEST_APP_PREFIX.length) : slug;
 }

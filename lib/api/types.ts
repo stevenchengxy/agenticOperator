@@ -44,6 +44,9 @@ export type AgentRow = {
   realness: 'real' | 'shell' | 'unbuilt';
   /** Inngest function slug for this agent; null when unbuilt. */
   slug: string | null;
+  /** True iff agent is registered (real/shell) but currently paused
+   *  (AgentConfig.enabled=false). UI uses this to show the resume affordance. */
+  paused: boolean;
 };
 export type AgentsResponse = { agents: AgentRow[]; meta: ApiMeta };
 

@@ -6,9 +6,19 @@ vi.mock('@/lib/inngest-admin-client', () => ({
   listFunctions: () => mockListFunctions(),
 }));
 
+// Default: no paused agents. Individual tests can override.
+const mockAgentConfigFindMany = vi.fn().mockResolvedValue([]);
+vi.mock('@/server/db', () => ({
+  prisma: {
+    agentConfig: { findMany: (...args: unknown[]) => mockAgentConfigFindMany(...args) },
+  },
+}));
+
 describe('fetchLiveRegistry', () => {
   beforeEach(() => {
     mockListFunctions.mockReset();
+    mockAgentConfigFindMany.mockReset();
+    mockAgentConfigFindMany.mockResolvedValue([]);
     vi.resetModules();
   });
 

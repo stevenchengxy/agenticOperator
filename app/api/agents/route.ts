@@ -57,6 +57,7 @@ export async function GET(_req: Request): Promise<Response> {
       spark: Array(16).fill(0),
       realness: live?.realness ?? 'unbuilt',
       slug: live?.slug ?? null,
+      paused: live?.paused ?? false,
     };
   });
 
@@ -84,6 +85,7 @@ export async function GET(_req: Request): Promise<Response> {
       spark: Array(16).fill(0),
       realness: r.realness,
       slug: r.slug,
+      paused: r.paused,
     });
   }
 
