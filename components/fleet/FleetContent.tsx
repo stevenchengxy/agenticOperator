@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Btn } from "@/components/shared/atoms";
+import { InngestPill } from "@/components/shared/InngestPill";
 import { fetchJson } from "@/lib/api/client";
 import type { AgentsResponse, AgentRow } from "@/lib/api/types";
 import { isReal, deploymentKind, type DeploymentKind } from "@/lib/agent-mapping";
@@ -263,6 +264,7 @@ export function FleetContent() {
             </div>
           </div>
           <div className="flex items-center gap-3 mt-1">
+            <InngestPill />
             <LiveIndicator lastRefresh={lastRefresh} />
             {partial && (
               <span className="text-[11.5px] text-ink-3 flex items-center gap-1.5">

@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { useApp } from "@/lib/i18n";
+import { InngestPill } from "@/components/shared/InngestPill";
 
 const STREAM_CONNECTED_THRESHOLD_MS = 10_000;
 
@@ -35,6 +36,7 @@ export function MonitorHeader({
         </h1>
       </div>
       <div className="flex items-center gap-8">
+        <InngestPill />
         <StatTile label={t("monitor_stat_active")} value={stats?.activeRuns ?? "—"} />
         <StatTile label={t("monitor_stat_hitl")} value={stats?.pendingHitl ?? "—"} />
         <StatTile
