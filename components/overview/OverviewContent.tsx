@@ -9,7 +9,8 @@ import type { ActivityResponse, LogEntry } from "@/lib/api/activity-types";
 import { useAgentsHealth } from "@/lib/api/agents-health";
 import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/route";
 import { byShortFunction } from "@/lib/agent-functions";
-import { AGENT_MAP, deploymentKind, byShort } from "@/lib/agent-mapping";
+import { AGENT_MAP, byShort } from "@/lib/agent-mapping";
+import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
 
 // /overview — system-at-a-glance dashboard.
@@ -58,6 +59,7 @@ type MatrixRow = {
 export function OverviewContent() {
   const health = useAgentsHealth(4_000);
   const { byWsId: liveByWsId } = useInngestLiveOverlay();
+  const { realness: realnessMap } = useDeploymentMap();
   const [activeRuns, setActiveRuns] = React.useState<RunSummary[] | null>(null);
   const [failed1h, setFailed1h] = React.useState<RunSummary[] | null>(null);
   const [anomalies, setAnomalies] = React.useState<LogEntry[] | null>(null);
@@ -105,7 +107,7 @@ export function OverviewContent() {
   // runtime health is overlaid as a secondary signal.
   const matrixRows: MatrixRow[] = React.useMemo(() => {
     const rows: MatrixRow[] = AGENT_MAP.map((a) => {
-      const kind = deploymentKind(a.short);
+      const kind = realnessMap.get(a.short) ?? "unbuilt";
       const live = liveByWsId.get(a.wsId);
       const deploy: DeployStatus =
         kind === "unbuilt" ? "not_deployed" :
@@ -129,7 +131,7 @@ export function OverviewContent() {
       return x.short.localeCompare(y.short);
     });
     return rows;
-  }, [liveByWsId, health.byShort]);
+  }, [liveByWsId, health.byShort, realnessMap]);
 
   const deployCounts = React.useMemo(() => {
     const out = { online: 0, paused: 0, not_deployed: 0 };

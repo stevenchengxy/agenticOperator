@@ -5,7 +5,8 @@ import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
 import { InngestDlqTab } from "./InngestDlqTab";
 import { useApp } from "@/lib/i18n";
-import { AGENT_MAP, deploymentKind, displayName as agentDisplayName } from "@/lib/agent-mapping";
+import { AGENT_MAP, displayName as agentDisplayName } from "@/lib/agent-mapping";
+import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { WSID_TO_INNGEST_SLUG, INNGEST_SLUG_TO_WSID } from "@/lib/api/inngest-live-overlay";
 import {
   RunDetailExpansion,
@@ -35,12 +36,9 @@ import {
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-// All agents with a registered Inngest function (real + shell). Listed in
-// workflow stage order so the monitor filter mirrors the pipeline.
-const DEPLOYED_AGENT_SHORTS: string[] = AGENT_MAP
-  .filter((a) => deploymentKind(a.short) !== "unbuilt")
-  .map((a) => a.short);
-const REAL_AGENT_SHORTS = DEPLOYED_AGENT_SHORTS;
+// AGENT_MAP order — used as a stable display order; the actual "deployed"
+// subset is computed at render time via useDeploymentMap (Inngest live).
+const ALL_AGENT_SHORTS: string[] = AGENT_MAP.map((a) => a.short);
 
 type StatusFilter = "all" | RunStatus;
 type WindowId = "1h" | "24h" | "7d";
@@ -503,6 +501,11 @@ function WindowSelector({ value, onChange }: { value: WindowId; onChange: (v: Wi
 }
 
 function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const { realness: realnessMap } = useDeploymentMap();
+  const deployedShorts = React.useMemo(
+    () => ALL_AGENT_SHORTS.filter((s) => (realnessMap.get(s) ?? "unbuilt") !== "unbuilt"),
+    [realnessMap],
+  );
   return (
     <div className="flex items-center gap-1 flex-wrap">
       <button
@@ -517,7 +520,7 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
       >
         全部
       </button>
-      {REAL_AGENT_SHORTS.map((short) => (
+      {deployedShorts.map((short) => (
         <button
           key={short}
           onClick={() => onChange(short)}

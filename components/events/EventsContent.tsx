@@ -2,7 +2,8 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AGENT_MAP, deploymentKind, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
+import { AGENT_MAP, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
+import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useInngestEventsStream } from "@/lib/api/inngest-events-stream";
 import type { InngestEventRow } from "@/lib/api/inngest-events";
 import { useEmHealth } from "@/lib/api/em-health";
@@ -38,10 +39,13 @@ const EVENT_TO_SUBSCRIBERS: Record<string, string[]> = (() => {
   return map;
 })();
 
-function subscribersOf(eventName: string): { short: string; isReal: boolean; kind: DeploymentKind }[] {
+function subscribersOf(
+  eventName: string,
+  realnessMap: Map<string, DeploymentKind>,
+): { short: string; isReal: boolean; kind: DeploymentKind }[] {
   const list = EVENT_TO_SUBSCRIBERS[eventName] ?? [];
   return list.map((short) => {
-    const kind = deploymentKind(short);
+    const kind = realnessMap.get(short) ?? "unbuilt";
     return { short, isReal: kind === "real", kind };
   });
 }
@@ -49,6 +53,7 @@ export function EventsContent() {
   const router = useRouter();
   const sp = useSearchParams();
   const { t, lang } = useApp();
+  const { realness: realnessMap } = useDeploymentMap();
 
   const filterName = sp.get("name");
   const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d";
@@ -226,7 +231,7 @@ export function EventsContent() {
           {filtered.map((e) => {
             const id = e.internal_id ?? e.id;
             const isSelected = selected && (selected.internal_id ?? selected.id) === id;
-            const subs = subscribersOf(e.name);
+            const subs = subscribersOf(e.name, realnessMap);
             const contract = registry.get(e.name) ?? null;
             return (
               <button
@@ -293,7 +298,8 @@ export function EventsContent() {
 }
 
 function PayloadViewer({ event, contract, setUrl }: { event: InngestEventRow; contract: EventContract | null; setUrl: (mut: (p: URLSearchParams) => void) => void }) {
-  const subs = subscribersOf(event.name);
+  const { realness: realnessMap } = useDeploymentMap();
+  const subs = subscribersOf(event.name, realnessMap);
   const [showSchema, setShowSchema] = React.useState(false);
   const [replayBusy, setReplayBusy] = React.useState(false);
   const [replayMsg, setReplayMsg] = React.useState<string | null>(null);
