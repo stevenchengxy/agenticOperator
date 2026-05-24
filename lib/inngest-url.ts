@@ -13,14 +13,26 @@
 
 const DEFAULT = "http://localhost:8288";
 
+export type InngestUrlSource =
+  | 'INNGEST_BASE_URL'
+  | 'INNGEST_DEV'
+  | 'INNGEST_LOCAL_URL'
+  | 'INNGEST_ADMIN_URL'
+  | 'default';
+
+/** Returns both the resolved URL and which env var (or "default") supplied it.
+ *  Used by /api/system/config + <SystemConfigModal/> so ops can verify env
+ *  bindings after deployment changes. */
+export function getInngestUrlWithSource(): { url: string; sourceEnv: InngestUrlSource } {
+  if (process.env.INNGEST_BASE_URL)  return { url: process.env.INNGEST_BASE_URL,  sourceEnv: 'INNGEST_BASE_URL' };
+  if (process.env.INNGEST_DEV)       return { url: process.env.INNGEST_DEV,       sourceEnv: 'INNGEST_DEV' };
+  if (process.env.INNGEST_LOCAL_URL) return { url: process.env.INNGEST_LOCAL_URL, sourceEnv: 'INNGEST_LOCAL_URL' };
+  if (process.env.INNGEST_ADMIN_URL) return { url: process.env.INNGEST_ADMIN_URL, sourceEnv: 'INNGEST_ADMIN_URL' };
+  return { url: DEFAULT, sourceEnv: 'default' };
+}
+
 export function getInngestUrl(): string {
-  return (
-    process.env.INNGEST_BASE_URL ??
-    process.env.INNGEST_DEV ??
-    process.env.INNGEST_LOCAL_URL ??
-    process.env.INNGEST_ADMIN_URL ??
-    DEFAULT
-  );
+  return getInngestUrlWithSource().url;
 }
 
 // Cross-system trace lookup (AO's bridge polls the partner's Inngest).
