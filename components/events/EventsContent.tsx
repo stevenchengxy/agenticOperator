@@ -9,6 +9,7 @@ import { useEmHealth } from "@/lib/api/em-health";
 import { fetchJson } from "@/lib/api/client";
 import type { EventsResponse, EventContract } from "@/lib/api/types";
 import { CandidateTrackingTab } from "./CandidateTrackingTab";
+import { AllmetaSyncStrip } from "./AllmetaSyncStrip";
 import { useApp } from "@/lib/i18n";
 import { classifySource, DIRECTION_META } from "@/lib/events/event-direction";
 
@@ -109,6 +110,8 @@ export function EventsContent() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
+      {/* Allmeta sync state strip */}
+      <AllmetaSyncStrip />
       {/* header */}
       <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
         <div className="flex items-start gap-6">

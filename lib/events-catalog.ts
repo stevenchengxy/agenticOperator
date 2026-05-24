@@ -1,7 +1,18 @@
 /**
- * @deprecated Fallback for app/api/events/route.ts when EM is unreachable.
- * Will be deleted in P2 once /api/events has been stable for ≥1 week.
- * No new code should import this directly — go through /api/events.
+ * @deprecated INTERNAL FALLBACK ONLY.
+ * Do NOT import `EVENT_CATALOG` outside `app/api/events/route.ts` cold-start
+ * path. UI components must use `useEventCatalog()` hook or fetch `/api/events`
+ * (both read from prisma.eventDefinition, which the Neo4j sync worker
+ * populates from Allmeta Ontology).
+ *
+ * Why this still exists: when the sync worker has never succeeded since
+ * cold boot (typically off-VPN dev), `/api/events` falls back to these so
+ * the UI doesn't blank out. The sync worker overwrites the response on its
+ * first success — at which point hardcoded entries are silently dropped.
+ *
+ * The `kindDot()` helper is pure and OK to import (no catalog dependency).
+ *
+ * Per spec 2026-05-24 §5.4.
  */
 export type EventKind = "trigger" | "domain" | "error" | "gate";
 
