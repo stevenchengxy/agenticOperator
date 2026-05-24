@@ -1,43 +1,33 @@
 // Inngest live overlay hook.
 //
 // Polls /api/inngest-admin/{functions,runs,dlq} every 5s and exposes a Map
-// keyed by workflow `wsId` (e.g. "9-1", "4", "10", "10-5") for the 4 real
-// production Inngest functions. Non-real (stub) nodes return undefined →
-// consumers should render them as "蓝图 / blueprint" instead of pretending
-// they're alive.
+// keyed by workflow `wsId` for whatever Inngest functions are CURRENTLY
+// registered. Non-registered agents return undefined → consumers should
+// render them as "blueprint / unbuilt" instead of pretending they're alive.
 //
-// Mapping wsId ↔ Inngest slug:
-//   "4"    → agentic-operator-main-create-jd-agent       (JDGenerator)
-//   "9-1"  → agentic-operator-main-resume-parser-agent   (ResumeParser)
-//   "10"   → agentic-operator-main-match-resume-agent    (Matcher)
-//   "10-5" → agentic-operator-main-rule-check-agent      (RuleCheck) ★ PR-4
+// wsId ↔ Inngest slug mapping is now derived from /api/agents (which itself
+// reads lib/inngest-registry.ts). Per spec 2026-05-24 §3.4 — no more static
+// 4-entry hardcode that goes stale when reals change.
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AGENT_MAP, isShell } from '@/lib/agent-mapping';
 
-// Real production agents — explicit slug mapping (matches the actual
-// Inngest function IDs declared in server/inngest/agents/*.ts).
-export const WSID_TO_INNGEST_SLUG: Record<string, string> = {
-  '4': 'agentic-operator-main-create-jd-agent',
-  '9-1': 'agentic-operator-main-resume-parser-agent',
-  '10': 'agentic-operator-main-match-resume-agent',
-  '10-5': 'agentic-operator-main-rule-check-agent',
-};
+// Mutable exports — keys are rebuilt from /api/agents on every hook fetch.
+// We mutate the existing object reference so callers `import {WSID_TO_INNGEST_SLUG}`
+// always see latest keys without needing to re-subscribe.
+export const WSID_TO_INNGEST_SLUG: Record<string, string> = {};
+export const INNGEST_SLUG_TO_WSID: Record<string, string> = {};
 
-// Empty-shell agents — slug derived from stub-factory:
-//   fnId = `agent.${short.toLowerCase()}`
-//   → slug = `agentic-operator-main-agent.${short.toLowerCase()}` (dot preserved by Inngest)
-for (const a of AGENT_MAP) {
-  if (!isShell(a.short)) continue;
-  if (WSID_TO_INNGEST_SLUG[a.wsId]) continue;
-  WSID_TO_INNGEST_SLUG[a.wsId] = `agentic-operator-main-agent.${a.short.toLowerCase()}`;
+function rebuildSlugMaps(agents: Array<{ wsId: string; slug: string | null }>): void {
+  for (const k of Object.keys(WSID_TO_INNGEST_SLUG)) delete WSID_TO_INNGEST_SLUG[k];
+  for (const k of Object.keys(INNGEST_SLUG_TO_WSID)) delete INNGEST_SLUG_TO_WSID[k];
+  for (const a of agents) {
+    if (!a.slug) continue;
+    WSID_TO_INNGEST_SLUG[a.wsId] = a.slug;
+    INNGEST_SLUG_TO_WSID[a.slug] = a.wsId;
+  }
 }
-
-export const INNGEST_SLUG_TO_WSID: Record<string, string> = Object.fromEntries(
-  Object.entries(WSID_TO_INNGEST_SLUG).map(([k, v]) => [v, k]),
-);
 
 export type LiveAgentState = {
   wsId: string;
@@ -73,13 +63,18 @@ export function useInngestLiveOverlay(): {
 
     async function load() {
       try {
-        const [fnRes, runRes] = await Promise.all([
+        const [fnRes, runRes, agentsRes] = await Promise.all([
           fetch('/api/inngest-admin/functions'),
           fetch('/api/inngest-admin/runs?limit=100'),
+          fetch('/api/agents'),
         ]);
         if (!fnRes.ok || !runRes.ok) return;
         const fnBody = await fnRes.json();
         const runBody = await runRes.json();
+        if (agentsRes.ok) {
+          const agentsBody = await agentsRes.json();
+          rebuildSlugMaps(agentsBody.agents ?? []);
+        }
         if (cancelled) return;
 
         const next = new Map<string, LiveAgentState>();

@@ -6,7 +6,7 @@ import { SystemStatusCards } from "./SystemStatusCards";
 import { InngestDlqTab } from "./InngestDlqTab";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, deploymentKind, displayName as agentDisplayName } from "@/lib/agent-mapping";
-import { WSID_TO_INNGEST_SLUG } from "@/lib/api/inngest-live-overlay";
+import { WSID_TO_INNGEST_SLUG, INNGEST_SLUG_TO_WSID } from "@/lib/api/inngest-live-overlay";
 import {
   RunDetailExpansion,
   fetchRunDetail,
@@ -425,21 +425,21 @@ function ReplayRunButton({ run }: { run: RunRow }) {
   );
 }
 
+// Map AGENT_MAP.short → live Inngest slug. Reads the slug map that
+// useInngestLiveOverlay rebuilds on each fetch (driven by /api/agents).
+// Returns null when no live registration matches.
 function shortToSlug(short: string): string | null {
-  if (short === "JDGenerator") return WSID_TO_INNGEST_SLUG["4"];
-  if (short === "ResumeParser") return WSID_TO_INNGEST_SLUG["9-1"];
-  if (short === "Matcher") return WSID_TO_INNGEST_SLUG["10"];
-  if (short === "RuleCheck") return WSID_TO_INNGEST_SLUG["10-5"];
-  return null;
+  const meta = AGENT_MAP.find((a) => a.short === short);
+  return meta ? WSID_TO_INNGEST_SLUG[meta.wsId] ?? null : null;
 }
 
+// Reverse direction — slug → short. Uses the live INNGEST_SLUG_TO_WSID
+// (rebuilt by useInngestLiveOverlay) then resolves wsId → short via AGENT_MAP.
 function slugToShort(slug: string | undefined): string | null {
   if (!slug) return null;
-  if (slug.includes("create-jd")) return "JDGenerator";
-  if (slug.includes("resume-parser")) return "ResumeParser";
-  if (slug.includes("match-resume")) return "Matcher";
-  if (slug.includes("rule-check")) return "RuleCheck";
-  return null;
+  const wsId = INNGEST_SLUG_TO_WSID[slug];
+  if (!wsId) return null;
+  return AGENT_MAP.find((a) => a.wsId === wsId)?.short ?? null;
 }
 
 // ── controls ────────────────────────────────────────────────────
