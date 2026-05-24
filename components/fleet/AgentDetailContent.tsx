@@ -107,11 +107,15 @@ export function AgentDetailContent({ short }: { short: string }) {
   // Local optimistic pause toggle so the button reflects state immediately.
   const [optimisticPause, setOptimisticPause] = React.useState<boolean | null>(null);
 
-  const real = agentRow ? isReal(agentRow.short) : false;
-  const realness: Realness = agentRow ? deploymentKind(agentRow.short) : "unbuilt";
-  const deployed = realness !== "unbuilt"; // real or shell — both are registered Inngest functions
+  // Read realness + slug directly from the API row (which sources them from
+  // lib/inngest-registry.ts server-side). Do NOT call isReal/deploymentKind
+  // here — those are sync helpers reading server-process module cache, which
+  // is empty in the browser.
+  const realness: Realness = agentRow?.realness ?? "unbuilt";
+  const real = realness === "real";
+  const deployed = realness !== "unbuilt";
   const wsId = agentRow?.wsId ?? "";
-  const slug = deployed ? WSID_TO_INNGEST_SLUG[wsId] ?? null : null;
+  const slug = agentRow?.slug ?? (deployed ? WSID_TO_INNGEST_SLUG[wsId] ?? null : null);
   const live: LiveAgentState | undefined = deployed ? liveByWsId.get(wsId) : undefined;
   const livePaused = live?.paused ?? false;
   const effectivePaused = optimisticPause ?? livePaused;

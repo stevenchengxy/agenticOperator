@@ -85,10 +85,14 @@ function isAnomalous(r: FleetRow): boolean {
 
 function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>): FleetRow[] {
   return api.agents.map((a) => {
-    const realness: Realness = deploymentKind(a.short);
-    const deployed = realness !== "unbuilt"; // real or shell — both register at Inngest
+    // Read realness + slug directly from the API response (which sources them
+    // from lib/inngest-registry.ts server-side). Do NOT call deploymentKind()
+    // here — that's the sync helper that reads server-process module cache,
+    // which is empty in the browser → would mark every agent as 'unbuilt'.
+    const realness: Realness = a.realness;
+    const deployed = realness !== "unbuilt";
     const live = deployed ? liveByWsId.get(a.wsId) : undefined;
-    const slug = deployed ? WSID_TO_INNGEST_SLUG[a.wsId] ?? null : null;
+    const slug = a.slug ?? (deployed ? WSID_TO_INNGEST_SLUG[a.wsId] ?? null : null);
 
     let lifecycle: Lifecycle;
     if (realness === "unbuilt") lifecycle = "draft";
