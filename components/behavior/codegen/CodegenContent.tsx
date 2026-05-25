@@ -431,6 +431,7 @@ export function CodegenContent() {
                 error={evalError}
                 onRun={runEvaluation}
                 canRun={!!spec}
+                generatedCode={code}
               />
             )}
           </div>

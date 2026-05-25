@@ -12,11 +12,14 @@
 
 import React from "react";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import type {
   EvaluationReport,
   ReplacementVerdict,
 } from "@/lib/agent-codegen/eval/evaluation-report";
 import type { ReviewIssue } from "@/lib/agent-codegen/eval/code-reviewer";
+import type { DynamicCasesSummary } from "@/lib/agent-codegen/eval/run-dynamic-cases";
+import type { DynamicRunResult } from "@/lib/agent-codegen/eval/dynamic-runner";
 
 export function EvaluationPanel({
   report,
@@ -24,12 +27,15 @@ export function EvaluationPanel({
   error,
   onRun,
   canRun,
+  generatedCode,
 }: {
   report: EvaluationReport | null;
   running: boolean;
   error: string | null;
   onRun: () => void;
   canRun: boolean;
+  /** Required for dynamic test case execution. When absent, Execute is disabled. */
+  generatedCode?: string;
 }) {
   const { t } = useApp();
 
@@ -94,7 +100,7 @@ export function EvaluationPanel({
       ) : (
         <NoGroundTruthSection fixtureName={report.fixtureName} />
       )}
-      <TestCasesSection report={report} />
+      <TestCasesSection report={report} generatedCode={generatedCode} />
       <div className="flex justify-end">
         <RunButton onRun={onRun} canRun={canRun} running={running} label={t("eval_rerun")} />
       </div>
@@ -269,22 +275,118 @@ function NoGroundTruthSection({ fixtureName }: { fixtureName: string }) {
   );
 }
 
-function TestCasesSection({ report }: { report: EvaluationReport }) {
+function TestCasesSection({
+  report,
+  generatedCode,
+}: {
+  report: EvaluationReport;
+  generatedCode?: string;
+}) {
   const { t } = useApp();
+  const { domain } = useDomain();
   const [open, setOpen] = React.useState<number | null>(null);
+  const [running, setRunning] = React.useState(false);
+  const [results, setResults] = React.useState<DynamicRunResult[] | null>(null);
+  const [runError, setRunError] = React.useState<string | null>(null);
+  const [summary, setSummary] = React.useState<{
+    passed: number;
+    total: number;
+    totalDurationMs: number;
+  } | null>(null);
+
+  // Reset results when the generated code changes — a new generation
+  // invalidates previous executions.
+  React.useEffect(() => {
+    setResults(null);
+    setSummary(null);
+    setRunError(null);
+  }, [generatedCode]);
+
+  const execute = async () => {
+    if (!generatedCode) return;
+    setRunning(true);
+    setRunError(null);
+    setResults(null);
+    setSummary(null);
+    try {
+      const r = await fetch("/api/codegen/run-test-cases", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code: generatedCode,
+          testCases: report.generatedTestCases,
+          domain,
+        }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      const data = (await r.json()) as DynamicCasesSummary;
+      setResults(data.results);
+      setSummary({
+        passed: data.passed,
+        total: data.total,
+        totalDurationMs: data.totalDurationMs,
+      });
+    } catch (e) {
+      setRunError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // Map result by case name so we can render the per-row badge.
+  const resultByName = React.useMemo(() => {
+    const m = new Map<string, DynamicRunResult>();
+    if (results) for (const r of results) m.set(r.testCaseName, r);
+    return m;
+  }, [results]);
+
   return (
     <Section
       title={t("eval_section_test_cases")}
       number={4}
       subtitle={t("eval_test_cases_blurb")}
+      action={
+        <ExecuteTestsButton
+          onClick={execute}
+          disabled={!generatedCode || running}
+          running={running}
+          summary={summary}
+        />
+      }
     >
+      {runError && (
+        <div
+          className="px-3 py-2 mb-3 rounded-md border text-[11.5px] leading-snug"
+          style={{
+            background:
+              "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 6%, var(--c-panel))",
+            borderColor:
+              "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, var(--c-line))",
+            color: "var(--c-err, oklch(0.5 0.2 25))",
+          }}
+        >
+          {t("eval_tc_runner_failure")}: {runError}
+        </div>
+      )}
+
       <ol className="m-0 p-0 list-none flex flex-col gap-2">
         {report.generatedTestCases.map((tc, i) => {
           const isOpen = open === i;
+          const result = resultByName.get(tc.name);
           return (
             <li
               key={i}
               className="rounded-md border border-line bg-panel overflow-hidden"
+              style={{
+                borderColor: result
+                  ? result.passed
+                    ? "color-mix(in oklab, var(--c-ok) 30%, var(--c-line))"
+                    : "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, var(--c-line))"
+                  : undefined,
+              }}
             >
               <button
                 onClick={() => setOpen(isOpen ? null : i)}
@@ -294,9 +396,8 @@ function TestCasesSection({ report }: { report: EvaluationReport }) {
                 <span className="text-[12px] text-ink-1 font-medium flex-1 min-w-0 truncate">
                   {tc.name}
                 </span>
-                <span className="text-[10px] mono text-ink-4">
-                  {isOpen ? "▼" : "▶"}
-                </span>
+                {result && <ResultBadge result={result} />}
+                <span className="text-[10px] mono text-ink-4">{isOpen ? "▼" : "▶"}</span>
               </button>
               {isOpen && (
                 <div
@@ -329,6 +430,20 @@ function TestCasesSection({ report }: { report: EvaluationReport }) {
                     value={`handler: ${tc.expectedOutcome.handlerResolves}\nemits: [${tc.expectedOutcome.expectedEmits.join(", ") || "—"}]`}
                     code
                   />
+                  {result && (
+                    <KV
+                      label={t("eval_tc_actual")}
+                      value={[
+                        `handler: ${result.handlerOutcome}`,
+                        `steps:   [${result.capturedSteps.join(", ") || "—"}]`,
+                        `emits:   [${result.capturedEmits.join(", ") || "—"}]`,
+                        `time:    ${result.durationMs}ms`,
+                        `reason:  ${result.reason}`,
+                        ...(result.errorMessage ? [`error:   ${result.errorMessage}`] : []),
+                      ].join("\n")}
+                      code
+                    />
+                  )}
                 </div>
               )}
             </li>
@@ -336,6 +451,78 @@ function TestCasesSection({ report }: { report: EvaluationReport }) {
         })}
       </ol>
     </Section>
+  );
+}
+
+function ExecuteTestsButton({
+  onClick,
+  disabled,
+  running,
+  summary,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  running: boolean;
+  summary: { passed: number; total: number; totalDurationMs: number } | null;
+}) {
+  const { t } = useApp();
+  return (
+    <div className="flex items-center gap-2">
+      {summary && (
+        <span
+          className="text-[10.5px] mono px-1.5 py-0.5 rounded"
+          style={{
+            background:
+              summary.passed === summary.total
+                ? "color-mix(in oklab, var(--c-ok) 12%, transparent)"
+                : "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 12%, transparent)",
+            color:
+              summary.passed === summary.total
+                ? "var(--c-ok)"
+                : "var(--c-err, oklch(0.5 0.2 25))",
+            border: `1px solid ${
+              summary.passed === summary.total
+                ? "color-mix(in oklab, var(--c-ok) 30%, transparent)"
+                : "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, transparent)"
+            }`,
+          }}
+        >
+          {summary.passed}/{summary.total} · {summary.totalDurationMs}ms
+        </span>
+      )}
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className="h-7 px-3 rounded-md text-[11px] font-medium border-0 cursor-pointer"
+        style={{
+          background: disabled ? "var(--c-panel)" : "var(--c-accent)",
+          color: disabled ? "var(--c-ink-4)" : "white",
+        }}
+        title={t("eval_tc_execute_tooltip")}
+      >
+        {running ? t("eval_tc_executing") : t("eval_tc_execute")}
+      </button>
+    </div>
+  );
+}
+
+function ResultBadge({ result }: { result: DynamicRunResult }) {
+  const color = result.passed
+    ? "var(--c-ok)"
+    : "var(--c-err, oklch(0.5 0.2 25))";
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] mono"
+      style={{
+        background: `color-mix(in oklab, ${color} 12%, transparent)`,
+        color,
+        border: `1px solid color-mix(in oklab, ${color} 30%, transparent)`,
+      }}
+      title={result.reason}
+    >
+      {result.passed ? "✓" : "✗"}
+      <span style={{ opacity: 0.7 }}>{result.durationMs}ms</span>
+    </span>
   );
 }
 
@@ -347,11 +534,13 @@ function Section({
   title,
   number,
   subtitle,
+  action,
   children,
 }: {
   title: string;
   number: number;
   subtitle?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -375,6 +564,7 @@ function Section({
           {title}
         </h3>
         {subtitle && <span className="text-[10.5px] text-ink-4">{subtitle}</span>}
+        {action && <div className="ml-auto">{action}</div>}
       </header>
       <div>{children}</div>
     </section>
