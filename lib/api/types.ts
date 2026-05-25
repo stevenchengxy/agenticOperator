@@ -1,4 +1,5 @@
 import type { Stage, AgentKind } from '../agent-mapping';
+import type { DomainId } from '../domains';
 
 export type RunStatus =
   | 'running'
@@ -24,6 +25,8 @@ export type ApiMeta = {
 export type AgentRow = {
   short: string;
   wsId: string;
+  /** Top-level domain container (see lib/domains.tsx). */
+  domain: DomainId;
   /** i18n key for the Chinese / English translated display name. */
   displayName: string;
   /** Human name as registered in Inngest (matches the Inngest dashboard). */

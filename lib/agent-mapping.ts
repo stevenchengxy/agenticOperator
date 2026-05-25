@@ -1,3 +1,5 @@
+import type { DomainId } from './domains';
+
 export type Stage =
   | 'system'
   | 'requirement'
@@ -14,6 +16,12 @@ export type AgentKind = 'auto' | 'hitl' | 'hybrid';
 export type AgentMeta = {
   short: string;
   wsId: string;
+  /**
+   * Top-level domain container — see lib/domains.tsx. All current 22 agents
+   * are 'raas'. Future R7 agents should go into AGENT_MAP_R7 below. Codegen
+   * Phase 1+ scopes its tool/event registries by this field.
+   */
+  domain: DomainId;
   stage: Stage;
   kind: AgentKind;
   ownerTeam: string;
@@ -39,7 +47,9 @@ export type AgentMeta = {
   inngestId?: string;
 };
 
-export const AGENT_MAP: AgentMeta[] = [
+// Raw rows (no `domain` field — auto-injected as 'raas' below). When R7
+// onboards, add its agents to AGENT_MAP_R7 with explicit `domain: 'r7'`.
+const AGENT_MAP_RAAS_RAW: Omit<AgentMeta, 'domain'>[] = [
   { short: 'ReqSync',          wsId: '1-1',     stage: 'system',      kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v1.4.2', triggersEvents: ['SCHEDULED_SYNC'],                                emitsEvents: ['REQUIREMENT_SYNCED', 'SYNC_FAILED_ALERT'],                                  terminal: false },
   { short: 'ManualEntry',      wsId: '1-2',     stage: 'requirement', kind: 'hitl',   ownerTeam: 'HSM·交付',  version: 'v1.0.0', triggersEvents: ['CLARIFICATION_INCOMPLETE'],                       emitsEvents: ['REQUIREMENT_LOGGED'],                                                       terminal: false },
   { short: 'ReqAnalyzer',      wsId: '2',       stage: 'requirement', kind: 'auto',   ownerTeam: 'HSM·交付',  version: 'v2.1.0', triggersEvents: ['REQUIREMENT_SYNCED', 'REQUIREMENT_LOGGED'],       emitsEvents: ['ANALYSIS_COMPLETED', 'ANALYSIS_BLOCKED'],                                   terminal: false },
@@ -83,6 +93,14 @@ export const AGENT_MAP: AgentMeta[] = [
   // terminal=true because it emits no events and is outside the business
   // workflow chain (trigger-or-terminal invariant in agent-mapping.test.ts).
   { short: 'Chatbot',          wsId: 'system-chatbot', stage: 'system', kind: 'auto',   ownerTeam: 'AO·UI',     version: 'v1.0.0', triggersEvents: [],                                                 emitsEvents: [],                                                                           terminal: true  },
+];
+
+// Empty until R7 onboarding. New R7 agents go here with explicit domain.
+const AGENT_MAP_R7: AgentMeta[] = [];
+
+export const AGENT_MAP: AgentMeta[] = [
+  ...AGENT_MAP_RAAS_RAW.map((a): AgentMeta => ({ ...a, domain: 'raas' })),
+  ...AGENT_MAP_R7,
 ];
 
 export function byShort(s: string): AgentMeta | undefined {

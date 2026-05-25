@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Ic } from "./Ic";
 import { useApp } from "@/lib/i18n";
 import { useEmHealth } from "@/lib/api/em-health";
+import { DomainSwitcher } from "./DomainSwitcher";
 
 export function AppBar({
   crumbs = [],
@@ -59,6 +60,8 @@ export function AppBar({
       </div>
 
       <EmStatusPill health={emHealth.data} loading={emHealth.loading} onSync={emHealth.syncNow} />
+
+      <DomainSwitcher />
 
       {/* Language segmented */}
       <div className="flex items-center h-6 p-[2px] bg-panel border border-line rounded-md">

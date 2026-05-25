@@ -42,6 +42,7 @@ export async function GET(_req: Request): Promise<Response> {
     return {
       short: a.short,
       wsId: a.wsId,
+      domain: a.domain,
       displayName: displayKey(a.short),
       inngestName: live?.inngestName ?? a.inngestName ?? a.short,
       stage: a.stage,
@@ -70,6 +71,9 @@ export async function GET(_req: Request): Promise<Response> {
     agents.push({
       short: r.short,
       wsId: r.fnId ?? r.short,
+      // Unknown-to-AGENT_MAP live functions: default to 'raas' since RAAS is
+      // AO's primary domain today. R7 agents must be added to AGENT_MAP_R7.
+      domain: 'raas',
       displayName: r.inngestName ?? r.short,
       inngestName: r.inngestName ?? r.short,
       stage: 'system',

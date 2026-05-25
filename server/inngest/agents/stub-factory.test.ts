@@ -48,6 +48,7 @@ function makeMeta(overrides: Partial<AgentMeta> = {}): AgentMeta {
   return {
     short: "TestAgent",
     wsId: "x",
+    domain: "raas",
     stage: "system",
     kind: "auto",
     ownerTeam: "team",

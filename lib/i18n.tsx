@@ -418,6 +418,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     theme_light: "亮",
     theme_dark: "暗",
 
+    // Domain switcher (lib/domains.tsx) — top-level container scope
+    domain_switch_label: "切换 Domain",
+    domain_switch_tooltip: "切换 Domain · 影响 Fleet / Codegen 可见范围",
+    domain_empty_fleet: "当前 Domain 下还没有智能体。切到其它 Domain,或在 lib/agent-mapping.ts 注册新 agent。",
+
     // P1: run/step status enum labels (7 RunStatus + 5 StepStatus)
     status_running: "运行中",
     status_suspended: "等待 HITL",
@@ -1595,6 +1600,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     ds_add: "Add connector",
     theme_light: "Light",
     theme_dark: "Dark",
+
+    // Domain switcher (lib/domains.tsx) — top-level container scope
+    domain_switch_label: "Switch domain",
+    domain_switch_tooltip: "Switch domain · scopes Fleet / Codegen",
+    domain_empty_fleet: "No agents registered in this domain yet. Pick another domain, or register one in lib/agent-mapping.ts.",
 
     // P1: run/step status enum labels (7 RunStatus + 5 StepStatus)
     status_running: "Running",

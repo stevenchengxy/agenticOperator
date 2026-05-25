@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AppProvider } from "@/lib/i18n";
+import { DomainProvider } from "@/lib/domains";
 import { fetchLiveRegistry } from "@/lib/inngest-registry";
 
 // Fire-and-forget warm-up of the Inngest live registry cache. Sync helpers
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <AppProvider>{children}</AppProvider>
+        <AppProvider>
+          <DomainProvider>{children}</DomainProvider>
+        </AppProvider>
       </body>
     </html>
   );

@@ -9,6 +9,7 @@ import { InngestPill } from "@/components/shared/InngestPill";
 import { fetchJson } from "@/lib/api/client";
 import type { AgentsResponse, AgentRow } from "@/lib/api/types";
 import { isReal, deploymentKind, type DeploymentKind } from "@/lib/agent-mapping";
+import { useDomain } from "@/lib/domains";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 
 // Fleet IA v2.1 — see docs/superpowers/specs/2026-05-19-fleet-ia-design.md
@@ -198,7 +199,15 @@ export function FleetContent() {
     return () => clearInterval(id);
   }, [refetchAgents]);
 
-  const rows: FleetRow[] | null = agentsRes ? buildRows(agentsRes, liveByWsId) : null;
+  // Domain filter — scopes Fleet to current top-level container (RAAS / R7 / …).
+  // Switcher lives in AppBar; state persists via lib/domains.tsx provider.
+  const { domain } = useDomain();
+  const scopedRes = React.useMemo(() => {
+    if (!agentsRes) return null;
+    return { ...agentsRes, agents: agentsRes.agents.filter((a) => a.domain === domain) };
+  }, [agentsRes, domain]);
+
+  const rows: FleetRow[] | null = scopedRes ? buildRows(scopedRes, liveByWsId) : null;
   const safeRows = rows ?? [];
 
   // Local optimistic toggle — reflect new state immediately, then await
