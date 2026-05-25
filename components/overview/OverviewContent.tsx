@@ -68,6 +68,7 @@ export function OverviewContent() {
   const [hitlPending, setHitlPending] = React.useState<number | null>(null);
   const [dlqPending, setDlqPending] = React.useState<number | null>(null);
   const [events1h, setEvents1h] = React.useState<number | null>(null);
+  const [alertsActive, setAlertsActive] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
@@ -75,7 +76,7 @@ export function OverviewContent() {
     today0.setHours(0, 0, 0, 0);
     const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [active, failed, recent, todayFinished, hitl, dlq, events] = await Promise.all([
+      const [active, failed, recent, todayFinished, hitl, dlq, events, alerts] = await Promise.all([
         fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=10"),
         fetchJson<RunsResponse>(
           `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
@@ -92,6 +93,10 @@ export function OverviewContent() {
         fetchJson<{ total?: number; events?: unknown[] }>(
           `/api/inngest-events?since=${encodeURIComponent(since1h)}`,
         ),
+        // Active alerts — those not yet acked. Endpoint already filters by
+        // resolved/unresolved at the source; we count unacked here for the
+        // operator-attention signal in the system-status strip.
+        fetchJson<{ alerts: Array<{ acked: boolean }> }>("/api/alerts"),
       ]);
       setActiveRuns(active.runs);
       setFailed1h(failed.runs);
@@ -103,6 +108,7 @@ export function OverviewContent() {
       setHitlPending(hitl.total ?? hitl.tasks?.length ?? 0);
       setDlqPending(dlq.pending);
       setEvents1h(events.total ?? events.events?.length ?? 0);
+      setAlertsActive(alerts.alerts.filter((a) => !a.acked).length);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -196,6 +202,7 @@ export function OverviewContent() {
         }}
       >
         <div className="overflow-auto" style={{ padding: "16px 22px" }}>
+          <SystemStatusStrip deployCounts={deployCounts} alertsActive={alertsActive} />
           <AgentMatrix rows={matrixRows} loading={health.loading} counts={deployCounts} />
           <ActiveRunsSection runs={activeRuns} />
         </div>
@@ -449,6 +456,72 @@ function Kpi({
   );
 }
 
+// ── System status strip ──────────────────────────────────────────────
+//
+// Replaces the 24-card AgentMatrix. Two reasons:
+//   1. The KPI bar already shows agents · 实装 X/Y — the per-card detail
+//      was redundant noise.
+//   2. /fleet exists for the per-agent view; Overview should aggregate,
+//      not duplicate.
+//
+// One compact horizontal strip showing 2 signal categories (deployment +
+// alerts) with jump links to the dedicated pages.
+
+function SystemStatusStrip({
+  deployCounts,
+  alertsActive,
+}: {
+  deployCounts: { online: number; paused: number; not_deployed: number };
+  alertsActive: number | null;
+}) {
+  return (
+    <section className="mb-5 border border-line rounded-md bg-surface" style={{ padding: "10px 14px" }}>
+      <div className="flex items-center flex-wrap gap-x-6 gap-y-2 text-[12px]">
+        <StatusGroup label="部署">
+          <StatusDot color="var(--c-ok)"   label="已上线" value={deployCounts.online} />
+          <span className="text-ink-4">·</span>
+          <StatusDot color="var(--c-warn)" label="已暂停" value={deployCounts.paused} />
+          <span className="text-ink-4">·</span>
+          <StatusDot color="var(--c-err)"  label="未上线" value={deployCounts.not_deployed} />
+          <Link href="/fleet" className="ml-3 text-[11.5px] text-accent hover:underline no-underline">
+            在 Fleet 管理 →
+          </Link>
+        </StatusGroup>
+        <span className="text-line">|</span>
+        <StatusGroup label="告警">
+          <StatusDot
+            color={alertsActive && alertsActive > 0 ? "var(--c-err)" : "var(--c-ink-4)"}
+            label={alertsActive == null ? "loading…" : alertsActive === 0 ? "无活跃告警" : "active"}
+            value={alertsActive ?? null}
+          />
+          <Link href="/alerts" className="ml-3 text-[11.5px] text-accent hover:underline no-underline">
+            告警详情 →
+          </Link>
+        </StatusGroup>
+      </div>
+    </section>
+  );
+}
+
+function StatusGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-ink-3 mono text-[10.5px] uppercase tracking-wide">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function StatusDot({ color, label, value }: { color: string; label: string; value: number | null }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      {value != null && <span className="tabular-nums font-semibold text-ink-1">{value}</span>}
+      <span className="text-ink-2">{label}</span>
+    </span>
+  );
+}
+
 // ── Agent matrix ─────────────────────────────────────────────────────
 // AGENT_MAP 全量 agent；着色与 /fleet 同源（已上线 / 已暂停 / 未上线）。
 // runtime health 作为副指示器叠加（部署正常但 runtime 失败的 agent 会带红
@@ -691,6 +764,17 @@ function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
           ))}
         </div>
       )}
+      {/* Footer jump to full log — sticky at the bottom of the sidebar so
+          operators can always pivot from "what went wrong" to "show me
+          everything". /audit is the legacy unified log view. */}
+      <div className="mt-auto border-t border-line bg-surface" style={{ padding: "10px 16px" }}>
+        <Link
+          href="/audit"
+          className="text-[11.5px] text-accent hover:underline no-underline flex items-center gap-1"
+        >
+          <Ic.book /> 查看完整审计日志 →
+        </Link>
+      </div>
     </>
   );
 }

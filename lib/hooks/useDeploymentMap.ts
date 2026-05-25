@@ -15,6 +15,7 @@ import type { AgentsResponse } from "@/lib/api/types";
 type DeploymentMap = {
   realness: Map<string, "real" | "shell" | "unbuilt">;
   slug: Map<string, string | null>;
+  paused: Map<string, boolean>;
   loading: boolean;
 };
 
@@ -25,11 +26,13 @@ const subscribers = new Set<(d: DeploymentMap) => void>();
 function buildMap(agents: AgentsResponse["agents"]): DeploymentMap {
   const realness = new Map<string, "real" | "shell" | "unbuilt">();
   const slug = new Map<string, string | null>();
+  const paused = new Map<string, boolean>();
   for (const a of agents) {
     realness.set(a.short, a.realness);
     slug.set(a.short, a.slug);
+    paused.set(a.short, a.paused);
   }
-  return { realness, slug, loading: false };
+  return { realness, slug, paused, loading: false };
 }
 
 async function doFetch(): Promise<void> {
@@ -49,7 +52,7 @@ export function useDeploymentMap(): DeploymentMap {
   const [data, setData] = useState<DeploymentMap>(
     cached && Date.now() - cached.ts < CACHE_TTL_MS
       ? cached.data
-      : { realness: new Map(), slug: new Map(), loading: true }
+      : { realness: new Map(), slug: new Map(), paused: new Map(), loading: true }
   );
 
   useEffect(() => {
