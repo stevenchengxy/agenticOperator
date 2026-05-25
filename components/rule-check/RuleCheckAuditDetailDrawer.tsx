@@ -68,12 +68,23 @@ function DrawerSection({
   );
 }
 
-export function RuleCheckAuditDetailDrawer({
+/**
+ * Body of the audit-detail view — header + tabs + tab bodies.
+ * Used by:
+ *   - <RuleCheckAuditDetailDrawer/> (this file's modal wrapper)
+ *   - /rule-check/audits/[auditId]/page.tsx (fullscreen route)
+ *
+ * `onClose` is the X-button handler when rendered as a drawer; pass
+ * `undefined` to render the back-to-list link instead (fullscreen mode).
+ */
+export function RuleCheckAuditDetailBody({
   auditId,
   onClose,
+  chrome = "drawer",
 }: {
   auditId: string;
-  onClose: () => void;
+  onClose?: () => void;
+  chrome?: "drawer" | "page";
 }) {
   const { t } = useApp();
   const [data, setData] = React.useState<RuleCheckAuditDetailResponse | null>(
@@ -116,15 +127,134 @@ export function RuleCheckAuditDetailDrawer({
     }
   }, [auditId, isReplaying]);
 
-  // ESC to close
+  // ESC to close — only for drawer chrome (page has browser back).
   React.useEffect(() => {
+    if (chrome !== "drawer" || !onClose) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, chrome]);
 
+  const headerAndBody = (
+    <>
+      <div
+        className="border-b border-line flex items-center gap-3"
+        style={{ padding: "12px 18px" }}
+      >
+        <Ic.shield />
+        <div className="flex-1 min-w-0">
+          <div className="text-[14px] font-semibold tracking-tight truncate">
+            {t("rc_drawer_title")}
+          </div>
+          <div className="mono text-[11px] text-ink-3 truncate">{auditId}</div>
+        </div>
+        <Neo4jLinkBtn
+          label="🔗 图引擎"
+          title={t("rc_drawer_neo4j_title")}
+          cypher={`MATCH (a:RuleCheckAudit {audit_id: "${auditId}"})\nOPTIONAL MATCH (a)-[r]->(n)\nRETURN a, r, n`}
+        />
+        <Btn
+          size="sm"
+          onClick={onReplay}
+          disabled={isReplaying}
+          title={t("rc_replay_title")}
+        >
+          {isReplaying ? t("rc_replay_running") : `🔁 ${t("rc_replay")}`}
+        </Btn>
+        {chrome === "drawer" && onClose && (
+          <Btn size="sm" onClick={onClose}>
+            {t("rc_drawer_close")}
+          </Btn>
+        )}
+      </div>
+
+      {loading && !data ? (
+        <div className="flex-1 flex items-center justify-center">
+          <EmptyState title={t("rc_loading")} hint="" />
+        </div>
+      ) : !data ? (
+        <div className="flex-1 flex items-center justify-center">
+          <EmptyState
+            icon={<Ic.alert />}
+            title={t("rc_drawer_load_failed")}
+            hint={t("rc_drawer_no_response")}
+          />
+        </div>
+      ) : !data.ok ? (
+        <div className="flex-1 flex items-center justify-center">
+          <EmptyState
+            icon={<Ic.alert />}
+            title={
+              data.reason === "not_found"
+                ? t("rc_drawer_audit_missing")
+                : t("rc_rule_def_load_err")
+            }
+            hint={data.reason === "error" ? data.error ?? "" : ""}
+            variant="info"
+          />
+        </div>
+      ) : (
+        <>
+          <DetailHeader detail={data.detail} />
+          {replayMsg ? (
+            <div
+              className="text-[12px] mono"
+              style={{
+                padding: "8px 22px",
+                background: "color-mix(in oklab, var(--c-info) 12%, var(--c-bg))",
+                borderBottom: "1px solid var(--c-line)",
+                color: "var(--c-info)",
+              }}
+            >
+              {replayMsg}
+            </div>
+          ) : null}
+          <div
+            className="border-b border-line flex"
+            style={{ padding: "0 18px", gap: 16 }}
+          >
+            <TabBtn active={tab === "prompt"} onClick={() => setTab("prompt")}>
+              {t("rc_tab_prompt")}
+            </TabBtn>
+            <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>
+              {t("rc_tab_flags")} ({data.detail.flags.length})
+            </TabBtn>
+            <TabBtn active={tab === "response"} onClick={() => setTab("response")}>
+              {t("rc_tab_response")}
+            </TabBtn>
+            <TabBtn active={tab === "instances"} onClick={() => setTab("instances")}>
+              {t("rc_tab_instances")}
+            </TabBtn>
+          </div>
+          <div className="flex-1 overflow-auto" style={{ padding: "16px 18px" }}>
+            {tab === "prompt" ? (
+              <PromptTab detail={data.detail} />
+            ) : tab === "rules" ? (
+              <RulesTab detail={data.detail} />
+            ) : tab === "response" ? (
+              <ResponseTab detail={data.detail} />
+            ) : (
+              <InstancesTab detail={data.detail} />
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  if (chrome === "page") {
+    // Fullscreen mode — no overlay, no fixed positioning. Parent route
+    // owns the surrounding chrome (Shell + breadcrumbs).
+    return (
+      <div className="flex-1 flex flex-col min-w-0 bg-surface">
+        {headerAndBody}
+      </div>
+    );
+  }
+
+  // Drawer mode — fixed overlay, click backdrop to close.
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end"
@@ -136,111 +266,18 @@ export function RuleCheckAuditDetailDrawer({
         style={{ width: "min(940px, 92vw)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          className="border-b border-line flex items-center gap-3"
-          style={{ padding: "12px 18px" }}
-        >
-          <Ic.shield />
-          <div className="flex-1 min-w-0">
-            <div className="text-[14px] font-semibold tracking-tight truncate">
-              {t("rc_drawer_title")}
-            </div>
-            <div className="mono text-[11px] text-ink-3 truncate">{auditId}</div>
-          </div>
-          <Neo4jLinkBtn
-            label="🔗 图引擎"
-            title={t("rc_drawer_neo4j_title")}
-            cypher={`MATCH (a:RuleCheckAudit {audit_id: "${auditId}"})\nOPTIONAL MATCH (a)-[r]->(n)\nRETURN a, r, n`}
-          />
-          <Btn
-            size="sm"
-            onClick={onReplay}
-            disabled={isReplaying}
-            title={t("rc_replay_title")}
-          >
-            {isReplaying ? t("rc_replay_running") : `🔁 ${t("rc_replay")}`}
-          </Btn>
-          <Btn size="sm" onClick={onClose}>
-            {t("rc_drawer_close")}
-          </Btn>
-        </div>
-
-        {loading && !data ? (
-          <div className="flex-1 flex items-center justify-center">
-            <EmptyState title={t("rc_loading")} hint="" />
-          </div>
-        ) : !data ? (
-          <div className="flex-1 flex items-center justify-center">
-            <EmptyState
-              icon={<Ic.alert />}
-              title={t("rc_drawer_load_failed")}
-              hint={t("rc_drawer_no_response")}
-            />
-          </div>
-        ) : !data.ok ? (
-          <div className="flex-1 flex items-center justify-center">
-            <EmptyState
-              icon={<Ic.alert />}
-              title={
-                data.reason === "not_found"
-                  ? t("rc_drawer_audit_missing")
-                  : t("rc_rule_def_load_err")
-              }
-              hint={data.reason === "error" ? data.error ?? "" : ""}
-              variant="info"
-            />
-          </div>
-        ) : (
-          <>
-            <DetailHeader
-              detail={data.detail}
-            />
-            {replayMsg ? (
-              <div
-                className="text-[12px] mono"
-                style={{
-                  padding: "8px 22px",
-                  background: "color-mix(in oklab, var(--c-info) 12%, var(--c-bg))",
-                  borderBottom: "1px solid var(--c-line)",
-                  color: "var(--c-info)",
-                }}
-              >
-                {replayMsg}
-              </div>
-            ) : null}
-            <div
-              className="border-b border-line flex"
-              style={{ padding: "0 18px", gap: 16 }}
-            >
-              <TabBtn active={tab === "prompt"} onClick={() => setTab("prompt")}>
-                {t("rc_tab_prompt")}
-              </TabBtn>
-              <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>
-                {t("rc_tab_flags")} ({data.detail.flags.length})
-              </TabBtn>
-              <TabBtn active={tab === "response"} onClick={() => setTab("response")}>
-                {t("rc_tab_response")}
-              </TabBtn>
-              <TabBtn active={tab === "instances"} onClick={() => setTab("instances")}>
-                {t("rc_tab_instances")}
-              </TabBtn>
-            </div>
-            <div className="flex-1 overflow-auto" style={{ padding: "16px 18px" }}>
-              {tab === "prompt" ? (
-                <PromptTab detail={data.detail} />
-              ) : tab === "rules" ? (
-                <RulesTab detail={data.detail} />
-              ) : tab === "response" ? (
-                <ResponseTab detail={data.detail} />
-              ) : (
-                <InstancesTab detail={data.detail} />
-              )}
-            </div>
-          </>
-        )}
+        {headerAndBody}
       </div>
     </div>
   );
+}
+
+/**
+ * @deprecated kept for any straggling callers — use `RuleCheckAuditDetailBody`
+ * with `chrome="drawer"` or navigate to /rule-check/audits/[auditId] directly.
+ */
+export function RuleCheckAuditDetailDrawer(props: { auditId: string; onClose: () => void }) {
+  return <RuleCheckAuditDetailBody {...props} chrome="drawer" />;
 }
 
 function DetailHeader({

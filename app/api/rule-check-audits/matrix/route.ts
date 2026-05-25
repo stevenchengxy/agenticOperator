@@ -27,7 +27,15 @@ export type RuleMatrixResponse = {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const days = Math.max(1, Math.min(90, parseInt(searchParams.get('days') ?? '30', 10) || 30));
+  // Accept either ?days=N or ?window=Nd (the dashboard uses the latter for
+  // consistency with the stats endpoint). Previously only `days` was read
+  // so a "?window=7d" call silently fell through to the 30-day default,
+  // causing the matrix to disagree with the dashboard's KPI window.
+  const windowParam = searchParams.get('window');
+  const daysParam = searchParams.get('days');
+  const fromWindow = windowParam?.match(/^(\d+)d$/)?.[1];
+  const raw = parseInt(daysParam ?? fromWindow ?? '30', 10);
+  const days = Math.max(1, Math.min(90, Number.isFinite(raw) ? raw : 30));
   const cutoff = new Date(Date.now() - days * 86_400_000);
 
   try {

@@ -49,12 +49,18 @@ export async function GET(req: Request) {
     if (client) where.client_name = client;
     if (jrId) where.job_requisition_id = jrId;
 
-    const audits = await prisma.ruleCheckAudit.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: limit,
-      include: { _count: { select: { flags: true } } },
-    });
+    const [audits, totalMatchingFilters] = await Promise.all([
+      prisma.ruleCheckAudit.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: limit,
+        include: { _count: { select: { flags: true } } },
+      }),
+      // Total matching the filter set — drives the dashboard's "loaded X/Y"
+      // line and the 加载更多 button visibility. Was hardcoded to rows.length
+      // before, which made the button never appear.
+      prisma.ruleCheckAudit.count({ where }),
+    ]);
 
     const rows: RuleCheckAuditRow[] = audits.map((a) => ({
       audit_id: a.audit_id,
@@ -80,7 +86,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json<RuleCheckAuditListResponse>({
       rows,
-      total: rows.length,
+      total: totalMatchingFilters,
       meta: { empty: rows.length === 0, generatedAt: new Date().toISOString() },
     });
   } catch (e) {

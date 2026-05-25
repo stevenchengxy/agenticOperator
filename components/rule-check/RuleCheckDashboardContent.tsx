@@ -82,21 +82,30 @@ export function RuleCheckDashboardContent() {
   const [matrix, setMatrix] = React.useState<{ rules: MatrixRule[]; total_audits: number } | null>(null);
   const [ontology, setOntology] = React.useState<OntologyRulesResponse | null>(null);
   const [windowDays, setWindowDays] = React.useState<7 | 30 | 90>(7);
-  const [auditLimit, setAuditLimit] = React.useState(12);
+  // Default 50 (was 12 — too easy to overlook the "加载更多" button, and
+  // gave the false impression that the system only had 12 audits ever).
+  // Page polls below, so this many cells × 27 rules stays performant.
+  const [auditLimit, setAuditLimit] = React.useState(50);
 
-  // Load top-level stats + audit list + per-rule matrix
+  // Load top-level stats + audit list + per-rule matrix with 10s polling
+  // so newly-completed rule-check runs surface on the open page without
+  // requiring a refresh.
   React.useEffect(() => {
     let cancel = false;
-    fetchJson<Stats>(`/api/rule-check-audits/stats?window=${windowDays}d`)
-      .then((s) => { if (!cancel) setStats(s); })
-      .catch(() => { if (!cancel) setStats(null); });
-    fetchJson<{ rules: MatrixRule[]; total_audits: number }>(`/api/rule-check-audits/matrix?window=${windowDays}d`)
-      .then((m) => { if (!cancel) setMatrix(m); })
-      .catch(() => { if (!cancel) setMatrix(null); });
-    fetchJson<{ rows: AuditListRow[]; total: number }>(`/api/rule-check-audits?limit=${auditLimit}`)
-      .then((d) => { if (!cancel) setAudits(d.rows); })
-      .catch(() => { if (!cancel) setAudits(null); });
-    return () => { cancel = true; };
+    const load = () => {
+      fetchJson<Stats>(`/api/rule-check-audits/stats?window=${windowDays}d`)
+        .then((s) => { if (!cancel) setStats(s); })
+        .catch(() => { /* keep prior */ });
+      fetchJson<{ rules: MatrixRule[]; total_audits: number }>(`/api/rule-check-audits/matrix?window=${windowDays}d`)
+        .then((m) => { if (!cancel) setMatrix(m); })
+        .catch(() => { /* keep prior */ });
+      fetchJson<{ rows: AuditListRow[]; total: number }>(`/api/rule-check-audits?limit=${auditLimit}`)
+        .then((d) => { if (!cancel) setAudits(d.rows); })
+        .catch(() => { /* keep prior */ });
+    };
+    load();
+    const id = setInterval(load, 10_000);
+    return () => { cancel = true; clearInterval(id); };
   }, [windowDays, auditLimit]);
 
   // Fetch ontology full rule set with 30s polling

@@ -10,7 +10,8 @@ import type {
   RuleCheckAuditRow,
 } from "@/app/api/rule-check-audits/route";
 import type { RuleCheckStatsResponse } from "@/app/api/rule-check-audits/stats/route";
-import { RuleCheckAuditDetailDrawer } from "./RuleCheckAuditDetailDrawer";
+// Audit detail moved to /rule-check/audits/[auditId] fullscreen route
+// (2026-05-25) — no longer renders here as a drawer.
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
@@ -21,7 +22,6 @@ export function RuleCheckAuditsContent() {
   const decision = searchParams.get("decision") ?? "";
   const client = searchParams.get("client") ?? "";
   const jrId = searchParams.get("jrId") ?? "";
-  const openAuditId = searchParams.get("auditId") ?? "";
 
   const [data, setData] = React.useState<RuleCheckAuditListResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -55,15 +55,12 @@ export function RuleCheckAuditsContent() {
     router.replace(`/rule-check?${sp.toString()}`);
   };
 
+  // Per user request (2026-05-25): open audit detail in a dedicated
+  // fullscreen route rather than a right-side drawer. Gives the detail
+  // view the whole viewport, makes URLs shareable, and lets browser back
+  // work as expected.
   const openDetail = (auditId: string) => {
-    const sp = new URLSearchParams(searchParams.toString());
-    sp.set("auditId", auditId);
-    router.replace(`/rule-check?${sp.toString()}`);
-  };
-  const closeDetail = () => {
-    const sp = new URLSearchParams(searchParams.toString());
-    sp.delete("auditId");
-    router.replace(`/rule-check${sp.toString() ? "?" + sp.toString() : ""}`);
+    router.push(`/rule-check/audits/${encodeURIComponent(auditId)}`);
   };
 
   const hasFilters = !!(decision || client || jrId);
@@ -163,12 +160,6 @@ export function RuleCheckAuditsContent() {
         )}
       </div>
 
-      {openAuditId ? (
-        <RuleCheckAuditDetailDrawer
-          auditId={openAuditId}
-          onClose={closeDetail}
-        />
-      ) : null}
     </div>
   );
 }
