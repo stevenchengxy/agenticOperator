@@ -59,17 +59,23 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
     // We deliberately don't throw — callers want partial data over no UI.
   }
 
-  // Paused agents: AgentConfig.enabled=false → our serve handler drops them
-  // from Inngest registration so they never appear in listFunctions(). Without
-  // this query, the UI would render them as "未上线" with no resume affordance.
-  // We use the slug as key (AgentConfig.id == slug per agent-pause-guard.ts).
+  // Pull the full AgentConfig set so we can answer two questions for each
+  // candidate slug:
+  //   - is this agent paused?           (enabled=false)
+  //   - is this agent recently enabled but Inngest hasn't picked it up yet?
+  //                                      (enabled=true AND not yet in liveFns)
+  //
+  // Without the second case, a just-toggled-online agent would show as
+  // 'unbuilt' for a few seconds while Inngest re-introspects — Fleet's
+  // optimistic-clear effect would then drop the optimistic flip and the
+  // user sees "未上线" until refresh.
   let pausedSlugs = new Set<string>();
+  let enabledSlugs = new Set<string>();
   try {
-    const paused = await prisma.agentConfig.findMany({
-      where: { enabled: false },
-      select: { id: true },
-    });
-    pausedSlugs = new Set(paused.map((p) => p.id));
+    const cfgs = await prisma.agentConfig.findMany({ select: { id: true, enabled: true } });
+    for (const c of cfgs) {
+      (c.enabled ? enabledSlugs : pausedSlugs).add(c.id);
+    }
   } catch {
     // DB unreachable — treat as no pauses (live state is then the truth).
   }
@@ -83,7 +89,26 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
 
   const entries: LiveRegistryEntry[] = AGENT_MAP.map((a) => {
     const candidates = candidateFnIds(a);
+    const candidateSlugs = candidates.map((id) => `${INNGEST_APP_PREFIX}${id}`);
+    // Pause check FIRST — Inngest may take a moment to drop a just-paused fn
+    // from its listFunctions output. If we trusted live presence, the agent
+    // would render as online for a few seconds after the user clicks 下线.
+    // AgentConfig (paused source of truth) is always read fresh, so this is
+    // the authoritative signal.
+    const pausedSlug = candidateSlugs.find((s) => pausedSlugs.has(s));
     const hit = candidates.map((id) => liveByFnId.get(id)).find(Boolean);
+    if (pausedSlug) {
+      const fnId = slugToFnId(pausedSlug);
+      return {
+        short: a.short,
+        fnId,
+        slug: pausedSlug,
+        realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
+        paused: true,
+        triggers: hit?.triggers.map((t) => t.value) ?? a.triggersEvents,
+        inngestName: hit?.name ?? a.inngestName ?? a.short,
+      };
+    }
     if (hit) {
       const fnId = slugToFnId(hit.slug);
       return {
@@ -96,24 +121,23 @@ export async function fetchLiveRegistry(opts?: { force?: boolean }): Promise<Liv
         inngestName: hit.name,
       };
     }
-    // Not live — check whether this agent is paused (registered then disabled).
-    // Slug computation mirrors the stub-factory / explicit inngestId conventions
-    // used by app/api/inngest-admin/functions/route.ts::buildMonitoredFallback.
-    if ((a.triggersEvents ?? []).length > 0) {
-      const candidateSlugs = candidates.map((id) => `${INNGEST_APP_PREFIX}${id}`);
-      const pausedSlug = candidateSlugs.find((s) => pausedSlugs.has(s));
-      if (pausedSlug) {
-        const fnId = slugToFnId(pausedSlug);
-        return {
-          short: a.short,
-          fnId,
-          slug: pausedSlug,
-          realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
-          paused: true,
-          triggers: a.triggersEvents,
-          inngestName: a.inngestName ?? a.short,
-        };
-      }
+    // Not paused, not live yet — could be a freshly-enabled agent still
+    // waiting for Inngest to re-introspect. If AgentConfig says enabled=true
+    // for a candidate slug, infer realness from the slug pattern instead of
+    // marking unbuilt. Without this branch, click 上线 would briefly render
+    // as 未上线 until Inngest catches up.
+    const enabledSlug = candidateSlugs.find((s) => enabledSlugs.has(s));
+    if (enabledSlug && (a.triggersEvents ?? []).length > 0) {
+      const fnId = slugToFnId(enabledSlug);
+      return {
+        short: a.short,
+        fnId,
+        slug: enabledSlug,
+        realness: fnId.startsWith('agent.') ? ('shell' as const) : ('real' as const),
+        paused: false,
+        triggers: a.triggersEvents,
+        inngestName: a.inngestName ?? a.short,
+      };
     }
     return {
       short: a.short,
@@ -202,5 +226,18 @@ export async function countByRealness(): Promise<{
 
 // Test-only — cache reset between vitest runs.
 export function __resetRegistryCacheForTests(): void {
+  cached = null;
+}
+
+/**
+ * Invalidate the 5s cache. Call this from state-mutation endpoints
+ * (toggle pause, sync app) so the next /api/agents fetch sees fresh
+ * data instead of returning a stale snapshot for up to 5 seconds.
+ *
+ * Without this, a paused→online toggle would briefly render the agent
+ * as 'unbuilt' (live fns cached as before-toggle, AgentConfig already
+ * shows it's not paused → matcher misses both branches).
+ */
+export function invalidateRegistryCache(): void {
   cached = null;
 }

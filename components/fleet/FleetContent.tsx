@@ -201,10 +201,14 @@ export function FleetContent() {
   const rows: FleetRow[] | null = agentsRes ? buildRows(agentsRes, liveByWsId) : null;
   const safeRows = rows ?? [];
 
-  // Local optimistic toggle — reflect new state immediately, then trigger an
-  // /api/agents refetch so the SummaryChip "实装" count moves within 200ms.
-  // (Without the explicit refetch, the count would only update on the next
-  // 5s poll tick.)
+  // Local optimistic toggle — reflect new state immediately, then await
+  // server confirmation before clearing the override. Bug history:
+  //   - v1: cleared optimistic state on a blind 1.5s timer. Could expose a
+  //     stale /api/agents snapshot (registry cache served pre-toggle data,
+  //     making the agent render as 'unbuilt' for a few seconds).
+  //   - v2 (now): clear optimistic only when the refetched row reflects the
+  //     new paused state. Toggle endpoint also invalidates registry cache,
+  //     so first refetch normally already shows the new state.
   const [optimisticPause, setOptimisticPause] = React.useState<Record<string, boolean>>({});
   const togglePause = React.useCallback(async (slug: string, next: boolean) => {
     setOptimisticPause((m) => ({ ...m, [slug]: next }));
@@ -215,14 +219,35 @@ export function FleetContent() {
         body: JSON.stringify({ paused: next }),
       });
       refetchAgents();
-      // Clear optimistic override now that the server response will be authoritative.
-      setTimeout(() => {
-        setOptimisticPause((m) => { const c = { ...m }; delete c[slug]; return c; });
-      }, 1_500);
     } catch {
+      // Toggle failed server-side — drop the optimistic flip so the UI
+      // returns to the actual current state.
       setOptimisticPause((m) => { const c = { ...m }; delete c[slug]; return c; });
     }
   }, [refetchAgents]);
+
+  // Clear optimistic overrides once the freshly-fetched row matches them.
+  // Decoupling from a timer means we never expose a stale snapshot during
+  // the refetch window, regardless of network latency or cache TTLs.
+  React.useEffect(() => {
+    if (!agentsRes) return;
+    setOptimisticPause((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const k of keys) {
+        const row = agentsRes.agents.find((a) => a.slug === k);
+        if (row && row.paused === prev[k]) {
+          // server matches optimistic; drop the override
+          changed = true;
+          continue;
+        }
+        next[k] = prev[k];
+      }
+      return changed ? next : prev;
+    });
+  }, [agentsRes]);
   // Apply optimistic overrides
   const effectiveRows = safeRows.map((r) => {
     if (!r.slug || !(r.slug in optimisticPause)) return r;
