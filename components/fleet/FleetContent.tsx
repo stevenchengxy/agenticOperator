@@ -616,7 +616,9 @@ function FilterMenu({ value, onChange, t }: { value: FilterId; onChange: (v: Fil
 
 // ── list ──────────────────────────────────────────────────────────
 
-const GRID = "minmax(280px, 1fr) 120px 140px 100px 70px";
+// Last column (button + version) widened from 70px → 150px to fit the
+// always-visible "上线"/"下线" button (was icon-only on hover before).
+const GRID = "minmax(280px, 1fr) 120px 140px 100px 150px";
 
 function GroupHeader({ title, rows }: { title: string; rows: FleetRow[] }) {
   const deployed = rows.filter((r) => r.status === "deployed").length;
@@ -698,8 +700,10 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
         {stub ? "" : relTime(row.lastActiveAt)}
       </div>
 
-      {/* version + hover action */}
-      <div className="relative text-ink-3 tabular-nums flex items-center justify-end gap-2" style={{ fontSize: 12 }}>
+      {/* version + hover action — fixed column width (see GRID const).
+          flex-nowrap + min-w-0 + whitespace-nowrap on button keeps the
+          "上线"/"下线" pill from overflowing into the 最近活动 column. */}
+      <div className="relative text-ink-3 tabular-nums flex items-center justify-end gap-2 min-w-0 flex-nowrap overflow-hidden" style={{ fontSize: 12 }}>
         {!stub && row.slug && (
           <PauseToggleButton
             paused={row.paused}
@@ -724,12 +728,13 @@ function PauseToggleButton({ paused, onClick }: { paused: boolean; onClick: (e: 
     <button
       onClick={onClick}
       title={paused ? "上线 (恢复运行)" : "下线 (暂停)"}
-      className={`${visibility} rounded transition-all hover:bg-surface inline-flex items-center gap-1`}
+      className={`${visibility} rounded transition-all hover:bg-surface inline-flex items-center gap-1 leading-none whitespace-nowrap shrink-0`}
       style={{
-        padding: "3px 7px",
+        padding: "2px 6px",
         border: `1px solid ${paused ? "var(--c-ok)" : "var(--c-line)"}`,
         color: paused ? "var(--c-ok)" : "var(--c-ink-2)",
         fontSize: 11,
+        lineHeight: 1.2,
       }}
     >
       {paused ? <Ic.play /> : <Ic.pause />}
