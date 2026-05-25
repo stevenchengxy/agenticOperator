@@ -56,6 +56,39 @@ export const AgentSpecSchema = z.object({
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;
 export type AgentSpecStep = z.infer<typeof AgentSpecStepSchema>;
 
+// Form-first split (Codegen v2): the operator-entered fields are everything
+// EXCEPT the steps[] array. The LLM only fills `steps`; identity/wire-up/
+// behavior decisions stay human. This keeps LLM blast radius small and
+// makes "regenerate existing agent" round-trip safely against AGENT_MAP.
+export const AgentFormFieldsSchema = AgentSpecSchema.omit({ steps: true });
+export type AgentFormFields = z.infer<typeof AgentFormFieldsSchema>;
+
+// LLM Call A output schema in v2 — just the steps array. Constrains the
+// model to its single job and shaves ~70% off the structured-output
+// schema vs. the v1 full-AgentSpec call.
+export const STEPS_ONLY_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['steps'],
+  properties: {
+    steps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'description'],
+        properties: {
+          id: { type: 'string' },
+          description: { type: 'string' },
+          callsLib: { type: ['string', 'null'] },
+          inputs: { type: 'array', items: { type: 'string' } },
+          outputs: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+  },
+} as const;
+
 /**
  * JSON Schema form of AgentSpecSchema — used as the OpenAI function-call
  * parameter schema (structured output). Kept hand-written rather than via

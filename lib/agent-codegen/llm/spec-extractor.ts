@@ -1,57 +1,66 @@
-// LLM Call A — natural-language prompt → AgentSpec JSON.
+// LLM Call A (Codegen v2) — given a human-completed AgentFormFields
+// (identity / wire-up / behavior) plus a natural-language business
+// description, ask the LLM to fill ONLY the steps[] array.
 //
-// Uses OpenAI-compatible function calling for structured output. The function
-// schema doubles as a hard constraint (model can't return free-form text)
-// and as the runtime contract — output is re-validated through Zod after
-// parsing in case the model violates the schema anyway.
+// The model never picks slug / displayName / stage / ownerTeam /
+// triggerEvent / emitEvents / retries / errorHandling. Those decisions
+// stay with the operator (the AgentConfigForm UI). This is the v2
+// reframe — see docs/2026-05-25-codegen-use-cases.md.
 
-import { AGENT_SPEC_JSON_SCHEMA, AgentSpecSchema, type AgentSpec } from '../spec-types';
+import { z } from 'zod';
 import {
-  getToolRegistry,
-  getEventRegistry,
-  type ToolRegistryEntry,
-  type EventRegistryEntry,
-} from '../registries';
-import type { DomainId } from '@/lib/domains';
+  AgentSpecStepSchema,
+  STEPS_ONLY_JSON_SCHEMA,
+  type AgentFormFields,
+  type AgentSpec,
+  type AgentSpecStep,
+} from '../spec-types';
+import { getToolRegistry, type ToolRegistryEntry } from '../registries';
 import { pickCodegenGateway, makeClient } from './gateway';
 
-export type ExtractSpecInput = {
-  prompt: string;
-  domain: DomainId;
+export type GenerateStepsInput = {
+  form: AgentFormFields;
+  businessLogic: string;
+  domain: 'raas' | 'r7';
 };
 
-export type ExtractSpecResult = {
+export type GenerateStepsResult = {
+  /** The full AgentSpec, assembled from form + LLM-emitted steps. */
   spec: AgentSpec;
   modelUsed: string;
   durationMs: number;
 };
 
-export async function extractSpec(input: ExtractSpecInput): Promise<ExtractSpecResult> {
+const StepsOnlySchema = z.object({
+  steps: z.array(AgentSpecStepSchema).min(1).max(12),
+});
+
+export async function generateSteps(input: GenerateStepsInput): Promise<GenerateStepsResult> {
   const t0 = Date.now();
   const gateway = pickCodegenGateway();
   const client = makeClient(gateway);
 
   const tools = getToolRegistry(input.domain);
-  const events = getEventRegistry(input.domain);
-  const systemPrompt = buildSystemPrompt(tools, events);
+  const systemPrompt = buildSystemPrompt(input.form, tools);
 
   const completion = await client.chat.completions.create({
     model: gateway.model,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: input.prompt },
+      { role: 'user', content: input.businessLogic },
     ],
     tools: [
       {
         type: 'function',
         function: {
-          name: 'submit_agent_spec',
-          description: 'Submit the final AgentSpec for the agent to be generated.',
-          parameters: AGENT_SPEC_JSON_SCHEMA,
+          name: 'submit_steps',
+          description:
+            'Submit the steps[] array for the agent under construction. Identity/wire-up come from the form, not from you.',
+          parameters: STEPS_ONLY_JSON_SCHEMA,
         },
       },
     ],
-    tool_choice: { type: 'function', function: { name: 'submit_agent_spec' } },
+    tool_choice: { type: 'function', function: { name: 'submit_steps' } },
   });
 
   const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
@@ -66,23 +75,29 @@ export async function extractSpec(input: ExtractSpecInput): Promise<ExtractSpecR
     throw new Error('LLM tool call arguments were not valid JSON');
   }
 
-  const parsed = AgentSpecSchema.safeParse(raw);
+  const parsed = StepsOnlySchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error(
-      'LLM-emitted spec failed schema validation: ' + JSON.stringify(parsed.error.issues),
+      'LLM-emitted steps failed schema validation: ' + JSON.stringify(parsed.error.issues),
     );
   }
 
+  // Assemble the final AgentSpec from form fields + LLM-emitted steps.
+  const spec: AgentSpec = {
+    ...input.form,
+    steps: parsed.data.steps as AgentSpecStep[],
+  };
+
   return {
-    spec: parsed.data,
+    spec,
     modelUsed: gateway.model,
     durationMs: Date.now() - t0,
   };
 }
 
 function buildSystemPrompt(
+  form: AgentFormFields,
   tools: ReadonlyArray<ToolRegistryEntry>,
-  events: ReadonlyArray<EventRegistryEntry>,
 ): string {
   const toolsBlock = tools.length
     ? tools
@@ -93,34 +108,35 @@ function buildSystemPrompt(
         .join('\n')
     : '  (no tools registered for this domain — leave callsLib empty in each step)';
 
-  const eventsBlock = events.length
-    ? events
-        .map((e) => `  - ${e.name} (${e.stage}, ${e.direction})  — ${e.summary}`)
-        .join('\n')
-    : '  (no event registry — pick reasonable past-tense names, e.g. RESUME_PROCESSED)';
-
   return [
-    'You are an Agentic Operator agent designer for the RAAS recruitment',
-    'workflow. Given a natural-language business description, emit a single',
-    'AgentSpec by calling submit_agent_spec. Never reply in prose; always',
-    'use the tool.',
+    'You are filling the steps[] array of an Inngest agent for the RAAS',
+    'recruitment workflow. Identity, wire-up, and behavior settings are',
+    'already decided by the operator (shown below) — do NOT change them,',
+    'do NOT emit a different slug / stage / event / etc.',
+    '',
+    'Operator-fixed configuration:',
+    `  slug:          ${form.slug}`,
+    `  displayName:   ${form.displayName}`,
+    `  stage:         ${form.stage}`,
+    `  ownerTeam:     ${form.ownerTeam}`,
+    `  triggerEvent:  ${form.triggerEvent}`,
+    `  emitEvents:    [${form.emitEvents.join(', ')}]`,
+    `  retries:       ${form.retries}`,
+    `  errorHandling: ${form.errorHandling}`,
     '',
     'Tool registry — only these may appear in step.callsLib:',
     toolsBlock,
     '',
-    'Event registry — triggerEvent MUST be one of these names, and every',
-    'emitEvents entry MUST also be from this list:',
-    eventsBlock,
-    '',
     'Hard rules:',
-    '  1. slug: kebab-case ending in "-agent" (e.g. "salary-checker-agent").',
-    '  2. stage: one of system, requirement, jd, resume, match, interview, eval, package, submit.',
-    '  3. Each step.id: kebab-case, unique within spec.',
-    '  4. 3-6 steps preferred, max 12.',
-    '  5. callsLib: pick a registry id when the step calls one — otherwise omit.',
-    '  6. triggerEvent + emitEvents: NEVER invent names; pick from the event registry.',
-    '  7. Pattern hint: production agents typically (a) fetch state from partner-pg,',
-    '     (b) mirror to Allmeta Neo4j, (c) call RoboHire, (d) persist back to partner-pg,',
-    '     (e) emit the downstream event. Follow this shape unless the prompt says otherwise.',
+    '  1. Output ONLY a steps[] array via submit_steps. Never reply in prose.',
+    '  2. Each step.id: kebab-case, unique within the spec.',
+    '  3. 3-6 steps preferred, max 12.',
+    '  4. callsLib: pick a registry id when a step calls one — otherwise omit.',
+    '  5. Sequence steps so the last step emits the configured downstream event(s)',
+    '     via the inngest.send tool (callsLib="inngest.send"), once per emitEvents entry.',
+    '  6. Production agent shape: (a) fetch state from partner-pg, (b) mirror to',
+    '     Allmeta Neo4j, (c) call RoboHire, (d) persist back to partner-pg,',
+    '     (e) emit the configured downstream event. Follow this unless the',
+    '     business description says otherwise.',
   ].join('\n');
 }

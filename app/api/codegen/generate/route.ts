@@ -1,31 +1,36 @@
-// POST /api/codegen/generate
+// POST /api/codegen/generate  (Codegen v2 — form-first)
 //
-// Runs the full Phase 1b codegen pipeline:
-//   prompt + domain → AgentSpec → step bodies → rendered TS → compile.
+// Runs the full v2 pipeline: form + businessLogic → steps[] (LLM A) →
+// step bodies (LLM B) → render → compile.
 //
 // Body:
-//   { prompt: string, domain: 'raas' | 'r7', skipStepBodies?: boolean }
+//   {
+//     form: AgentFormFields {
+//       slug, displayName, stage, ownerTeam,
+//       triggerEvent, emitEvents[], retries, errorHandling
+//     },
+//     businessLogic: string,
+//     domain: 'raas' | 'r7',
+//     skipStepBodies?: boolean
+//   }
 //
 // Reply (200):
 //   {
-//     spec: AgentSpec,
-//     code: { path, content },
-//     compile: CompileResult,
-//     timings: { specMs, bodiesMs, renderMs, compileMs, totalMs },
-//     modelUsed: string,
+//     spec, code: { path, content }, compile, timings, modelUsed
 //   }
 //
-// Error responses:
+// Errors:
 //   400 invalid_body — Zod validation failed
-//   500 pipeline_failure — anything thrown inside the pipeline (LLM down,
-//       env var missing, schema violation, etc.) — message string included
+//   500 pipeline_failure — anything thrown inside the pipeline
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { runPipeline } from '@/lib/agent-codegen/pipeline';
+import { AgentFormFieldsSchema } from '@/lib/agent-codegen/spec-types';
 
 const BodySchema = z.object({
-  prompt: z.string().min(8).max(8_000),
+  form: AgentFormFieldsSchema,
+  businessLogic: z.string().min(8).max(8_000),
   domain: z.enum(['raas', 'r7']),
   skipStepBodies: z.boolean().optional(),
 });
@@ -61,5 +66,4 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 // Codegen can take 30-90s end-to-end (two LLM calls + project compile).
-// Bump the platform timeout so the request doesn't get killed mid-pipeline.
 export const maxDuration = 120;

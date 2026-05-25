@@ -1,6 +1,6 @@
 "use client";
 
-// Codegen page — Phase 1c polish pass.
+// Codegen page — v2 (form-first).
 //
 // Layout:
 //   ┌──────────────────────────────────────────────────────────────────────┐
@@ -8,19 +8,16 @@
 //   │ Horizontal pipeline stepper                                          │
 //   ├─────────────┬───────────────────────────────────────┬───────────────┤
 //   │ Left rail   │ Middle (Monaco tabs)                  │ Right rail    │
-//   │ Prompt      │ Prompt / Spec / Code / Diff           │ Compiler +    │
-//   │ + meta      │                                       │ Save button   │
+//   │ AgentConfig │ Spec / Code / Diff                    │ Compiler +    │
+//   │ Form        │                                       │ Save button   │
 //   └─────────────┴───────────────────────────────────────┴───────────────┘
 //
-// What the operator gets end-to-end:
-//   1. write a business prompt → click "Generate agent"
-//   2. pipeline runs: LLM Call A (spec) → LLM Call B (step bodies) →
-//      template render → in-process tsc compile
-//   3. Spec / Code / Diff tabs populate; right rail shows diagnostics
-//   4. when compile.ok and slug matches AGENT_MAP, "Save as version" persists
-//      to AgentVersion (capturedFrom='codegen')
-//
-// Side flow: Code tab + Compile button still works standalone for hand-edits.
+// v2 reframe:
+//   - Operator fills slug / displayName / stage / owner / trigger / emits /
+//     retries / errorHandling in the FORM (left rail) — not free-form prompt.
+//   - LLM only writes the steps[] array and per-step bodies.
+//   - "Regenerate existing" mode lets the operator pick from AGENT_MAP and
+//     prefills the form, so save-as-version reliably round-trips.
 
 import React from "react";
 import { useApp } from "@/lib/i18n";
@@ -28,42 +25,42 @@ import { useDomain, getDomain } from "@/lib/domains";
 import { byInngestSlug } from "@/lib/agent-mapping";
 import { CodeEditor } from "./CodeEditor";
 import { CompilerPanel } from "./CompilerPanel";
-import { PromptPanel } from "./PromptPanel";
-import { PipelineTimeline, type PipelineStage, type StageState } from "./PipelineTimeline";
+import {
+  AgentConfigForm,
+  emptyFormState,
+  toApiPayload,
+  type AgentConfigFormState,
+} from "./AgentConfigForm";
+import {
+  PipelineTimeline,
+  type PipelineStage,
+  type StageState,
+} from "./PipelineTimeline";
 import { DiffViewer } from "./DiffViewer";
 import { SaveAsVersionButton } from "./SaveAsVersionButton";
 import type { CompileResult } from "@/lib/agent-codegen/compiler/types";
 import type { AgentSpec } from "@/lib/agent-codegen/spec-types";
 import type { VersionsListResponse } from "@/lib/agent-versions/types";
 
-type Tab = "prompt" | "spec" | "code" | "diff";
+type Tab = "spec" | "code" | "diff";
 
-const STARTER_CODE = `// Edit and click Compile, or use the prompt on the left to generate one.
+const STARTER_BUSINESS_LOGIC = `每一步该做的事(自然语言,LLM 看这部分):
+
+1. 收到事件后,从 partner Postgres 拉相关上下文
+2. 把上下文镜像写到 Allmeta Neo4j
+3. 调 RoboHire 完成主业务动作 (4xx 失败走 NonRetriableError)
+4. 把结果落回 partner Postgres
+5. emit 下游事件
+`;
+
+const STARTER_CODE = `// 用左侧 Form 填好 → 点 "生成 Agent →"
+//   或者 直接在这里粘代码 → 点 右侧 Compile
 //
-// The compiler typechecks this AS IF the file lives at the path shown below,
-// resolving @/ aliases against the real AO project.
+// 编译器会把这段视作真实文件,@/ 别名按真实项目解析。
 
 import { AGENT_MAP } from '@/lib/agent-mapping';
 
 export const _placeholder = AGENT_MAP.length;
-`;
-
-const STARTER_PROMPT = `Describe the agent you want to build. Example:
-
-"When a candidate's match score is high enough to need an interview, call
-RoboHire to send an AI video interview invitation to their email, then
-mirror the communication into the Allmeta Neo4j ontology and emit
-INTERVIEW_INVITATION_SENT."
-`;
-
-const STARTER_SPEC = `{
-  "slug": "",
-  "displayName": "",
-  "stage": "system",
-  "triggerEvent": "",
-  "emitEvents": [],
-  "steps": []
-}
 `;
 
 const DIFF_EMPTY_LEFT = `// No saved version yet for this agent.
@@ -78,8 +75,9 @@ export function CodegenContent() {
 
   // State -------------------------------------------------------------------
   const [tab, setTab] = React.useState<Tab>("code");
-  const [prompt, setPrompt] = React.useState(STARTER_PROMPT);
-  const [spec, setSpec] = React.useState(STARTER_SPEC);
+  const [form, setForm] = React.useState<AgentConfigFormState>(() => emptyFormState());
+  const [businessLogic, setBusinessLogic] = React.useState(STARTER_BUSINESS_LOGIC);
+  const [spec, setSpec] = React.useState<AgentSpec | null>(null);
   const [code, setCode] = React.useState(STARTER_CODE);
   const [virtualPath, setVirtualPath] = React.useState(
     "server/inngest/agents/__scratch.ts",
@@ -92,24 +90,12 @@ export function CodegenContent() {
   const [pipelineTimings, setPipelineTimings] = React.useState<
     { totalMs: number; modelUsed: string } | null
   >(null);
-  const [parsedSpec, setParsedSpec] = React.useState<AgentSpec | null>(null);
   const [savedActiveCode, setSavedActiveCode] = React.useState<string | null>(null);
 
-  // Try to keep parsedSpec in sync with the Spec tab text, so the save flow
-  // can read spec.slug without round-tripping through the pipeline.
+  // When the form points at a registered agent, pre-fetch its saved
+  // codegen versions so the Diff tab has a real left side.
   React.useEffect(() => {
-    try {
-      const j = JSON.parse(spec);
-      setParsedSpec(j);
-    } catch {
-      setParsedSpec(null);
-    }
-  }, [spec]);
-
-  // When the parsed spec points at a known agent, pre-fetch its saved
-  // versions so the Diff tab has a real left side.
-  React.useEffect(() => {
-    const slug = parsedSpec?.slug;
+    const slug = form.slug;
     if (!slug) return setSavedActiveCode(null);
     const meta = byInngestSlug(slug);
     if (!meta) return setSavedActiveCode(null);
@@ -118,35 +104,38 @@ export function CodegenContent() {
       .then((r) => r.json())
       .then((j: VersionsListResponse) => {
         if (cancelled) return;
-        // Prefer the active version; fall back to the newest codegen version.
         const latest =
-          j.versions.find((v) => v.id === j.activeVersionId) ??
-          j.versions[0];
-        // Existing version rows only have configJson today; codegen-saved
-        // ones have codeBlob via the extended POST. Read it off the raw
-        // row — types might lag.
-        const code = (latest as unknown as { codeBlob?: string })?.codeBlob;
-        setSavedActiveCode(typeof code === "string" ? code : null);
+          j.versions.find((v) => v.id === j.activeVersionId) ?? j.versions[0];
+        const codeBlob = (latest as unknown as { codeBlob?: string })?.codeBlob;
+        setSavedActiveCode(typeof codeBlob === "string" ? codeBlob : null);
       })
       .catch(() => setSavedActiveCode(null));
     return () => {
       cancelled = true;
     };
-  }, [parsedSpec?.slug, pipelineTimings]);
+  }, [form.slug, pipelineTimings]);
 
   // Pipeline state derivation ----------------------------------------------
-  const pipelineStates: Partial<Record<PipelineStage, StageState>> = React.useMemo(() => {
-    const s: Partial<Record<PipelineStage, StageState>> = {};
-    if (prompt.trim() && prompt.trim() !== STARTER_PROMPT.trim()) s.prompt = "ok";
-    if (parsedSpec && parsedSpec.slug) s.spec = "ok";
-    if (parsedSpec) s.render = "ok";
-    if (parsedSpec && parsedSpec.steps?.length > 0) s.body = "ok";
-    if (compiling) s.compile = "active";
-    else if (compileResult) s.compile = compileResult.ok ? "ok" : "err";
-    if (compileResult?.ok && parsedSpec) s.review = "ok";
-    if (pipelineStage) s[pipelineStage] = "active";
-    return s;
-  }, [prompt, parsedSpec, pipelineStage, compiling, compileResult]);
+  const pipelineStates: Partial<Record<PipelineStage, StageState>> =
+    React.useMemo(() => {
+      const s: Partial<Record<PipelineStage, StageState>> = {};
+      // Stage 1 — form filled (slug + trigger required as proxy for "configured")
+      if (form.slug && form.triggerEvent) s.prompt = "ok";
+      // Stage 2-4 — generated artifacts present
+      if (spec) {
+        s.spec = "ok";
+        s.render = "ok";
+        if (spec.steps.length > 0) s.body = "ok";
+      }
+      // Stage 5 — compile
+      if (compiling) s.compile = "active";
+      else if (compileResult) s.compile = compileResult.ok ? "ok" : "err";
+      // Stage 6 — ready to save
+      if (compileResult?.ok && spec) s.review = "ok";
+      // Active LLM round-trip overrides
+      if (pipelineStage) s[pipelineStage] = "active";
+      return s;
+    }, [form.slug, form.triggerEvent, spec, pipelineStage, compiling, compileResult]);
 
   // Actions -----------------------------------------------------------------
   const runPipeline = React.useCallback(async () => {
@@ -159,25 +148,35 @@ export function CodegenContent() {
       const r = await fetch("/api/codegen/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, domain }),
+        body: JSON.stringify({
+          form: toApiPayload(form),
+          businessLogic,
+          domain,
+        }),
       });
       if (!r.ok) {
-        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        const j = (await r.json().catch(() => ({}))) as {
+          message?: string;
+          error?: string;
+        };
         throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
       }
       const result = await r.json();
-      setSpec(JSON.stringify(result.spec, null, 2));
+      setSpec(result.spec as AgentSpec);
       setCode(result.code.content);
       setVirtualPath(result.code.path);
       setCompileResult(result.compile);
-      setPipelineTimings({ totalMs: result.timings.totalMs, modelUsed: result.modelUsed });
+      setPipelineTimings({
+        totalMs: result.timings.totalMs,
+        modelUsed: result.modelUsed,
+      });
       setTab("code");
     } catch (e) {
       setPipelineError(e instanceof Error ? e.message : String(e));
     } finally {
       setPipelineStage(null);
     }
-  }, [prompt, domain]);
+  }, [form, businessLogic, domain]);
 
   const runCompile = React.useCallback(async () => {
     setCompiling(true);
@@ -192,7 +191,10 @@ export function CodegenContent() {
         }),
       });
       if (!r.ok) {
-        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        const j = (await r.json().catch(() => ({}))) as {
+          message?: string;
+          error?: string;
+        };
         throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
       }
       setCompileResult((await r.json()) as CompileResult);
@@ -203,6 +205,11 @@ export function CodegenContent() {
       setCompiling(false);
     }
   }, [code, virtualPath, domain]);
+
+  const specJsonText = React.useMemo(
+    () => (spec ? JSON.stringify(spec, null, 2) : "{}"),
+    [spec],
+  );
 
   // Render ------------------------------------------------------------------
   return (
@@ -228,7 +235,7 @@ export function CodegenContent() {
               {t("codegen_title")}
             </h1>
             <p className="text-[12.5px] text-ink-3 m-0 mt-2 leading-relaxed max-w-[640px]">
-              {t("codegen_hero_blurb")}
+              {t("codegen_hero_blurb_v2")}
             </p>
           </div>
           <DomainBadge color={domainMeta.color} label={domainMeta.label[lang]} />
@@ -239,32 +246,22 @@ export function CodegenContent() {
 
       {/* Three-column body */}
       <div className="flex-1 min-h-0 flex">
-        {/* Left rail */}
+        {/* Left rail — the form (scrollable) */}
         <aside
           className="border-r border-line bg-surface p-4 flex flex-col gap-4 overflow-auto"
-          style={{ width: 280, minWidth: 280 }}
+          style={{ width: 320, minWidth: 320 }}
         >
-          <PromptPanel
-            value={prompt}
-            onChange={setPrompt}
-            onGenerateSpec={runPipeline}
-            disabled={pipelineStage !== null}
+          <AgentConfigForm
+            state={form}
+            setState={setForm}
+            businessLogic={businessLogic}
+            setBusinessLogic={setBusinessLogic}
+            onGenerate={runPipeline}
+            busy={pipelineStage !== null}
           />
 
           {pipelineError && (
-            <div
-              className="px-3 py-2.5 text-[11.5px] rounded-md border"
-              style={{
-                background: "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 6%, var(--c-panel))",
-                borderColor: "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, var(--c-line))",
-                color: "var(--c-err, oklch(0.5 0.2 25))",
-              }}
-            >
-              <div className="font-medium text-[10px] uppercase tracking-[0.06em] mb-1">
-                {t("codegen_pipeline_error")}
-              </div>
-              <div className="leading-snug">{pipelineError}</div>
-            </div>
+            <ErrorCard label={t("codegen_pipeline_error")} message={pipelineError} />
           )}
 
           {pipelineTimings && !pipelineError && (
@@ -273,27 +270,13 @@ export function CodegenContent() {
                 {t("codegen_pipeline_last_run")}
               </div>
               <div className="flex items-center gap-2 text-[11.5px]">
-                <span className="text-ink-1 font-medium mono">{pipelineTimings.totalMs} ms</span>
+                <span className="text-ink-1 font-medium mono">
+                  {pipelineTimings.totalMs} ms
+                </span>
                 <span className="text-ink-4">·</span>
-                <span className="text-ink-3 mono text-[10.5px]">{pipelineTimings.modelUsed}</span>
-              </div>
-            </div>
-          )}
-
-          {parsedSpec && (
-            <div className="px-3 py-2.5 rounded-md border border-line bg-panel flex flex-col gap-1.5">
-              <div className="text-[10px] uppercase tracking-[0.06em] text-ink-4">
-                {t("codegen_current_spec")}
-              </div>
-              <div className="text-[12px] font-medium text-ink-1 truncate" title={parsedSpec.displayName}>
-                {parsedSpec.displayName || "—"}
-              </div>
-              <div className="text-[10.5px] text-ink-4 mono truncate" title={parsedSpec.slug}>
-                {parsedSpec.slug || "—"}
-              </div>
-              <div className="text-[10.5px] text-ink-3 mt-1">
-                <span className="mono">{parsedSpec.steps?.length ?? 0}</span> steps ·{" "}
-                <span className="mono">{parsedSpec.emitEvents?.length ?? 0}</span> emits
+                <span className="text-ink-3 mono text-[10.5px]">
+                  {pipelineTimings.modelUsed}
+                </span>
               </div>
             </div>
           )}
@@ -305,7 +288,6 @@ export function CodegenContent() {
             className="flex items-center border-b border-line bg-surface px-3 gap-1"
             style={{ height: 36 }}
           >
-            <TabBtn id="prompt" current={tab} setTab={setTab} label={t("codegen_tab_prompt")} />
             <TabBtn id="spec" current={tab} setTab={setTab} label={t("codegen_tab_spec")} />
             <TabBtn id="code" current={tab} setTab={setTab} label={t("codegen_tab_code")} />
             <TabBtn id="diff" current={tab} setTab={setTab} label={t("codegen_tab_diff")} />
@@ -322,22 +304,13 @@ export function CodegenContent() {
           </div>
 
           <div className="flex-1 min-h-0">
-            {tab === "prompt" && (
-              <CodeEditor
-                value={prompt}
-                onChange={setPrompt}
-                language="markdown"
-                path="prompt.md"
-                height="100%"
-              />
-            )}
             {tab === "spec" && (
               <CodeEditor
-                value={spec}
-                onChange={setSpec}
+                value={specJsonText}
                 language="json"
                 path="spec.json"
                 height="100%"
+                readOnly
               />
             )}
             {tab === "code" && (
@@ -368,12 +341,12 @@ export function CodegenContent() {
           onCompile={runCompile}
           saveButton={
             <SaveAsVersionButton
-              slug={parsedSpec?.slug ?? null}
-              prompt={prompt}
-              spec={spec}
+              slug={spec?.slug ?? form.slug ?? null}
+              prompt={businessLogic}
+              spec={specJsonText}
               code={code}
               modelUsed={pipelineTimings?.modelUsed ?? null}
-              canSave={!!compileResult?.ok}
+              canSave={!!compileResult?.ok && !!spec}
             />
           }
         />
@@ -381,6 +354,8 @@ export function CodegenContent() {
     </div>
   );
 }
+
+// ────────────────────────────────────────────────────────────────────────
 
 function DomainBadge({ color, label }: { color: string; label: string }) {
   const { t } = useApp();
@@ -432,5 +407,25 @@ function TabBtn({
     >
       {label}
     </button>
+  );
+}
+
+function ErrorCard({ label, message }: { label: string; message: string }) {
+  return (
+    <div
+      className="px-3 py-2.5 text-[11.5px] rounded-md border"
+      style={{
+        background:
+          "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 6%, var(--c-panel))",
+        borderColor:
+          "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, var(--c-line))",
+        color: "var(--c-err, oklch(0.5 0.2 25))",
+      }}
+    >
+      <div className="font-medium text-[10px] uppercase tracking-[0.06em] mb-1">
+        {label}
+      </div>
+      <div className="leading-snug">{message}</div>
+    </div>
   );
 }
