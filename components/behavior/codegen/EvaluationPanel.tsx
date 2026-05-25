@@ -28,6 +28,8 @@ export function EvaluationPanel({
   onRun,
   canRun,
   generatedCode,
+  onAutoIterate,
+  autoIterateBusy,
 }: {
   report: EvaluationReport | null;
   running: boolean;
@@ -36,6 +38,9 @@ export function EvaluationPanel({
   canRun: boolean;
   /** Required for dynamic test case execution. When absent, Execute is disabled. */
   generatedCode?: string;
+  /** Bundle M — when provided AND verdict isn't FULL, shows "🤖 Auto-iterate". */
+  onAutoIterate?: () => void;
+  autoIterateBusy?: boolean;
 }) {
   const { t } = useApp();
 
@@ -92,7 +97,11 @@ export function EvaluationPanel({
 
   return (
     <div className="overflow-auto p-6 max-w-[920px] mx-auto flex flex-col gap-6">
-      <VerdictHeader report={report} />
+      <VerdictHeader
+        report={report}
+        onAutoIterate={onAutoIterate}
+        autoIterateBusy={autoIterateBusy}
+      />
       <StructuralSection report={report} />
       <ReviewSection issues={report.review.issues} />
       {report.behavioral ? (
@@ -112,9 +121,18 @@ export function EvaluationPanel({
 // Sections
 // ────────────────────────────────────────────────────────────────────────
 
-function VerdictHeader({ report }: { report: EvaluationReport }) {
+function VerdictHeader({
+  report,
+  onAutoIterate,
+  autoIterateBusy,
+}: {
+  report: EvaluationReport;
+  onAutoIterate?: () => void;
+  autoIterateBusy?: boolean;
+}) {
   const { t } = useApp();
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+  const showAutoIter = onAutoIterate && report.finalVerdict !== "FULL";
   return (
     <div
       className="flex items-stretch gap-4 p-5 rounded-xl border border-line"
@@ -129,6 +147,21 @@ function VerdictHeader({ report }: { report: EvaluationReport }) {
           <span className="text-[10.5px] uppercase tracking-[0.08em] text-ink-4">
             {t("eval_aggregate")}
           </span>
+          {showAutoIter && (
+            <button
+              onClick={onAutoIterate}
+              disabled={autoIterateBusy}
+              className="ml-auto h-7 px-3 rounded-md text-[11.5px] font-medium border cursor-pointer inline-flex items-center gap-1.5"
+              style={{
+                background: autoIterateBusy ? "var(--c-panel)" : "transparent",
+                color: autoIterateBusy ? "var(--c-ink-4)" : "var(--c-accent)",
+                borderColor: "color-mix(in oklab, var(--c-accent) 35%, var(--c-line))",
+              }}
+              title={t("autoiter_button_tooltip")}
+            >
+              🤖 {autoIterateBusy ? t("autoiter_running") : t("autoiter_button")}
+            </button>
+          )}
         </div>
         <div className="flex gap-4 text-[11px] text-ink-3">
           <MiniStat label={t("eval_structural")} value={pct(report.structural.composite)} />
@@ -347,7 +380,14 @@ function TestCasesSection({
     <Section
       title={t("eval_section_test_cases")}
       number={4}
-      subtitle={t("eval_test_cases_blurb")}
+      subtitle={
+        report.realEventFixture
+          ? t("eval_test_cases_blurb_real").replace(
+              "{id}",
+              report.realEventFixture.eventInstanceId.slice(0, 12),
+            )
+          : t("eval_test_cases_blurb")
+      }
       action={
         <ExecuteTestsButton
           onClick={execute}

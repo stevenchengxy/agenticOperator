@@ -44,11 +44,18 @@ export type TestCase = {
 export function generateTestCases(
   spec: AgentSpec,
   toolRegistry: ReadonlyArray<ToolRegistryEntry>,
+  /** When provided (Bundle N), the happy-path case uses this real payload
+   *  instead of a synthetic one. Other cases stay synthetic (their job is
+   *  to exercise specific failure modes, not realistic shapes). */
+  realEventPayload?: Record<string, unknown> | null,
 ): TestCase[] {
   const cases: TestCase[] = [];
 
   // ── 1. Happy path ────────────────────────────────────────────────
-  const happyEvent = synthesizeEvent(spec, /* missingField */ null);
+  // Bundle N: prefer real EventInstance payload when available; falls
+  // back to the heuristic synthesizer.
+  const happyEventData = realEventPayload ?? synthesizeEvent(spec, null).data;
+  const happyEvent = { name: spec.triggerEvent, data: happyEventData };
   const happyMocks = spec.steps
     .filter((s) => !!s.callsLib)
     .map((s) => ({

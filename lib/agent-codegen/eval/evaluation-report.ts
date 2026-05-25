@@ -34,6 +34,14 @@ export type EvaluationReport = {
     verdict: ReplacementVerdict;
   };
   generatedTestCases: TestCase[];
+  /** Bundle N — when the happy-path case used a real EventInstance payload,
+   *  this carries its provenance. UI shows a "(real)" badge; CLI prints
+   *  the event id for traceability. */
+  realEventFixture?: {
+    eventInstanceId: string;
+    source: string;
+    tsIso: string;
+  } | null;
 
   // Pipeline meta (carried from upstream)
   compileOk: boolean;
@@ -131,6 +139,9 @@ export function formatEvaluationReport(r: EvaluationReport): string {
 
   lines.push(
     `── 4. Generated test cases (${r.generatedTestCases.length}) ──`,
+    r.realEventFixture
+      ? `  happy-path event: REAL (EventInstance ${r.realEventFixture.eventInstanceId} from ${r.realEventFixture.source} at ${r.realEventFixture.tsIso})`
+      : `  happy-path event: synthetic (no matching EventInstance in DB)`,
     ...r.generatedTestCases.map((c) => `  · ${c.name} [${c.category}]`),
     '',
     '════ Verdict ════',

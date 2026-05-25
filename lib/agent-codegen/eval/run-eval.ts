@@ -28,6 +28,7 @@ import {
 } from './evaluation-report';
 import { getToolRegistry } from '../registries';
 import { findGroundTruth } from './ground-truth';
+import { pickRealEventFixture } from './real-event-fixtures';
 import type { EvalFixture } from './fixtures';
 
 const ROOT = process.cwd();
@@ -75,8 +76,18 @@ export async function runEval(
       })()
     : undefined;
 
-  // 4. Test cases (always; they're declarative — cheap)
-  const generatedTestCases = generateTestCases(pipeline.spec, toolRegistry);
+  // 4. Test cases (always). Bundle N: real EventInstance payload preferred.
+  let realEvent: Awaited<ReturnType<typeof pickRealEventFixture>> = null;
+  try {
+    realEvent = await pickRealEventFixture(pipeline.spec.triggerEvent);
+  } catch {
+    realEvent = null;
+  }
+  const generatedTestCases = generateTestCases(
+    pipeline.spec,
+    toolRegistry,
+    realEvent?.data ?? null,
+  );
 
   const final = computeFinalVerdict(
     structural,
@@ -95,6 +106,13 @@ export async function runEval(
     review,
     behavioral,
     generatedTestCases,
+    realEventFixture: realEvent
+      ? {
+          eventInstanceId: realEvent.eventInstanceId,
+          source: realEvent.source,
+          tsIso: realEvent.ts.toISOString(),
+        }
+      : null,
     compileOk: pipeline.compile.ok,
     compileDiagnosticsCount: pipeline.compile.diagnostics.length,
     pipelineTotalMs: pipeline.timings.totalMs,

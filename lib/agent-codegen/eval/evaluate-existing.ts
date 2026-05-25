@@ -25,6 +25,7 @@ import { getToolRegistry } from '../registries';
 import { findGroundTruth } from './ground-truth';
 import { findFixture } from './fixtures';
 import { byInngestSlug } from '@/lib/agent-mapping';
+import { pickRealEventFixture } from './real-event-fixtures';
 import type { AgentSpec } from '../spec-types';
 import type { DomainId } from '@/lib/domains';
 import type { CompileResult } from '../compiler/types';
@@ -113,8 +114,22 @@ export async function evaluateExisting(
       })()
     : undefined;
 
-  // 4. Test cases — always.
-  const generatedTestCases = generateTestCases(input.spec, toolRegistry);
+  // 4. Test cases — always. Bundle N: try a real EventInstance payload
+  // for the happy-path case so we exercise the actual RAAS event shape
+  // instead of synthesized heuristics. Falls back silently when nothing
+  // matches in the local DB.
+  let realEvent: Awaited<ReturnType<typeof pickRealEventFixture>> = null;
+  try {
+    realEvent = await pickRealEventFixture(input.spec.triggerEvent);
+  } catch {
+    // Prisma not available or table empty — fall back to synthetic.
+    realEvent = null;
+  }
+  const generatedTestCases = generateTestCases(
+    input.spec,
+    toolRegistry,
+    realEvent?.data ?? null,
+  );
 
   const final = computeFinalVerdict(
     structural,
@@ -133,6 +148,13 @@ export async function evaluateExisting(
     review,
     behavioral,
     generatedTestCases,
+    realEventFixture: realEvent
+      ? {
+          eventInstanceId: realEvent.eventInstanceId,
+          source: realEvent.source,
+          tsIso: realEvent.ts.toISOString(),
+        }
+      : null,
     compileOk: input.compileResult?.ok ?? true,
     compileDiagnosticsCount: input.compileResult?.diagnostics.length ?? 0,
     pipelineTotalMs: input.pipelineTotalMs ?? 0,
