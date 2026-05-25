@@ -76,6 +76,7 @@ export function LeftNav() {
     { type: "item", id: "alerts",     icon: "alert",    label: t("nav_alerts"),count: "—", href: "/alerts" },
     { type: "group", title: t("nav_group_build") },
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), count: "1", href: "/workflow" },
+    { type: "item", id: "codegen",    icon: "sparkle",  label: t("nav_codegen"), href: "/behavior/codegen" },
     { type: "group", title: t("nav_group_govern") },
     { type: "item", id: "integrations", icon: "plug",   label: t("nav_integrations"), href: "/datasources" },
     { type: "item", id: "audit",      icon: "book",     label: t("nav_audit"), href: "/audit" },

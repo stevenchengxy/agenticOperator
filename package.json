@@ -29,6 +29,7 @@
     "gen:v4-snapshot": "node --env-file=.env.local --import tsx scripts/gen-v4-snapshot.ts"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "eventsource-parser": "^3.0.8",
