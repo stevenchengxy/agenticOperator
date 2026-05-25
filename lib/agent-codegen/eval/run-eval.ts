@@ -29,6 +29,7 @@ import {
 import { getToolRegistry } from '../registries';
 import { findGroundTruth } from './ground-truth';
 import { pickRealEventFixture } from './real-event-fixtures';
+import { checkInngestRegistration } from './inngest-registration';
 import type { EvalFixture } from './fixtures';
 
 const ROOT = process.cwd();
@@ -89,6 +90,12 @@ export async function runEval(
     realEvent?.data ?? null,
   );
 
+  // Bundle L — Inngest registration check (vm-capture + form cross-check).
+  const inngestRegistration = checkInngestRegistration({
+    source: pipeline.code.content,
+    form: fixture.form,
+  });
+
   const final = computeFinalVerdict(
     structural,
     review,
@@ -96,6 +103,7 @@ export async function runEval(
       ? { score: behavioral.score, verdict: behavioral.verdict, diff: behavioral.diff }
       : undefined,
     gt?.replacementVerdict,
+    inngestRegistration,
   );
 
   return {
@@ -113,6 +121,7 @@ export async function runEval(
           tsIso: realEvent.ts.toISOString(),
         }
       : null,
+    inngestRegistration,
     compileOk: pipeline.compile.ok,
     compileDiagnosticsCount: pipeline.compile.diagnostics.length,
     pipelineTotalMs: pipeline.timings.totalMs,

@@ -21,7 +21,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { evaluateExisting } from '@/lib/agent-codegen/eval/evaluate-existing';
-import { AgentSpecSchema } from '@/lib/agent-codegen/spec-types';
+import {
+  AgentSpecSchema,
+  AgentFormFieldsSchema,
+} from '@/lib/agent-codegen/spec-types';
 
 const BodySchema = z.object({
   spec: AgentSpecSchema,
@@ -31,6 +34,9 @@ const BodySchema = z.object({
   fixtureName: z.string().max(64).optional(),
   modelUsed: z.string().max(80).optional(),
   pipelineTotalMs: z.number().int().nonnegative().optional(),
+  /** Bundle L — operator's form fields, used for Inngest registration
+   *  cross-validation. Falls back to spec-derived form when absent. */
+  form: AgentFormFieldsSchema.optional(),
 });
 
 export async function POST(req: Request): Promise<Response> {

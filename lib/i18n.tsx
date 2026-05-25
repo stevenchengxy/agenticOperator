@@ -609,6 +609,19 @@ export const I18N: Record<Lang, Record<string, string>> = {
     autoiter_footer_note: "采用前请审阅每轮的代码 + 评估。AI 可能误判 — 你是最后一道闸。",
     autoiter_failed: "自迭代失败",
 
+    // Bundle L — Inngest registration check
+    eval_section_inngest: "Inngest 注册验证",
+    eval_inngest_pass: "通过",
+    eval_inngest_fail: "未通过",
+    eval_inngest_loaded: "加载",
+    eval_inngest_handler: "handler",
+    eval_inngest_load_error: "模块加载失败",
+    eval_inngest_captured: "Inngest SDK 捕获到的配置",
+    eval_inngest_drift: "Form 不一致",
+    eval_inngest_expected: "期望",
+    eval_inngest_actual: "实际",
+    eval_inngest_warnings: "静态告警",
+
     codegen_compiler_empty: "未编译。Code 标签编辑后点击 编译。",
     codegen_compiler_failure: "编译器失败",
     codegen_compile_ok: "通过",
@@ -1984,6 +1997,19 @@ export const I18N: Record<Lang, Record<string, string>> = {
     autoiter_close: "Close",
     autoiter_footer_note: "Review each round's code + eval before adopting. AI can mis-judge — you're the last gate.",
     autoiter_failed: "Auto-iterate failed",
+
+    // Bundle L — Inngest registration check
+    eval_section_inngest: "Inngest registration",
+    eval_inngest_pass: "passed",
+    eval_inngest_fail: "failed",
+    eval_inngest_loaded: "loaded",
+    eval_inngest_handler: "handler",
+    eval_inngest_load_error: "Module load error",
+    eval_inngest_captured: "Captured by Inngest SDK",
+    eval_inngest_drift: "Form drift",
+    eval_inngest_expected: "expected",
+    eval_inngest_actual: "actual",
+    eval_inngest_warnings: "Static warnings",
 
     codegen_compiler_empty: "Not compiled yet. Edit the Code tab and click Compile.",
     codegen_compiler_failure: "Compiler failure",

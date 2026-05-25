@@ -16,6 +16,7 @@ import type {
 } from './behavioral-analyzer';
 import type { TestCase } from './test-case-generator';
 import type { GroundTruth } from './ground-truth';
+import type { InngestRegistrationReport } from './inngest-registration';
 
 export type ReplacementVerdict = 'FULL' | 'PARTIAL' | 'DRAFT';
 
@@ -42,6 +43,9 @@ export type EvaluationReport = {
     source: string;
     tsIso: string;
   } | null;
+  /** Bundle L — Inngest registration validator. Loads the generated code
+   *  in vm, captures createFunction args, cross-checks against form. */
+  inngestRegistration?: InngestRegistrationReport;
 
   // Pipeline meta (carried from upstream)
   compileOk: boolean;
@@ -63,16 +67,23 @@ export function computeFinalVerdict(
   review: ReviewReport,
   behavioral?: { score: number; verdict: ReplacementVerdict; diff: BehavioralDiff },
   groundTruthVerdict?: string,
+  inngestReg?: InngestRegistrationReport,
 ): { aggregateScore: number; finalVerdict: ReplacementVerdict; summary: string } {
   // No ground truth → fall back to structural only.
   if (!behavioral) {
     const agg = structural.composite;
-    const verdict: ReplacementVerdict = agg >= 0.85 ? 'FULL' : agg >= 0.6 ? 'PARTIAL' : 'DRAFT';
+    let verdict: ReplacementVerdict = agg >= 0.85 ? 'FULL' : agg >= 0.6 ? 'PARTIAL' : 'DRAFT';
+    // Bundle L — Inngest registration failure must downgrade verdict, even
+    // when other signals look fine. If Inngest can't accept the function,
+    // nothing else matters at L8.
+    if (inngestReg && !inngestReg.passed && verdict === 'FULL') verdict = 'PARTIAL';
+    if (inngestReg && (inngestReg.drift.length > 1 || !inngestReg.loadedOk) && verdict === 'PARTIAL') verdict = 'DRAFT';
     return {
       aggregateScore: agg,
       finalVerdict: verdict,
       summary:
-        `Structural-only evaluation (no ground truth). Composite ${(agg * 100).toFixed(1)}%, review ${review.errorCount} errors / ${review.warningCount} warnings.`,
+        `Structural-only evaluation (no ground truth). Composite ${(agg * 100).toFixed(1)}%, review ${review.errorCount} errors / ${review.warningCount} warnings.` +
+        (inngestReg ? regSummary(inngestReg) : ''),
     };
   }
 
@@ -82,6 +93,9 @@ export function computeFinalVerdict(
   let verdict: ReplacementVerdict = behavioral.verdict;
   if (review.errorCount > 0 && verdict === 'FULL') verdict = 'PARTIAL';
   if (review.errorCount > 2 && verdict === 'PARTIAL') verdict = 'DRAFT';
+  // Bundle L — Inngest registration drift / load failure further downgrades.
+  if (inngestReg && !inngestReg.passed && verdict === 'FULL') verdict = 'PARTIAL';
+  if (inngestReg && (inngestReg.drift.length > 1 || !inngestReg.loadedOk) && verdict === 'PARTIAL') verdict = 'DRAFT';
 
   const stepSummary =
     behavioral.diff.missingSteps.length === 0
@@ -89,9 +103,18 @@ export function computeFinalVerdict(
       : `${behavioral.diff.missingSteps.length} step(s) missing: ${behavioral.diff.missingSteps.map((s) => s.id).join(', ')}`;
   const summary =
     `${verdict}. Aggregate ${(agg * 100).toFixed(1)}% · structural ${(structural.composite * 100).toFixed(1)}% · behavioral ${(behavioral.score * 100).toFixed(1)}% · review ${review.errorCount} err/${review.warningCount} warn · ${stepSummary}.` +
+    (inngestReg ? regSummary(inngestReg) : '') +
     (groundTruthVerdict ? `\n  Ground-truth note: ${groundTruthVerdict}` : '');
 
   return { aggregateScore: agg, finalVerdict: verdict, summary };
+}
+
+function regSummary(reg: InngestRegistrationReport): string {
+  if (!reg.loadedOk) return `\n  Inngest registration: ❌ load failed (${reg.loadError ?? 'unknown error'}).`;
+  if (reg.captured && reg.captured.hasHandler && reg.drift.length === 0) {
+    return `\n  Inngest registration: ✓ form matches captured (id=${reg.captured.id}, trigger=${reg.captured.triggerEvent}, retries=${reg.captured.retries}).`;
+  }
+  return `\n  Inngest registration: ⚠ drift on ${reg.drift.map((d) => d.field).join(', ') || 'unknown'}.`;
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -120,6 +143,25 @@ export function formatEvaluationReport(r: EvaluationReport): string {
     r.review.issues.length > 8 ? `  … +${r.review.issues.length - 8} more` : '',
     '',
   ];
+
+  if (r.inngestRegistration) {
+    const ir = r.inngestRegistration;
+    lines.push(
+      '── 3a. Inngest registration (Bundle L) ──',
+      `  ${ir.passed ? '✓ passed' : '✗ failed'}  loaded=${ir.loadedOk}  hasHandler=${ir.captured?.hasHandler ?? false}`,
+      ...(ir.loadError ? [`  load error: ${ir.loadError}`] : []),
+      ...(ir.captured ? [
+        `  captured: id=${ir.captured.id ?? '?'} · name=${ir.captured.name ?? '?'} · retries=${ir.captured.retries ?? '?'} · trigger=${ir.captured.triggerEvent ?? '?'}`,
+      ] : []),
+      ...(ir.drift.length
+        ? ['  drift:', ...ir.drift.map((d) => `    - ${d.field}: expected "${d.expected}" got "${d.actual}"`)]
+        : []),
+      ...(ir.warnings.length
+        ? ['  warnings:', ...ir.warnings.slice(0, 4).map((w) => `    · ${w}`)]
+        : []),
+      '',
+    );
+  }
 
   if (r.behavioral) {
     lines.push(

@@ -211,6 +211,7 @@ export function CodegenContent() {
               domain,
               modelUsed: result.modelUsed,
               pipelineTotalMs: result.timings.totalMs,
+              form: toApiPayload(form),
             }),
           });
           if (!er.ok) {
@@ -246,6 +247,7 @@ export function CodegenContent() {
           domain,
           modelUsed: pipelineTimings?.modelUsed,
           pipelineTotalMs: pipelineTimings?.totalMs,
+          form: toApiPayload(form),
         }),
       });
       if (!r.ok) {
@@ -258,7 +260,7 @@ export function CodegenContent() {
     } finally {
       setEvalRunning(false);
     }
-  }, [spec, code, businessLogic, domain, pipelineTimings]);
+  }, [spec, code, businessLogic, domain, pipelineTimings, form]);
 
   const requestAutoIterate = React.useCallback(async () => {
     setAutoIterOpen(true);

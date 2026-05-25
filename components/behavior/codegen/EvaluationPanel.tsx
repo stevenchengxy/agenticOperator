@@ -20,6 +20,7 @@ import type {
 import type { ReviewIssue } from "@/lib/agent-codegen/eval/code-reviewer";
 import type { DynamicCasesSummary } from "@/lib/agent-codegen/eval/run-dynamic-cases";
 import type { DynamicRunResult } from "@/lib/agent-codegen/eval/dynamic-runner";
+import type { InngestRegistrationReport } from "@/lib/agent-codegen/eval/inngest-registration";
 
 export function EvaluationPanel({
   report,
@@ -104,6 +105,9 @@ export function EvaluationPanel({
       />
       <StructuralSection report={report} />
       <ReviewSection issues={report.review.issues} />
+      {report.inngestRegistration && (
+        <InngestRegistrationSection registration={report.inngestRegistration} />
+      )}
       {report.behavioral ? (
         <BehavioralSection report={report} />
       ) : (
@@ -250,6 +254,177 @@ function ReviewSection({ issues }: { issues: ReviewIssue[] }) {
         ))}
       </div>
     </Section>
+  );
+}
+
+function InngestRegistrationSection({
+  registration,
+}: {
+  registration: InngestRegistrationReport;
+}) {
+  const { t } = useApp();
+  const r = registration;
+  // Choose a section number — fits between Review (2) and Behavioral (3).
+  return (
+    <Section title={t("eval_section_inngest")} number={2.5}>
+      <div className="flex items-center gap-3 mb-3">
+        <StatusPill
+          ok={r.passed}
+          label={r.passed ? t("eval_inngest_pass") : t("eval_inngest_fail")}
+        />
+        <span className="text-[11px] text-ink-3 mono">
+          {t("eval_inngest_loaded")} {r.loadedOk ? "✓" : "✗"} ·{" "}
+          {t("eval_inngest_handler")} {r.captured?.hasHandler ? "✓" : "✗"}
+        </span>
+      </div>
+
+      {r.loadError && (
+        <div
+          className="px-3 py-2 mb-3 rounded-md border text-[11.5px] leading-snug"
+          style={{
+            background:
+              "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 6%, var(--c-panel))",
+            borderColor:
+              "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, var(--c-line))",
+            color: "var(--c-err, oklch(0.5 0.2 25))",
+          }}
+        >
+          <div className="font-medium text-[10px] uppercase tracking-[0.06em] mb-1">
+            {t("eval_inngest_load_error")}
+          </div>
+          <div>{r.loadError}</div>
+        </div>
+      )}
+
+      {r.captured && (
+        <div
+          className="rounded-md border border-line p-3 mb-3"
+          style={{ background: "var(--c-panel)" }}
+        >
+          <div className="text-[9.5px] uppercase tracking-[0.08em] text-ink-4 mb-2">
+            {t("eval_inngest_captured")}
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[11.5px]">
+            <KvLine label="id" value={r.captured.id ?? "—"} drift={driftedField(r, "id")} />
+            <KvLine label="name" value={r.captured.name ?? "—"} drift={driftedField(r, "name")} />
+            <KvLine
+              label="retries"
+              value={r.captured.retries !== undefined ? String(r.captured.retries) : "—"}
+              drift={driftedField(r, "retries")}
+            />
+            <KvLine
+              label="triggerEvent"
+              value={r.captured.triggerEvent ?? "—"}
+              drift={driftedField(r, "triggerEvent")}
+            />
+          </div>
+        </div>
+      )}
+
+      {r.drift.length > 0 && (
+        <div className="flex flex-col gap-2 mb-3">
+          <div className="text-[9.5px] uppercase tracking-[0.08em] text-ink-4">
+            {t("eval_inngest_drift")}
+          </div>
+          {r.drift.map((d, i) => (
+            <div
+              key={i}
+              className="px-3 py-2 rounded-md border text-[11.5px] leading-snug"
+              style={{
+                background:
+                  "color-mix(in oklab, var(--c-warn, oklch(0.65 0.14 75)) 6%, var(--c-panel))",
+                borderColor:
+                  "color-mix(in oklab, var(--c-warn, oklch(0.65 0.14 75)) 30%, var(--c-line))",
+              }}
+            >
+              <span className="mono text-[10.5px] text-ink-4">{d.field}:</span>{" "}
+              <span className="text-ink-3">
+                {t("eval_inngest_expected")} <span className="mono text-ink-1">"{d.expected}"</span>{" "}
+                · {t("eval_inngest_actual")}{" "}
+                <span className="mono" style={{ color: "var(--c-err, oklch(0.5 0.2 25))" }}>
+                  "{d.actual}"
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {r.warnings.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="text-[9.5px] uppercase tracking-[0.08em] text-ink-4">
+            {t("eval_inngest_warnings")}
+          </div>
+          {r.warnings.map((w, i) => (
+            <div
+              key={i}
+              className="px-3 py-1.5 rounded-md text-[11px] leading-snug"
+              style={{
+                background: "var(--c-panel)",
+                border: "1px dashed var(--c-line)",
+                color: "var(--c-ink-2)",
+              }}
+            >
+              {w}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function driftedField(
+  r: InngestRegistrationReport,
+  field: "id" | "name" | "retries" | "triggerEvent",
+): boolean {
+  return r.drift.some((d) => d.field === field);
+}
+
+function KvLine({
+  label,
+  value,
+  drift,
+}: {
+  label: string;
+  value: string;
+  drift: boolean;
+}) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-[9.5px] uppercase tracking-[0.08em] text-ink-4 mono">
+        {label}
+      </span>
+      <span
+        className="text-[11.5px] mono"
+        style={{
+          color: drift ? "var(--c-err, oklch(0.5 0.2 25))" : "var(--c-ink-1)",
+        }}
+      >
+        {value}
+      </span>
+      {drift && (
+        <span className="text-[10.5px]" style={{ color: "var(--c-err, oklch(0.5 0.2 25))" }}>
+          ⚠
+        </span>
+      )}
+    </div>
+  );
+}
+
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+  const color = ok ? "var(--c-ok)" : "var(--c-err, oklch(0.5 0.2 25))";
+  return (
+    <span
+      className="inline-flex items-center px-2 py-1 rounded text-[10.5px] mono font-semibold tracking-[0.06em]"
+      style={{
+        background: `color-mix(in oklab, ${color} 14%, transparent)`,
+        color,
+        border: `1px solid color-mix(in oklab, ${color} 30%, transparent)`,
+      }}
+    >
+      {ok ? "✓" : "✗"} {label}
+    </span>
   );
 }
 

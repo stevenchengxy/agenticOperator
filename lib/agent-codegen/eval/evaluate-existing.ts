@@ -26,6 +26,8 @@ import { findGroundTruth } from './ground-truth';
 import { findFixture } from './fixtures';
 import { byInngestSlug } from '@/lib/agent-mapping';
 import { pickRealEventFixture } from './real-event-fixtures';
+import { checkInngestRegistration } from './inngest-registration';
+import type { AgentFormFields } from '../spec-types';
 import type { AgentSpec } from '../spec-types';
 import type { DomainId } from '@/lib/domains';
 import type { CompileResult } from '../compiler/types';
@@ -47,6 +49,9 @@ export type EvaluateExistingInput = {
   modelUsed?: string;
   compileResult?: CompileResult;
   pipelineTotalMs?: number;
+  /** Bundle L — when provided, runs Inngest registration check (load code,
+   *  capture createFunction args, cross-validate against form). */
+  form?: AgentFormFields;
 };
 
 export async function evaluateExisting(
@@ -131,6 +136,45 @@ export async function evaluateExisting(
     realEvent?.data ?? null,
   );
 
+  // Bundle L — Inngest registration validator (load + capture + cross-validate).
+  // Only when caller supplied form; CLI path falls back to deriving form from
+  // spec.
+  const formForReg: AgentFormFields | undefined =
+    input.form ?? {
+      slug: input.spec.slug,
+      displayName: input.spec.displayName,
+      stage: input.spec.stage,
+      ownerTeam: input.spec.ownerTeam,
+      triggerEvent: input.spec.triggerEvent,
+      emitEvents: input.spec.emitEvents,
+      retries: input.spec.retries,
+      errorHandling: input.spec.errorHandling,
+    };
+  let inngestRegistration: ReturnType<typeof checkInngestRegistration>;
+  try {
+    inngestRegistration = checkInngestRegistration({
+      source: input.code,
+      form: formForReg,
+    });
+  } catch (e) {
+    // Defensive — should not throw, but if vm setup fails, report rather
+    // than crash eval.
+    inngestRegistration = {
+      loadedOk: false,
+      loadError: `validator crashed: ${e instanceof Error ? e.message : String(e)}`,
+      captured: null,
+      formMatches: {
+        idMatchesSlug: null,
+        nameMatchesDisplay: null,
+        retriesMatch: null,
+        triggerEventMatches: null,
+      },
+      drift: [],
+      warnings: [],
+      passed: false,
+    };
+  }
+
   const final = computeFinalVerdict(
     structural,
     review,
@@ -138,6 +182,7 @@ export async function evaluateExisting(
       ? { score: behavioral.score, verdict: behavioral.verdict, diff: behavioral.diff }
       : undefined,
     groundTruth?.replacementVerdict,
+    inngestRegistration,
   );
 
   return {
@@ -155,6 +200,7 @@ export async function evaluateExisting(
           tsIso: realEvent.ts.toISOString(),
         }
       : null,
+    inngestRegistration,
     compileOk: input.compileResult?.ok ?? true,
     compileDiagnosticsCount: input.compileResult?.diagnostics.length ?? 0,
     pipelineTotalMs: input.pipelineTotalMs ?? 0,
