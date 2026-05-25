@@ -12,6 +12,7 @@ import type {
   DeployVersionResponse,
 } from '@/lib/agent-versions/types';
 import { DeployConfirmDialog } from './DeployConfirmDialog';
+import { OpenPrDialog } from './OpenPrDialog';
 
 const SERIF =
   'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
@@ -74,6 +75,10 @@ export function VersionsTab({ short }: { short: string }) {
   const [data, setData] = React.useState<VersionsListResponse | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [confirmId, setConfirmId] = React.useState<string | null>(null);
+  // Open-PR dialog: targets a single AgentVersion (by id). Only enabled
+  // for capturedFrom='codegen' rows because we need the codeBlob to render
+  // the file-write command.
+  const [openPrId, setOpenPrId] = React.useState<string | null>(null);
   const [flash, setFlash] = React.useState<{ kind: 'ok' | 'err'; msg: string } | null>(
     null,
   );
@@ -246,6 +251,7 @@ export function VersionsTab({ short }: { short: string }) {
               key={v.id}
               v={v}
               onDeployClick={() => setConfirmId(v.id)}
+              onOpenPrClick={() => setOpenPrId(v.id)}
               busy={busy}
               t={t}
             />
@@ -260,6 +266,13 @@ export function VersionsTab({ short }: { short: string }) {
           onCancel={() => setConfirmId(null)}
         />
       )}
+
+      {openPrId && data?.versions.find((x) => x.id === openPrId) && (
+        <OpenPrDialog
+          version={data.versions.find((x) => x.id === openPrId)!}
+          onClose={() => setOpenPrId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -267,24 +280,42 @@ export function VersionsTab({ short }: { short: string }) {
 function VersionRow({
   v,
   onDeployClick,
+  onOpenPrClick,
   busy,
   t,
 }: {
   v: AgentVersionRow;
   onDeployClick: () => void;
+  onOpenPrClick: () => void;
   busy: boolean;
   t: (k: string) => string;
 }) {
+  const isCodegen = v.capturedFrom === 'codegen' && !!v.codeBlob;
   return (
     <div
       className="grid items-center border-b border-line last:border-b-0"
       style={{
-        gridTemplateColumns: '1.4fr 0.8fr 0.9fr 1fr 0.6fr',
+        gridTemplateColumns: '1.4fr 0.8fr 0.9fr 1fr 0.9fr',
         padding: '10px 16px',
         fontSize: 12.5,
       }}
     >
-      <div className="text-ink-1 tabular-nums">{v.versionLabel}</div>
+      <div className="text-ink-1 tabular-nums flex items-center gap-1.5">
+        <span>{v.versionLabel}</span>
+        {isCodegen && (
+          <span
+            className="text-[9.5px] mono uppercase tracking-[0.06em] px-1 py-px rounded"
+            style={{
+              background: 'color-mix(in oklab, var(--c-accent) 12%, transparent)',
+              color: 'var(--c-accent)',
+              border: '1px solid color-mix(in oklab, var(--c-accent) 30%, transparent)',
+            }}
+            title="Captured from codegen pipeline"
+          >
+            codegen
+          </span>
+        )}
+      </div>
       <div>
         <StatusBadge status={v.status} t={t} />
       </div>
@@ -292,7 +323,12 @@ function VersionRow({
       <div className="text-ink-3 truncate" title={v.generatedBy}>
         {v.generatedBy}
       </div>
-      <div className="text-right">
+      <div className="text-right flex items-center justify-end gap-1.5">
+        {isCodegen && (
+          <Btn size="sm" variant="ghost" onClick={onOpenPrClick} disabled={busy}>
+            {t('av_open_pr_btn')}
+          </Btn>
+        )}
         {v.status === 'active' ? (
           <span className="text-ink-4" style={{ fontSize: 11 }}>
             {t('av_deploy_active')}

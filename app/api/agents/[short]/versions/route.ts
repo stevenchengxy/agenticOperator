@@ -48,6 +48,7 @@ function dbRowToApiRow(row: {
   generatedBy: string;
   createdAt: Date;
   deployedAt: Date | null;
+  codeBlob?: string | null;
 }): AgentVersionRow {
   let snap: AgentConfigSnapshot | null = null;
   if (row.configJson) {
@@ -70,6 +71,9 @@ function dbRowToApiRow(row: {
     generatedBy: row.generatedBy,
     createdAt: row.createdAt.toISOString(),
     deployedAt: row.deployedAt ? row.deployedAt.toISOString() : null,
+    // Codegen rows carry the generated TypeScript so the Open-PR dialog
+    // can render it without an extra fetch. Other rows leave it null.
+    codeBlob: row.capturedFrom === 'codegen' ? row.codeBlob ?? null : null,
   };
 }
 

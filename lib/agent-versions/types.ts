@@ -25,6 +25,12 @@ export type AgentVersionRow = {
   generatedBy: string;
   createdAt: string;
   deployedAt: string | null;
+  /**
+   * Codegen-saved row's TypeScript body. Sent ONLY when capturedFrom='codegen';
+   * other rows leave this null. Used by the Open-PR dialog to produce the
+   * suggested file write + git commands.
+   */
+  codeBlob: string | null;
 };
 
 export type VersionsListResponse = {
