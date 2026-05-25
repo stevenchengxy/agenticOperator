@@ -204,7 +204,23 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
               request_id: e.requestId ?? null,
             };
           }
-          // 429 / 5xx / NETWORK — 抛错走 Inngest retry
+          // 2026-05-25 fix(由 e2e 暴露):2xx + body.success=false 是上游业务拒绝
+          // (例:RoboHire 返 "upload_resume failed after 3 attempts" — GoHire 端
+          // resume 解析失败,RoboHire 内部已重试 3 次).handleJsonResponse 把这种
+          // 情形标 code='SERVER',但 httpStatus 是 2xx — AO 这层重跑不会有不同结果.
+          // 分类为 GOHIRE_REJECTED terminal,让 RaaS 拿到 _FAILED 而不是 Inngest
+          // run 静默退休(use case doc §6 L1 fix).
+          if (e.code === 'SERVER' && e.httpStatus >= 200 && e.httpStatus < 400) {
+            return {
+              ok: false as const,
+              terminal: true as const,
+              error_code: 'GOHIRE_REJECTED',
+              error_message: `RoboHire 2xx 但 success=false: ${e.message}`,
+              http_status: e.httpStatus,
+              request_id: e.requestId ?? null,
+            };
+          }
+          // 429 / 实际 5xx HTTP / NETWORK — 抛错走 Inngest retry
         }
         throw e;
       }

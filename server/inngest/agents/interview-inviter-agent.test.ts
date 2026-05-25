@@ -328,6 +328,45 @@ describe('interviewInviterAgentHandler — error paths', () => {
     expect(failedEmit?.payload.data.payload.error_code).toBe('ROBOHIRE_QUOTA');
   });
 
+  it('RoboHire 2xx 但 success=false(GoHire upload_resume 失败)→ emit _FAILED GOHIRE_REJECTED 不重试', async () => {
+    // 这是 e2e 真实发现的场景:RoboHire 内部把简历转给 GoHire 解析失败 3 次后
+    // 返 HTTP 200 + { success: false, error: 'upload_resume failed after 3 attempts' }.
+    // handleJsonResponse 抛 RobohireApiError(200, 'SERVER', ...) — 重跑不会有不同结果,
+    // 必须分类为 terminal,否则 Inngest run 静默退休,RaaS 永远拿不到 _FAILED.
+    mockInvite.mockRejectedValueOnce(
+      new RobohireApiError(
+        200,
+        'SERVER',
+        'invite-candidate returned success=false: upload_resume failed after 3 attempts',
+        'req_upload_fail',
+      ),
+    );
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: false, error: 'GOHIRE_REJECTED' });
+    expect(mockWriteComm).not.toHaveBeenCalled();
+    expect(mockWriteIvr).not.toHaveBeenCalled();
+    const failed = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failed?.payload.data.payload).toMatchObject({
+      error_code: 'GOHIRE_REJECTED',
+      http_status: 200,
+      robohire_request_id: 'req_upload_fail',
+    });
+    expect(failed?.payload.data.payload.error_message).toMatch(/upload_resume failed/);
+  });
+
   it('RoboHire 500 → 抛错走 Inngest retry(不 emit _FAILED)', async () => {
     mockInvite.mockRejectedValueOnce(
       new RobohireApiError(500, 'SERVER', 'internal'),
