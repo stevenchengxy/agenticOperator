@@ -25,6 +25,14 @@ export type ToolRegistryEntry = {
   sideEffects: string;
   /** Broad bucket so UIs can group by intent. */
   category: 'partner-pg' | 'robohire' | 'allmeta' | 'minio' | 'inngest' | 'rule-check' | 'logger';
+  /**
+   * Real call-site snippets from production agents — one or two lines max.
+   * Step body filler shows these to the LLM so it mimics the exact AO
+   * idioms (null-check + NonRetriableError pattern, soft-fail ok shape,
+   * logger.info one-liner format) instead of inventing its own conventions.
+   * Added 2026-05-25 from inspection of the 5 real agents (D2 tuning).
+   */
+  exampleCalls?: string[];
 };
 
 export const TOOL_REGISTRY_RAAS: ReadonlyArray<ToolRegistryEntry> = [
@@ -37,6 +45,15 @@ export const TOOL_REGISTRY_RAAS: ReadonlyArray<ToolRegistryEntry> = [
     summary: 'Pull one job requirement snapshot from partner Postgres (read-only).',
     sideEffects: 'read-only',
     category: 'partner-pg',
+    // Lifted from create-jd-agent.ts:fetch-requirement — note the null-check
+    // → NonRetriableError pattern (every getter follows this).
+    exampleCalls: [
+      `const r = await getRequirementDetail(requisitionId);
+if (!r) {
+  throw new NonRetriableError(\`[\${AGENT_NAME}] partner-pg: job_requisition \${requisitionId} not found\`);
+}
+return r;`,
+    ],
   },
   {
     id: 'partner-pg.getRequirementsAgentView',
@@ -111,6 +128,23 @@ export const TOOL_REGISTRY_RAAS: ReadonlyArray<ToolRegistryEntry> = [
     summary: 'Direct-call RoboHire /api/v1/jobs/generate-jd to synthesize a JD.',
     sideEffects: 'external HTTP; may throw RobohireApiError',
     category: 'robohire',
+    // Lifted from create-jd-agent.ts:generate — the canonical RoboHire
+    // call pattern: try/catch with NonRetriableError on isClientError.
+    exampleCalls: [
+      `try {
+  const r = await generateJdDirect(
+    { prompt, language: 'zh', companyName: requirement.client_name },
+    { traceId },
+  );
+  logger.info(\`[\${AGENT_NAME}] RoboHire generate-jd OK · requestId=\${r.requestId}\`);
+  return r;
+} catch (e) {
+  if (e instanceof RobohireApiError && e.isClientError) {
+    throw new NonRetriableError(\`RoboHire generate-jd 4xx: \${e.httpStatus} \${e.code} \${e.message}\`);
+  }
+  throw e;
+}`,
+    ],
   },
   {
     id: 'robohire.matchResume',
@@ -158,6 +192,17 @@ export const TOOL_REGISTRY_RAAS: ReadonlyArray<ToolRegistryEntry> = [
     summary: 'Mirror a job_requisition row into the Allmeta Neo4j ontology.',
     sideEffects: 'writes Neo4j Job_Requisition instance',
     category: 'allmeta',
+    // Lifted from create-jd-agent.ts:write-jr-neo4j — allmeta is soft-fail
+    // by design: never throw, log warn on !ok, return the result so
+    // downstream steps see what happened.
+    exampleCalls: [
+      `const r = await writeJobRequisitionInstance({
+  requirement: requirement as unknown as Record<string, unknown>,
+});
+if (r.ok) logger.info(\`[\${AGENT_NAME}] ✓ allmeta wrote Job_Requisition \${requisitionId}\`);
+else logger.warn(\`[\${AGENT_NAME}] allmeta JR write failed: \${r.error}\`);
+return r;`,
+    ],
   },
   {
     id: 'allmeta.writeJobPosting',
@@ -232,6 +277,14 @@ export const TOOL_REGISTRY_RAAS: ReadonlyArray<ToolRegistryEntry> = [
     summary: 'Emit a downstream event so the next agent in the workflow picks it up.',
     sideEffects: 'writes EventInstance + fans out to subscribers',
     category: 'inngest',
+    // NOTE: in production agents, emits typically go via step.sendEvent(stepKey, ...)
+    // for idempotent retry — but inngest.send is fine for terminal emits.
+    exampleCalls: [
+      `await inngest.send({
+  name: 'JD_GENERATED',
+  data: { job_requisition_id, job_posting_id, jd_content } satisfies JdGeneratedEnvelope,
+});`,
+    ],
   },
   {
     id: 'logger.event',

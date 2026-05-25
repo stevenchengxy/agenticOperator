@@ -193,6 +193,73 @@ const r = await writeCommunicationLogInstance({
 if (!r.ok) logger.warn(\`[\${AGENT_NAME}] allmeta comm-log write failed: \${r.error}\`);
 return r;`,
   },
+
+  // ── D2 expansion (2026-05-25) ──────────────────────────────────────
+  // Gaps identified by inspection: production agents universally use
+  // step.sendEvent(stepKey, ...) instead of inngest.send for downstream
+  // emits, so retries are idempotent on the step. Codegen v1 leaned on
+  // inngest.send — this entry tilts future generations toward the
+  // correct pattern.
+  {
+    source: 'server/inngest/agents/match-resume-agent.ts',
+    stage: 'match',
+    stepName: 'emit-match-failed-robohire-error',
+    toolIds: ['inngest.send'],
+    body: `await step.sendEvent(\`emit-match-failed-\${stepKey}\`, {
+  name: 'MATCH_FAILED',
+  data: {
+    job_requisition_id: data.job_requisition_id,
+    candidate_id: candidateId || null,
+    matching_score: null,
+    upload_id: uploadId || null,
+    overall_status: '不匹配',
+    success: false,
+    data: { error_kind: 'robohire-match-call-failed' },
+    error: matchResult.error,
+  },
+});`,
+  },
+  // Allmeta soft-fail with PK derivation — the cmr_<candidate>_<jr>
+  // pattern is canonical across match + rule-check agents.
+  {
+    source: 'server/inngest/agents/match-resume-agent.ts',
+    stage: 'match',
+    stepName: 'write-cmr-neo4j',
+    toolIds: ['allmeta.writeCandidateMatchResult'],
+    body: `const cmrId = \`cmr_\${candidateId || 'unknown'}_\${data.job_requisition_id}\`;
+const r = await writeCandidateMatchResultInstance({
+  candidate_match_result_id: cmrId,
+  client_id: pickClientId(req) ?? null,
+  candidate_id: candidateId,
+  job_requisition_id: data.job_requisition_id,
+  overall_match_score: matching_score,
+  overall_fit_verdict: overall_status,
+  overall_match_grade: gradeFromScore(matching_score),
+});
+if (r.ok) logger.info(\`[\${AGENT_NAME}] ✓ allmeta wrote Candidate_Match_Result \${cmrId}\`);
+else logger.warn(\`[\${AGENT_NAME}] allmeta cmr write failed: \${r.error}\`);
+return r;`,
+  },
+  // Partner-pg writer return shape: { synced, job_posting_id, reason? }.
+  // Codegen v1 sometimes generated bodies that swallowed the return; this
+  // entry shows the production "log then return" idiom.
+  {
+    source: 'server/inngest/agents/resume-parser-agent.ts',
+    stage: 'resume',
+    stepName: 'save-candidate-detailed',
+    toolIds: ['partner-pg.saveCandidate'],
+    body: `const r = await saveCandidateToPartnerPg({
+  upload_id: event.data.upload_id,
+  parsed_resume_json: parsed.data,
+  source: 'resume-parser-agent',
+  trace_id: traceId ?? undefined,
+});
+logger.info(
+  \`[\${AGENT_NAME}] saveCandidate OK · candidate_id=\${r.candidate_id} \` +
+  \`upload_id=\${event.data.upload_id} created=\${r.created}\`,
+);
+return r;`,
+  },
 ];
 
 /**

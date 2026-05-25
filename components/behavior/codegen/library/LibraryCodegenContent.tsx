@@ -238,7 +238,11 @@ export function LibraryCodegenContent() {
           </Section>
 
           <Section title={t("lib_section_examples")} hint={t("lib_section_examples_hint")}>
-            <CurlExamplesInput examples={examples} setExamples={setExamples} />
+            <CurlExamplesInput
+              examples={examples}
+              setExamples={setExamples}
+              baseUrlHint={form.baseUrl || undefined}
+            />
           </Section>
 
           {pipelineError && (

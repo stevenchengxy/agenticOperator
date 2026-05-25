@@ -4,6 +4,12 @@
 // verb + path + description, with optional request/response sample JSON for
 // type inference. The order operator drags-or-types them in is the order
 // LLM Call C emits methods.
+//
+// Two seed input modes:
+//   📋 Examples (default): structured entry — operator types verb/path/sample
+//   💬 NL: free text → LLM drafts CurlExample[] for operator to refine
+//        (draft mode never bypasses human review — drafted entries land in
+//         the structured list and are editable before running lib codegen)
 
 import React from "react";
 import type { CurlExample } from "@/lib/agent-codegen/library/lib-spec-types";
@@ -14,17 +20,50 @@ const VERBS: CurlExample["httpVerb"][] = ["GET", "POST", "PUT", "PATCH", "DELETE
 export function CurlExamplesInput({
   examples,
   setExamples,
+  baseUrlHint,
 }: {
   examples: CurlExample[];
   setExamples: React.Dispatch<React.SetStateAction<CurlExample[]>>;
+  /** Operator-supplied base URL — passed to NL drafter so LLM doesn't invent host. */
+  baseUrlHint?: string;
 }) {
   const { t } = useApp();
+  const [mode, setMode] = React.useState<"examples" | "nl">("examples");
+  const [nlText, setNlText] = React.useState("");
+  const [drafting, setDrafting] = React.useState(false);
+  const [draftError, setDraftError] = React.useState<string | null>(null);
 
   const addExample = () =>
     setExamples((xs) => [
       ...xs,
       { httpVerb: "GET", httpPath: "/", description: "" },
     ]);
+
+  const draftFromNL = async () => {
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const r = await fetch("/api/codegen/library/draft-examples", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: nlText, baseUrlHint }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      const j = (await r.json()) as { examples: CurlExample[] };
+      // Append drafted examples to whatever the operator already has —
+      // they review and edit BEFORE running the full lib codegen.
+      setExamples((xs) => [...xs, ...j.examples]);
+      // Switch back to examples view so operator immediately sees + reviews.
+      setMode("examples");
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const updateExample = (i: number, patch: Partial<CurlExample>) =>
     setExamples((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -34,7 +73,56 @@ export function CurlExamplesInput({
 
   return (
     <div className="flex flex-col gap-3">
-      {examples.length === 0 && (
+      {/* Mode toggle */}
+      <div className="flex gap-1 p-0.5 bg-panel border border-line rounded-md">
+        <ModeChip active={mode === "examples"} onClick={() => setMode("examples")}>
+          📋 {t("lib_mode_examples")}
+        </ModeChip>
+        <ModeChip active={mode === "nl"} onClick={() => setMode("nl")}>
+          💬 {t("lib_mode_nl")}
+        </ModeChip>
+      </div>
+
+      {/* NL drafter */}
+      {mode === "nl" && (
+        <div className="flex flex-col gap-2 p-2 rounded-md border border-line bg-panel">
+          <span className="text-[10px] uppercase tracking-[0.08em] text-ink-4">
+            {t("lib_nl_prompt_label")}
+          </span>
+          <textarea
+            value={nlText}
+            onChange={(e) => setNlText(e.target.value)}
+            rows={5}
+            spellCheck={false}
+            placeholder={t("lib_nl_placeholder")}
+            disabled={drafting}
+            className="w-full p-2 bg-surface border border-line rounded-md text-[11.5px] leading-[1.5]"
+          />
+          <button
+            onClick={draftFromNL}
+            disabled={drafting || nlText.trim().length < 12}
+            className="h-7 px-3 rounded-md text-[11.5px] font-medium border-0 cursor-pointer self-start"
+            style={{
+              background:
+                drafting || nlText.trim().length < 12 ? "var(--c-panel)" : "var(--c-accent)",
+              color:
+                drafting || nlText.trim().length < 12 ? "var(--c-ink-4)" : "white",
+            }}
+          >
+            {drafting ? t("lib_drafting") : t("lib_draft_action")}
+          </button>
+          {draftError && (
+            <div className="text-[10.5px] leading-snug" style={{ color: "var(--c-err, oklch(0.5 0.2 25))" }}>
+              {draftError}
+            </div>
+          )}
+          <p className="text-[10px] text-ink-4 leading-snug m-0">
+            {t("lib_nl_review_note")}
+          </p>
+        </div>
+      )}
+
+      {examples.length === 0 && mode === "examples" && (
         <div className="text-[11px] text-ink-4 leading-snug px-2">
           {t("lib_examples_empty")}
         </div>
@@ -110,6 +198,31 @@ export function CurlExamplesInput({
         + {t("lib_add_example")}
       </button>
     </div>
+  );
+}
+
+function ModeChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex-1 h-6 px-2 rounded-sm text-[11px] border-0 cursor-pointer"
+      style={{
+        background: active ? "var(--c-surface)" : "transparent",
+        color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
+        fontWeight: active ? 500 : 400,
+        boxShadow: active ? "var(--shadow-sh-1, 0 1px 2px rgba(0,0,0,0.04))" : "none",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

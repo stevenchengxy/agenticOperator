@@ -132,12 +132,7 @@ function buildSystemPrompt(
   registry: ReadonlyArray<ToolRegistryEntry>,
 ): string {
   const toolsBlock = registry.length
-    ? registry
-        .map(
-          (t) =>
-            `  - ${t.id}\n      import { ${t.importName} } from '${t.importFrom}';\n      ${t.signature}\n      ${t.summary}`,
-        )
-        .join('\n')
+    ? registry.map(formatToolEntry).join('\n')
     : '  (no tools registered — bodies should be minimal and may return null)';
 
   const stepsBlock = spec.steps
@@ -195,4 +190,24 @@ function renderFewShot(s: FewShotEntry): string {
     s.body,
     '```',
   ].join('\n');
+}
+
+function formatToolEntry(t: ToolRegistryEntry): string {
+  const head = [
+    `  - ${t.id} [${t.category}]`,
+    `      import { ${t.importName} } from '${t.importFrom}';`,
+    `      ${t.signature}`,
+    `      ${t.summary}`,
+  ].join('\n');
+  if (!t.exampleCalls || t.exampleCalls.length === 0) return head;
+  const examples = t.exampleCalls
+    .map((ex) => {
+      const indented = ex
+        .split('\n')
+        .map((line) => '        ' + line)
+        .join('\n');
+      return `      production call pattern:\n${indented}`;
+    })
+    .join('\n');
+  return `${head}\n${examples}`;
 }
