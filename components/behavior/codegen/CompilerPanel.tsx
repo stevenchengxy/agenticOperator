@@ -16,12 +16,16 @@ export function CompilerPanel({
   running,
   error,
   onCompile,
+  onSuggestFix,
   saveButton,
 }: {
   result: CompileResult | null;
   running: boolean;
   error: string | null;
   onCompile: () => void;
+  /** Optional: when provided AND there are error diagnostics, surfaces a
+   *  "✨ Suggest fix" button. Click opens the CodeFixerDialog. */
+  onSuggestFix?: () => void;
   /** Optional save affordance rendered at the bottom when relevant. */
   saveButton?: React.ReactNode;
 }) {
@@ -53,18 +57,35 @@ export function CompilerPanel({
             {t("codegen_compiler_title")}
           </span>
         </div>
-        <button
-          onClick={onCompile}
-          disabled={running}
-          className="ml-auto h-7 px-3 rounded-md text-[11.5px] font-medium border-0 cursor-pointer"
-          style={{
-            background: running ? "var(--c-panel)" : "var(--c-accent)",
-            color: running ? "var(--c-ink-3)" : "white",
-            opacity: running ? 0.8 : 1,
-          }}
-        >
-          {running ? t("codegen_compiling") : t("codegen_compile")}
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {onSuggestFix && result && !result.ok && result.diagnostics.some((d) => d.severity === "error") && (
+            <button
+              onClick={onSuggestFix}
+              disabled={running}
+              className="h-7 px-2.5 rounded-md text-[11px] font-medium border cursor-pointer inline-flex items-center gap-1"
+              style={{
+                background: "transparent",
+                color: "var(--c-accent)",
+                borderColor: "color-mix(in oklab, var(--c-accent) 35%, var(--c-line))",
+              }}
+              title={t("codegen_suggest_fix_tooltip")}
+            >
+              ✨ {t("codegen_suggest_fix")}
+            </button>
+          )}
+          <button
+            onClick={onCompile}
+            disabled={running}
+            className="h-7 px-3 rounded-md text-[11.5px] font-medium border-0 cursor-pointer"
+            style={{
+              background: running ? "var(--c-panel)" : "var(--c-accent)",
+              color: running ? "var(--c-ink-3)" : "white",
+              opacity: running ? 0.8 : 1,
+            }}
+          >
+            {running ? t("codegen_compiling") : t("codegen_compile")}
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

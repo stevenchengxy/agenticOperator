@@ -39,6 +39,7 @@ import {
 import { DiffViewer } from "./DiffViewer";
 import { SaveAsVersionButton } from "./SaveAsVersionButton";
 import { EvaluationPanel } from "./EvaluationPanel";
+import { CodeFixerDialog, type FixSuggestion } from "./CodeFixerDialog";
 import type { CompileResult } from "@/lib/agent-codegen/compiler/types";
 import type { AgentSpec } from "@/lib/agent-codegen/spec-types";
 import type { EvaluationReport } from "@/lib/agent-codegen/eval/evaluation-report";
@@ -99,6 +100,12 @@ export function CodegenContent() {
   const [evalReport, setEvalReport] = React.useState<EvaluationReport | null>(null);
   const [evalRunning, setEvalRunning] = React.useState(false);
   const [evalError, setEvalError] = React.useState<string | null>(null);
+  // AI code-fixer state. Opens the modal + fires the LLM call when the
+  // operator clicks ✨ Suggest fix in the CompilerPanel.
+  const [fixerOpen, setFixerOpen] = React.useState(false);
+  const [fixerSuggestion, setFixerSuggestion] = React.useState<FixSuggestion | null>(null);
+  const [fixerRunning, setFixerRunning] = React.useState(false);
+  const [fixerError, setFixerError] = React.useState<string | null>(null);
 
   // When the form points at a registered agent, pre-fetch its saved
   // codegen versions so the Diff tab has a real left side.
@@ -245,6 +252,68 @@ export function CodegenContent() {
       setEvalRunning(false);
     }
   }, [spec, code, businessLogic, domain, pipelineTimings]);
+
+  const requestFixSuggestion = React.useCallback(async () => {
+    if (!compileResult || compileResult.diagnostics.length === 0) return;
+    setFixerOpen(true);
+    setFixerRunning(true);
+    setFixerError(null);
+    setFixerSuggestion(null);
+    try {
+      const r = await fetch("/api/codegen/fix-suggestion", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          filename: virtualPath,
+          code,
+          diagnostics: compileResult.diagnostics,
+          domain,
+        }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      setFixerSuggestion((await r.json()) as FixSuggestion);
+    } catch (e) {
+      setFixerError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFixerRunning(false);
+    }
+  }, [compileResult, code, virtualPath, domain]);
+
+  const applyFix = React.useCallback(
+    (patched: string) => {
+      setCode(patched);
+      setFixerOpen(false);
+      setFixerSuggestion(null);
+      // Immediately retest — operator sees if the fix worked.
+      void (async () => {
+        setCompiling(true);
+        setCompileError(null);
+        try {
+          const r = await fetch("/api/codegen/compile", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              files: [{ path: virtualPath, content: patched }],
+              domain,
+            }),
+          });
+          if (!r.ok) {
+            const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+            throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+          }
+          setCompileResult((await r.json()) as CompileResult);
+        } catch (e) {
+          setCompileError(e instanceof Error ? e.message : String(e));
+        } finally {
+          setCompiling(false);
+        }
+      })();
+    },
+    [virtualPath, domain],
+  );
 
   const runCompile = React.useCallback(async () => {
     setCompiling(true);
@@ -443,6 +512,7 @@ export function CodegenContent() {
           running={compiling}
           error={compileError}
           onCompile={runCompile}
+          onSuggestFix={requestFixSuggestion}
           saveButton={
             <SaveAsVersionButton
               slug={spec?.slug ?? form.slug ?? null}
@@ -455,6 +525,21 @@ export function CodegenContent() {
           }
         />
       </div>
+
+      {fixerOpen && (
+        <CodeFixerDialog
+          currentCode={code}
+          suggestion={fixerSuggestion}
+          running={fixerRunning}
+          error={fixerError}
+          onApply={applyFix}
+          onClose={() => {
+            setFixerOpen(false);
+            setFixerSuggestion(null);
+            setFixerError(null);
+          }}
+        />
+      )}
     </div>
   );
 }
