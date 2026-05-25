@@ -40,6 +40,8 @@ import { DiffViewer } from "./DiffViewer";
 import { SaveAsVersionButton } from "./SaveAsVersionButton";
 import { EvaluationPanel } from "./EvaluationPanel";
 import { CodeFixerDialog, type FixSuggestion } from "./CodeFixerDialog";
+import { AutoIterateDialog, type OnAdoptArgs } from "./AutoIterateDialog";
+import type { AutoIterateRunResult } from "@/lib/agent-codegen/eval/auto-iterate";
 import type { CompileResult } from "@/lib/agent-codegen/compiler/types";
 import type { AgentSpec } from "@/lib/agent-codegen/spec-types";
 import type { EvaluationReport } from "@/lib/agent-codegen/eval/evaluation-report";
@@ -106,6 +108,11 @@ export function CodegenContent() {
   const [fixerSuggestion, setFixerSuggestion] = React.useState<FixSuggestion | null>(null);
   const [fixerRunning, setFixerRunning] = React.useState(false);
   const [fixerError, setFixerError] = React.useState<string | null>(null);
+  // Bundle M — AI auto-iteration loop. Triggered from EvaluationPanel.
+  const [autoIterOpen, setAutoIterOpen] = React.useState(false);
+  const [autoIterRunning, setAutoIterRunning] = React.useState(false);
+  const [autoIterResult, setAutoIterResult] = React.useState<AutoIterateRunResult | null>(null);
+  const [autoIterError, setAutoIterError] = React.useState<string | null>(null);
 
   // When the form points at a registered agent, pre-fetch its saved
   // codegen versions so the Diff tab has a real left side.
@@ -252,6 +259,47 @@ export function CodegenContent() {
       setEvalRunning(false);
     }
   }, [spec, code, businessLogic, domain, pipelineTimings]);
+
+  const requestAutoIterate = React.useCallback(async () => {
+    setAutoIterOpen(true);
+    setAutoIterRunning(true);
+    setAutoIterError(null);
+    setAutoIterResult(null);
+    try {
+      const r = await fetch("/api/codegen/auto-iterate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          form: toApiPayload(form),
+          initialBusinessLogic: businessLogic,
+          domain,
+          maxIterations: 3,
+        }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      setAutoIterResult((await r.json()) as AutoIterateRunResult);
+    } catch (e) {
+      setAutoIterError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAutoIterRunning(false);
+    }
+  }, [form, businessLogic, domain]);
+
+  const adoptAutoIterRound = React.useCallback(
+    (args: OnAdoptArgs) => {
+      setBusinessLogic(args.businessLogic);
+      setCode(args.code);
+      setVirtualPath(args.codePath);
+      setAutoIterOpen(false);
+      // Final round of the loop already produced a fresh EvaluationReport
+      // server-side; we'd ideally fetch it back, but for simplicity let
+      // the operator click Re-evaluate manually.
+    },
+    [],
+  );
 
   const requestFixSuggestion = React.useCallback(async () => {
     if (!compileResult || compileResult.diagnostics.length === 0) return;
@@ -501,6 +549,8 @@ export function CodegenContent() {
                 onRun={runEvaluation}
                 canRun={!!spec}
                 generatedCode={code}
+                onAutoIterate={requestAutoIterate}
+                autoIterateBusy={autoIterRunning}
               />
             )}
           </div>
@@ -538,6 +588,20 @@ export function CodegenContent() {
             setFixerSuggestion(null);
             setFixerError(null);
           }}
+        />
+      )}
+
+      {autoIterOpen && (
+        <AutoIterateDialog
+          running={autoIterRunning}
+          result={autoIterResult}
+          error={autoIterError}
+          onClose={() => {
+            setAutoIterOpen(false);
+            setAutoIterResult(null);
+            setAutoIterError(null);
+          }}
+          onAdopt={adoptAutoIterRound}
         />
       )}
     </div>
