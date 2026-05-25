@@ -16,6 +16,7 @@ import type { DomainId } from '@/lib/domains';
 import type { StepBody } from '../templates/render-agent';
 import { pickCodegenGateway, makeClient } from './gateway';
 import { pickFewShots, type FewShotEntry } from '../few-shot-index';
+import { formatCanonicalForPrompt } from '../ontology/canonical-schemas';
 
 export type FillBodiesInput = {
   spec: AgentSpec;
@@ -193,21 +194,33 @@ function renderFewShot(s: FewShotEntry): string {
 }
 
 function formatToolEntry(t: ToolRegistryEntry): string {
-  const head = [
+  const parts: string[] = [
     `  - ${t.id} [${t.category}]`,
     `      import { ${t.importName} } from '${t.importFrom}';`,
     `      ${t.signature}`,
     `      ${t.summary}`,
-  ].join('\n');
-  if (!t.exampleCalls || t.exampleCalls.length === 0) return head;
-  const examples = t.exampleCalls
-    .map((ex) => {
+  ];
+  // Bundle J — inject canonical Allmeta entity schema for ontology-bound
+  // writers so the LLM uses real ontology fields instead of guessing.
+  if (t.canonicalEntity) {
+    const block = formatCanonicalForPrompt(t.canonicalEntity);
+    if (block) {
+      parts.push(
+        block
+          .split('\n')
+          .map((line) => '      ' + line)
+          .join('\n'),
+      );
+    }
+  }
+  if (t.exampleCalls && t.exampleCalls.length > 0) {
+    for (const ex of t.exampleCalls) {
       const indented = ex
         .split('\n')
         .map((line) => '        ' + line)
         .join('\n');
-      return `      production call pattern:\n${indented}`;
-    })
-    .join('\n');
-  return `${head}\n${examples}`;
+      parts.push(`      production call pattern:\n${indented}`);
+    }
+  }
+  return parts.join('\n');
 }

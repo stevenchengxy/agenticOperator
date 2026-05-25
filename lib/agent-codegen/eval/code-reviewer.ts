@@ -15,6 +15,7 @@
 
 import type { AgentSpec } from '../spec-types';
 import type { ToolRegistryEntry } from '../registries';
+import { canonicalFieldNames } from '../ontology/canonical-schemas';
 
 export type ReviewSeverity = 'error' | 'warning' | 'info';
 
@@ -59,6 +60,7 @@ const RULES: Rule[] = [
   ruleExternalCallsWrappedInTryCatch,
   ruleStepsHaveLogger,
   ruleStepRunsHaveReturn,
+  ruleAllmetaCanonicalFieldsOnly,
 ];
 
 export function reviewCode(input: ReviewInput): ReviewReport {
@@ -238,6 +240,51 @@ function ruleStepRunsHaveReturn({ source, spec }: ReviewInput): ReviewIssue[] {
   return issues;
 }
 
+/**
+ * Bundle J rule — every writeXInstance call argument must use ONLY fields
+ * from the canonical AllmetaOntology schema for that entity. Catches the
+ * "allmeta silently rejects unknown fields" class of bug.
+ *
+ * Implementation: scan source for `writeXInstance({ ... })` call sites,
+ * extract top-level object-literal keys, compare to the canonical set for
+ * the corresponding entity, flag any unknown keys.
+ */
+function ruleAllmetaCanonicalFieldsOnly({ source, toolRegistry }: ReviewInput): ReviewIssue[] {
+  const issues: ReviewIssue[] = [];
+  const allmetaWriters = toolRegistry.filter((t) => t.canonicalEntity);
+
+  for (const t of allmetaWriters) {
+    const canonicalFields = canonicalFieldNames(t.canonicalEntity!);
+    // Allow the `requirement` / `parsed` wrapper keys — those are writer-
+    // specific helper keys that the writer unpacks into canonical fields
+    // internally (see lib/allmeta-writers/<entity>.ts).
+    const allowedExtras = new Set(['requirement', 'parsed']);
+
+    // Find all call sites of this writer.
+    const callRe = new RegExp(
+      `\\b${escapeRegex(t.importName)}\\s*\\(\\s*\\{`,
+      'g',
+    );
+    for (const m of source.matchAll(callRe)) {
+      const startBrace = (m.index ?? 0) + m[0].length - 1;
+      const objLit = extractBracedRegion(source, startBrace);
+      if (!objLit) continue;
+      const keys = extractTopLevelKeys(objLit);
+      for (const k of keys) {
+        if (canonicalFields.has(k) || allowedExtras.has(k)) continue;
+        issues.push({
+          ruleId: 'allmeta-canonical-fields-only',
+          severity: 'warning',
+          message: `${t.importName}({ ${k}: … }) — "${k}" is not in the canonical ${t.canonicalEntity} schema; allmeta will drop or reject it.`,
+          line: lineOf(source, m.index ?? 0),
+          hint: `Either rename to a canonical ${t.canonicalEntity} field, OR wrap your inputs under \`parsed\`/\`requirement\` so the writer normalizes them.`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────
@@ -291,6 +338,155 @@ function isInsideTryBlock(source: string, index: number): boolean {
     }
   }
   return false;
+}
+
+/** From an index pointing at `{`, return the text BETWEEN the matching
+ *  braces (exclusive), with nested braces respected. Returns null on
+ *  unbalanced input. Crude but sufficient for top-level reviewer pattern
+ *  matching — full TS-AST is Bundle K territory. */
+function extractBracedRegion(source: string, openBraceIdx: number): string | null {
+  if (source[openBraceIdx] !== '{') return null;
+  let depth = 1;
+  let i = openBraceIdx + 1;
+  let inStr: false | '"' | "'" | '`' = false;
+  let inTemplateExpr = 0;
+  while (i < source.length && depth > 0) {
+    const c = source[i];
+    if (inStr) {
+      if (c === '\\') {
+        i += 2;
+        continue;
+      }
+      if (inStr === '`' && c === '$' && source[i + 1] === '{') {
+        inTemplateExpr++;
+        i += 2;
+        continue;
+      }
+      if (c === inStr) inStr = false;
+    } else if (inTemplateExpr > 0) {
+      if (c === '{') inTemplateExpr++;
+      else if (c === '}') inTemplateExpr--;
+    } else {
+      if (c === '"' || c === "'" || c === '`') inStr = c;
+      else if (c === '{') depth++;
+      else if (c === '}') depth--;
+    }
+    i++;
+  }
+  if (depth !== 0) return null;
+  return source.slice(openBraceIdx + 1, i - 1);
+}
+
+/** Extract top-level object-literal keys from a brace-content snippet.
+ *  Skips strings, template literals, nested objects, comments, spread.
+ *  Returns [] on parse failure (defensive). */
+function extractTopLevelKeys(body: string): string[] {
+  const keys: string[] = [];
+  let i = 0;
+  let depth = 0;
+  let inStr: false | '"' | "'" | '`' = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let atKeyStart = true;
+  let buf = '';
+
+  while (i < body.length) {
+    const c = body[i];
+    const next = body[i + 1];
+
+    if (inLineComment) {
+      if (c === '\n') inLineComment = false;
+      i++;
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === '*' && next === '/') {
+        inBlockComment = false;
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (inStr) {
+      if (c === '\\') {
+        i += 2;
+        continue;
+      }
+      if (c === inStr) inStr = false;
+      i++;
+      continue;
+    }
+    // Outside any nested context, ready to read a key.
+    if (depth === 0) {
+      if (c === '/' && next === '/') {
+        inLineComment = true;
+        i += 2;
+        continue;
+      }
+      if (c === '/' && next === '*') {
+        inBlockComment = true;
+        i += 2;
+        continue;
+      }
+      if (c === '{' || c === '[' || c === '(') {
+        depth++;
+        atKeyStart = false;
+        i++;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        inStr = c;
+        i++;
+        continue;
+      }
+      if (c === ',') {
+        atKeyStart = true;
+        buf = '';
+        i++;
+        continue;
+      }
+      if (c === ':') {
+        // End of key
+        const k = buf.trim();
+        if (k && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) keys.push(k);
+        // Anything that's not a plain ident (like quoted keys, computed
+        // keys) is intentionally skipped — we don't validate those.
+        buf = '';
+        // Skip the value until next top-level comma or end.
+        atKeyStart = false;
+        i++;
+        continue;
+      }
+      if (atKeyStart) {
+        // Building the key name candidate.
+        if (/\s/.test(c)) {
+          // Whitespace allowed before key starts; if buf already has
+          // content, treat as end of key.
+          i++;
+          continue;
+        }
+        buf += c;
+      }
+      i++;
+      continue;
+    }
+    // Inside nested {[(.
+    if (c === '"' || c === "'" || c === '`') {
+      inStr = c;
+    } else if (c === '{' || c === '[' || c === '(') {
+      depth++;
+    } else if (c === '}' || c === ']' || c === ')') {
+      depth--;
+      if (depth === 0) {
+        // After closing nested value, expect comma or end → ready for next key.
+        atKeyStart = true;
+        buf = '';
+      }
+    }
+    i++;
+  }
+  return keys;
 }
 
 /** Given the source and the position right after `step.run('id'`, find the

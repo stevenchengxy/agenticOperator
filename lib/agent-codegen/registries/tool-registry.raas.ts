@@ -33,6 +33,14 @@ export type ToolRegistryEntry = {
    * Added 2026-05-25 from inspection of the 5 real agents (D2 tuning).
    */
   exampleCalls?: string[];
+  /**
+   * AllmetaOntology entity label this tool writes to (Bundle J).
+   * When set, codegen prompts inject the canonical field list so the LLM
+   * uses real ontology fields instead of guessing from parse output.
+   * Reviewer + dynamic runner also enforce that only canonical keys appear
+   * in writeXInstance call sites.
+   */
+  canonicalEntity?: string;
 };
 
 export const TOOL_REGISTRY_RAAS: ReadonlyArray<ToolRegistryEntry> = [
@@ -203,6 +211,7 @@ if (r.ok) logger.info(\`[\${AGENT_NAME}] ✓ allmeta wrote Job_Requisition \${re
 else logger.warn(\`[\${AGENT_NAME}] allmeta JR write failed: \${r.error}\`);
 return r;`,
     ],
+    canonicalEntity: 'Job_Requisition',
   },
   {
     id: 'allmeta.writeJobPosting',
@@ -212,6 +221,7 @@ return r;`,
     summary: 'Mirror a job_posting row into the Allmeta Neo4j ontology.',
     sideEffects: 'writes Neo4j Job_Posting instance',
     category: 'allmeta',
+    canonicalEntity: 'Job_Posting',
   },
   {
     id: 'allmeta.writeCandidate',
@@ -221,6 +231,7 @@ return r;`,
     summary: 'Mirror a candidate row into the Allmeta Neo4j ontology.',
     sideEffects: 'writes Neo4j Candidate instance',
     category: 'allmeta',
+    canonicalEntity: 'Candidate',
   },
   {
     id: 'allmeta.writeResume',
@@ -230,6 +241,7 @@ return r;`,
     summary: 'Mirror a parsed resume into the Allmeta Neo4j ontology.',
     sideEffects: 'writes Neo4j Resume instance',
     category: 'allmeta',
+    canonicalEntity: 'Resume',
   },
   {
     id: 'allmeta.writeCandidateMatchResult',
@@ -239,6 +251,7 @@ return r;`,
     summary: 'Mirror a match-result row (overall + per-dimension) into the Allmeta Neo4j ontology.',
     sideEffects: 'writes Neo4j Candidate_Match_Result instance',
     category: 'allmeta',
+    canonicalEntity: 'Candidate_Match_Result',
   },
   {
     id: 'allmeta.writeCommunicationLog',
@@ -248,6 +261,7 @@ return r;`,
     summary: 'Mirror an outbound communication (email / SMS / phone) into the Allmeta ontology.',
     sideEffects: 'writes Neo4j Communication_Log instance',
     category: 'allmeta',
+    canonicalEntity: 'Communication_Log',
   },
   {
     id: 'allmeta.writeInterviewRecord',
@@ -257,6 +271,7 @@ return r;`,
     summary: 'Mirror an interview event (invitation/round/result) into the Allmeta ontology.',
     sideEffects: 'writes Neo4j Interview_Record instance',
     category: 'allmeta',
+    canonicalEntity: 'Interview_Record',
   },
   // ── Rule check ───────────────────────────────────────────────────────
   {

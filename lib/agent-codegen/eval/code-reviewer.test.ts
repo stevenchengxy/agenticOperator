@@ -37,6 +37,16 @@ const TOOL_REGISTRY: ToolRegistryEntry[] = [
     sideEffects: 'external HTTP; may throw RobohireApiError',
     category: 'robohire',
   },
+  {
+    id: 'allmeta.writeCandidate',
+    importFrom: '@/lib/allmeta-writers',
+    importName: 'writeCandidateInstance',
+    signature: '',
+    summary: '',
+    sideEffects: 'writes Neo4j Candidate instance',
+    category: 'allmeta',
+    canonicalEntity: 'Candidate',
+  },
 ];
 
 function passingSource() {
@@ -134,6 +144,59 @@ describe('reviewCode', () => {
     const issue = r.issues.find((i) => i.ruleId === 'steps-have-logger' && i.message.includes('persist-thing'));
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe('info');
+  });
+
+  // ── Bundle J: allmeta canonical fields ───────────────────────────
+
+  it('flags a writeCandidateInstance call using a non-canonical field (e.g. full_name)', () => {
+    const src =
+      "import { writeCandidateInstance } from '@/lib/allmeta-writers';\n" +
+      "import { inngest } from '@/server/inngest/client';\n" +
+      "export const a = inngest.createFunction({ id: 'a' }, { event: 'X' }, async () => {\n" +
+      "  await writeCandidateInstance({\n" +
+      "    candidate_id: 'cand_1',\n" +
+      "    full_name: 'Wrong Field Name',\n" +     // ← not canonical (canonical is 'name')
+      "    email: 'ok@x.com',\n" +
+      "  });\n" +
+      "});\n";
+    const r = reviewCode({ source: src, spec: MINIMAL_SPEC, toolRegistry: TOOL_REGISTRY });
+    const issue = r.issues.find(
+      (i) => i.ruleId === 'allmeta-canonical-fields-only' && i.message.includes('full_name'),
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe('warning');
+  });
+
+  it('does NOT flag the parsed wrapper key (writer normalizes internally)', () => {
+    const src =
+      "import { writeCandidateInstance } from '@/lib/allmeta-writers';\n" +
+      "import { inngest } from '@/server/inngest/client';\n" +
+      "export const a = inngest.createFunction({ id: 'a' }, { event: 'X' }, async () => {\n" +
+      "  await writeCandidateInstance({\n" +
+      "    candidate_id: 'cand_1',\n" +
+      "    parsed: { name: 'X', phone: 'Y' },\n" +
+      "  });\n" +
+      "});\n";
+    const r = reviewCode({ source: src, spec: MINIMAL_SPEC, toolRegistry: TOOL_REGISTRY });
+    const issue = r.issues.find((i) => i.ruleId === 'allmeta-canonical-fields-only');
+    expect(issue).toBeUndefined();
+  });
+
+  it('does NOT flag canonical fields (candidate_id, name, email)', () => {
+    const src =
+      "import { writeCandidateInstance } from '@/lib/allmeta-writers';\n" +
+      "import { inngest } from '@/server/inngest/client';\n" +
+      "export const a = inngest.createFunction({ id: 'a' }, { event: 'X' }, async () => {\n" +
+      "  await writeCandidateInstance({\n" +
+      "    candidate_id: 'cand_1',\n" +
+      "    name: 'A',\n" +
+      "    email: 'a@b.com',\n" +
+      "    phone: '12345',\n" +
+      "  });\n" +
+      "});\n";
+    const r = reviewCode({ source: src, spec: MINIMAL_SPEC, toolRegistry: TOOL_REGISTRY });
+    const issue = r.issues.find((i) => i.ruleId === 'allmeta-canonical-fields-only');
+    expect(issue).toBeUndefined();
   });
 
   it('flags long step callback without return / throw', () => {

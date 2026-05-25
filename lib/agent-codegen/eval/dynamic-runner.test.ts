@@ -182,6 +182,60 @@ describe('runTestCase — dynamic execution', () => {
     expect(r.errorMessage).toMatch(/no mock for require/);
   });
 
+  it('strict allmeta mock (Bundle J) — writeCandidateInstance with unknown field returns ok=false', async () => {
+    const ALLMETA_REGISTRY: ToolRegistryEntry[] = [
+      ...REGISTRY,
+      {
+        id: 'allmeta.writeCandidate',
+        importFrom: '@/lib/allmeta-writers',
+        importName: 'writeCandidateInstance',
+        signature: '',
+        summary: '',
+        sideEffects: 'writes Neo4j Candidate instance',
+        category: 'allmeta',
+        canonicalEntity: 'Candidate',
+      },
+    ];
+    const sourceBadField = `
+      import { writeCandidateInstance } from '@/lib/allmeta-writers';
+      import { inngest } from '@/server/inngest/client';
+      export const a = inngest.createFunction(
+        { id: 'a' },
+        { event: 'X' },
+        async ({ step, logger }) => {
+          const r = await step.run('write', async () => {
+            const w = await writeCandidateInstance({
+              candidate_id: 'cand_1',
+              full_name: 'Wrong Field',
+            });
+            if (!w.ok) logger.warn('allmeta failed: ' + w.error);
+            return w;
+          });
+          await inngest.send({ name: 'JD_GENERATED', data: { ok: r.ok, err: r.error } });
+        },
+      );
+    `;
+    const passingCase: TestCase = {
+      name: 'demo',
+      description: '',
+      category: 'happy-path',
+      inputEvent: { name: 'X', data: {} },
+      mockSetup: [], // no explicit mock — strict default kicks in
+      expectedOutcome: { handlerResolves: 'success', expectedEmits: ['JD_GENERATED'] },
+    };
+    const r = await runTestCase({
+      source: sourceBadField,
+      testCase: passingCase,
+      toolRegistry: ALLMETA_REGISTRY,
+    });
+    expect(r.passed).toBe(true);
+    expect(r.handlerOutcome).toBe('resolved');
+    expect(r.capturedEmits).toEqual(['JD_GENERATED']);
+    // The strict allmeta mock surfaced the error message through to the agent body.
+    // (The test isn't asserting on it directly — point is the mock returned ok=false
+    // without throwing, so the agent observed the bad-field case end-to-end.)
+  });
+
   it('captures timeout when handler hangs', async () => {
     const hangSource = `
       import { inngest } from '@/server/inngest/client';

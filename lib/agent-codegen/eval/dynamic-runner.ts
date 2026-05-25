@@ -32,6 +32,7 @@ import * as ts from 'typescript';
 import * as vm from 'node:vm';
 import type { TestCase } from './test-case-generator';
 import type { ToolRegistryEntry } from '../registries';
+import { canonicalFieldNames } from '../ontology/canonical-schemas';
 
 export type HandlerOutcome =
   | 'resolved'
@@ -274,7 +275,45 @@ function buildMockModules(
     });
   }
 
+  // ── Bundle J — for any allmeta writer NOT explicitly mocked by the
+  // test case, install a strict-validating fake that mirrors the real
+  // allmeta server: input fields must be canonical or the writer's
+  // documented wrapper keys (parsed / requirement). Unknown field ⇒
+  // { ok: false, error: 'unknown_field_<X>' }. This catches the
+  // "code compiles + behavior looks right but allmeta silently rejects"
+  // class of bug that pure mocks miss.
+  for (const entry of registry) {
+    if (!entry.canonicalEntity) continue;
+    const path = entry.importFrom;
+    const existing = modules.get(path) ?? {};
+    if (existing[entry.importName]) continue; // case-specific mock wins
+    modules.set(path, {
+      ...existing,
+      [entry.importName]: makeStrictAllmetaMock(entry.canonicalEntity),
+    });
+  }
+
   return modules;
+}
+
+const ALLMETA_WRAPPER_KEYS = new Set(['requirement', 'parsed']);
+
+function makeStrictAllmetaMock(entityName: string) {
+  const allowed = canonicalFieldNames(entityName);
+  return async (input: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => {
+    if (!input || typeof input !== 'object') {
+      return { ok: false, error: `bad input shape (expected object)` };
+    }
+    for (const key of Object.keys(input)) {
+      if (!allowed.has(key) && !ALLMETA_WRAPPER_KEYS.has(key)) {
+        return {
+          ok: false,
+          error: `unknown_field_${key} (not in canonical ${entityName} schema)`,
+        };
+      }
+    }
+    return { ok: true };
+  };
 }
 
 function makeToolMockFn(

@@ -17,6 +17,7 @@ import {
 } from '../spec-types';
 import { getToolRegistry, type ToolRegistryEntry } from '../registries';
 import { pickCodegenGateway, makeClient } from './gateway';
+import { formatCanonicalForPrompt } from '../ontology/canonical-schemas';
 
 export type GenerateStepsInput = {
   form: AgentFormFields;
@@ -101,10 +102,16 @@ function buildSystemPrompt(
 ): string {
   const toolsBlock = tools.length
     ? tools
-        .map(
-          (t) =>
-            `  - ${t.id} [${t.category}]\n      import { ${t.importName} } from '${t.importFrom}';\n      ${t.signature}\n      ${t.summary}`,
-        )
+        .map((t) => {
+          const head = `  - ${t.id} [${t.category}]\n      import { ${t.importName} } from '${t.importFrom}';\n      ${t.signature}\n      ${t.summary}`;
+          // Bundle J — show canonical entity hint when relevant; helps the
+          // LLM realize "this step writes Candidate" → it shapes the input
+          // around canonical fields when proposing inputs/outputs.
+          if (t.canonicalEntity) {
+            return `${head}\n      → writes ontology entity "${t.canonicalEntity}" (canonical fields exposed at step-body fill time).`;
+          }
+          return head;
+        })
         .join('\n')
     : '  (no tools registered for this domain — leave callsLib empty in each step)';
 
