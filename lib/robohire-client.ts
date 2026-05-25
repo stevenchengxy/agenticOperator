@@ -296,6 +296,128 @@ export async function generateJdDirect(
   );
 }
 
+// ─── invite-candidate ───────────────────────────────────────────
+//
+// POST /api/v1/invite-candidate
+// 触发 RoboHire 在 GoHire 端为候选人开一个 AI 视频面试入口(login_url +
+// qrcode_url),并把请求/响应记录到 RoboHire 自有的 Interview/HiringRequest
+// 表。AO 这边收到 _SENT 事件后会再把 Interview_Record + Communication_Log
+// 写到 Neo4j 通过 allmeta。
+//
+// 入参契约:
+//   - (resume OR resume_id) 必带其一:resume 为简历纯文本;resume_id 为
+//     已注册到 RoboHire 的 Resume.id(会 server-side 加载 resumeText +
+//     parsedData)。
+//   - (jd OR job_id) 必带其一:jd 为 JD 纯文本;job_id 为已注册到 RoboHire
+//     的 Job.id(server-side 解析 title/description/duration/language)。
+// 其它字段全可选,可覆盖 server-side 推断值。
+//
+// 返回 data 在 fresh-invite 路径含 login_url/qrcode_url/user_id 等
+// candidate-facing 入口字段;在 dedup-hit 路径会带 `reused:true` 复用之前的
+// invite。两种情况字段集基本一致,agent 端无需区分。
+
+export type RobohireInviteCandidateInput = {
+  // 二选一(resume / resume_id)
+  resume?: string;
+  resume_id?: string;
+  // 二选一(jd / job_id)
+  jd?: string;
+  job_id?: string;
+  // 可选
+  hiring_request_id?: string;
+  candidate_email?: string;
+  recruiter_email?: string;
+  interviewer_requirement?: string;
+  job_title?: string;
+  company_name?: string;
+  interview_language?: 'en' | 'zh' | 'ja';
+  /** Minutes, > 0;default Job.interviewDuration → 30. */
+  interview_duration?: number;
+  /** e.g. 'ai_video';RoboHire 仅落 Interview.metadata.inviteConfig. */
+  interview_mode?: string;
+  /** 0-100;RoboHire-side post-interview gate. */
+  passing_score?: number;
+  /** 字面 "null" 字符串会清掉 Job 层级的默认绑定. */
+  linked_assessment_id?: string;
+};
+
+export type RobohireInviteCandidateData = {
+  /** dedup hit 时 server 会返回这个标记;fresh invite 此字段不存在. */
+  reused?: boolean;
+  email?: string;
+  name?: string;
+  login_url?: string;
+  qrcode_url?: string;
+  /** Fresh-invite 是 number,dedup-hit 可能是 string. */
+  user_id?: number | string;
+  request_introduction_id?: string;
+  company_name?: string;
+  job_title?: string;
+  /** 实际生效的面试时长(分钟). */
+  job_interview_duration?: number;
+  gohire_job_id?: number | string;
+  message?: string;
+  resumeId?: string;
+  hiringRequestId?: string;
+  /**
+   * RoboHire 透传 GoHire 那一跳的完整 req/res — 出问题用来 forensic.
+   * Shape: { provider, endpoint, method, requestBody, responseBody }
+   */
+  gohireInviteLog?: Record<string, unknown>;
+  /**
+   * 200 + 这个字段非空 = "邀请送出,但 RoboHire 自己的 DB 落库失败";
+   * 不算 fatal,但应当 emit _FAILED(error_code=PERSISTENCE_WARNING)让
+   * RAAS 端知情,因为这条 RoboHire 侧不会自动对账。
+   */
+  persistenceWarning?: string;
+  [k: string]: unknown;
+};
+
+export type RobohireInviteCandidateResponse = {
+  data: RobohireInviteCandidateData;
+  requestId: string;
+  /** RoboHire 包了 envelope,success/error 字段在 handleJsonResponse 已校验. */
+  success?: boolean;
+};
+
+export async function inviteCandidateDirect(
+  input: RobohireInviteCandidateInput,
+  opts: CommonOpts = {},
+): Promise<RobohireInviteCandidateResponse> {
+  // 二选一字段校验 — 早 fail 比 RoboHire 返 400 后再翻 response 清晰得多.
+  if (!input.resume && !input.resume_id) {
+    throw new RobohireApiError(0, 'CLIENT', 'invite-candidate: resume 或 resume_id 至少给一个');
+  }
+  if (!input.jd && !input.job_id) {
+    throw new RobohireApiError(0, 'CLIENT', 'invite-candidate: jd 或 job_id 至少给一个');
+  }
+
+  const { baseUrl, apiKey, timeoutMs } = config();
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
+  if (opts.traceId) headers['X-Trace-Id'] = opts.traceId;
+
+  const url = `${baseUrl}/api/v1/invite-candidate`;
+  return instrumentedFetch(
+    'RoboHire.inviteCandidate',
+    url,
+    'POST',
+    input,
+    () =>
+      fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? timeoutMs),
+      }).catch((e) => {
+        throw new RobohireApiError(0, 'NETWORK', `invite-candidate fetch failed: ${(e as Error).message}`);
+      }),
+    (res) => handleJsonResponse<RobohireInviteCandidateResponse>(res, 'invite-candidate'),
+  );
+}
+
 // ─── shared response handler ────────────────────────────────────
 
 async function handleJsonResponse<T>(res: Response, op: string): Promise<T> {

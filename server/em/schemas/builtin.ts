@@ -59,9 +59,18 @@ const RESUME_DOWNLOADED_v1 = envelope(
   }).passthrough(),
 );
 
+// 2026-05-24: upload_id 由必填改可选 — RaaS Web Console "更换关联岗位" / "匹配
+// 同序列岗位" 两个功能不带 upload_id,只发 candidate_id + resume_id +
+// job_requisition_id 的 thin event,由 ruleCheckAgent back-pull partner-pg 补齐
+// parsed。ruleCheckAgent 第 94-96 行本就接受 upload_id 缺失;此处修 schema 与
+// agent 契约不一致。candidate_id / resume_id 显式 .optional() 仅为可读性,
+// .passthrough() 本就放行。
+// 见 docs/2026-05-22-ao-raas-event-architecture.md §7
 const RESUME_PROCESSED_v1 = envelope(
   z.object({
-    upload_id: z.string().min(1),
+    upload_id: z.string().min(1).optional(),
+    candidate_id: z.string().optional(),
+    resume_id: z.string().optional(),
     parsed: z
       .object({
         data: z.record(z.string(), z.unknown()),
@@ -121,6 +130,88 @@ const JD_REJECTED_v1 = envelope(
   z.object({
     requirement_id: z.string().optional(),
     reason: z.string(),
+  }).passthrough(),
+);
+
+// ── Interview invitation 事件(2026-05-25 新增) ─────────────────────────
+//
+// RAAS 消费 MATCH_PASSED_NEED_INTERVIEW 后,经 HSM/审批决定发邀请,发
+// INTERVIEW_INVITATION_REQUESTED 给 AO;AO interviewInviterAgent 调
+// RoboHire /api/v1/invite-candidate,回发 _SENT 或 _FAILED。
+//
+// 详见 server/inngest/client.ts InterviewInvitationRequestedPayload。
+
+const INTERVIEW_INVITATION_REQUESTED_v1 = envelope(
+  z.object({
+    candidate_id: z.string().min(1),
+    job_requisition_id: z.string().min(1),
+    application_id: z.string().nullable().optional(),
+    candidate_match_result_id: z.string().nullable().optional(),
+    client_id: z.string().nullable().optional(),
+    resume_id: z.string().nullable().optional(),
+    operator_id: z.string().nullable().optional(),
+
+    // RoboHire 入参直透 — 全可选,缺失时 agent 端按 anchors 回查 partner-pg
+    resume_text: z.string().optional(),
+    jd_text: z.string().optional(),
+    robohire_resume_id: z.string().optional(),
+    robohire_job_id: z.string().optional(),
+    hiring_request_id: z.string().optional(),
+    candidate_email: z.string().optional(),
+    recruiter_email: z.string().optional(),
+    interviewer_requirement: z.string().optional(),
+    job_title: z.string().optional(),
+    company_name: z.string().optional(),
+    interview_language: z.enum(['en', 'zh', 'ja']).optional(),
+    interview_duration: z.number().positive().optional(),
+    interview_mode: z.string().optional(),
+    passing_score: z.number().min(0).max(100).optional(),
+    linked_assessment_id: z.string().optional(),
+
+    runtime_context: z.record(z.string(), z.unknown()).optional(),
+  }).passthrough(),
+);
+
+const INTERVIEW_INVITATION_SENT_v1 = envelope(
+  z.object({
+    candidate_id: z.string().min(1),
+    job_requisition_id: z.string().min(1),
+    application_id: z.string().nullable().optional(),
+    candidate_match_result_id: z.string().nullable().optional(),
+    interview_record_id: z.string().min(1),
+    communication_log_id: z.string().min(1),
+    login_url: z.string().nullable(),
+    qrcode_url: z.string().nullable(),
+    user_id: z.union([z.string(), z.number(), z.null()]),
+    request_introduction_id: z.string().nullable(),
+    gohire_job_id: z.union([z.string(), z.number(), z.null()]),
+    candidate_email: z.string().nullable(),
+    interview_language: z.string().nullable(),
+    interview_duration_minutes: z.number().nullable(),
+    robohire_request_id: z.string().nullable(),
+    sent_at: z.string(),
+  }).passthrough(),
+);
+
+const INTERVIEW_INVITATION_FAILED_v1 = envelope(
+  z.object({
+    candidate_id: z.string().min(1),
+    job_requisition_id: z.string().min(1),
+    application_id: z.string().nullable().optional(),
+    error_code: z.enum([
+      'MISSING_PAYLOAD',
+      'BACKFILL_FAILED',
+      'ROBOHIRE_4XX',
+      'ROBOHIRE_QUOTA',
+      'ROBOHIRE_5XX',
+      'GOHIRE_REJECTED',
+      'PERSISTENCE_WARNING',
+      'UNKNOWN',
+    ]),
+    error_message: z.string(),
+    http_status: z.number().optional(),
+    robohire_request_id: z.string().nullable().optional(),
+    failed_at: z.string(),
   }).passthrough(),
 );
 
@@ -202,6 +293,30 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
     versions: [{ version: "1.0", schema: MATCH_FAILED_v1 }],
     publishers: ["rpa.matchResumeAgent"],
     subscribers: ["raas-backend.match-result-ingest-failed"],
+  },
+  {
+    name: "INTERVIEW_INVITATION_REQUESTED",
+    description:
+      "RAAS HSM/审批通过后请求 AO 发面试邀请;AO interviewInviterAgent 调 RoboHire /invite-candidate",
+    versions: [{ version: "1.0", schema: INTERVIEW_INVITATION_REQUESTED_v1 }],
+    publishers: ["raas-backend.interview-dispatcher"],
+    subscribers: ["ao.interviewInviterAgent"],
+  },
+  {
+    name: "INTERVIEW_INVITATION_SENT",
+    description:
+      "AO 已通过 RoboHire 把邀请送达候选人;payload 含 login_url/qrcode_url + interview_record_id",
+    versions: [{ version: "1.0", schema: INTERVIEW_INVITATION_SENT_v1 }],
+    publishers: ["ao.interviewInviterAgent"],
+    subscribers: ["raas-backend.interview-invitation-sync"],
+  },
+  {
+    name: "INTERVIEW_INVITATION_FAILED",
+    description:
+      "AO 发邀请失败;error_code 区分 RoboHire/GoHire/缺字段;RAAS 端据此决定重试或人工介入",
+    versions: [{ version: "1.0", schema: INTERVIEW_INVITATION_FAILED_v1 }],
+    publishers: ["ao.interviewInviterAgent"],
+    subscribers: ["raas-backend.interview-invitation-sync"],
   },
 ];
 

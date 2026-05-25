@@ -44,10 +44,13 @@ import { resumeParserAgent } from "./agents/resume-parser-agent";
 import { createJdAgent } from "./agents/create-jd-agent";
 import { matchResumeAgent } from "./agents/match-resume-agent";
 import { ruleCheckAgent } from "./agents/rule-check-agent";  // NEW PR-4
+import { interviewInviterAgent } from "./agents/interview-inviter-agent"; // 2026-05-25
 
 // wsIds owned by the real agents above. Stub-factory MUST skip these to
 // avoid double-handling of trigger events (race condition).
-const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10", "10-5"]);
+// "11-1" = interviewInviterAgent;AGENT_MAP wsId 11-1 已从 shell 升 real(见
+// lib/agent-mapping.ts 2026-05-25 注释)。
+const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10", "10-5", "11-1"]);
 
 // Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation).
 const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
@@ -78,7 +81,13 @@ const behaviorFunctions = BEHAVIOR_AGENTS_ENABLED
   ? [monitorAgent, managerAgent]
   : [];
 
-const realFunctions = [resumeParserAgent, createJdAgent, matchResumeAgent, ruleCheckAgent];
+const realFunctions = [
+  resumeParserAgent,
+  createJdAgent,
+  matchResumeAgent,
+  ruleCheckAgent,
+  interviewInviterAgent,
+];
 
 export const allFunctions = [
   ...realFunctions,

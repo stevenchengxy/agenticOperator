@@ -1,0 +1,410 @@
+// interview-inviter-agent.test.ts — unit tests for interviewInviterAgentHandler.
+//
+// 2026-05-25: 新 agent,触发 INTERVIEW_INVITATION_REQUESTED,调 RoboHire
+// /api/v1/invite-candidate,写 Neo4j Interview_Record + Communication_Log,
+// 回发 INTERVIEW_INVITATION_SENT / _FAILED。
+//
+// Pattern 同 rule-check-agent.test.ts:mock @/server/inngest/client +
+// 所有 module-level 依赖,import handler 直接驱动。
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// 1) inngest client — 阻止 createFunction 真注册。
+vi.mock('@/server/inngest/client', () => ({
+  inngest: {
+    createFunction: vi.fn((cfg: unknown, handler: unknown) => ({ cfg, handler })),
+  },
+}));
+
+// 2) RoboHire 客户端
+vi.mock('@/lib/robohire-client', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/robohire-client')>(
+    '@/lib/robohire-client',
+  );
+  return {
+    ...actual,
+    inviteCandidateDirect: vi.fn(),
+  };
+});
+
+// 3) Allmeta writers — 双写 Neo4j
+vi.mock('@/lib/allmeta-writers', () => ({
+  writeCommunicationLogInstance: vi.fn(async () => ({ ok: true, instance: {} })),
+  writeInterviewRecordInstance: vi.fn(async () => ({ ok: true, instance: {} })),
+}));
+
+// 4) partner-pg backfill
+vi.mock('@/lib/partner-pg/parsed-resume', () => ({
+  getParsedResume: vi.fn(),
+}));
+vi.mock('@/lib/partner-pg/requirements', () => ({
+  getRequirementDetail: vi.fn(),
+}));
+
+// 5) agent-logger — runWithLogger 必须 unwrap callback;createAgentLogger
+//    返回带 event() 方法的对象。
+vi.mock('@/lib/agent-logger', () => ({
+  createAgentLogger: vi.fn(() => ({
+    event: vi.fn(),
+    apiCall: vi.fn(),
+  })),
+  runWithLogger: vi.fn(async (_l: unknown, fn: () => unknown) => fn()),
+}));
+
+import { interviewInviterAgentHandler } from './interview-inviter-agent';
+import { inviteCandidateDirect, RobohireApiError } from '@/lib/robohire-client';
+import {
+  writeCommunicationLogInstance,
+  writeInterviewRecordInstance,
+} from '@/lib/allmeta-writers';
+import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
+import { getRequirementDetail } from '@/lib/partner-pg/requirements';
+
+const mockInvite = inviteCandidateDirect as ReturnType<typeof vi.fn>;
+const mockWriteComm = writeCommunicationLogInstance as ReturnType<typeof vi.fn>;
+const mockWriteIvr = writeInterviewRecordInstance as ReturnType<typeof vi.fn>;
+const mockGetParsedResume = getParsedResume as ReturnType<typeof vi.fn>;
+const mockGetRequirementDetail = getRequirementDetail as ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+// ── helpers ────────────────────────────────────────────────────────────
+
+type StepCalls = {
+  runs: Array<{ key: string; fn: () => Promise<unknown> }>;
+  events: Array<{ key: string; payload: { name: string; data: any } }>;
+};
+
+function fakeStep(): { step: any; calls: StepCalls } {
+  const calls: StepCalls = { runs: [], events: [] };
+  const step = {
+    run: async (key: string, fn: () => Promise<unknown>) => {
+      calls.runs.push({ key, fn });
+      return await fn();
+    },
+    sendEvent: async (key: string, payload: { name: string; data: any }) => {
+      calls.events.push({ key, payload });
+    },
+  };
+  return { step, calls };
+}
+
+function fakeLogger() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
+
+function envelope(payload: Record<string, unknown>) {
+  return {
+    name: 'INTERVIEW_INVITATION_REQUESTED',
+    data: {
+      entity_type: 'Candidate',
+      entity_id: payload.candidate_id ?? null,
+      event_id: 'evt_test',
+      payload,
+      trace: { trace_id: 'trace-test' },
+    },
+  };
+}
+
+// ── tests ──────────────────────────────────────────────────────────────
+
+describe('interviewInviterAgentHandler — happy path', () => {
+  it('调 RoboHire → 写 Comm_Log + Interview_Record → emit _SENT', async () => {
+    mockInvite.mockResolvedValueOnce({
+      data: {
+        login_url: 'https://gohire.top/i/abc',
+        qrcode_url: 'https://gohire.top/qr/abc.png',
+        user_id: 1234,
+        request_introduction_id: 'rii_xyz',
+        gohire_job_id: 'gh_42',
+        email: 'cand@example.com',
+        job_interview_duration: 30,
+      },
+      requestId: 'req_invite_1',
+    });
+
+    const { step, calls } = fakeStep();
+    const event = envelope({
+      candidate_id: 'C1',
+      job_requisition_id: 'JR1',
+      application_id: 'APP1',
+      operator_id: 'EMP_TEST',
+      resume_text: 'resume text body',
+      jd_text: 'jd text body',
+      interview_language: 'zh',
+      interview_duration: 30,
+    });
+
+    const out = await interviewInviterAgentHandler({
+      event,
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+
+    expect(out).toMatchObject({ ok: true, candidate_id: 'C1', job_requisition_id: 'JR1' });
+    expect(mockInvite).toHaveBeenCalledTimes(1);
+    expect(mockWriteComm).toHaveBeenCalledTimes(1);
+    expect(mockWriteIvr).toHaveBeenCalledTimes(1);
+
+    // 不应有 backfill(payload 已给了 resume_text + jd_text)
+    expect(mockGetParsedResume).not.toHaveBeenCalled();
+    expect(mockGetRequirementDetail).not.toHaveBeenCalled();
+
+    // 只 emit _SENT,无 _FAILED
+    const emits = calls.events.map((e) => e.payload.name);
+    expect(emits).toEqual(['INTERVIEW_INVITATION_SENT']);
+
+    const sent = calls.events[0].payload.data.payload;
+    expect(sent).toMatchObject({
+      candidate_id: 'C1',
+      job_requisition_id: 'JR1',
+      application_id: 'APP1',
+      login_url: 'https://gohire.top/i/abc',
+      qrcode_url: 'https://gohire.top/qr/abc.png',
+      user_id: 1234,
+      gohire_job_id: 'gh_42',
+      candidate_email: 'cand@example.com',
+      interview_duration_minutes: 30,
+      robohire_request_id: 'req_invite_1',
+    });
+    expect(sent.interview_record_id).toBe('ivr_C1_JR1_inv');
+    expect(sent.communication_log_id).toMatch(/^comm_invite_C1_JR1_\d+$/);
+  });
+});
+
+describe('interviewInviterAgentHandler — backfill paths', () => {
+  it('payload thin → backfill resume_text from partner-pg', async () => {
+    mockGetParsedResume.mockResolvedValueOnce({
+      candidate_id: 'C1',
+      resume_id: 'R1',
+      parsed_content: 'backfilled resume body',
+      data: { name: '张三' },
+    });
+    mockInvite.mockResolvedValueOnce({
+      data: { login_url: 'https://gohire.top/i/x', user_id: 1 },
+      requestId: 'r1',
+    });
+
+    const { step } = fakeStep();
+    await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        resume_id: 'R1',
+        jd_text: 'jd body',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+
+    expect(mockGetParsedResume).toHaveBeenCalledWith('C1', 'R1');
+    expect(mockInvite).toHaveBeenCalledTimes(1);
+    const inviteArg = mockInvite.mock.calls[0][0] as { resume?: string };
+    expect(inviteArg.resume).toBe('backfilled resume body');
+  });
+
+  it('payload 缺 resume_id 又缺 resume_text → emit _FAILED BACKFILL_FAILED + NonRetriable', async () => {
+    const { step, calls } = fakeStep();
+    await expect(
+      interviewInviterAgentHandler({
+        event: envelope({
+          candidate_id: 'C1',
+          job_requisition_id: 'JR1',
+          jd_text: 'jd body',
+          // 故意不带 resume_text / resume_id / robohire_resume_id
+        }),
+        step,
+        logger: fakeLogger(),
+        runId: 'r1',
+      }),
+    ).rejects.toThrow();
+    expect(mockInvite).not.toHaveBeenCalled();
+    const failedEmit = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failedEmit?.payload.data.payload).toMatchObject({
+      candidate_id: 'C1',
+      job_requisition_id: 'JR1',
+      error_code: 'BACKFILL_FAILED',
+    });
+  });
+
+  it('robohire_resume_id 直传 → 不走 partner-pg backfill', async () => {
+    mockInvite.mockResolvedValueOnce({
+      data: { login_url: 'https://x', user_id: 1 },
+      requestId: 'r1',
+    });
+    const { step } = fakeStep();
+    await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        robohire_resume_id: 'rsm_x',
+        robohire_job_id: 'job_x',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(mockGetParsedResume).not.toHaveBeenCalled();
+    expect(mockGetRequirementDetail).not.toHaveBeenCalled();
+    const inviteArg = mockInvite.mock.calls[0][0] as { resume_id?: string; job_id?: string };
+    expect(inviteArg.resume_id).toBe('rsm_x');
+    expect(inviteArg.job_id).toBe('job_x');
+  });
+});
+
+describe('interviewInviterAgentHandler — error paths', () => {
+  it('缺 candidate_id → emit _FAILED MISSING_PAYLOAD + NonRetriable', async () => {
+    const { step, calls } = fakeStep();
+    await expect(
+      interviewInviterAgentHandler({
+        event: envelope({ job_requisition_id: 'JR1' }),
+        step,
+        logger: fakeLogger(),
+        runId: 'r1',
+      }),
+    ).rejects.toThrow();
+    expect(mockInvite).not.toHaveBeenCalled();
+    const failedEmit = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failedEmit?.payload.data.payload.error_code).toBe('MISSING_PAYLOAD');
+  });
+
+  it('RoboHire 422(GoHire reject) → emit _FAILED ROBOHIRE_4XX,不重试', async () => {
+    mockInvite.mockRejectedValueOnce(
+      new RobohireApiError(422, 'CLIENT', 'gohire_invitation_failed', 'req_x'),
+    );
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: false, error: 'ROBOHIRE_4XX' });
+    expect(mockWriteComm).not.toHaveBeenCalled();
+    expect(mockWriteIvr).not.toHaveBeenCalled();
+    const failedEmit = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failedEmit?.payload.data.payload).toMatchObject({
+      error_code: 'ROBOHIRE_4XX',
+      http_status: 422,
+      robohire_request_id: 'req_x',
+    });
+  });
+
+  it('RoboHire 402 quota → emit _FAILED ROBOHIRE_QUOTA', async () => {
+    mockInvite.mockRejectedValueOnce(
+      new RobohireApiError(402, 'QUOTA_EXHAUSTED', 'out of quota'),
+    );
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: false, error: 'ROBOHIRE_QUOTA' });
+    const failedEmit = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failedEmit?.payload.data.payload.error_code).toBe('ROBOHIRE_QUOTA');
+  });
+
+  it('RoboHire 500 → 抛错走 Inngest retry(不 emit _FAILED)', async () => {
+    mockInvite.mockRejectedValueOnce(
+      new RobohireApiError(500, 'SERVER', 'internal'),
+    );
+    const { step, calls } = fakeStep();
+    await expect(
+      interviewInviterAgentHandler({
+        event: envelope({
+          candidate_id: 'C1',
+          job_requisition_id: 'JR1',
+          resume_text: 'r',
+          jd_text: 'j',
+        }),
+        step,
+        logger: fakeLogger(),
+        runId: 'r1',
+      }),
+    ).rejects.toThrow();
+    expect(calls.events.length).toBe(0);
+  });
+
+  it('persistenceWarning → 仍写 Neo4j + emit _FAILED PERSISTENCE_WARNING + emit _SENT', async () => {
+    mockInvite.mockResolvedValueOnce({
+      data: {
+        login_url: 'https://x',
+        user_id: 1,
+        persistenceWarning: 'DB write failed,but invite was sent',
+      },
+      requestId: 'req_warn',
+    });
+    const { step, calls } = fakeStep();
+    await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    const emitNames = calls.events.map((e) => e.payload.name);
+    expect(emitNames).toContain('INTERVIEW_INVITATION_FAILED');
+    expect(emitNames).toContain('INTERVIEW_INVITATION_SENT');
+    const failed = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failed?.payload.data.payload.error_code).toBe('PERSISTENCE_WARNING');
+    // Neo4j 写应该照常发生(候选人确实拿到了 login_url)
+    expect(mockWriteComm).toHaveBeenCalledTimes(1);
+    expect(mockWriteIvr).toHaveBeenCalledTimes(1);
+  });
+
+  it('RoboHire 200 但无 login_url 且非 reused → emit _FAILED GOHIRE_REJECTED', async () => {
+    mockInvite.mockResolvedValueOnce({
+      data: { message: 'something went wrong' },
+      requestId: 'req_nourl',
+    });
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C1',
+        job_requisition_id: 'JR1',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: false, error: 'GOHIRE_REJECTED' });
+    expect(mockWriteComm).not.toHaveBeenCalled();
+    expect(mockWriteIvr).not.toHaveBeenCalled();
+    const failed = calls.events.find(
+      (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
+    );
+    expect(failed?.payload.data.payload.error_code).toBe('GOHIRE_REJECTED');
+  });
+});

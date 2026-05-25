@@ -64,7 +64,12 @@ export const AGENT_MAP: AgentMeta[] = [
   { short: 'RuleCheck',        wsId: '10-5',    stage: 'match',       kind: 'auto',   ownerTeam: '合规',     version: 'v2.0.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: ['MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED'],                        terminal: false, inngestName: 'Rule Check Agent', inngestId: 'rule-check-agent' },
   // MatchReviewer (wsId 10-HITL) removed: not in authoritative workflow JSON.
   // MATCH_FAILED is terminal in the canonical workflow spec.
-  { short: 'InterviewInviter', wsId: '11-1',    stage: 'interview',   kind: 'auto',   ownerTeam: '技术招聘', version: 'v0.7.2', triggersEvents: ['MATCH_PASSED_NEED_INTERVIEW'],                    emitsEvents: ['INTERVIEW_INVITATION_SENT'],                                                terminal: true  },
+  // 2026-05-25: 由 shell 升级为 real agent。trigger 改为 INTERVIEW_INVITATION_REQUESTED
+  // —— matchResumeAgent emit MATCH_PASSED_NEED_INTERVIEW 后由 RaaS 端 HSM/审批
+  // 消费,再回发 INTERVIEW_INVITATION_REQUESTED 触发本 agent 调 RoboHire
+  // /api/v1/invite-candidate。emits 增加 _FAILED 路径(error_code 分类)。
+  // terminal 改 false:本 agent emit 的 _SENT 会被下游 AIInterviewer (wsId 11-2) 接。
+  { short: 'InterviewInviter', wsId: '11-1',    stage: 'interview',   kind: 'auto',   ownerTeam: '技术招聘', version: 'v1.0.0', triggersEvents: ['INTERVIEW_INVITATION_REQUESTED'],                  emitsEvents: ['INTERVIEW_INVITATION_SENT', 'INTERVIEW_INVITATION_FAILED'],                  terminal: false, inngestName: 'Interview Inviter Agent', inngestId: 'interview-inviter-agent' },
   { short: 'AIInterviewer',    wsId: '11-2',    stage: 'interview',   kind: 'hybrid', ownerTeam: '技术招聘', version: 'v0.7.2', triggersEvents: ['INTERVIEW_INVITATION_SENT'],                      emitsEvents: ['AI_INTERVIEW_COMPLETED'],                                                   terminal: false },
   { short: 'Evaluator',        wsId: '12',      stage: 'eval',        kind: 'auto',   ownerTeam: '技术招聘', version: 'v1.6.0', triggersEvents: ['AI_INTERVIEW_COMPLETED'],                         emitsEvents: ['EVALUATION_PASSED', 'EVALUATION_FAILED'],                                   terminal: false },
   { short: 'ResumeRefiner',    wsId: '13',      stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v1.1.0', triggersEvents: ['EVALUATION_PASSED', 'MATCH_PASSED_NO_INTERVIEW'], emitsEvents: ['RESUME_OPTIMIZED'],                                                         terminal: false },

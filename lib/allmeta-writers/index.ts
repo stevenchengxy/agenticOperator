@@ -18,3 +18,5 @@ export { writeCandidateInstance } from './candidate';
 export { writeResumeInstance } from './resume';
 export { writeApplicationInstance } from './application';
 export { writeCandidateMatchResultInstance } from './candidate-match-result';
+export { writeCommunicationLogInstance } from './communication-log';
+export { writeInterviewRecordInstance } from './interview-record';

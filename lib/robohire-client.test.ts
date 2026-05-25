@@ -3,6 +3,7 @@ import {
   parseResumeDirect,
   matchResumeDirect,
   generateJdDirect,
+  inviteCandidateDirect,
   RobohireApiError,
 } from './robohire-client';
 
@@ -151,6 +152,164 @@ describe('generateJdDirect', () => {
     await generateJdDirect({ prompt: 'test prompt that is long enough to be valid' }, { traceId: 'trace-jd' });
     const init = (fetchSpy.mock.calls[0][1] ?? {}) as RequestInit;
     expect((init.headers as Record<string, string>)['X-Trace-Id']).toBe('trace-jd');
+  });
+});
+
+describe('inviteCandidateDirect', () => {
+  it('returns fresh invite data on 200', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            email: 'cand@example.com',
+            name: 'Zhang San',
+            login_url: 'https://gohire.top/i/abc',
+            qrcode_url: 'https://gohire.top/qr/abc.png',
+            user_id: 1234,
+            request_introduction_id: 'rii_xyz',
+            company_name: 'AcmeCorp',
+            job_title: 'Senior FE',
+            job_interview_duration: 30,
+            gohire_job_id: 'gh_job_42',
+          },
+          requestId: 'req_invite_1',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await inviteCandidateDirect({
+      resume: 'resume text',
+      jd: 'jd text',
+      candidate_email: 'cand@example.com',
+    });
+    expect(r.data.login_url).toBe('https://gohire.top/i/abc');
+    expect(r.data.user_id).toBe(1234);
+    expect(r.data.gohire_job_id).toBe('gh_job_42');
+    expect(r.requestId).toBe('req_invite_1');
+  });
+
+  it('returns dedup-hit data with reused:true', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            reused: true,
+            email: 'cand@example.com',
+            name: 'Zhang San',
+            login_url: 'https://gohire.top/i/abc',
+            qrcode_url: 'https://gohire.top/qr/abc.png',
+            user_id: 'usr_old',
+          },
+          requestId: 'req_invite_dup',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await inviteCandidateDirect({
+      resume_id: 'rsm_existing',
+      job_id: 'job_existing',
+    });
+    expect(r.data.reused).toBe(true);
+    expect(r.data.user_id).toBe('usr_old');
+  });
+
+  it('throws CLIENT err synchronously when neither resume nor resume_id given', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await expect(
+      inviteCandidateDirect({ jd: 'jd text' } as any),
+    ).rejects.toMatchObject({ code: 'CLIENT' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws CLIENT err synchronously when neither jd nor job_id given', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await expect(
+      inviteCandidateDirect({ resume: 'resume text' } as any),
+    ).rejects.toMatchObject({ code: 'CLIENT' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws RobohireApiError 402 → QUOTA_EXHAUSTED', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ success: false, error: 'interview quota exhausted' }), {
+        status: 402,
+      }),
+    );
+    await expect(
+      inviteCandidateDirect({ resume: 'r', jd: 'j' }),
+    ).rejects.toMatchObject({ httpStatus: 402, code: 'QUOTA_EXHAUSTED' });
+  });
+
+  it('throws RobohireApiError 4xx with gohire_invitation_failed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: 'gohire_invitation_failed',
+          code: 'gohire_invitation_failed',
+          requestId: 'req_gohire_fail',
+        }),
+        { status: 422 },
+      ),
+    );
+    await expect(
+      inviteCandidateDirect({ resume: 'r', jd: 'j' }),
+    ).rejects.toMatchObject({ httpStatus: 422, code: 'CLIENT', requestId: 'req_gohire_fail' });
+  });
+
+  it('serializes the full input as JSON + passes Bearer auth + X-Trace-Id', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: { login_url: 'https://x', user_id: 1 },
+            requestId: 'r',
+          }),
+        ),
+      );
+    await inviteCandidateDirect(
+      {
+        resume: 'R',
+        jd: 'J',
+        candidate_email: 'c@e.com',
+        recruiter_email: 'rec@e.com',
+        interview_language: 'zh',
+        interview_duration: 45,
+        interview_mode: 'ai_video',
+        passing_score: 70,
+      },
+      { traceId: 'trace-invite' },
+    );
+    const init = (fetchSpy.mock.calls[0][1] ?? {}) as RequestInit;
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer rh_test_key');
+    expect((init.headers as Record<string, string>)['X-Trace-Id']).toBe('trace-invite');
+    const body = JSON.parse((init.body as string) ?? '{}');
+    expect(body).toMatchObject({
+      resume: 'R',
+      jd: 'J',
+      candidate_email: 'c@e.com',
+      interview_language: 'zh',
+      interview_duration: 45,
+      interview_mode: 'ai_video',
+      passing_score: 70,
+    });
+  });
+
+  it('hits the correct endpoint path', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ success: true, data: { login_url: 'https://x' }, requestId: 'r' }),
+        ),
+      );
+    await inviteCandidateDirect({ resume: 'R', jd: 'J' });
+    const url = fetchSpy.mock.calls[0][0] as string;
+    expect(url).toBe('https://api.robohire.io/api/v1/invite-candidate');
   });
 });
 

@@ -156,6 +156,157 @@ export type MatchPassedNeedInterviewData = MatchEventData;
 export type MatchPassedNoInterviewData = MatchEventData;
 export type MatchFailedData = MatchEventData;
 
+// ─── §3.3.1 Interview invitation 事件(2026-05-25 新增) ────
+//
+// 链路:matchResumeAgent → MATCH_PASSED_NEED_INTERVIEW → RAAS 消费 → RAAS
+// 经 HSM/审批后再发 INTERVIEW_INVITATION_REQUESTED → AO interviewInviterAgent
+// 调 RoboHire POST /api/v1/invite-candidate → 写 Neo4j Interview_Record +
+// Communication_Log → 回发 INTERVIEW_INVITATION_SENT(或 _FAILED)。
+//
+// Envelope-style payload(与其它 RAAS-emitted 事件一致):
+//   { entity_type, entity_id, event_id, payload:{...}, trace }
+//
+// Payload 字段对齐 RoboHire `/invite-candidate` 入参 + AO Neo4j 写实例所需
+// 的 anchors(candidate_id / job_requisition_id / application_id 等)。
+
+export type InterviewInvitationRequestedPayload = {
+  // ── anchors(必带,用于 Neo4j 写实例 + 回查 partner-pg)──
+  candidate_id: string;
+  job_requisition_id: string;
+  /** RaaS-side Application PK; Neo4j Interview_Record.application_id 引用. */
+  application_id?: string | null;
+  /** AO matchResumeAgent 写的 CMR Neo4j 主键,便于 trace 串起来. */
+  candidate_match_result_id?: string | null;
+  client_id?: string | null;
+  /** RaaS-side resume PK(用于 partner-pg 回查 parsed_content)。 */
+  resume_id?: string | null;
+  /** RaaS-side recruiter/operator;落 Communication_Log.message_sender 兜底. */
+  operator_id?: string | null;
+
+  // ── RoboHire 调用入参直透(参见 lib/robohire-client.ts inviteCandidateDirect)──
+  /** 优先直接传 resume 文本;为空则按 candidate_id+resume_id 从 partner-pg 回查 parsed_content. */
+  resume_text?: string;
+  /** 优先直接传 jd 文本;为空则按 job_requisition_id 从 partner-pg 回查 + flatten. */
+  jd_text?: string;
+  /** 已在 RoboHire 侧建立的 resume 行 id(可替代 resume_text). */
+  robohire_resume_id?: string;
+  /** 已在 RoboHire 侧建立的 job 行 id(可替代 jd_text). */
+  robohire_job_id?: string;
+  hiring_request_id?: string;
+  candidate_email?: string;
+  recruiter_email?: string;
+  interviewer_requirement?: string;
+  job_title?: string;
+  company_name?: string;
+  interview_language?: 'en' | 'zh' | 'ja';
+  /** 面试时长(分钟),> 0;default 30. */
+  interview_duration?: number;
+  /** 'ai_video' 等;RoboHire 仅落到 Interview.metadata.inviteConfig. */
+  interview_mode?: string;
+  passing_score?: number;
+  linked_assessment_id?: string;
+
+  /** runtime_context 透传(主要 traceId)。 */
+  runtime_context?: {
+    trace_id?: string | null;
+    request_id?: string | null;
+    workflow_id?: string | null;
+  };
+};
+
+export type InterviewInvitationRequestedData = {
+  entity_type?: string;
+  entity_id?: string | null;
+  event_id?: string;
+  payload: InterviewInvitationRequestedPayload;
+  trace?: {
+    trace_id?: string | null;
+    request_id?: string | null;
+    workflow_id?: string | null;
+    parent_trace_id?: string | null;
+  };
+};
+
+/** AO → RAAS 邀请发出成功 — 含 RoboHire/GoHire 回执 + AO Neo4j PK,供 RAAS UI 串起 trace. */
+export type InterviewInvitationSentPayload = {
+  candidate_id: string;
+  job_requisition_id: string;
+  application_id?: string | null;
+  candidate_match_result_id?: string | null;
+  /** AO 新建的 Interview_Record Neo4j PK. */
+  interview_record_id: string;
+  /** AO 新建的 Communication_Log Neo4j PK. */
+  communication_log_id: string;
+  /** RoboHire response.data 直透关键字段(GoHire 给候选人的入口). */
+  login_url: string | null;
+  qrcode_url: string | null;
+  user_id: string | number | null;
+  request_introduction_id: string | null;
+  gohire_job_id: string | number | null;
+  candidate_email: string | null;
+  interview_language: string | null;
+  interview_duration_minutes: number | null;
+  /** RoboHire requestId — 跨系统 trace 用. */
+  robohire_request_id: string | null;
+  sent_at: string; // ISO
+};
+
+export type InterviewInvitationFailedPayload = {
+  candidate_id: string;
+  job_requisition_id: string;
+  application_id?: string | null;
+  /**
+   * 失败原因分类:
+   *   MISSING_PAYLOAD     — payload anchors 不全
+   *   BACKFILL_FAILED     — partner-pg 回查 resume/JR 失败
+   *   ROBOHIRE_4XX        — RoboHire 端 client error(配额/参数等)
+   *   ROBOHIRE_QUOTA      — RoboHire 402 / 403 quota / subscription
+   *   ROBOHIRE_5XX        — RoboHire server error(已重试到顶)
+   *   GOHIRE_REJECTED     — RoboHire 200 但 GoHire 上游拒绝(code=gohire_invitation_failed)
+   *   PERSISTENCE_WARNING — RoboHire 邀请送出但落库失败(persistenceWarning)
+   *   UNKNOWN             — 兜底
+   */
+  error_code:
+    | 'MISSING_PAYLOAD'
+    | 'BACKFILL_FAILED'
+    | 'ROBOHIRE_4XX'
+    | 'ROBOHIRE_QUOTA'
+    | 'ROBOHIRE_5XX'
+    | 'GOHIRE_REJECTED'
+    | 'PERSISTENCE_WARNING'
+    | 'UNKNOWN';
+  error_message: string;
+  http_status?: number;
+  robohire_request_id?: string | null;
+  failed_at: string; // ISO
+};
+
+export type InterviewInvitationSentData = {
+  entity_type?: string;
+  entity_id?: string | null;
+  event_id?: string;
+  payload: InterviewInvitationSentPayload;
+  trace?: {
+    trace_id?: string | null;
+    request_id?: string | null;
+    workflow_id?: string | null;
+    parent_trace_id?: string | null;
+  };
+};
+
+export type InterviewInvitationFailedData = {
+  entity_type?: string;
+  entity_id?: string | null;
+  event_id?: string;
+  payload: InterviewInvitationFailedPayload;
+  trace?: {
+    trace_id?: string | null;
+    request_id?: string | null;
+    workflow_id?: string | null;
+    parent_trace_id?: string | null;
+  };
+};
+
 // ─── §3.5 Rule check 事件(workflow node 10-1) ───
 //
 // 2026-05-19 consolidation: ruleCheckAgent 直接订阅 `RESUME_PROCESSED`
