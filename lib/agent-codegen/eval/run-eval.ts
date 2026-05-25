@@ -1,31 +1,47 @@
-// Eval runner — load a fixture, run the codegen pipeline, score the
-// generated source against the production reference, print a report.
+// Eval runner — Bundle E version.
 //
-// Used by:
-//   - scripts/codegen-eval.ts (CLI)
-//   - future eval UI (Bundle E)
+// Replaces the D4-only runner: now runs structural score + code review +
+// (optionally) behavioral diff against ground truth + always generates
+// declarative test cases for hand inspection.
+//
+// CLI flags map to which sub-reports get computed:
+//   default        — structural only (cheap, fast)
+//   --review       — + code reviewer
+//   --behavior     — + behavioral diff (needs a ground truth record)
+//   --full         — all of the above
 
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { runPipeline } from '../pipeline';
-import { scoreCandidate, DEFAULT_WEIGHTS, type ScoreBreakdown } from './score';
+import { scoreCandidate, DEFAULT_WEIGHTS } from './score';
+import { reviewCode } from './code-reviewer';
+import {
+  extractTrace,
+  diffAgainstGroundTruth,
+  scoreBehavioralDiff,
+  verdictOf,
+} from './behavioral-analyzer';
+import { generateTestCases } from './test-case-generator';
+import {
+  computeFinalVerdict,
+  type EvaluationReport,
+} from './evaluation-report';
+import { getToolRegistry } from '../registries';
+import { findGroundTruth } from './ground-truth';
 import type { EvalFixture } from './fixtures';
 
 const ROOT = process.cwd();
 
-export type EvalReport = {
-  fixtureName: string;
-  productionPath: string;
-  score: ScoreBreakdown;
-  generated: { path: string; content: string };
-  productionContent: string;
-  pipelineTimings: { specMs: number; bodiesMs: number; renderMs: number; compileMs: number; totalMs: number };
-  modelUsed: string;
-  compileOk: boolean;
-  compileDiagnosticsCount: number;
+export type RunOptions = {
+  review?: boolean;
+  behavior?: boolean;
 };
 
-export async function runEval(fixture: EvalFixture, domain: 'raas' | 'r7' = 'raas'): Promise<EvalReport> {
+export async function runEval(
+  fixture: EvalFixture,
+  opts: RunOptions = {},
+  domain: 'raas' | 'r7' = 'raas',
+): Promise<EvaluationReport> {
   const productionContent = await readFile(path.join(ROOT, fixture.productionPath), 'utf8');
 
   const pipeline = await runPipeline({
@@ -34,49 +50,59 @@ export async function runEval(fixture: EvalFixture, domain: 'raas' | 'r7' = 'raa
     domain,
   });
 
-  const score = scoreCandidate(productionContent, pipeline.code.content, DEFAULT_WEIGHTS);
+  const toolRegistry = getToolRegistry(domain);
+
+  // 1. Structural
+  const structural = scoreCandidate(productionContent, pipeline.code.content, DEFAULT_WEIGHTS);
+
+  // 2. Code review (always cheap — run it unconditionally; --review just
+  // surfaces it in the printed output, but the data is always populated)
+  const review = reviewCode({
+    source: pipeline.code.content,
+    spec: pipeline.spec,
+    toolRegistry,
+  });
+
+  // 3. Behavioral (only when a ground truth record exists)
+  const gt = findGroundTruth(fixture.name);
+  const behavioral = gt
+    ? (() => {
+        const trace = extractTrace(pipeline.code.content, toolRegistry);
+        const diff = diffAgainstGroundTruth(trace, gt, pipeline.code.content);
+        const score = scoreBehavioralDiff(diff, gt);
+        const verdict = verdictOf(score, diff);
+        return { trace, diff, score, verdict };
+      })()
+    : undefined;
+
+  // 4. Test cases (always; they're declarative — cheap)
+  const generatedTestCases = generateTestCases(pipeline.spec, toolRegistry);
+
+  const final = computeFinalVerdict(
+    structural,
+    review,
+    behavioral
+      ? { score: behavioral.score, verdict: behavioral.verdict, diff: behavioral.diff }
+      : undefined,
+    gt?.replacementVerdict,
+  );
 
   return {
     fixtureName: fixture.name,
     productionPath: fixture.productionPath,
-    score,
-    generated: pipeline.code,
-    productionContent,
-    pipelineTimings: pipeline.timings,
     modelUsed: pipeline.modelUsed,
+    structural,
+    review,
+    behavioral,
+    generatedTestCases,
     compileOk: pipeline.compile.ok,
     compileDiagnosticsCount: pipeline.compile.diagnostics.length,
+    pipelineTotalMs: pipeline.timings.totalMs,
+    aggregateScore: final.aggregateScore,
+    finalVerdict: final.finalVerdict,
+    summary: final.summary,
   };
 }
 
-/** Pretty-print an eval report for a terminal. */
-export function formatReport(r: EvalReport): string {
-  const pct = (n: number) => `${(n * 100).toFixed(1).padStart(5)}%`;
-  const lines: string[] = [
-    '',
-    `── Codegen eval · ${r.fixtureName} ──────────────────`,
-    `Production: ${r.productionPath}`,
-    `Model:      ${r.modelUsed}`,
-    `Pipeline:   ${r.pipelineTimings.totalMs} ms (spec ${r.pipelineTimings.specMs} + bodies ${r.pipelineTimings.bodiesMs} + render ${r.pipelineTimings.renderMs} + compile ${r.pipelineTimings.compileMs})`,
-    `Compile:    ${r.compileOk ? '✓ OK' : '❌ FAIL'} · ${r.compileDiagnosticsCount} diagnostic${r.compileDiagnosticsCount === 1 ? '' : 's'}`,
-    '',
-    `Score dimensions (weights ${formatWeights(DEFAULT_WEIGHTS)}):`,
-    `  imports  ${pct(r.score.imports)}    steps    ${pct(r.score.steps)}`,
-    `  tools    ${pct(r.score.tools)}    patterns ${pct(r.score.patterns)}`,
-    `  loc      ${pct(r.score.loc)}`,
-    '',
-    `COMPOSITE  ${pct(r.score.composite)}`,
-    '',
-    'Diff details:',
-    `  imports missing in generated:  ${r.score.details.missingImports.join(', ') || '(none)'}`,
-    `  imports extra in generated:    ${r.score.details.extraImports.join(', ') || '(none)'}`,
-    `  steps missing in generated:    ${r.score.details.missingSteps.join(', ') || '(none)'}`,
-    `  steps extra in generated:      ${r.score.details.extraSteps.join(', ') || '(none)'}`,
-    '',
-  ];
-  return lines.join('\n');
-}
-
-function formatWeights(w: typeof DEFAULT_WEIGHTS): string {
-  return `imports ${w.imports}, steps ${w.steps}, tools ${w.tools}, patterns ${w.patterns}, loc ${w.loc}`;
-}
+// Re-export for CLI convenience.
+export { formatEvaluationReport } from './evaluation-report';
