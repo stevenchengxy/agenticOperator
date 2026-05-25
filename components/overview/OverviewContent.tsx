@@ -13,6 +13,7 @@ import { AGENT_MAP, byShort } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
 import { InngestPill } from "@/components/shared/InngestPill";
+import { useApp } from "@/lib/i18n";
 
 // /overview — system-at-a-glance dashboard.
 //
@@ -221,6 +222,8 @@ export function OverviewContent() {
 // path to verify or trigger activity.
 
 function DataFlowDiagnostic() {
+  const { t } = useApp();
+  const aoUrl = typeof window !== "undefined" ? window.location.origin : "<host>";
   return (
     <div
       className="border-b flex items-start gap-3"
@@ -233,31 +236,29 @@ function DataFlowDiagnostic() {
       <Ic.alert />
       <div className="flex-1 text-[12px] leading-relaxed">
         <div className="font-semibold mb-1" style={{ color: "var(--c-info)" }}>
-          事件总线空闲 · 当前无活跃 run、无最近异常
+          {t("overview_diag_title")}
         </div>
-        <div className="text-ink-2">
-          这通常是<strong>正常</strong>的 — 系统在等下一个外部事件。如果你刚启动 dev server 想验证链路，下面几个常见入口：
-        </div>
+        <div className="text-ink-2">{t("overview_diag_intro")}</div>
         <ul className="mt-2 text-ink-2" style={{ listStyle: "disc", paddingLeft: 18 }}>
           <li>
-            发一个测试事件:{" "}
+            {t("overview_diag_li_test")}{" "}
             <code className="mono text-[11px]">POST /api/test/trigger-requirement</code>
-            {" "}— 触发 ReqAnalyzer → JDGenerator → ... 链路
+            {" "}{t("overview_diag_li_test_desc")}
           </li>
           <li>
-            或直接 publish 任意事件:{" "}
+            {t("overview_diag_li_publish")}{" "}
             <code className="mono text-[11px]">POST /api/inngest-events {`{name, data}`}</code>
           </li>
           <li>
-            智能体没注册? 在头部 <strong>InngestPill</strong> → <strong>同步新 App</strong> 填{" "}
-            <code className="mono text-[11px]">${typeof window !== "undefined" ? window.location.origin : "<host>"}/api/inngest</code>
+            {t("overview_diag_li_sync")} <strong>InngestPill</strong> {t("overview_diag_li_sync_2")}{" "}
+            <code className="mono text-[11px]">{aoUrl}/api/inngest</code>
           </li>
         </ul>
         <div className="text-ink-3 text-[11.5px] mt-2">
-          完整运行日志在{" "}
+          {t("overview_diag_footer_runlog")}{" "}
           <Link href="/live" className="text-accent hover:underline">/live</Link>，
-          系统配置点头部{" "}
-          <Link href="/fleet" className="text-accent hover:underline">/fleet</Link> 的 InngestPill。
+          {t("overview_diag_footer_config")}{" "}
+          <Link href="/fleet" className="text-accent hover:underline">/fleet</Link> {t("overview_diag_footer_config_2")} InngestPill。
         </div>
       </div>
     </div>
@@ -275,6 +276,7 @@ function Header({
   onRefresh: () => void;
   fetchedAt: Date | null;
 }) {
+  const { t } = useApp();
   return (
     <div
       className="border-b border-line bg-surface flex items-start"
@@ -284,7 +286,7 @@ function Header({
         <div
           className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2"
         >
-          SYSTEM OVERVIEW · 实时
+          {t("overview_overline")}
         </div>
         <h1
           className="m-0 text-ink-1"
@@ -296,21 +298,21 @@ function Header({
             lineHeight: 1.1,
           }}
         >
-          总览
+          {t("overview_title")}
         </h1>
         <div className="text-ink-2 mt-2" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-          系统视角 · 当下整体跑得怎样。所有数字姓"系统"，不属于任何单条 run。
+          {t("overview_sub")}
         </div>
       </div>
       <div className="flex items-center gap-3 mt-1 shrink-0">
         <InngestPill />
         {fetchedAt && (
           <span className="text-[11px] text-ink-4 tabular-nums">
-            updated {fetchedAt.toLocaleTimeString(undefined, { hour12: false })}
+            {t("overview_updated_at")} {fetchedAt.toLocaleTimeString(undefined, { hour12: false })}
           </span>
         )}
         <Btn size="sm" variant="ghost" onClick={onRefresh}>
-          <Ic.bolt /> 刷新
+          <Ic.bolt /> {t("overview_refresh")}
         </Btn>
       </div>
     </div>
@@ -356,49 +358,57 @@ function KpiBar({
       ? Math.round((todayRuns.completed / todayRuns.total) * 100)
       : null;
 
-  // Two rows of 4. Top row = "operational state" (right now). Bottom row =
-  // "queues / throughput" (work backlog + system pulse). Generous gaps and
-  // uppercase-tracked labels mirror the Claude hero pattern from /monitor —
-  // metrics read as numbers, not as table cells.
+  const { t } = useApp();
+  const tpl = (s: string, vars: Record<string, string | number>) =>
+    Object.entries(vars).reduce((acc, [k, v]) => acc.replace(`{${k}}`, String(v)), s);
+  const agentsSub = `${deployCounts.online} ${t("overview_kpi_agents_status_online")} · ${deployCounts.paused} ${t("overview_kpi_agents_status_paused")} · ${deployCounts.not_deployed} ${t("overview_kpi_agents_status_not_deployed")}`;
+  const anomalySub =
+    t("overview_kpi_anomaly_sub") +
+    (runtimeUnhealthy > 0 ? ` · ${t("overview_kpi_anomaly_runtime_label")} ${runtimeUnhealthy}` : "");
+  // Two rows of 4. Top row = operational state right now. Bottom row =
+  // queues / throughput. All labels i18n-driven so zh/en switch is global.
   return (
     <div className="border-b border-line bg-surface" style={{ padding: "24px 32px" }}>
       <div className="grid mb-6" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 32 }}>
         <Kpi
-          label="ACTIVE RUNS"
+          label={t("overview_kpi_active")}
           value={activeCount ?? "…"}
-          sub="运行中 / 暂停"
+          sub={t("overview_kpi_active_sub")}
           href="/live?status=active"
         />
         <Kpi
-          label="FAILED · 1H"
+          label={t("overview_kpi_failed")}
           value={failed1hCount ?? "…"}
-          sub="失败 / 超时 / 中断"
+          sub={t("overview_kpi_failed_sub")}
           tone={failed1hCount && failed1hCount > 0 ? "err" : undefined}
           href="/live?status=failed&time=1h"
         />
         <Kpi
-          label="ANOMALY · 1H"
+          label={t("overview_kpi_anomaly")}
           value={anomaly1hCount ?? "…"}
-          sub={`跨 run 异常 / 错误${runtimeUnhealthy > 0 ? ` · runtime ${runtimeUnhealthy}` : ""}`}
+          sub={anomalySub}
           tone={anomaly1hCount && anomaly1hCount > 0 ? "warn" : undefined}
           href="/monitor"
         />
         <Kpi
-          label="AGENTS · 实装"
+          label={t("overview_kpi_agents")}
           value={`${deployCounts.online}/${totalAgents}`}
-          sub={`${deployCounts.online} 已上线 · ${deployCounts.paused} 已暂停 · ${deployCounts.not_deployed} 未上线`}
+          sub={agentsSub}
           tone={deployCounts.online === 0 && totalAgents > 0 ? "err" : "ok"}
           href="/fleet"
         />
       </div>
       <div className="grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 32 }}>
         <Kpi
-          label="今日成功率"
+          label={t("overview_kpi_today")}
           value={successRatePct == null ? "—" : `${successRatePct}%`}
           sub={
             todayRuns
-              ? `${todayRuns.completed}/${todayRuns.total} runs · since 00:00`
-              : "loading…"
+              ? tpl(t("overview_kpi_today_sub"), {
+                  completed: todayRuns.completed,
+                  total: todayRuns.total,
+                })
+              : t("overview_kpi_today_loading")
           }
           tone={
             successRatePct == null ? undefined
@@ -409,23 +419,23 @@ function KpiBar({
           href="/live"
         />
         <Kpi
-          label="待人工 · HITL"
+          label={t("overview_kpi_hitl")}
           value={hitlPending ?? "…"}
-          sub="pending HumanTask"
+          sub={t("overview_kpi_hitl_sub")}
           tone={hitlPending && hitlPending > 0 ? "warn" : undefined}
           href="/inbox"
         />
         <Kpi
-          label="DLQ · 待重试"
+          label={t("overview_kpi_dlq")}
           value={dlqPending ?? "…"}
-          sub="event 校验失败 / 待处理"
+          sub={t("overview_kpi_dlq_sub")}
           tone={dlqPending && dlqPending > 0 ? "err" : undefined}
           href="/events"
         />
         <Kpi
-          label="事件吞吐 · 1h"
+          label={t("overview_kpi_events")}
           value={events1h ?? "…"}
-          sub="Inngest 总线 · 过去 1 小时"
+          sub={t("overview_kpi_events_sub")}
           href="/events"
         />
       </div>
@@ -504,27 +514,34 @@ function SystemStatusStrip({
   deployCounts: { online: number; paused: number; not_deployed: number };
   alertsActive: number | null;
 }) {
+  const { t } = useApp();
+  const alertsLabel =
+    alertsActive == null
+      ? t("overview_status_loading")
+      : alertsActive === 0
+        ? t("overview_status_no_alerts")
+        : t("overview_status_active_alerts");
   // Borderless chips with generous spacing — reads more like a status line
   // than a form. Big tabular-nums per count, soft glow on the dots (consistent
   // with Fleet's status indicator), uppercase tracked group labels.
   return (
     <section className="mb-8 flex items-center flex-wrap" style={{ gap: "8px 40px" }}>
-      <StatusGroup label="部署">
-        <StatusDot color="var(--c-ok)"   label="已上线" value={deployCounts.online} />
-        <StatusDot color="var(--c-warn)" label="已暂停" value={deployCounts.paused} />
-        <StatusDot color="var(--c-err)"  label="未上线" value={deployCounts.not_deployed} />
+      <StatusGroup label={t("overview_status_deploy")}>
+        <StatusDot color="var(--c-ok)"   label={t("overview_kpi_agents_status_online")}       value={deployCounts.online} />
+        <StatusDot color="var(--c-warn)" label={t("overview_kpi_agents_status_paused")}       value={deployCounts.paused} />
+        <StatusDot color="var(--c-err)"  label={t("overview_kpi_agents_status_not_deployed")} value={deployCounts.not_deployed} />
         <Link href="/fleet" className="ml-2 text-[11.5px] text-accent hover:underline no-underline">
-          Fleet 管理 →
+          {t("overview_jump_fleet")}
         </Link>
       </StatusGroup>
-      <StatusGroup label="告警">
+      <StatusGroup label={t("overview_status_alerts")}>
         <StatusDot
           color={alertsActive && alertsActive > 0 ? "var(--c-err)" : "var(--c-ink-4)"}
-          label={alertsActive == null ? "loading" : alertsActive === 0 ? "无活跃告警" : "active"}
+          label={alertsLabel}
           value={alertsActive ?? null}
         />
         <Link href="/alerts" className="ml-2 text-[11.5px] text-accent hover:underline no-underline">
-          告警详情 →
+          {t("overview_jump_alerts")}
         </Link>
       </StatusGroup>
     </section>
@@ -576,22 +593,23 @@ function AgentMatrix({
   loading: boolean;
   counts: { online: number; paused: number; not_deployed: number };
 }) {
+  const { t } = useApp();
   return (
     <section className="mb-8">
       <div className="flex items-baseline gap-3 mb-4">
         <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4">
-          AGENT MATRIX
+          {t("overview_matrix_title")}
         </div>
         <span className="text-[11px] text-ink-3">
-          与 /fleet 同源
+          {t("overview_matrix_source")}
         </span>
         <div className="flex-1" />
         <DeployLegend counts={counts} />
       </div>
       {loading && rows.length === 0 ? (
-        <div className="text-[12px] text-ink-3 py-4">加载中…</div>
+        <div className="text-[12px] text-ink-3 py-4">{t("overview_matrix_loading")}</div>
       ) : rows.length === 0 ? (
-        <EmptyState title="暂无 agent" hint="AGENT_MAP 为空" />
+        <EmptyState title={t("overview_matrix_empty_title")} hint={t("overview_matrix_empty_hint")} />
       ) : (
         <div
           className="grid"
@@ -610,11 +628,12 @@ function AgentMatrix({
 }
 
 function DeployLegend({ counts }: { counts: { online: number; paused: number; not_deployed: number } }) {
+  const { t } = useApp();
   return (
     <div className="flex items-center gap-4 text-[11px] text-ink-3">
-      <LegendDot color="var(--c-ok)"   label="已上线" value={counts.online} />
-      <LegendDot color="var(--c-warn)" label="已暂停" value={counts.paused} />
-      <LegendDot color="var(--c-err)"  label="未上线" value={counts.not_deployed} />
+      <LegendDot color="var(--c-ok)"   label={t("overview_kpi_agents_status_online")}       value={counts.online} />
+      <LegendDot color="var(--c-warn)" label={t("overview_kpi_agents_status_paused")}       value={counts.paused} />
+      <LegendDot color="var(--c-err)"  label={t("overview_kpi_agents_status_not_deployed")} value={counts.not_deployed} />
     </div>
   );
 }
@@ -638,6 +657,7 @@ function LegendDot({ color, label, value }: { color: string; label: string; valu
 }
 
 function AgentCard({ row }: { row: MatrixRow }) {
+  const { t } = useApp();
   const tone = DEPLOY_TONE[row.deploy];
   const fn = byShortFunction(row.short);
   const meta = byShort(row.short);
@@ -687,14 +707,14 @@ function AgentCard({ row }: { row: MatrixRow }) {
       )}
       <div className="text-[10.5px] text-claude-ink-4 flex items-center gap-1.5 tabular-nums">
         {row.deploy === "not_deployed" ? (
-          <span>未注册</span>
+          <span>{t("overview_card_unregistered")}</span>
         ) : counts ? (
           <>
-            <span>{counts.completed}/{counts.started} step</span>
+            <span>{counts.completed}/{counts.started} {t("overview_card_step_unit")}</span>
             {errorCount > 0 && (
-              <span style={{ color: "var(--c-err)" }}>· {errorCount} err</span>
+              <span style={{ color: "var(--c-err)" }}>· {errorCount} {t("overview_card_err_unit")}</span>
             )}
-            {counts.tool > 0 && <span>· {counts.tool} tool</span>}
+            {counts.tool > 0 && <span>· {counts.tool} {t("overview_card_tool_unit")}</span>}
           </>
         ) : (
           <span>—</span>
@@ -722,31 +742,32 @@ function AgentCard({ row }: { row: MatrixRow }) {
 // ── Active runs ──────────────────────────────────────────────────────
 
 function ActiveRunsSection({ runs }: { runs: RunSummary[] | null }) {
+  const { t } = useApp();
   return (
     <section>
       <div className="flex items-baseline mb-3">
         <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4 flex-1">
-          ACTIVE RUNS
+          {t("overview_active_title")}
         </div>
         <Link
           href="/live?status=active"
           className="text-[11px] text-ink-3 no-underline hover:text-accent"
         >
-          查看全部 →
+          {t("overview_active_view_all")}
         </Link>
       </div>
       {!runs ? (
-        <div className="text-[12px] text-ink-3 py-4">加载中…</div>
+        <div className="text-[12px] text-ink-3 py-4">{t("overview_matrix_loading")}</div>
       ) : runs.length === 0 ? (
-        <div className="text-[11.5px] text-ink-3 py-4">当前无活跃 run。</div>
+        <div className="text-[11.5px] text-ink-3 py-4">{t("overview_active_empty")}</div>
       ) : (
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width: 130 }}>开始</th>
-              <th style={{ width: 200 }}>触发事件</th>
-              <th>客户 / JD</th>
-              <th style={{ width: 100 }}>耗时</th>
+              <th style={{ width: 130 }}>{t("overview_active_th_start")}</th>
+              <th style={{ width: 200 }}>{t("overview_active_th_event")}</th>
+              <th>{t("overview_active_th_target")}</th>
+              <th style={{ width: 100 }}>{t("overview_active_th_duration")}</th>
               <th style={{ width: 90 }}>HITL</th>
               <th style={{ width: 80 }}></th>
             </tr>
@@ -763,6 +784,7 @@ function ActiveRunsSection({ runs }: { runs: RunSummary[] | null }) {
 }
 
 function ActiveRunRow({ run }: { run: RunSummary }) {
+  const { t } = useApp();
   const start = new Date(run.startedAt);
   const last = new Date(run.lastActivityAt);
   const durMs = Math.max(0, last.getTime() - start.getTime());
@@ -788,7 +810,7 @@ function ActiveRunRow({ run }: { run: RunSummary }) {
           href={`/live?run=${encodeURIComponent(run.id)}`}
           className="mono text-[11px] text-ink-2 no-underline hover:text-ink-1"
         >
-          打开 →
+          {t("overview_active_open")}
         </Link>
       </td>
     </tr>
@@ -798,28 +820,29 @@ function ActiveRunRow({ run }: { run: RunSummary }) {
 // ── Anomalies feed ───────────────────────────────────────────────────
 
 function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
+  const { t } = useApp();
   // Inline (post-Tier-C) — was a 360px right sidebar before. Header matches
   // ActiveRunsSection (uppercase tracked + right-aligned audit jump).
   return (
     <section>
       <div className="flex items-baseline mb-3">
         <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4 flex-1">
-          最近异常 · 1H
+          {t("overview_anomaly_title")}
         </div>
         <Link
           href="/audit"
           className="text-[11px] text-ink-3 no-underline hover:text-accent flex items-center gap-1"
         >
-          <Ic.book /> 完整审计日志 →
+          <Ic.book /> {t("overview_anomaly_audit")}
         </Link>
       </div>
       {!entries ? (
-        <div className="text-[12px] text-ink-3 py-6">加载中…</div>
+        <div className="text-[12px] text-ink-3 py-6">{t("overview_matrix_loading")}</div>
       ) : entries.length === 0 ? (
         <div className="py-6">
           <EmptyState
-            title="过去 1h 无异常"
-            hint="所有 agent 都健康跑着——保持就好。"
+            title={t("overview_anomaly_empty_title")}
+            hint={t("overview_anomaly_empty_hint")}
           />
         </div>
       ) : (
@@ -834,6 +857,7 @@ function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
 }
 
 function AnomalyRow({ entry }: { entry: LogEntry }) {
+  const { t } = useApp();
   const ts = new Date(entry.ts);
   const tone =
     entry.kind === "step.failed" || entry.kind === "error"
@@ -841,10 +865,10 @@ function AnomalyRow({ entry }: { entry: LogEntry }) {
       : "oklch(0.5 0.14 75)";
   const kindLabel =
     entry.kind === "step.failed"
-      ? "step.failed"
+      ? t("overview_kind_step_failed")
       : entry.kind === "error"
-        ? "error"
-        : "anomaly";
+        ? t("overview_kind_error")
+        : t("overview_kind_anomaly");
   const inner = (
     <div className="cursor-pointer hover:bg-claude-surface transition-colors" style={{ padding: "14px 18px" }}>
       <div className="flex items-center gap-2 mb-1">
