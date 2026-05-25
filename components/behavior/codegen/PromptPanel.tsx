@@ -15,6 +15,7 @@ export function PromptPanel({
   value: string;
   onChange: (v: string) => void;
   onGenerateSpec: () => void;
+  /** True while the pipeline is running — keeps the button + textarea quiet. */
   disabled?: boolean;
 }) {
   const { t } = useApp();
@@ -29,6 +30,7 @@ export function PromptPanel({
         rows={10}
         spellCheck={false}
         placeholder={t("codegen_prompt_placeholder")}
+        disabled={disabled}
         className="w-full p-2 bg-panel border border-line rounded-md text-[12px] leading-[1.55] resize-vertical"
       />
       <button
@@ -40,15 +42,9 @@ export function PromptPanel({
           color: "white",
           opacity: disabled || !value.trim() ? 0.5 : 1,
         }}
-        title={disabled ? t("codegen_disabled_phase1a") : undefined}
       >
-        {t("codegen_generate_spec")}
+        {disabled ? t("codegen_generating") : t("codegen_generate_spec")}
       </button>
-      {disabled && (
-        <p className="text-[10.5px] text-ink-4 m-0 leading-snug">
-          {t("codegen_disabled_phase1a")}
-        </p>
-      )}
     </div>
   );
 }

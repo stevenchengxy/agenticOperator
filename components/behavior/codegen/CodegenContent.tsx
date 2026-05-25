@@ -5,10 +5,12 @@
 // Layout: left rail (prompt + pipeline timeline) · middle (Monaco tabs:
 // Prompt / Spec / Code / Diff) · right rail (compiler diagnostics).
 //
-// Phase 1a wires only the compile path (Code tab → POST /api/codegen/compile
-// → CompilerPanel). Prompt / Spec / Diff tabs render but their actions
-// (Generate Spec, Generate Code, Diff vs active) are disabled placeholders
-// until Phase 1b ships the LLM pipeline.
+// Phase 1b wires:
+//   - "Generate Spec →" button → POST /api/codegen/generate (full pipeline:
+//     LLM Call A spec extractor → LLM Call B step body filler → template
+//     render → Phase 0c compile). Populates Spec + Code tabs and the
+//     right-rail CompilerPanel with the result.
+//   - Code tab + "Compile" button still works standalone for hand-editing.
 //
 // Spec / pipeline / scope by domain: see lib/domains.tsx — current domain
 // gates which event/tool registry the LLM will see (Phase 1b).
@@ -66,18 +68,59 @@ export function CodegenContent() {
   const [compileResult, setCompileResult] = React.useState<CompileResult | null>(null);
   const [compileError, setCompileError] = React.useState<string | null>(null);
   const [compiling, setCompiling] = React.useState(false);
+  // Phase 1b — full-pipeline progress / errors. Distinct from `compiling`
+  // because pipeline drives multiple stages and may take 30-90s.
+  const [pipelineStage, setPipelineStage] = React.useState<PipelineStage | null>(null);
+  const [pipelineError, setPipelineError] = React.useState<string | null>(null);
+  const [pipelineTimings, setPipelineTimings] = React.useState<{ totalMs: number; modelUsed: string } | null>(null);
 
-  // Pipeline stage indicator (Phase 1a — only compile lights up) -----------
+  // Pipeline stage indicator -----------------------------------------------
   const pipelineStates: Partial<Record<PipelineStage, StageState>> = React.useMemo(() => {
     const s: Partial<Record<PipelineStage, StageState>> = {};
     if (prompt.trim()) s.prompt = "ok";
-    if (spec.trim()) s.spec = "ok";
+    if (spec.trim() && spec.trim() !== STARTER_SPEC.trim()) s.spec = "ok";
+    if (pipelineStage) s[pipelineStage] = "active";
     if (compiling) s.compile = "active";
     else if (compileResult) s.compile = compileResult.ok ? "ok" : "err";
+    if (compileResult?.ok && !pipelineStage) s.review = "ok";
     return s;
-  }, [prompt, spec, compiling, compileResult]);
+  }, [prompt, spec, pipelineStage, compiling, compileResult]);
 
   // Actions -----------------------------------------------------------------
+  // Phase 1b — full pipeline: prompt → spec → step bodies → render → compile.
+  // On success, populates Spec + Code tabs and the right-rail compiler panel.
+  const runPipeline = React.useCallback(async () => {
+    setPipelineError(null);
+    setPipelineTimings(null);
+    setCompileError(null);
+    setCompileResult(null);
+    setPipelineStage("spec");
+    try {
+      const r = await fetch("/api/codegen/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt, domain }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      const result = await r.json();
+      // Populate downstream surfaces. UI now reflects the generated artifacts;
+      // operator can still edit the code tab and re-compile manually.
+      setSpec(JSON.stringify(result.spec, null, 2));
+      setCode(result.code.content);
+      setVirtualPath(result.code.path);
+      setCompileResult(result.compile);
+      setPipelineTimings({ totalMs: result.timings.totalMs, modelUsed: result.modelUsed });
+      setTab("code");
+    } catch (e) {
+      setPipelineError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPipelineStage(null);
+    }
+  }, [prompt, domain]);
+
   const runCompile = React.useCallback(async () => {
     setCompiling(true);
     setCompileError(null);
@@ -150,11 +193,22 @@ export function CodegenContent() {
           <PromptPanel
             value={prompt}
             onChange={setPrompt}
-            onGenerateSpec={() => {
-              // Phase 1b will wire this to POST /api/codegen/generate (spec extractor).
-            }}
-            disabled
+            onGenerateSpec={runPipeline}
+            disabled={pipelineStage !== null}
           />
+          {pipelineError && (
+            <div
+              className="px-2 py-1.5 text-[11px] rounded-md border border-line bg-panel leading-snug"
+              style={{ color: "var(--c-err, oklch(0.5 0.2 25))" }}
+            >
+              {t("codegen_pipeline_error")}: {pipelineError}
+            </div>
+          )}
+          {pipelineTimings && (
+            <div className="px-2 py-1.5 text-[11px] text-ink-4 rounded-md border border-line bg-panel mono">
+              ✓ {pipelineTimings.totalMs} ms · {pipelineTimings.modelUsed}
+            </div>
+          )}
           <div>
             <div className="text-[11px] uppercase tracking-[0.06em] text-ink-4 mb-2">
               {t("codegen_pipeline_title")}
