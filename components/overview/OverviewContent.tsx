@@ -194,21 +194,19 @@ export function OverviewContent() {
           ⚠ 加载部分失败：{error}
         </div>
       )}
-      <div
-        className="flex-1 grid min-h-0"
-        style={{
-          gridTemplateColumns: "1fr 360px",
-          gap: 0,
-        }}
-      >
-        <div className="overflow-auto" style={{ padding: "16px 22px" }}>
+      {/* Single-column flow — anomalies moved out of the right rail and
+          into the main vertical sequence (per Tier C of design proposal).
+          Lose always-visible right-pane in trade for a calmer single-axis
+          read. Max-width constrained so lines don't sprawl on wide screens. */}
+      <div className="flex-1 overflow-auto">
+        <div className="mx-auto" style={{ padding: "32px 32px", maxWidth: 1280 }}>
           <SystemStatusStrip deployCounts={deployCounts} alertsActive={alertsActive} />
           <AgentMatrix rows={matrixRows} loading={health.loading} counts={deployCounts} />
           <ActiveRunsSection runs={activeRuns} />
+          <div className="mt-8">
+            <AnomaliesSection entries={anomalies} />
+          </div>
         </div>
-        <aside className="border-l border-line bg-surface flex flex-col min-h-0 overflow-auto">
-          <AnomaliesSection entries={anomalies} />
-        </aside>
       </div>
     </div>
   );
@@ -268,6 +266,8 @@ function DataFlowDiagnostic() {
 
 // ── Header ───────────────────────────────────────────────────────────
 
+const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
+
 function Header({
   onRefresh,
   fetchedAt,
@@ -277,24 +277,42 @@ function Header({
 }) {
   return (
     <div
-      className="border-b border-line bg-surface flex items-center"
-      style={{ padding: "14px 22px", gap: 18 }}
+      className="border-b border-line bg-surface flex items-start"
+      style={{ padding: "32px 32px 24px", gap: 24 }}
     >
-      <div className="flex-1">
-        <div className="text-[15px] font-semibold tracking-tight">总览</div>
-        <div className="text-ink-3 text-[12px] mt-px">
+      <div className="flex-1 min-w-0">
+        <div
+          className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2"
+        >
+          SYSTEM OVERVIEW · 实时
+        </div>
+        <h1
+          className="m-0 text-ink-1"
+          style={{
+            fontFamily: SERIF,
+            fontWeight: 500,
+            fontSize: 36,
+            letterSpacing: "-0.015em",
+            lineHeight: 1.1,
+          }}
+        >
+          总览
+        </h1>
+        <div className="text-ink-2 mt-2" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
           系统视角 · 当下整体跑得怎样。所有数字姓"系统"，不属于任何单条 run。
         </div>
       </div>
-      <InngestPill />
-      {fetchedAt && (
-        <span className="mono text-[10.5px] text-ink-4">
-          updated {fetchedAt.toLocaleTimeString(undefined, { hour12: false })}
-        </span>
-      )}
-      <Btn size="sm" variant="ghost" onClick={onRefresh}>
-        <Ic.bolt /> 刷新
-      </Btn>
+      <div className="flex items-center gap-3 mt-1 shrink-0">
+        <InngestPill />
+        {fetchedAt && (
+          <span className="text-[11px] text-ink-4 tabular-nums">
+            updated {fetchedAt.toLocaleTimeString(undefined, { hour12: false })}
+          </span>
+        )}
+        <Btn size="sm" variant="ghost" onClick={onRefresh}>
+          <Ic.bolt /> 刷新
+        </Btn>
+      </div>
     </div>
   );
 }
@@ -339,40 +357,41 @@ function KpiBar({
       : null;
 
   // Two rows of 4. Top row = "operational state" (right now). Bottom row =
-  // "queues / throughput" (work backlog + system pulse). Keeps each row at
-  // ≤4 KPIs so the reader's eye never scans more than four numbers at once.
+  // "queues / throughput" (work backlog + system pulse). Generous gaps and
+  // uppercase-tracked labels mirror the Claude hero pattern from /monitor —
+  // metrics read as numbers, not as table cells.
   return (
-    <div className="border-b border-line bg-surface" style={{ padding: "14px 22px" }}>
-      <div className="grid mb-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 18 }}>
+    <div className="border-b border-line bg-surface" style={{ padding: "24px 32px" }}>
+      <div className="grid mb-6" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 32 }}>
         <Kpi
-          label="active runs"
+          label="ACTIVE RUNS"
           value={activeCount ?? "…"}
           sub="运行中 / 暂停"
           href="/live?status=active"
         />
         <Kpi
-          label="failed · 1h"
+          label="FAILED · 1H"
           value={failed1hCount ?? "…"}
           sub="失败 / 超时 / 中断"
           tone={failed1hCount && failed1hCount > 0 ? "err" : undefined}
           href="/live?status=failed&time=1h"
         />
         <Kpi
-          label="anomaly · 1h"
+          label="ANOMALY · 1H"
           value={anomaly1hCount ?? "…"}
           sub={`跨 run 异常 / 错误${runtimeUnhealthy > 0 ? ` · runtime ${runtimeUnhealthy}` : ""}`}
           tone={anomaly1hCount && anomaly1hCount > 0 ? "warn" : undefined}
           href="/monitor"
         />
         <Kpi
-          label="agents · 实装"
+          label="AGENTS · 实装"
           value={`${deployCounts.online}/${totalAgents}`}
           sub={`${deployCounts.online} 已上线 · ${deployCounts.paused} 已暂停 · ${deployCounts.not_deployed} 未上线`}
           tone={deployCounts.online === 0 && totalAgents > 0 ? "err" : "ok"}
           href="/fleet"
         />
       </div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 18 }}>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 32 }}>
         <Kpi
           label="今日成功率"
           value={successRatePct == null ? "—" : `${successRatePct}%`}
@@ -427,6 +446,10 @@ function Kpi({
   tone?: "err" | "warn" | "ok";
   href?: string;
 }) {
+  // Claude metric styling — uppercase tracked label on top, big humanist
+  // tabular-nums value (no mono — mono makes numbers feel like log output,
+  // not a measurement), sub in muted ink. Color only flags problems;
+  // healthy/default numbers stay neutral ink-1 to keep the page calm.
   const color =
     tone === "err"
       ? "var(--c-err)"
@@ -436,15 +459,22 @@ function Kpi({
           ? "var(--c-ok)"
           : "var(--c-ink-1)";
   const inner = (
-    <div className={href ? "cursor-pointer hover:bg-panel rounded-sm transition-colors" : ""} style={href ? { padding: 4, margin: -4 } : undefined}>
-      <div className="hint">{label}</div>
+    <div
+      className={href ? "cursor-pointer hover:opacity-70 transition-opacity" : ""}
+      style={{ minHeight: 80 }}
+    >
       <div
-        className="font-semibold tracking-tight tabular-nums mono"
-        style={{ fontSize: 22, color }}
+        className="text-[10px] uppercase tracking-[0.12em] font-medium text-ink-4 mb-2"
+      >
+        {label}
+      </div>
+      <div
+        className="font-medium tabular-nums"
+        style={{ fontSize: 30, color, lineHeight: 1.05, letterSpacing: "-0.01em" }}
       >
         {value}
       </div>
-      <div className="mono text-[10.5px] text-ink-4">{sub}</div>
+      <div className="text-[11px] text-ink-3 mt-1.5 leading-snug">{sub}</div>
     </div>
   );
   return href ? (
@@ -474,50 +504,60 @@ function SystemStatusStrip({
   deployCounts: { online: number; paused: number; not_deployed: number };
   alertsActive: number | null;
 }) {
+  // Borderless chips with generous spacing — reads more like a status line
+  // than a form. Big tabular-nums per count, soft glow on the dots (consistent
+  // with Fleet's status indicator), uppercase tracked group labels.
   return (
-    <section className="mb-5 border border-line rounded-md bg-surface" style={{ padding: "10px 14px" }}>
-      <div className="flex items-center flex-wrap gap-x-6 gap-y-2 text-[12px]">
-        <StatusGroup label="部署">
-          <StatusDot color="var(--c-ok)"   label="已上线" value={deployCounts.online} />
-          <span className="text-ink-4">·</span>
-          <StatusDot color="var(--c-warn)" label="已暂停" value={deployCounts.paused} />
-          <span className="text-ink-4">·</span>
-          <StatusDot color="var(--c-err)"  label="未上线" value={deployCounts.not_deployed} />
-          <Link href="/fleet" className="ml-3 text-[11.5px] text-accent hover:underline no-underline">
-            在 Fleet 管理 →
-          </Link>
-        </StatusGroup>
-        <span className="text-line">|</span>
-        <StatusGroup label="告警">
-          <StatusDot
-            color={alertsActive && alertsActive > 0 ? "var(--c-err)" : "var(--c-ink-4)"}
-            label={alertsActive == null ? "loading…" : alertsActive === 0 ? "无活跃告警" : "active"}
-            value={alertsActive ?? null}
-          />
-          <Link href="/alerts" className="ml-3 text-[11.5px] text-accent hover:underline no-underline">
-            告警详情 →
-          </Link>
-        </StatusGroup>
-      </div>
+    <section className="mb-8 flex items-center flex-wrap" style={{ gap: "8px 40px" }}>
+      <StatusGroup label="部署">
+        <StatusDot color="var(--c-ok)"   label="已上线" value={deployCounts.online} />
+        <StatusDot color="var(--c-warn)" label="已暂停" value={deployCounts.paused} />
+        <StatusDot color="var(--c-err)"  label="未上线" value={deployCounts.not_deployed} />
+        <Link href="/fleet" className="ml-2 text-[11.5px] text-accent hover:underline no-underline">
+          Fleet 管理 →
+        </Link>
+      </StatusGroup>
+      <StatusGroup label="告警">
+        <StatusDot
+          color={alertsActive && alertsActive > 0 ? "var(--c-err)" : "var(--c-ink-4)"}
+          label={alertsActive == null ? "loading" : alertsActive === 0 ? "无活跃告警" : "active"}
+          value={alertsActive ?? null}
+        />
+        <Link href="/alerts" className="ml-2 text-[11.5px] text-accent hover:underline no-underline">
+          告警详情 →
+        </Link>
+      </StatusGroup>
     </section>
   );
 }
 
 function StatusGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-ink-3 mono text-[10.5px] uppercase tracking-wide">{label}</span>
-      {children}
+    <div className="flex items-center gap-3">
+      <span className="text-ink-4 text-[10px] uppercase tracking-[0.14em] font-medium">{label}</span>
+      <div className="flex items-center gap-4">{children}</div>
     </div>
   );
 }
 
 function StatusDot({ color, label, value }: { color: string; label: string; value: number | null }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-      {value != null && <span className="tabular-nums font-semibold text-ink-1">{value}</span>}
-      <span className="text-ink-2">{label}</span>
+    <span className="inline-flex items-center gap-2">
+      <span
+        className="rounded-full"
+        style={{
+          width: 8,
+          height: 8,
+          background: color,
+          boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 16%, transparent)`,
+        }}
+      />
+      {value != null && (
+        <span className="tabular-nums font-medium text-ink-1" style={{ fontSize: 15 }}>
+          {value}
+        </span>
+      )}
+      <span className="text-ink-2 text-[12px]">{label}</span>
     </span>
   );
 }
@@ -537,11 +577,13 @@ function AgentMatrix({
   counts: { online: number; paused: number; not_deployed: number };
 }) {
   return (
-    <section className="mb-5">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="text-[13px] font-semibold">Agent 矩阵</div>
-        <span className="mono text-[10.5px] text-ink-4">
-          与 /fleet 同源 · 部署状态
+    <section className="mb-8">
+      <div className="flex items-baseline gap-3 mb-4">
+        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4">
+          AGENT MATRIX
+        </div>
+        <span className="text-[11px] text-ink-3">
+          与 /fleet 同源
         </span>
         <div className="flex-1" />
         <DeployLegend counts={counts} />
@@ -554,8 +596,8 @@ function AgentMatrix({
         <div
           className="grid"
           style={{
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            gap: 8,
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: 12,
           }}
         >
           {rows.map((r) => (
@@ -569,7 +611,7 @@ function AgentMatrix({
 
 function DeployLegend({ counts }: { counts: { online: number; paused: number; not_deployed: number } }) {
   return (
-    <div className="flex items-center gap-3 mono text-[10.5px] text-ink-3">
+    <div className="flex items-center gap-4 text-[11px] text-ink-3">
       <LegendDot color="var(--c-ok)"   label="已上线" value={counts.online} />
       <LegendDot color="var(--c-warn)" label="已暂停" value={counts.paused} />
       <LegendDot color="var(--c-err)"  label="未上线" value={counts.not_deployed} />
@@ -579,10 +621,18 @@ function DeployLegend({ counts }: { counts: { online: number; paused: number; no
 
 function LegendDot({ color, label, value }: { color: string; label: string; value: number }) {
   return (
-    <span className="flex items-center gap-1">
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className="rounded-full"
+        style={{
+          width: 6,
+          height: 6,
+          background: color,
+          boxShadow: `0 0 0 2px color-mix(in oklab, ${color} 14%, transparent)`,
+        }}
+      />
+      <span className="tabular-nums font-medium text-ink-1">{value}</span>
       <span>{label}</span>
-      <span className="tabular-nums text-ink-2">{value}</span>
     </span>
   );
 }
@@ -591,7 +641,6 @@ function AgentCard({ row }: { row: MatrixRow }) {
   const tone = DEPLOY_TONE[row.deploy];
   const fn = byShortFunction(row.short);
   const meta = byShort(row.short);
-  // Runtime overlay: only meaningful when agent is actually deployed.
   const runtimeStatus = row.deploy !== "not_deployed" ? row.health?.status : null;
   const runtimeBadge = runtimeStatus ? RUNTIME_BADGE_TONE[runtimeStatus] : undefined;
   const counts = row.health?.counts;
@@ -599,39 +648,46 @@ function AgentCard({ row }: { row: MatrixRow }) {
   const lastLabel = row.health?.lastActivityAt
     ? new Date(row.health.lastActivityAt).toLocaleTimeString(undefined, { hour12: false })
     : null;
-  // Unbuilt agents have no /workflow node; link back to fleet detail instead.
   const href = row.deploy === "not_deployed"
     ? `/fleet/${encodeURIComponent(row.short)}`
     : `/workflow?agent=${encodeURIComponent(row.short)}`;
+  // Claude-style soft card: panel bg, larger rounded, no border by default
+  // (border only on hover to keep page calm), generous padding, lowercase
+  // friendly name (not mono), status conveyed by dot color + ring (no
+  // redundant text label — that's noise once the dot is glowing).
   return (
     <Link
       href={href}
-      className="no-underline border border-line rounded-md bg-surface hover:border-line-strong transition-colors block"
-      style={{ padding: "8px 10px", opacity: row.deploy === "not_deployed" ? 0.85 : 1 }}
+      className="no-underline rounded-[10px] bg-claude-panel hover:bg-surface hover:shadow-sm transition-all block"
+      style={{
+        padding: "12px 14px",
+        opacity: row.deploy === "not_deployed" ? 0.7 : 1,
+        border: "1px solid transparent",
+      }}
     >
-      <div className="flex items-center gap-2 mb-0.5">
+      <div className="flex items-center gap-2.5 mb-1">
         <span
-          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+          className="rounded-full flex-shrink-0"
           title={tone.label}
           style={{
+            width: 8,
+            height: 8,
             background: tone.color,
             boxShadow: `0 0 0 3px color-mix(in oklab, ${tone.color} 18%, transparent)`,
           }}
         />
-        <span className="mono text-[11.5px] font-semibold text-ink-1 flex-1 truncate">
+        <span className="text-[13px] font-medium text-claude-ink-1 flex-1 truncate" style={{ letterSpacing: "-0.005em" }}>
           {meta?.inngestName ?? row.short}
         </span>
-        <span
-          className="mono text-[9.5px]"
-          style={{ color: tone.color, fontWeight: 600 }}
-        >
-          {tone.label}
-        </span>
       </div>
-      {fn && <div className="text-[10.5px] text-ink-3 mb-1 truncate">{fn.summary}</div>}
-      <div className="mono text-[10px] text-ink-4 flex items-center gap-2">
+      {fn && (
+        <div className="text-[11px] text-claude-ink-3 mb-1.5 truncate leading-snug">
+          {fn.summary}
+        </div>
+      )}
+      <div className="text-[10.5px] text-claude-ink-4 flex items-center gap-1.5 tabular-nums">
         {row.deploy === "not_deployed" ? (
-          <span className="text-ink-3">未注册 Inngest function</span>
+          <span>未注册</span>
         ) : counts ? (
           <>
             <span>{counts.completed}/{counts.started} step</span>
@@ -646,10 +702,10 @@ function AgentCard({ row }: { row: MatrixRow }) {
         <div className="flex-1" />
         {runtimeBadge && (
           <span
-            className="px-1 rounded"
+            className="px-1.5 rounded text-[9.5px]"
             style={{
               color: runtimeBadge.color,
-              border: `1px solid color-mix(in oklab, ${runtimeBadge.color} 40%, transparent)`,
+              background: `color-mix(in oklab, ${runtimeBadge.color} 12%, transparent)`,
               fontWeight: 600,
             }}
             title={runtimeBadge.label}
@@ -668,11 +724,13 @@ function AgentCard({ row }: { row: MatrixRow }) {
 function ActiveRunsSection({ runs }: { runs: RunSummary[] | null }) {
   return (
     <section>
-      <div className="flex items-center mb-2">
-        <div className="text-[13px] font-semibold flex-1">活跃 run</div>
+      <div className="flex items-baseline mb-3">
+        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4 flex-1">
+          ACTIVE RUNS
+        </div>
         <Link
           href="/live?status=active"
-          className="mono text-[10.5px] text-ink-3 no-underline hover:text-ink-1"
+          className="text-[11px] text-ink-3 no-underline hover:text-accent"
         >
           查看全部 →
         </Link>
@@ -740,42 +798,38 @@ function ActiveRunRow({ run }: { run: RunSummary }) {
 // ── Anomalies feed ───────────────────────────────────────────────────
 
 function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
+  // Inline (post-Tier-C) — was a 360px right sidebar before. Header matches
+  // ActiveRunsSection (uppercase tracked + right-aligned audit jump).
   return (
-    <>
-      <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-        <div className="text-[13px] font-semibold mb-0.5">最近异常 · 1h</div>
-        <div className="text-[10.5px] text-ink-4">
-          跨 run / 跨 agent · click → /live 详情
+    <section>
+      <div className="flex items-baseline mb-3">
+        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4 flex-1">
+          最近异常 · 1H
         </div>
+        <Link
+          href="/audit"
+          className="text-[11px] text-ink-3 no-underline hover:text-accent flex items-center gap-1"
+        >
+          <Ic.book /> 完整审计日志 →
+        </Link>
       </div>
       {!entries ? (
-        <div className="text-[12px] text-ink-3 p-4">加载中…</div>
+        <div className="text-[12px] text-ink-3 py-6">加载中…</div>
       ) : entries.length === 0 ? (
-        <div className="p-4">
+        <div className="py-6">
           <EmptyState
             title="过去 1h 无异常"
             hint="所有 agent 都健康跑着——保持就好。"
           />
         </div>
       ) : (
-        <div className="flex flex-col">
+        <div className="rounded-[10px] bg-claude-panel divide-y divide-claude-line/60 overflow-hidden">
           {entries.map((e) => (
             <AnomalyRow key={e.id} entry={e} />
           ))}
         </div>
       )}
-      {/* Footer jump to full log — sticky at the bottom of the sidebar so
-          operators can always pivot from "what went wrong" to "show me
-          everything". /audit is the legacy unified log view. */}
-      <div className="mt-auto border-t border-line bg-surface" style={{ padding: "10px 16px" }}>
-        <Link
-          href="/audit"
-          className="text-[11.5px] text-accent hover:underline no-underline flex items-center gap-1"
-        >
-          <Ic.book /> 查看完整审计日志 →
-        </Link>
-      </div>
-    </>
+    </section>
   );
 }
 
@@ -787,24 +841,35 @@ function AnomalyRow({ entry }: { entry: LogEntry }) {
       : "oklch(0.5 0.14 75)";
   const kindLabel =
     entry.kind === "step.failed"
-      ? "✗ step.failed"
+      ? "step.failed"
       : entry.kind === "error"
-        ? "✗ error"
-        : "⚠ anomaly";
+        ? "error"
+        : "anomaly";
   const inner = (
-    <div className="border-b border-line cursor-pointer hover:bg-panel" style={{ padding: "8px 16px" }}>
-      <div className="flex items-center gap-1.5 mb-0.5 mono text-[10px]">
-        <span className="text-ink-4">{ts.toLocaleTimeString(undefined, { hour12: false })}</span>
-        <span style={{ color: tone, fontWeight: 600 }}>{kindLabel}</span>
-        <span className="text-ink-1 font-semibold truncate" style={{ flex: 1 }}>
+    <div className="cursor-pointer hover:bg-claude-surface transition-colors" style={{ padding: "14px 18px" }}>
+      <div className="flex items-center gap-2 mb-1">
+        <span
+          className="rounded-full"
+          style={{
+            width: 6, height: 6, background: tone,
+            boxShadow: `0 0 0 2px color-mix(in oklab, ${tone} 16%, transparent)`,
+          }}
+        />
+        <span className="text-[10.5px] uppercase tracking-wide font-medium" style={{ color: tone }}>
+          {kindLabel}
+        </span>
+        <span className="text-[12.5px] text-claude-ink-1 font-medium truncate flex-1" style={{ letterSpacing: "-0.005em" }}>
           {entry.agent}
         </span>
+        <span className="text-[10.5px] text-claude-ink-4 tabular-nums shrink-0">
+          {ts.toLocaleTimeString(undefined, { hour12: false })}
+        </span>
       </div>
-      <div className="text-[11.5px] text-ink-2 leading-snug">{entry.message}</div>
+      <div className="text-[12px] text-claude-ink-2 leading-snug">{entry.message}</div>
     </div>
   );
   return entry.runId ? (
-    <Link href={`/live?run=${encodeURIComponent(entry.runId)}`} className="no-underline">
+    <Link href={`/live?run=${encodeURIComponent(entry.runId)}`} className="no-underline block">
       {inner}
     </Link>
   ) : (
