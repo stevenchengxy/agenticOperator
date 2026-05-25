@@ -1,45 +1,59 @@
 "use client";
 
-// Codegen page — Phase 1a skeleton.
+// Codegen page — Phase 1c polish pass.
 //
-// Layout: left rail (prompt + pipeline timeline) · middle (Monaco tabs:
-// Prompt / Spec / Code / Diff) · right rail (compiler diagnostics).
+// Layout:
+//   ┌──────────────────────────────────────────────────────────────────────┐
+//   │ Hero header (serif title + subtitle + domain badge)                  │
+//   │ Horizontal pipeline stepper                                          │
+//   ├─────────────┬───────────────────────────────────────┬───────────────┤
+//   │ Left rail   │ Middle (Monaco tabs)                  │ Right rail    │
+//   │ Prompt      │ Prompt / Spec / Code / Diff           │ Compiler +    │
+//   │ + meta      │                                       │ Save button   │
+//   └─────────────┴───────────────────────────────────────┴───────────────┘
 //
-// Phase 1b wires:
-//   - "Generate Spec →" button → POST /api/codegen/generate (full pipeline:
-//     LLM Call A spec extractor → LLM Call B step body filler → template
-//     render → Phase 0c compile). Populates Spec + Code tabs and the
-//     right-rail CompilerPanel with the result.
-//   - Code tab + "Compile" button still works standalone for hand-editing.
+// What the operator gets end-to-end:
+//   1. write a business prompt → click "Generate agent"
+//   2. pipeline runs: LLM Call A (spec) → LLM Call B (step bodies) →
+//      template render → in-process tsc compile
+//   3. Spec / Code / Diff tabs populate; right rail shows diagnostics
+//   4. when compile.ok and slug matches AGENT_MAP, "Save as version" persists
+//      to AgentVersion (capturedFrom='codegen')
 //
-// Spec / pipeline / scope by domain: see lib/domains.tsx — current domain
-// gates which event/tool registry the LLM will see (Phase 1b).
+// Side flow: Code tab + Compile button still works standalone for hand-edits.
 
 import React from "react";
 import { useApp } from "@/lib/i18n";
 import { useDomain, getDomain } from "@/lib/domains";
+import { byInngestSlug } from "@/lib/agent-mapping";
 import { CodeEditor } from "./CodeEditor";
 import { CompilerPanel } from "./CompilerPanel";
 import { PromptPanel } from "./PromptPanel";
 import { PipelineTimeline, type PipelineStage, type StageState } from "./PipelineTimeline";
+import { DiffViewer } from "./DiffViewer";
+import { SaveAsVersionButton } from "./SaveAsVersionButton";
 import type { CompileResult } from "@/lib/agent-codegen/compiler/types";
+import type { AgentSpec } from "@/lib/agent-codegen/spec-types";
+import type { VersionsListResponse } from "@/lib/agent-versions/types";
 
 type Tab = "prompt" | "spec" | "code" | "diff";
 
-const STARTER_CODE = `// Phase 1a placeholder — paste or edit TypeScript here, then click Compile.
+const STARTER_CODE = `// Edit and click Compile, or use the prompt on the left to generate one.
 //
-// Phase 1b will populate this tab with LLM-generated code from your prompt.
-// The compiler typechecks AS IF this file lives at the path shown below,
-// resolving @/ aliases against the real project.
+// The compiler typechecks this AS IF the file lives at the path shown below,
+// resolving @/ aliases against the real AO project.
 
 import { AGENT_MAP } from '@/lib/agent-mapping';
 
 export const _placeholder = AGENT_MAP.length;
 `;
 
-const STARTER_PROMPT = `// Describe the agent you want to build, e.g.
-//   "When a candidate signs an offer, send a welcome email via the RMS
-//    notification API and write a CommunicationLog entry."
+const STARTER_PROMPT = `Describe the agent you want to build. Example:
+
+"When a candidate's match score is high enough to need an interview, call
+RoboHire to send an AI video interview invitation to their email, then
+mirror the communication into the Allmeta Neo4j ontology and emit
+INTERVIEW_INVITATION_SENT."
 `;
 
 const STARTER_SPEC = `{
@@ -50,6 +64,11 @@ const STARTER_SPEC = `{
   "emitEvents": [],
   "steps": []
 }
+`;
+
+const DIFF_EMPTY_LEFT = `// No saved version yet for this agent.
+// Generate, compile clean, then click "Save as version" — the next
+// generation diffs against what you just saved.
 `;
 
 export function CodegenContent() {
@@ -68,27 +87,68 @@ export function CodegenContent() {
   const [compileResult, setCompileResult] = React.useState<CompileResult | null>(null);
   const [compileError, setCompileError] = React.useState<string | null>(null);
   const [compiling, setCompiling] = React.useState(false);
-  // Phase 1b — full-pipeline progress / errors. Distinct from `compiling`
-  // because pipeline drives multiple stages and may take 30-90s.
   const [pipelineStage, setPipelineStage] = React.useState<PipelineStage | null>(null);
   const [pipelineError, setPipelineError] = React.useState<string | null>(null);
-  const [pipelineTimings, setPipelineTimings] = React.useState<{ totalMs: number; modelUsed: string } | null>(null);
+  const [pipelineTimings, setPipelineTimings] = React.useState<
+    { totalMs: number; modelUsed: string } | null
+  >(null);
+  const [parsedSpec, setParsedSpec] = React.useState<AgentSpec | null>(null);
+  const [savedActiveCode, setSavedActiveCode] = React.useState<string | null>(null);
 
-  // Pipeline stage indicator -----------------------------------------------
+  // Try to keep parsedSpec in sync with the Spec tab text, so the save flow
+  // can read spec.slug without round-tripping through the pipeline.
+  React.useEffect(() => {
+    try {
+      const j = JSON.parse(spec);
+      setParsedSpec(j);
+    } catch {
+      setParsedSpec(null);
+    }
+  }, [spec]);
+
+  // When the parsed spec points at a known agent, pre-fetch its saved
+  // versions so the Diff tab has a real left side.
+  React.useEffect(() => {
+    const slug = parsedSpec?.slug;
+    if (!slug) return setSavedActiveCode(null);
+    const meta = byInngestSlug(slug);
+    if (!meta) return setSavedActiveCode(null);
+    let cancelled = false;
+    fetch(`/api/agents/${encodeURIComponent(meta.short)}/versions`)
+      .then((r) => r.json())
+      .then((j: VersionsListResponse) => {
+        if (cancelled) return;
+        // Prefer the active version; fall back to the newest codegen version.
+        const latest =
+          j.versions.find((v) => v.id === j.activeVersionId) ??
+          j.versions[0];
+        // Existing version rows only have configJson today; codegen-saved
+        // ones have codeBlob via the extended POST. Read it off the raw
+        // row — types might lag.
+        const code = (latest as unknown as { codeBlob?: string })?.codeBlob;
+        setSavedActiveCode(typeof code === "string" ? code : null);
+      })
+      .catch(() => setSavedActiveCode(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [parsedSpec?.slug, pipelineTimings]);
+
+  // Pipeline state derivation ----------------------------------------------
   const pipelineStates: Partial<Record<PipelineStage, StageState>> = React.useMemo(() => {
     const s: Partial<Record<PipelineStage, StageState>> = {};
-    if (prompt.trim()) s.prompt = "ok";
-    if (spec.trim() && spec.trim() !== STARTER_SPEC.trim()) s.spec = "ok";
-    if (pipelineStage) s[pipelineStage] = "active";
+    if (prompt.trim() && prompt.trim() !== STARTER_PROMPT.trim()) s.prompt = "ok";
+    if (parsedSpec && parsedSpec.slug) s.spec = "ok";
+    if (parsedSpec) s.render = "ok";
+    if (parsedSpec && parsedSpec.steps?.length > 0) s.body = "ok";
     if (compiling) s.compile = "active";
     else if (compileResult) s.compile = compileResult.ok ? "ok" : "err";
-    if (compileResult?.ok && !pipelineStage) s.review = "ok";
+    if (compileResult?.ok && parsedSpec) s.review = "ok";
+    if (pipelineStage) s[pipelineStage] = "active";
     return s;
-  }, [prompt, spec, pipelineStage, compiling, compileResult]);
+  }, [prompt, parsedSpec, pipelineStage, compiling, compileResult]);
 
   // Actions -----------------------------------------------------------------
-  // Phase 1b — full pipeline: prompt → spec → step bodies → render → compile.
-  // On success, populates Spec + Code tabs and the right-rail compiler panel.
   const runPipeline = React.useCallback(async () => {
     setPipelineError(null);
     setPipelineTimings(null);
@@ -106,8 +166,6 @@ export function CodegenContent() {
         throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
       }
       const result = await r.json();
-      // Populate downstream surfaces. UI now reflects the generated artifacts;
-      // operator can still edit the code tab and re-compile manually.
       setSpec(JSON.stringify(result.spec, null, 2));
       setCode(result.code.content);
       setVirtualPath(result.code.path);
@@ -149,45 +207,41 @@ export function CodegenContent() {
   // Render ------------------------------------------------------------------
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg">
-      {/* Header */}
-      <header className="px-6 py-4 border-b border-line flex items-center gap-4">
-        <div className="flex-1 min-w-0">
-          <h1
-            className="m-0 text-ink-1"
-            style={{
-              fontFamily: 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif',
-              fontWeight: 500,
-              fontSize: 22,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            {t("codegen_title")}
-          </h1>
-          <p className="text-[11.5px] tracking-[0.04em] text-ink-4 m-0 mt-1">
-            {t("codegen_subtitle")}
-          </p>
+      {/* Hero header */}
+      <header
+        className="border-b border-line bg-surface"
+        style={{ padding: "28px 32px 20px" }}
+      >
+        <div className="flex items-start gap-6 mb-6">
+          <div className="flex-1 min-w-0">
+            <h1
+              className="m-0 text-ink-1"
+              style={{
+                fontFamily:
+                  'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif',
+                fontWeight: 500,
+                fontSize: 30,
+                letterSpacing: "-0.02em",
+                lineHeight: 1.1,
+              }}
+            >
+              {t("codegen_title")}
+            </h1>
+            <p className="text-[12.5px] text-ink-3 m-0 mt-2 leading-relaxed max-w-[640px]">
+              {t("codegen_hero_blurb")}
+            </p>
+          </div>
+          <DomainBadge color={domainMeta.color} label={domainMeta.label[lang]} />
         </div>
-        <span
-          className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] bg-panel border border-line text-ink-2"
-          title={t("codegen_scoped_to_domain")}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: domainMeta.color,
-            }}
-          />
-          {t("codegen_scoped_to_domain")}: <span className="font-medium text-ink-1">{domainMeta.label[lang]}</span>
-        </span>
+
+        <PipelineTimeline states={pipelineStates} />
       </header>
 
-      {/* Body — three columns */}
+      {/* Three-column body */}
       <div className="flex-1 min-h-0 flex">
         {/* Left rail */}
         <aside
-          className="border-r border-line bg-surface p-3 flex flex-col gap-5 overflow-auto"
+          className="border-r border-line bg-surface p-4 flex flex-col gap-4 overflow-auto"
           style={{ width: 280, minWidth: 280 }}
         >
           <PromptPanel
@@ -196,48 +250,77 @@ export function CodegenContent() {
             onGenerateSpec={runPipeline}
             disabled={pipelineStage !== null}
           />
+
           {pipelineError && (
             <div
-              className="px-2 py-1.5 text-[11px] rounded-md border border-line bg-panel leading-snug"
-              style={{ color: "var(--c-err, oklch(0.5 0.2 25))" }}
+              className="px-3 py-2.5 text-[11.5px] rounded-md border"
+              style={{
+                background: "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 6%, var(--c-panel))",
+                borderColor: "color-mix(in oklab, var(--c-err, oklch(0.5 0.2 25)) 30%, var(--c-line))",
+                color: "var(--c-err, oklch(0.5 0.2 25))",
+              }}
             >
-              {t("codegen_pipeline_error")}: {pipelineError}
+              <div className="font-medium text-[10px] uppercase tracking-[0.06em] mb-1">
+                {t("codegen_pipeline_error")}
+              </div>
+              <div className="leading-snug">{pipelineError}</div>
             </div>
           )}
-          {pipelineTimings && (
-            <div className="px-2 py-1.5 text-[11px] text-ink-4 rounded-md border border-line bg-panel mono">
-              ✓ {pipelineTimings.totalMs} ms · {pipelineTimings.modelUsed}
+
+          {pipelineTimings && !pipelineError && (
+            <div className="px-3 py-2 rounded-md border border-line bg-panel">
+              <div className="text-[10px] uppercase tracking-[0.06em] text-ink-4 mb-1">
+                {t("codegen_pipeline_last_run")}
+              </div>
+              <div className="flex items-center gap-2 text-[11.5px]">
+                <span className="text-ink-1 font-medium mono">{pipelineTimings.totalMs} ms</span>
+                <span className="text-ink-4">·</span>
+                <span className="text-ink-3 mono text-[10.5px]">{pipelineTimings.modelUsed}</span>
+              </div>
             </div>
           )}
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.06em] text-ink-4 mb-2">
-              {t("codegen_pipeline_title")}
+
+          {parsedSpec && (
+            <div className="px-3 py-2.5 rounded-md border border-line bg-panel flex flex-col gap-1.5">
+              <div className="text-[10px] uppercase tracking-[0.06em] text-ink-4">
+                {t("codegen_current_spec")}
+              </div>
+              <div className="text-[12px] font-medium text-ink-1 truncate" title={parsedSpec.displayName}>
+                {parsedSpec.displayName || "—"}
+              </div>
+              <div className="text-[10.5px] text-ink-4 mono truncate" title={parsedSpec.slug}>
+                {parsedSpec.slug || "—"}
+              </div>
+              <div className="text-[10.5px] text-ink-3 mt-1">
+                <span className="mono">{parsedSpec.steps?.length ?? 0}</span> steps ·{" "}
+                <span className="mono">{parsedSpec.emitEvents?.length ?? 0}</span> emits
+              </div>
             </div>
-            <PipelineTimeline states={pipelineStates} />
-          </div>
+          )}
         </aside>
 
         {/* Middle — editor tabs */}
         <main className="flex-1 min-w-0 flex flex-col">
-          {/* Tab strip */}
-          <div className="flex items-center border-b border-line bg-surface px-2 gap-1 h-[34px]">
-            <Tab id="prompt" current={tab} setTab={setTab} label={t("codegen_tab_prompt")} />
-            <Tab id="spec" current={tab} setTab={setTab} label={t("codegen_tab_spec")} />
-            <Tab id="code" current={tab} setTab={setTab} label={t("codegen_tab_code")} />
-            <Tab id="diff" current={tab} setTab={setTab} label={t("codegen_tab_diff")} />
+          <div
+            className="flex items-center border-b border-line bg-surface px-3 gap-1"
+            style={{ height: 36 }}
+          >
+            <TabBtn id="prompt" current={tab} setTab={setTab} label={t("codegen_tab_prompt")} />
+            <TabBtn id="spec" current={tab} setTab={setTab} label={t("codegen_tab_spec")} />
+            <TabBtn id="code" current={tab} setTab={setTab} label={t("codegen_tab_code")} />
+            <TabBtn id="diff" current={tab} setTab={setTab} label={t("codegen_tab_diff")} />
             {tab === "code" && (
               <input
                 value={virtualPath}
                 onChange={(e) => setVirtualPath(e.target.value)}
                 spellCheck={false}
-                className="ml-3 h-6 px-2 bg-panel border border-line rounded-md text-[11px] mono"
-                style={{ minWidth: 360 }}
+                className="ml-3 h-6 px-2 bg-panel border border-line rounded-md text-[10.5px] mono"
+                style={{ minWidth: 360, color: "var(--c-ink-3)" }}
                 title={t("codegen_virtual_path_hint")}
               />
             )}
           </div>
 
-          {/* Tab body */}
           <div className="flex-1 min-h-0">
             {tab === "prompt" && (
               <CodeEditor
@@ -267,9 +350,12 @@ export function CodegenContent() {
               />
             )}
             {tab === "diff" && (
-              <div className="p-6 text-[12px] text-ink-4">
-                {t("codegen_diff_placeholder")}
-              </div>
+              <DiffViewer
+                original={savedActiveCode ?? DIFF_EMPTY_LEFT}
+                modified={code}
+                language="typescript"
+                height="100%"
+              />
             )}
           </div>
         </main>
@@ -280,13 +366,49 @@ export function CodegenContent() {
           running={compiling}
           error={compileError}
           onCompile={runCompile}
+          saveButton={
+            <SaveAsVersionButton
+              slug={parsedSpec?.slug ?? null}
+              prompt={prompt}
+              spec={spec}
+              code={code}
+              modelUsed={pipelineTimings?.modelUsed ?? null}
+              canSave={!!compileResult?.ok}
+            />
+          }
         />
       </div>
     </div>
   );
 }
 
-function Tab({
+function DomainBadge({ color, label }: { color: string; label: string }) {
+  const { t } = useApp();
+  return (
+    <div
+      className="flex flex-col items-end px-3 py-2 rounded-lg border border-line bg-panel"
+      style={{ minWidth: 160 }}
+    >
+      <span className="text-[9.5px] uppercase tracking-[0.08em] text-ink-4">
+        {t("codegen_scoped_to_domain")}
+      </span>
+      <div className="flex items-center gap-1.5 mt-0.5">
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: color,
+            boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 18%, transparent)`,
+          }}
+        />
+        <span className="text-[12.5px] font-medium text-ink-1">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function TabBtn({
   id,
   current,
   setTab,
@@ -301,10 +423,10 @@ function Tab({
   return (
     <button
       onClick={() => setTab(id)}
-      className="h-7 px-3 rounded-md text-[12px] border-0 cursor-pointer"
+      className="h-7 px-3 rounded-md text-[12px] border-0 cursor-pointer transition-colors"
       style={{
         background: active ? "var(--c-accent-bg)" : "transparent",
-        color: active ? "var(--c-accent)" : "var(--c-ink-2)",
+        color: active ? "var(--c-accent)" : "var(--c-ink-3)",
         fontWeight: active ? 500 : 400,
       }}
     >

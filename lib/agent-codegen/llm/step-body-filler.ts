@@ -15,6 +15,7 @@ import { getToolRegistry, type ToolRegistryEntry } from '../registries';
 import type { DomainId } from '@/lib/domains';
 import type { StepBody } from '../templates/render-agent';
 import { pickCodegenGateway, makeClient } from './gateway';
+import { pickFewShots, type FewShotEntry } from '../few-shot-index';
 
 export type FillBodiesInput = {
   spec: AgentSpec;
@@ -146,21 +147,52 @@ function buildSystemPrompt(
     )
     .join('\n');
 
+  // Retrieve few-shots that match this spec's stage + the tools actually used.
+  // The model sees real production-agent step bodies as the idiomatic template
+  // for try/catch around RoboHire, NonRetriableError on 4xx, return-shape, etc.
+  const callsLibs = spec.steps
+    .map((s) => s.callsLib)
+    .filter((x): x is string => !!x);
+  const shots = pickFewShots({
+    stage: spec.stage,
+    toolIds: callsLibs,
+    topN: 3,
+  });
+  const fewShotBlock = shots.length
+    ? shots.map((s) => renderFewShot(s)).join('\n\n')
+    : '(no few-shot examples available for this stage)';
+
   return [
     'You are filling step.run callback bodies for an Inngest agent.',
-    'Constraints:',
-    '  - Output body is the code INSIDE the async () => { ... } callback, with no outer braces.',
-    '  - You may use `event` (the Inngest event payload), `logger`, and any earlier step outputs.',
-    '  - You may ONLY import from the tool registry below; never invent paths.',
-    '  - If a step has no clean tool match, return a body that throws or returns null with a comment.',
+    '',
+    'Hard rules:',
+    '  - Output body = code INSIDE the async () => { ... } callback, no outer braces.',
+    '  - Use `event` (Inngest event payload), `logger`, and any earlier step outputs.',
+    '  - Only import from the tool registry below; never invent paths.',
+    '  - Wrap external HTTP calls in try/catch; throw NonRetriableError for 4xx errors.',
+    '  - Always log a useful one-liner on success via logger.info.',
+    '  - Always return something so downstream steps can read the value.',
+    '  - If a step has no clean tool match, return null with a TODO comment.',
     '',
     'Tool registry:',
     toolsBlock,
+    '',
+    'Few-shot examples from production agents (study these patterns):',
+    fewShotBlock,
     '',
     `Agent under construction: ${spec.slug} — ${spec.displayName}`,
     `Trigger: ${spec.triggerEvent}    Emits: ${spec.emitEvents.join(', ') || '(none)'}`,
     '',
     'Steps to fill:',
     stepsBlock,
+  ].join('\n');
+}
+
+function renderFewShot(s: FewShotEntry): string {
+  return [
+    `--- ${s.source} · step "${s.stepName}" (tools: ${s.toolIds.join(', ')})`,
+    '```ts',
+    s.body,
+    '```',
   ].join('\n');
 }

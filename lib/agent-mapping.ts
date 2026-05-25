@@ -111,6 +111,21 @@ export function byWsId(id: string): AgentMeta | undefined {
   return AGENT_MAP.find((a) => a.wsId === id);
 }
 
+/**
+ * Resolve an AGENT_MAP entry from an Inngest function slug (kebab-case agent id).
+ * Matches either an explicit `inngestId` OR the derived `<kebab-short>-agent`
+ * convention. Used by codegen's save-as-version flow to map a generated slug
+ * back to a known agent short — same algorithm as the version API route.
+ */
+export function byInngestSlug(slug: string): AgentMeta | undefined {
+  return AGENT_MAP.find((a) => {
+    if (a.inngestId === slug) return true;
+    const derived =
+      a.short.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase() + '-agent';
+    return derived === slug;
+  });
+}
+
 // Agent realness derivation moved to lib/inngest-registry.ts which queries
 // Inngest live. These sync helpers read the LAST cached snapshot of that
 // registry. First call returns 'unbuilt' until fetchLiveRegistry() populates
