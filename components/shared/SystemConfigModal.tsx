@@ -78,6 +78,7 @@ export function SystemConfigModal({
             label={t("config_last_probe")}
             value={new Date(cfg.inngest.lastProbeAt).toLocaleString()}
           />
+          <SyncAppRow />
         </Section>
 
         {/* Event Engine */}
@@ -164,6 +165,95 @@ function Field({
       <span className="text-ink-3 w-[120px] shrink-0">{label}</span>
       {valueNode ?? (
         <span className={`text-ink-1 ${mono ? "mono break-all" : ""}`}>{value}</span>
+      )}
+    </div>
+  );
+}
+
+// ── Sync new App ──────────────────────────────────────────────────────
+// UI wrapper around POST /api/inngest-admin/sync-app. Lets ops register
+// any Inngest serve endpoint (this AO, a sibling project, a Docker host
+// alias) without dropping to a curl / scripts/register-with-inngest.ts.
+
+type SyncResult =
+  | { ok: true; functionsRegistered: number | null }
+  | { ok: false; error: string };
+
+function SyncAppRow() {
+  const { t } = useApp();
+  const defaultUrl = React.useMemo(
+    () => (typeof window !== "undefined" ? `${window.location.origin}/api/inngest` : ""),
+    [],
+  );
+  const [url, setUrl] = React.useState<string>(defaultUrl);
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState<SyncResult | null>(null);
+
+  const onSync = async () => {
+    if (!url.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await fetch("/api/inngest-admin/sync-app", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      const j = await r.json();
+      if (j.ok) {
+        setResult({ ok: true, functionsRegistered: j.functionsRegistered ?? null });
+      } else {
+        setResult({ ok: false, error: j.error ?? "unknown error" });
+      }
+    } catch (e) {
+      setResult({ ok: false, error: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-line mt-3 pt-3">
+      <div className="text-[11.5px] font-medium text-ink-2 mb-1">
+        {t("sync_app_title")}
+      </div>
+      <div className="text-[11px] text-ink-3 mb-2 leading-snug">
+        {t("sync_app_hint")}
+      </div>
+      <div className="flex items-stretch gap-1.5">
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="http://host:port/api/inngest"
+          className="flex-1 border border-line bg-panel rounded-sm mono text-[11.5px] text-ink-1 outline-none px-2 py-1"
+        />
+        <button
+          type="button"
+          onClick={() => setUrl(defaultUrl)}
+          className="text-[11px] text-ink-3 hover:text-ink-1 border border-line rounded-sm px-2 py-1 bg-surface shrink-0"
+          title={defaultUrl}
+        >
+          {t("sync_app_use_local")}
+        </button>
+        <Btn size="sm" onClick={onSync} disabled={busy || !url.trim()}>
+          {busy ? t("sync_app_syncing") : t("sync_app_button")}
+        </Btn>
+      </div>
+      {result && (
+        <div className="mt-2 text-[11.5px]">
+          {result.ok ? (
+            <span style={{ color: "var(--c-ok)" }}>
+              ✓ {t("sync_app_success")} ·{" "}
+              {result.functionsRegistered != null
+                ? t("sync_app_fn_count").replace("{n}", String(result.functionsRegistered))
+                : t("sync_app_fn_count_unknown")}
+            </span>
+          ) : (
+            <span style={{ color: "var(--c-err)" }} className="break-all">
+              ✗ {t("sync_app_error")}: {result.error}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
