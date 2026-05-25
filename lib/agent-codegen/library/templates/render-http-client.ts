@@ -157,8 +157,20 @@ function renderErrorClass(): string {
 }
 
 function renderMethod(m: LibMethod): string {
+  // TS1064 guard — async functions MUST return Promise<T>. The LLM
+  // sometimes emits a bare type (`InviteCandidateResponse`) instead of
+  // `Promise<InviteCandidateResponse>`. Wrap defensively so the generator
+  // never emits a TS1064 even on a slightly-misbehaving model.
+  const returnType = ensurePromise(m.returnType);
   return `/** ${m.description} */
-export async function ${m.name}(params: ${m.paramsType}): ${m.returnType} {
+export async function ${m.name}(params: ${m.paramsType}): ${returnType} {
   ${m.body.trim().split('\n').join('\n  ')}
 }`;
+}
+
+/** Wrap `T` as `Promise<T>` unless it's already a Promise. */
+function ensurePromise(returnType: string): string {
+  const trimmed = returnType.trim();
+  if (/^Promise\s*</.test(trimmed)) return trimmed;
+  return `Promise<${trimmed}>`;
 }
