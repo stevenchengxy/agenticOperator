@@ -64,24 +64,45 @@ export function OverviewContent() {
   const [activeRuns, setActiveRuns] = React.useState<RunSummary[] | null>(null);
   const [failed1h, setFailed1h] = React.useState<RunSummary[] | null>(null);
   const [anomalies, setAnomalies] = React.useState<LogEntry[] | null>(null);
+  const [todayRuns, setTodayRuns] = React.useState<{ total: number; completed: number } | null>(null);
+  const [hitlPending, setHitlPending] = React.useState<number | null>(null);
+  const [dlqPending, setDlqPending] = React.useState<number | null>(null);
+  const [events1h, setEvents1h] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
+    const today0 = new Date();
+    today0.setHours(0, 0, 0, 0);
+    const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [active, failed, recent] = await Promise.all([
+      const [active, failed, recent, todayFinished, hitl, dlq, events] = await Promise.all([
         fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=10"),
         fetchJson<RunsResponse>(
-          `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(
-            new Date(Date.now() - 60 * 60_000).toISOString(),
-          )}&limit=20`,
+          `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
         ),
         fetchJson<ActivityResponse>(
           "/api/activity/recent?kind=anomaly,error,step.failed&windowMs=3600000&limit=15",
+        ),
+        // 今日完成数 — completed since 00:00. completed/total ratio drives 成功率 KPI.
+        fetchJson<RunsResponse>(
+          `/api/runs?status=completed,failed,timed_out,interrupted&since=${encodeURIComponent(today0.toISOString())}&limit=1000`,
+        ),
+        fetchJson<{ total?: number; tasks?: unknown[] }>("/api/human-tasks?status=pending"),
+        fetchJson<{ pending: number }>("/api/em/dlq/count"),
+        fetchJson<{ total?: number; events?: unknown[] }>(
+          `/api/inngest-events?since=${encodeURIComponent(since1h)}`,
         ),
       ]);
       setActiveRuns(active.runs);
       setFailed1h(failed.runs);
       setAnomalies(recent.entries);
+      setTodayRuns({
+        total: todayFinished.runs.length,
+        completed: todayFinished.runs.filter((r) => r.status === "completed").length,
+      });
+      setHitlPending(hitl.total ?? hitl.tasks?.length ?? 0);
+      setDlqPending(dlq.pending);
+      setEvents1h(events.total ?? events.events?.length ?? 0);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -150,6 +171,10 @@ export function OverviewContent() {
         activeCount={activeRuns?.length ?? null}
         failed1hCount={failed1h?.length ?? null}
         anomaly1hCount={anomalies?.length ?? null}
+        todayRuns={todayRuns}
+        hitlPending={hitlPending}
+        dlqPending={dlqPending}
+        events1h={events1h}
       />
       {error && (
         <div
@@ -275,18 +300,24 @@ function KpiBar({
   activeCount,
   failed1hCount,
   anomaly1hCount,
+  todayRuns,
+  hitlPending,
+  dlqPending,
+  events1h,
 }: {
   agents: AgentHealth[];
   deployCounts: { online: number; paused: number; not_deployed: number };
   activeCount: number | null;
   failed1hCount: number | null;
   anomaly1hCount: number | null;
+  todayRuns: { total: number; completed: number } | null;
+  hitlPending: number | null;
+  dlqPending: number | null;
+  events1h: number | null;
 }) {
-  // Runtime health (from AgentActivity) is a separate signal from
-  // deployment status (Inngest registry). We surface deployment as the
-  // primary "agents" KPI because it matches what /fleet's SummaryChip
-  // shows — keeping the two pages numerically consistent. Runtime
-  // anomalies are still merged into the "anomaly · 1h" KPI.
+  // Runtime health (AgentActivity-driven) is folded into anomaly · 1h KPI's
+  // subtext so we don't double-count error signals. Deployment count is the
+  // single "agents" KPI (matches /fleet exactly).
   const runtimeCounts = React.useMemo(() => {
     const out = { running: 0, healthy: 0, degraded: 0, failed: 0, idle: 0 };
     for (const a of agents) out[a.status] += 1;
@@ -295,49 +326,83 @@ function KpiBar({
   const totalAgents = deployCounts.online + deployCounts.paused + deployCounts.not_deployed;
   const runtimeUnhealthy = runtimeCounts.degraded + runtimeCounts.failed;
 
+  const successRatePct =
+    todayRuns && todayRuns.total > 0
+      ? Math.round((todayRuns.completed / todayRuns.total) * 100)
+      : null;
+
+  // Two rows of 4. Top row = "operational state" (right now). Bottom row =
+  // "queues / throughput" (work backlog + system pulse). Keeps each row at
+  // ≤4 KPIs so the reader's eye never scans more than four numbers at once.
   return (
-    <div
-      className="border-b border-line bg-surface grid"
-      style={{
-        padding: "14px 22px",
-        gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-        gap: 18,
-      }}
-    >
-      <Kpi
-        label="active runs"
-        value={activeCount ?? "…"}
-        sub="运行中 / 暂停"
-        href="/live?status=active"
-      />
-      <Kpi
-        label="failed · 1h"
-        value={failed1hCount ?? "…"}
-        sub="失败 / 超时 / 中断"
-        tone={failed1hCount && failed1hCount > 0 ? "err" : undefined}
-        href="/live?status=failed&time=1h"
-      />
-      <Kpi
-        label="anomaly · 1h"
-        value={anomaly1hCount ?? "…"}
-        sub={`跨 run 异常 / 错误${runtimeUnhealthy > 0 ? ` · runtime ${runtimeUnhealthy}` : ""}`}
-        tone={anomaly1hCount && anomaly1hCount > 0 ? "warn" : undefined}
-        href="/monitor"
-      />
-      <Kpi
-        label="agents · 实装"
-        value={`${deployCounts.online}/${totalAgents}`}
-        sub={`${deployCounts.online} 已上线 · ${deployCounts.paused} 已暂停 · ${deployCounts.not_deployed} 未上线`}
-        tone={deployCounts.online === 0 && totalAgents > 0 ? "err" : "ok"}
-        href="/fleet"
-      />
-      <Kpi
-        label="agents · 运行异常"
-        value={runtimeUnhealthy}
-        sub={`${runtimeCounts.failed} failed · ${runtimeCounts.degraded} degraded · ${runtimeCounts.idle} idle`}
-        tone={runtimeCounts.failed > 0 ? "err" : runtimeCounts.degraded > 0 ? "warn" : undefined}
-        href="/monitor"
-      />
+    <div className="border-b border-line bg-surface" style={{ padding: "14px 22px" }}>
+      <div className="grid mb-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 18 }}>
+        <Kpi
+          label="active runs"
+          value={activeCount ?? "…"}
+          sub="运行中 / 暂停"
+          href="/live?status=active"
+        />
+        <Kpi
+          label="failed · 1h"
+          value={failed1hCount ?? "…"}
+          sub="失败 / 超时 / 中断"
+          tone={failed1hCount && failed1hCount > 0 ? "err" : undefined}
+          href="/live?status=failed&time=1h"
+        />
+        <Kpi
+          label="anomaly · 1h"
+          value={anomaly1hCount ?? "…"}
+          sub={`跨 run 异常 / 错误${runtimeUnhealthy > 0 ? ` · runtime ${runtimeUnhealthy}` : ""}`}
+          tone={anomaly1hCount && anomaly1hCount > 0 ? "warn" : undefined}
+          href="/monitor"
+        />
+        <Kpi
+          label="agents · 实装"
+          value={`${deployCounts.online}/${totalAgents}`}
+          sub={`${deployCounts.online} 已上线 · ${deployCounts.paused} 已暂停 · ${deployCounts.not_deployed} 未上线`}
+          tone={deployCounts.online === 0 && totalAgents > 0 ? "err" : "ok"}
+          href="/fleet"
+        />
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 18 }}>
+        <Kpi
+          label="今日成功率"
+          value={successRatePct == null ? "—" : `${successRatePct}%`}
+          sub={
+            todayRuns
+              ? `${todayRuns.completed}/${todayRuns.total} runs · since 00:00`
+              : "loading…"
+          }
+          tone={
+            successRatePct == null ? undefined
+              : successRatePct >= 95 ? "ok"
+              : successRatePct >= 80 ? "warn"
+              : "err"
+          }
+          href="/live"
+        />
+        <Kpi
+          label="待人工 · HITL"
+          value={hitlPending ?? "…"}
+          sub="pending HumanTask"
+          tone={hitlPending && hitlPending > 0 ? "warn" : undefined}
+          href="/inbox"
+        />
+        <Kpi
+          label="DLQ · 待重试"
+          value={dlqPending ?? "…"}
+          sub="event 校验失败 / 待处理"
+          tone={dlqPending && dlqPending > 0 ? "err" : undefined}
+          href="/events"
+        />
+        <Kpi
+          label="事件吞吐 · 1h"
+          value={events1h ?? "…"}
+          sub="Inngest 总线 · 过去 1 小时"
+          href="/events"
+        />
+      </div>
     </div>
   );
 }
