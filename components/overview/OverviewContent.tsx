@@ -12,6 +12,7 @@ import { byShortFunction } from "@/lib/agent-functions";
 import { AGENT_MAP, byShort } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
+import { InngestPill } from "@/components/shared/InngestPill";
 
 // /overview — system-at-a-glance dashboard.
 //
@@ -145,6 +146,7 @@ export function OverviewContent() {
       {isAllIdle && <DataFlowDiagnostic />}
       <KpiBar
         agents={health.agents}
+        deployCounts={deployCounts}
         activeCount={activeRuns?.length ?? null}
         failed1hCount={failed1h?.length ?? null}
         anomaly1hCount={anomalies?.length ?? null}
@@ -183,10 +185,10 @@ export function OverviewContent() {
 // ── Data-flow diagnostic banner ──────────────────────────────────────
 //
 // Shows up when /overview can't find ANY signs of life — no active runs,
-// no anomalies, all agents idle. The point: distinguish "UI is broken"
-// from "no agents are emitting data" — the latter is a setup issue, not
-// a UI bug. Lists exactly which data sources are empty and what the
-// cross-process logging contract is so a user can fix it themselves.
+// no anomalies, all agents idle. The intent is to distinguish "UI is broken"
+// from "system is registered but no one's emitting events". The latter is
+// normal between operations; the banner just gives the user a one-click
+// path to verify or trigger activity.
 
 function DataFlowDiagnostic() {
   return (
@@ -201,27 +203,31 @@ function DataFlowDiagnostic() {
       <Ic.alert />
       <div className="flex-1 text-[12px] leading-relaxed">
         <div className="font-semibold mb-1" style={{ color: "var(--c-info)" }}>
-          数据流诊断 · 当前所有 agent 空闲、零活跃 run、零最近异常
+          事件总线空闲 · 当前无活跃 run、无最近异常
         </div>
         <div className="text-ink-2">
-          AO-main 自己**不再注册任何 Inngest function**（见 <code className="mono text-[11px]">server/inngest/functions.ts</code>，agents 已迁到 sibling 项目 <code className="mono text-[11px]">resume-parser-agent</code> port 3020）。
-          所以 AO-main 的 DB 不会自动收到新的 AgentActivity，除非外部 runtime 通过下面任一方式推送：
+          这通常是<strong>正常</strong>的 — 系统在等下一个外部事件。如果你刚启动 dev server 想验证链路，下面几个常见入口：
         </div>
         <ul className="mt-2 text-ink-2" style={{ listStyle: "disc", paddingLeft: 18 }}>
           <li>
-            外部 runtime POST{" "}
-            <code className="mono text-[11px]">/api/runs/[runId]/activity</code> with{" "}
-            <code className="mono text-[11px]">{`{ entries: [...] }`}</code>{" "}
-            — 详见路由文件顶部注释
+            发一个测试事件:{" "}
+            <code className="mono text-[11px]">POST /api/test/trigger-requirement</code>
+            {" "}— 触发 ReqAnalyzer → JDGenerator → ... 链路
           </li>
           <li>
-            或者用 <code className="mono text-[11px]">POST /api/test/trigger-requirement</code>{" "}
-            触发测试事件（在 RPA 项目 port 3020 跑起的前提下 —— agents 全部由
-            resume-parser-agent 持有，AO-main 不再注册 Inngest function）
+            或直接 publish 任意事件:{" "}
+            <code className="mono text-[11px]">POST /api/inngest-events {`{name, data}`}</code>
+          </li>
+          <li>
+            智能体没注册? 在头部 <strong>InngestPill</strong> → <strong>同步新 App</strong> 填{" "}
+            <code className="mono text-[11px]">${typeof window !== "undefined" ? window.location.origin : "<host>"}/api/inngest</code>
           </li>
         </ul>
-        <div className="text-ink-3 text-[11.5px] mt-2 mono">
-          这不是 UI bug——是数据契约还没接通。配置后这一面板会自动消失。
+        <div className="text-ink-3 text-[11.5px] mt-2">
+          完整运行日志在{" "}
+          <Link href="/live" className="text-accent hover:underline">/live</Link>，
+          系统配置点头部{" "}
+          <Link href="/fleet" className="text-accent hover:underline">/fleet</Link> 的 InngestPill。
         </div>
       </div>
     </div>
@@ -248,6 +254,7 @@ function Header({
           系统视角 · 当下整体跑得怎样。所有数字姓"系统"，不属于任何单条 run。
         </div>
       </div>
+      <InngestPill />
       {fetchedAt && (
         <span className="mono text-[10.5px] text-ink-4">
           updated {fetchedAt.toLocaleTimeString(undefined, { hour12: false })}
@@ -264,22 +271,29 @@ function Header({
 
 function KpiBar({
   agents,
+  deployCounts,
   activeCount,
   failed1hCount,
   anomaly1hCount,
 }: {
   agents: AgentHealth[];
+  deployCounts: { online: number; paused: number; not_deployed: number };
   activeCount: number | null;
   failed1hCount: number | null;
   anomaly1hCount: number | null;
 }) {
-  const counts = React.useMemo(() => {
+  // Runtime health (from AgentActivity) is a separate signal from
+  // deployment status (Inngest registry). We surface deployment as the
+  // primary "agents" KPI because it matches what /fleet's SummaryChip
+  // shows — keeping the two pages numerically consistent. Runtime
+  // anomalies are still merged into the "anomaly · 1h" KPI.
+  const runtimeCounts = React.useMemo(() => {
     const out = { running: 0, healthy: 0, degraded: 0, failed: 0, idle: 0 };
     for (const a of agents) out[a.status] += 1;
     return out;
   }, [agents]);
-  const totalAgents = agents.length;
-  const unhealthy = counts.degraded + counts.failed;
+  const totalAgents = deployCounts.online + deployCounts.paused + deployCounts.not_deployed;
+  const runtimeUnhealthy = runtimeCounts.degraded + runtimeCounts.failed;
 
   return (
     <div
@@ -306,24 +320,23 @@ function KpiBar({
       <Kpi
         label="anomaly · 1h"
         value={anomaly1hCount ?? "…"}
-        sub="跨 run 异常 / 错误"
+        sub={`跨 run 异常 / 错误${runtimeUnhealthy > 0 ? ` · runtime ${runtimeUnhealthy}` : ""}`}
         tone={anomaly1hCount && anomaly1hCount > 0 ? "warn" : undefined}
+        href="/monitor"
       />
       <Kpi
-        label="agents · health"
-        value={`${counts.healthy + counts.running}/${totalAgents}`}
-        sub={`${counts.running} running · ${counts.healthy} healthy · ${counts.idle} idle`}
-        tone={
-          counts.failed > 0 ? "err" : counts.degraded > 0 ? "warn" : "ok"
-        }
-        href="/workflow"
+        label="agents · 实装"
+        value={`${deployCounts.online}/${totalAgents}`}
+        sub={`${deployCounts.online} 已上线 · ${deployCounts.paused} 已暂停 · ${deployCounts.not_deployed} 未上线`}
+        tone={deployCounts.online === 0 && totalAgents > 0 ? "err" : "ok"}
+        href="/fleet"
       />
       <Kpi
-        label="agents · 异常"
-        value={unhealthy}
-        sub={`${counts.failed} failed · ${counts.degraded} degraded`}
-        tone={counts.failed > 0 ? "err" : counts.degraded > 0 ? "warn" : undefined}
-        href="/workflow"
+        label="agents · 运行异常"
+        value={runtimeUnhealthy}
+        sub={`${runtimeCounts.failed} failed · ${runtimeCounts.degraded} degraded · ${runtimeCounts.idle} idle`}
+        tone={runtimeCounts.failed > 0 ? "err" : runtimeCounts.degraded > 0 ? "warn" : undefined}
+        href="/monitor"
       />
     </div>
   );
