@@ -38,11 +38,13 @@ import {
 } from "./PipelineTimeline";
 import { DiffViewer } from "./DiffViewer";
 import { SaveAsVersionButton } from "./SaveAsVersionButton";
+import { EvaluationPanel } from "./EvaluationPanel";
 import type { CompileResult } from "@/lib/agent-codegen/compiler/types";
 import type { AgentSpec } from "@/lib/agent-codegen/spec-types";
+import type { EvaluationReport } from "@/lib/agent-codegen/eval/evaluation-report";
 import type { VersionsListResponse } from "@/lib/agent-versions/types";
 
-type Tab = "spec" | "code" | "diff";
+type Tab = "spec" | "code" | "diff" | "evaluation";
 
 const STARTER_BUSINESS_LOGIC = `每一步该做的事(自然语言,LLM 看这部分):
 
@@ -91,6 +93,12 @@ export function CodegenContent() {
     { totalMs: number; modelUsed: string } | null
   >(null);
   const [savedActiveCode, setSavedActiveCode] = React.useState<string | null>(null);
+  // Evaluation panel state — populated by /api/codegen/evaluate. Auto-runs
+  // after a successful pipeline generation; can be manually re-run via the
+  // panel's "Re-evaluate" button.
+  const [evalReport, setEvalReport] = React.useState<EvaluationReport | null>(null);
+  const [evalRunning, setEvalRunning] = React.useState(false);
+  const [evalError, setEvalError] = React.useState<string | null>(null);
 
   // When the form points at a registered agent, pre-fetch its saved
   // codegen versions so the Diff tab has a real left side.
@@ -171,12 +179,72 @@ export function CodegenContent() {
         modelUsed: result.modelUsed,
       });
       setTab("code");
+
+      // Auto-fire evaluation against the freshly-generated artifacts.
+      // Pass them explicitly because the state setters above haven't flushed yet.
+      void (async () => {
+        setEvalReport(null);
+        setEvalRunning(true);
+        setEvalError(null);
+        try {
+          const er = await fetch("/api/codegen/evaluate", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              spec: result.spec,
+              code: result.code.content,
+              prompt: businessLogic,
+              domain,
+              modelUsed: result.modelUsed,
+              pipelineTotalMs: result.timings.totalMs,
+            }),
+          });
+          if (!er.ok) {
+            const j = (await er.json().catch(() => ({}))) as { message?: string; error?: string };
+            throw new Error(j.message ?? j.error ?? `HTTP ${er.status}`);
+          }
+          setEvalReport((await er.json()) as EvaluationReport);
+        } catch (e) {
+          setEvalError(e instanceof Error ? e.message : String(e));
+        } finally {
+          setEvalRunning(false);
+        }
+      })();
     } catch (e) {
       setPipelineError(e instanceof Error ? e.message : String(e));
     } finally {
       setPipelineStage(null);
     }
   }, [form, businessLogic, domain]);
+
+  const runEvaluation = React.useCallback(async () => {
+    if (!spec) return;
+    setEvalRunning(true);
+    setEvalError(null);
+    try {
+      const r = await fetch("/api/codegen/evaluate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          spec,
+          code,
+          prompt: businessLogic,
+          domain,
+          modelUsed: pipelineTimings?.modelUsed,
+          pipelineTotalMs: pipelineTimings?.totalMs,
+        }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      setEvalReport((await r.json()) as EvaluationReport);
+    } catch (e) {
+      setEvalError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEvalRunning(false);
+    }
+  }, [spec, code, businessLogic, domain, pipelineTimings]);
 
   const runCompile = React.useCallback(async () => {
     setCompiling(true);
@@ -291,6 +359,32 @@ export function CodegenContent() {
             <TabBtn id="spec" current={tab} setTab={setTab} label={t("codegen_tab_spec")} />
             <TabBtn id="code" current={tab} setTab={setTab} label={t("codegen_tab_code")} />
             <TabBtn id="diff" current={tab} setTab={setTab} label={t("codegen_tab_diff")} />
+            <TabBtn
+              id="evaluation"
+              current={tab}
+              setTab={setTab}
+              label={t("codegen_tab_evaluation")}
+              badge={
+                evalReport
+                  ? evalReport.finalVerdict === "FULL"
+                    ? "✓"
+                    : evalReport.finalVerdict === "PARTIAL"
+                    ? "~"
+                    : "!"
+                  : evalRunning
+                  ? "…"
+                  : undefined
+              }
+              badgeColor={
+                evalReport?.finalVerdict === "FULL"
+                  ? "var(--c-ok)"
+                  : evalReport?.finalVerdict === "PARTIAL"
+                  ? "var(--c-warn, oklch(0.65 0.14 75))"
+                  : evalReport?.finalVerdict === "DRAFT"
+                  ? "var(--c-err, oklch(0.5 0.2 25))"
+                  : undefined
+              }
+            />
             {tab === "code" && (
               <input
                 value={virtualPath}
@@ -328,6 +422,15 @@ export function CodegenContent() {
                 modified={code}
                 language="typescript"
                 height="100%"
+              />
+            )}
+            {tab === "evaluation" && (
+              <EvaluationPanel
+                report={evalReport}
+                running={evalRunning}
+                error={evalError}
+                onRun={runEvaluation}
+                canRun={!!spec}
               />
             )}
           </div>
@@ -388,17 +491,22 @@ function TabBtn({
   current,
   setTab,
   label,
+  badge,
+  badgeColor,
 }: {
   id: Tab;
   current: Tab;
   setTab: (t: Tab) => void;
   label: string;
+  /** Small char in the tab pill (✓ / ~ / ! / … ) for evaluation feedback. */
+  badge?: string;
+  badgeColor?: string;
 }) {
   const active = id === current;
   return (
     <button
       onClick={() => setTab(id)}
-      className="h-7 px-3 rounded-md text-[12px] border-0 cursor-pointer transition-colors"
+      className="h-7 px-3 rounded-md text-[12px] border-0 cursor-pointer transition-colors inline-flex items-center gap-1.5"
       style={{
         background: active ? "var(--c-accent-bg)" : "transparent",
         color: active ? "var(--c-accent)" : "var(--c-ink-3)",
@@ -406,6 +514,22 @@ function TabBtn({
       }}
     >
       {label}
+      {badge && (
+        <span
+          className="inline-flex items-center justify-center mono"
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            background: badgeColor ?? "var(--c-ink-4)",
+            color: "white",
+            fontSize: 9,
+            fontWeight: 700,
+          }}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
