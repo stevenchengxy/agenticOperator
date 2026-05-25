@@ -828,7 +828,7 @@ function DataWritesSummary({
         {pgLiveMissing.length > 0 && (
           <span style={{ color: "var(--c-err)" }}> ({pgLiveMissing.length} 缺失)</span>
         )}
-        {" · Neo4j "}
+        {" · Ontology "}
         {live.loading ? "…" : neoLiveExists.length}
         {neoLiveMissing.length > 0 && (
           <span style={{ color: "var(--c-err)" }}> ({neoLiveMissing.length} 缺失)</span>
@@ -843,7 +843,7 @@ function DataWritesSummary({
           stepFallback={pgFromSteps}
         />
         <Neo4jLiveColumn
-          title="图引擎 (via allmeta · 实时反查)"
+          title="Ontology (via allmeta · 实时反查)"
           loading={live.loading}
           error={live.error}
           entities={live.neoEntities}
@@ -890,7 +890,7 @@ function Neo4jLiveColumn({
       </div>
       {loading && (
         <div className="text-ink-4" style={{ fontSize: 11 }}>
-          查询 Neo4j 中…
+          查询中…
         </div>
       )}
       {!loading && error && entities.length === 0 && (
@@ -900,7 +900,7 @@ function Neo4jLiveColumn({
       )}
       {!loading && entities.length === 0 && !error && stepFallback.length === 0 && (
         <div className="text-ink-4" style={{ fontSize: 11 }}>
-          (此 agent 不写 Neo4j)
+          (此 agent 无写入)
         </div>
       )}
       {!loading && entities.length > 0 && (

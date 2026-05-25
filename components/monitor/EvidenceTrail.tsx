@@ -139,9 +139,13 @@ function EvidenceCard({ row }: { row: EvidenceRow }) {
               <span className="mono text-ink-3">PK = {row.allmeta_pk_value}</span>
             )}
           </div>
+          {/* Cypher snippet kept for dev verification of written instances.
+              Per 2026-05-25 user clarification: hide direct-entry jumps
+              into the graph engine, but the Cypher itself stays so devs
+              can copy + paste to verify writes outside the UI. */}
           {row.allmeta_neo4j && (
             <div>
-              <div className="text-ink-4 uppercase text-[10px] mb-0.5">图引擎 Cypher (copy + paste 到 http://localhost:7475/browser/):</div>
+              <div className="text-ink-4 uppercase text-[10px] mb-0.5">写入 Cypher (开发验证用):</div>
               <pre className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap break-words bg-bg/40 border border-line rounded px-2 py-1 select-all">{row.allmeta_neo4j}</pre>
             </div>
           )}

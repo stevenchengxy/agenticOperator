@@ -150,11 +150,6 @@ export function RuleCheckAuditDetailBody({
           </div>
           <div className="mono text-[11px] text-ink-3 truncate">{auditId}</div>
         </div>
-        <Neo4jLinkBtn
-          label="🔗 图引擎"
-          title={t("rc_drawer_neo4j_title")}
-          cypher={`MATCH (a:RuleCheckAudit {audit_id: "${auditId}"})\nOPTIONAL MATCH (a)-[r]->(n)\nRETURN a, r, n`}
-        />
         <Btn
           size="sm"
           onClick={onReplay}
@@ -1178,10 +1173,6 @@ function InferenceChainCard({
         <Badge variant={flag.result === "PASS" ? "ok" : flag.result === "FAIL" ? "err" : "default"}>
           {flag.result}
         </Badge>
-        <Neo4jLinkBtn
-          label="🔗"
-          cypher={`MATCH (r:Rule {id: "${flag.rule_id}"})\nRETURN r`}
-        />
       </div>
 
       {/* Candidate + JD context row */}
@@ -1565,6 +1556,9 @@ function AllmetaInstanceCard({
           >
             {JSON.stringify(data.instance, null, 2)}
           </pre>
+          {/* Cypher snippet kept for dev verification of written instances
+              (per 2026-05-25 user clarification — hide graph-engine entry
+              jumps but keep the read-only Cypher for copy + paste). */}
           <div
             className="mono text-[10px] text-ink-3"
             style={{
@@ -1574,7 +1568,7 @@ function AllmetaInstanceCard({
               borderRadius: 3,
             }}
           >
-            <div className="text-ink-3 mb-1">📋 {t("rc_allmeta_cypher_label")}</div>
+            <div className="text-ink-3 mb-1">📋 验证 Cypher (开发用):</div>
             <CypherSnippet cypher={data.verify.cypher} />
             <div className="mt-2 text-ink-3 text-[9.5px]">
               Allmeta API: {data.verify.api_path}
@@ -1595,7 +1589,7 @@ function AllmetaInstanceCard({
               className="mono text-[10px] text-ink-3"
               style={{ marginTop: 6, padding: "6px 8px", background: "var(--c-bg)", borderRadius: 3 }}
             >
-              <div className="text-ink-3 mb-1">📋 {t("rc_allmeta_direct_label")}</div>
+              <div className="text-ink-3 mb-1">📋 直查 Cypher (开发用):</div>
               <CypherSnippet cypher={data.verify.cypher} />
             </div>
           ) : null}
@@ -1605,6 +1599,9 @@ function AllmetaInstanceCard({
   );
 }
 
+// CypherSnippet — read-only display of the cypher used to verify a
+// written instance. Per 2026-05-25 user clarification: hide direct-entry
+// jumps to the graph engine but keep the Cypher text for dev verification.
 function CypherSnippet({ cypher }: { cypher: string }) {
   return (
     <div className="flex items-start" style={{ gap: 6 }}>
@@ -1672,45 +1669,13 @@ function InstanceCard({
   );
 }
 
-/**
- * A2 — 一键复制 Cypher 并跳转 Neo4j Browser
- *
- * Neo4j Browser 不直接接 URL query 参数运行 cypher,所以做法是:
- *   1. 把 cypher copy 到剪贴板
- *   2. 在新 tab 打开 Browser
- *   3. 用户粘贴(Cmd+V)即可
- * 短期方案,UX 不完美但比"无源可追"好。长期方案是写个 mini graph viewer。
- */
-function Neo4jLinkBtn({
-  label = "🔗 图引擎",
-  title,
-  cypher,
-}: {
-  label?: string;
-  title?: string;
-  cypher: string;
-}) {
-  const { t } = useApp();
-  const [copied, setCopied] = React.useState(false);
-  const browserUrl =
-    process.env.NEXT_PUBLIC_NEO4J_BROWSER_URL || "http://localhost:7475/browser/";
-  return (
-    <button
-      title={title || t("rc_neo4j_default_title")}
-      onClick={(e) => {
-        e.stopPropagation();
-        navigator.clipboard?.writeText(cypher);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2500);
-        window.open(browserUrl, "_blank", "noopener");
-      }}
-      className="mono text-[10.5px] border border-line bg-panel text-ink-2 rounded-sm cursor-pointer hover:bg-surface hover:text-ink-1"
-      style={{ padding: "4px 8px" }}
-    >
-      {copied ? t("rc_copied_cypher") : label}
-    </button>
-  );
-}
+// 2026-05-25 cleanup per user request: AO no longer offers DIRECT-ENTRY
+// jumps into the graph engine browser. Removed:
+//   - Neo4jLinkBtn (clickable "open in Neo4j Browser" + clipboard cypher)
+// Kept (dev verification):
+//   - CypherSnippet (read-only Cypher display + copy button) — see
+//     definition further up. User can copy + run elsewhere to verify
+//     writes, but AO itself never navigates to the graph engine.
 
 function CopyBtn({ text }: { text: string }) {
   const { t } = useApp();

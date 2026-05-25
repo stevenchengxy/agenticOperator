@@ -130,8 +130,8 @@ function EmStatusPill({
     ? [
         `状态：${p.label}`,
         health.neo4j.configured
-          ? `Neo4j：${health.neo4j.reachable ? "可达" : "不通"}${health.neo4j.error ? ` · ${health.neo4j.error}` : ""}`
-          : "图引擎：未配置",
+          ? `Ontology：${health.neo4j.reachable ? "可达" : "不通"}${health.neo4j.error ? ` · ${health.neo4j.error}` : ""}`
+          : "Ontology：未配置",
         health.neo4j.lastSyncAt
           ? `上次同步：${new Date(health.neo4j.lastSyncAt).toLocaleString(undefined, { hour12: false })}`
           : "尚未成功同步",

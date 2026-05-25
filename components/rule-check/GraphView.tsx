@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { buildNeo4jBrowserUrl, type NodeKind } from "./neo4j-jump";
+import type { NodeKind } from "./neo4j-jump";
 
 export type GraphViewProps = {
   graph: {
@@ -13,7 +13,6 @@ export type GraphViewProps = {
     employment_links?: Array<Record<string, unknown>>;
   } | null | undefined;
   highlightNodes: Set<NodeKind>;
-  neo4jBrowserBase?: string;
 };
 
 type SlotKind = Exclude<NodeKind, 'subgraph'>;
@@ -34,7 +33,7 @@ const EDGES: Array<{ from: SlotKind; to: SlotKind; label: string }> = [
   { from: 'application', to: 'jd',          label: 'TARGETS_REQUISITION' },
 ];
 
-export function GraphView({ graph, highlightNodes, neo4jBrowserBase }: GraphViewProps) {
+export function GraphView({ graph, highlightNodes }: GraphViewProps) {
   const g = graph ?? {};
   const [selected, setSelected] = React.useState<SlotKind | null>(null);
 
@@ -113,12 +112,6 @@ export function GraphView({ graph, highlightNodes, neo4jBrowserBase }: GraphView
           kind={selected}
           label={POSITIONS[selected].label}
           data={dataOf(selected)}
-          neo4jUrl={(() => {
-            const id = idOf(selected);
-            // employment_links uses a separate kind in neo4j-jump; the rest map 1:1.
-            if (selected === 'employment' || !id) return null;
-            return buildNeo4jBrowserUrl(neo4jBrowserBase, selected, id);
-          })()}
           onClose={() => setSelected(null)}
         />
       )}
@@ -126,8 +119,11 @@ export function GraphView({ graph, highlightNodes, neo4jBrowserBase }: GraphView
   );
 }
 
-function NodeDetailPanel({ kind, label, data, neo4jUrl, onClose }: {
-  kind: SlotKind; label: string; data: unknown; neo4jUrl: string | null; onClose: () => void;
+// 2026-05-25: removed "↗ Open in Neo4j" / "↗ 图引擎" link per user request —
+// no direct entry into the graph engine browser. Node payload still
+// shown inline; users inspect data here without leaving AO.
+function NodeDetailPanel({ kind, label, data, onClose }: {
+  kind: SlotKind; label: string; data: unknown; onClose: () => void;
 }) {
   const isEmpty = data === null || (Array.isArray(data) && data.length === 0);
   return (
@@ -136,12 +132,7 @@ function NodeDetailPanel({ kind, label, data, neo4jUrl, onClose }: {
         <div className="text-[11px] text-ink-2">
           <span className="text-ink-1 mono">{label}</span> <span className="text-ink-4 mono">({kind})</span>
         </div>
-        <div className="flex items-center gap-3 text-[11px]">
-          {neo4jUrl
-            ? <a href={neo4jUrl} target="_blank" rel="noreferrer" className="text-[color:var(--c-accent)] underline">↗ Open in Neo4j</a>
-            : <span className="text-ink-4" title="图引擎浏览器链接对此节点类型不可用">↗ 图引擎</span>}
-          <button onClick={onClose} className="text-ink-3 hover:text-ink-1">× close</button>
-        </div>
+        <button onClick={onClose} className="text-ink-3 hover:text-ink-1 text-[11px]">× close</button>
       </div>
       <pre className="text-[10.5px] mono text-ink-2 p-2 overflow-x-auto max-h-[260px] whitespace-pre-wrap">
         {isEmpty ? '(no data — slot empty)' : safeStringify(data)}

@@ -451,7 +451,7 @@ function PayloadViewer({ event, contract, setUrl }: { event: InngestEventRow; co
             style={{ fontSize: 12 }}
           >
             <span style={{ display: "inline-block", transition: "transform 0.15s", transform: showSchema ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
-            注册 schema (Neo4j Ontology)
+            注册 schema (Ontology)
           </button>
           {showSchema && (
             <pre
@@ -658,7 +658,7 @@ function EmStatusBar({
       </span>
       <span className="flex items-center gap-1.5">
         <span className="rounded-full" style={{ width: 6, height: 6, background: neo4jColor }} />
-        <span className="text-ink-3">图引擎 (Ontology)</span>
+        <span className="text-ink-3">Ontology</span>
         <span className="text-ink-1">{neo4jReachable ? "可达" : "不可达"}</span>
       </span>
       <span>
@@ -690,7 +690,7 @@ function EmStatusBar({
           opacity: syncing ? 0.6 : 1,
         }}
       >
-        {syncing ? "同步中…" : "↻ 同步 Neo4j"}
+        {syncing ? "同步中…" : "↻ 同步 Ontology"}
       </button>
     </div>
   );
@@ -741,7 +741,7 @@ function RegistrationBadge({ contract, large }: { contract: EventContract | null
     return (
       <span
         className="inline-flex items-center gap-1 rounded"
-        title="此事件已注册到 Neo4j Ontology"
+        title="此事件已注册到 Ontology"
         style={{
           padding, fontSize: size,
           background: "var(--c-ok-bg)",
@@ -757,7 +757,7 @@ function RegistrationBadge({ contract, large }: { contract: EventContract | null
   return (
     <span
       className="inline-flex items-center rounded"
-      title="此事件未在 Neo4j Ontology 注册"
+      title="此事件未在 Ontology 注册"
       style={{
         padding, fontSize: size,
         background: "transparent",

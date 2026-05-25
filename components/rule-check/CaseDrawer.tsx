@@ -3,9 +3,14 @@
 import React from "react";
 import { Btn } from "@/components/shared/atoms";
 import type { ScenarioResultPayload } from "./use-run-stream";
-import { buildNeo4jBrowserUrl, type NodeKind } from "./neo4j-jump";
+import type { NodeKind } from "./neo4j-jump";
 import { InferenceChainView } from "./InferenceChainView";
 import { GraphView } from "./GraphView";
+
+// 2026-05-25: removed Neo4j Browser "Open Candidate/Resume in Neo4j"
+// jump links per user request — no direct entry into the graph engine.
+// `neo4jBrowserBase` prop kept in the type for callsite compatibility but
+// no longer used.
 
 export type CaseDrawerProps = {
   result: ScenarioResultPayload | null;
@@ -13,21 +18,16 @@ export type CaseDrawerProps = {
   onClose: () => void;
   selectedRuleId: string | null;
   setSelectedRuleId: (rid: string | null) => void;
-  neo4jBrowserBase: string | undefined;
+  /** @deprecated unused since the Neo4j Browser links were removed. */
+  neo4jBrowserBase?: string | undefined;
   onReplay: () => void;
   replayInFlight: boolean;
 };
 
-export function CaseDrawer({ result, open, onClose, selectedRuleId, setSelectedRuleId, neo4jBrowserBase, onReplay, replayInFlight }: CaseDrawerProps) {
+export function CaseDrawer({ result, open, onClose, selectedRuleId, setSelectedRuleId, onReplay, replayInFlight }: CaseDrawerProps) {
   if (!open || !result) return null;
   const selectedRule = result.rule_results.find((r) => r.rule_id === selectedRuleId) ?? result.rule_results[0];
   const selectedChain = result.inference_chain.find((c) => c.rule_id === selectedRule?.rule_id);
-
-  const gc = (result.graph_context as Record<string, unknown> | null | undefined) ?? {};
-  const candidateId = (gc.candidate as Record<string, unknown> | undefined)?.candidate_id as string | undefined;
-  const resumeId = (gc.resume as Record<string, unknown> | undefined)?.resume_id as string | undefined;
-  const candidateUrl = candidateId ? buildNeo4jBrowserUrl(neo4jBrowserBase, 'candidate', candidateId) : null;
-  const resumeUrl = resumeId ? buildNeo4jBrowserUrl(neo4jBrowserBase, 'resume', resumeId) : null;
 
   const highlightNodes = new Set<NodeKind>((selectedChain?.highlight_nodes ?? []) as NodeKind[]);
 
@@ -46,8 +46,6 @@ export function CaseDrawer({ result, open, onClose, selectedRuleId, setSelectedR
 
       <div className="flex flex-wrap gap-2 px-3 py-2 border-b border-line text-[11px]">
         <Btn variant="primary" onClick={onReplay} disabled={replayInFlight}>{replayInFlight ? '⏳ Replaying…' : '▶ Replay this scenario'}</Btn>
-        <Neo4jLink url={candidateUrl} label="Open Candidate in Neo4j" />
-        <Neo4jLink url={resumeUrl} label="Open Resume in Neo4j" />
       </div>
 
       <div className="px-3 py-2 text-[10.5px] text-ink-3 border-b border-line mono">
@@ -95,18 +93,11 @@ export function CaseDrawer({ result, open, onClose, selectedRuleId, setSelectedR
 
         <div className="p-3">
           <div className="text-[11px] text-ink-3 mb-1">Graph view</div>
-          <GraphView graph={result.graph_context as never} highlightNodes={highlightNodes} neo4jBrowserBase={neo4jBrowserBase} />
+          <GraphView graph={result.graph_context as never} highlightNodes={highlightNodes} />
         </div>
       </div>
     </div>
   );
-}
-
-function Neo4jLink({ url, label }: { url: string | null; label: string }) {
-  if (url) {
-    return <a href={url} target="_blank" rel="noreferrer" className="text-[color:var(--c-accent)] underline text-[11px]">↗ {label}</a>;
-  }
-  return <span className="text-ink-4 text-[11px]" title="Set NEO4J_BROWSER_BASE in .env.local">↗ {label} (disabled)</span>;
 }
 
 function statusBadge(status: string): React.ReactNode {
