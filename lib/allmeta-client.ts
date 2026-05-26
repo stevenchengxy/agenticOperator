@@ -4,8 +4,16 @@
 // Allmeta is the only path to Neo4j instance data (per ADR-0011 + alignment doc §1).
 
 import { currentLogger } from '@/lib/agent-logger';
+import { logApiCall } from '@/lib/external-api-log';
 
-const DEFAULT_BASE_URL = process.env.ALLMETA_BASE_URL ?? 'http://localhost:3500';
+// Read at module load. No silent localhost fallback for the base URL —
+// a partner whose .env.local is half-configured used to get cryptic
+// "connection refused 127.0.0.1:3500" errors deep inside an agent run;
+// throwing a clear "ALLMETA_BASE_URL is not configured" message at the
+// first call point is much easier to diagnose. Empty string keeps module
+// load side-effect-free so importing this file in a misconfigured env
+// doesn't crash the whole server boot.
+const DEFAULT_BASE_URL = process.env.ALLMETA_BASE_URL ?? '';
 const DEFAULT_DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
 const API_KEY = process.env.ALLMETA_API_KEY ?? '';
 
@@ -52,7 +60,13 @@ async function doRequest<T>(
   body?: unknown,
   opts: CommonOpts = {},
 ): Promise<T> {
-  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const rawBase = opts.baseUrl ?? DEFAULT_BASE_URL;
+  if (!rawBase) {
+    throw new Error(
+      'ALLMETA_BASE_URL is not configured. Set it in .env.local (e.g. http://localhost:3500).',
+    );
+  }
+  const baseUrl = rawBase.replace(/\/+$/, '');
   const url = `${baseUrl}${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
@@ -74,6 +88,16 @@ async function doRequest<T>(
       signal: controller.signal,
     });
   } catch (err) {
+    // 独立 sink — 不依赖 ALS,Inngest step.run 内部也能稳定记录(网络/abort 错)
+    logApiCall({
+      category: 'allmeta',
+      label,
+      url,
+      method,
+      duration_ms: Date.now() - start,
+      request: body,
+      error: (err as Error).message,
+    });
     // Network / abort error — nothing to parse, but still emit a log line so
     // the agent file shows "we tried, it never connected".
     logger?.apiCall(label, {
@@ -96,6 +120,18 @@ async function doRequest<T>(
     parsed = rawText;
   }
 
+  // 独立 sink — 完整 in/out,绕过 ALS
+  logApiCall({
+    category: 'allmeta',
+    label,
+    url,
+    method,
+    status: res.status,
+    duration_ms: Date.now() - start,
+    request: body,
+    response: parsed,
+    ...(res.ok ? {} : { error: `HTTP ${res.status}` }),
+  });
   logger?.apiCall(label, {
     url,
     method,

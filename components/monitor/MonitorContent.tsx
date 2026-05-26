@@ -7,7 +7,6 @@ import { InngestDlqTab } from "./InngestDlqTab";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, displayName as agentDisplayName } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
-import { WSID_TO_INNGEST_SLUG, INNGEST_SLUG_TO_WSID } from "@/lib/api/inngest-live-overlay";
 import {
   RunDetailExpansion,
   fetchRunDetail,
@@ -336,8 +335,8 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
                 onClick={() => toggle(r)}
                 className="contents text-left cursor-pointer bg-transparent border-0"
               >
-                <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }} title={agentShort ?? undefined}>
-                  {agentShort ? agentDisplayName(agentShort) : r.function?.slug ?? "—"}
+                <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }} title={agentShort ?? r.function?.slug ?? undefined}>
+                  {agentShort ? agentDisplayName(agentShort) : r.function?.name ?? r.function?.slug ?? "—"}
                 </span>
                 <span className="text-ink-3 truncate" style={{ fontSize: 12 }}>
                   {r.eventName ?? "—"}
@@ -423,21 +422,33 @@ function ReplayRunButton({ run }: { run: RunRow }) {
   );
 }
 
-// Map AGENT_MAP.short → live Inngest slug. Reads the slug map that
-// useInngestLiveOverlay rebuilds on each fetch (driven by /api/agents).
-// Returns null when no live registration matches.
-function shortToSlug(short: string): string | null {
-  const meta = AGENT_MAP.find((a) => a.short === short);
-  return meta ? WSID_TO_INNGEST_SLUG[meta.wsId] ?? null : null;
+// Inngest app id (see server/inngest/client.ts). Slug shape: `<prefix>-<fnId>`.
+// Static derivation here so the lookup doesn't depend on useInngestLiveOverlay
+// being mounted upstream — /monitor is often the first page visited.
+const INNGEST_APP_PREFIX = "agentic-operator-main-";
+
+// Match the three fnId conventions kept in sync with lib/inngest-registry.ts:
+//   1. explicit `inngestId` on AgentMeta
+//   2. stub-factory `agent.<short.toLowerCase()>`
+//   3. kebab `<kebab-short>-agent` (real-agent file convention)
+function matchesFnId(a: (typeof AGENT_MAP)[number], fnId: string): boolean {
+  if (a.inngestId === fnId) return true;
+  if (fnId === `agent.${a.short.toLowerCase()}`) return true;
+  const kebab = a.short.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "");
+  return fnId === `${kebab}-agent`;
 }
 
-// Reverse direction — slug → short. Uses the live INNGEST_SLUG_TO_WSID
-// (rebuilt by useInngestLiveOverlay) then resolves wsId → short via AGENT_MAP.
+function shortToSlug(short: string): string | null {
+  const meta = AGENT_MAP.find((a) => a.short === short);
+  if (!meta) return null;
+  const fnId = meta.inngestId ?? `agent.${meta.short.toLowerCase()}`;
+  return `${INNGEST_APP_PREFIX}${fnId}`;
+}
+
 function slugToShort(slug: string | undefined): string | null {
   if (!slug) return null;
-  const wsId = INNGEST_SLUG_TO_WSID[slug];
-  if (!wsId) return null;
-  return AGENT_MAP.find((a) => a.wsId === wsId)?.short ?? null;
+  const fnId = slug.startsWith(INNGEST_APP_PREFIX) ? slug.slice(INNGEST_APP_PREFIX.length) : slug;
+  return AGENT_MAP.find((a) => matchesFnId(a, fnId))?.short ?? null;
 }
 
 // ── controls ────────────────────────────────────────────────────

@@ -23,8 +23,12 @@ import type { AgentLogger } from '@/lib/agent-logger';
 import type {
   MatchResumeStepGroup,
   Rule,
+  RuleProvenance,
 } from './types';
+
+export type { RuleProvenance } from './types';
 import { query as pgQuery, isPartnerPgConfigured } from '@/lib/partner-pg/client';
+import { matchesDepartment, deriveBgFromDepartmentId, deriveBgFromOrgName } from './ontology';
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
@@ -41,13 +45,118 @@ export class RuleFetchApiError extends Error {
 export type RuleFetchInput = {
   /** JR 上挂的 raw client_id(可能是 CLI_BYTEDANCE_001 等 ID,也可能空)。 */
   clientId: string | null | undefined;
+  /** JR 上挂的 client_department_id(可能是 UUID,也可能是 CLI_*_IEG_* 编码)。 */
+  departmentId?: string | null;
+  /** JR 上显式的 client_business_group(若 partner 填了),最权威。 */
+  businessGroup?: string | null;
+  /** JR 上的 sd_org_name(如"腾讯互娱事业部"),department_id 是 UUID 时靠它兜底。 */
+  orgName?: string | null;
   /** agent 串过来的 logger,所有 API 调用走它落盘。 */
   logger: AgentLogger;
 };
 
+/**
+ * 一条 API rule 是否通过 client + department 过滤。
+ *
+ * 这是 rule 摘取的核心断言 —— 2026-05-26 修:之前只比 applicableClient,
+ * 导致 CDG 专属规则(10-42)被摘进腾讯 IEG 岗位,LLM 再误判 fail。现在
+ * client 维度 + department 维度(复用 ontology.matchesDepartment)都要过。
+ *
+ * @param clientName 已解析的客户中文名(如"腾讯");null 表示 unresolved。
+ * @param bg         已解析的事业群 token(如"IEG"/"CDG");null 表示 unresolved
+ *                   → 部门专属规则一律 fail-closed 排除(宁可漏判不可错拦)。
+ */
+export function ruleSurvivesFilter(
+  r: Record<string, unknown>,
+  clientName: string | null,
+  bg: string | null,
+): boolean {
+  if (r.executor !== 'Agent') return false;
+  if (r.enforcementLevel !== 'mandatory') return false;
+  const ac = typeof r.applicableClient === 'string' ? r.applicableClient : '';
+  const clientOk = ac === '通用' || (!!clientName && ac === clientName);
+  if (!clientOk) return false;
+  const dept = typeof r.applicableDepartment === 'string' ? r.applicableDepartment : '';
+  return matchesDepartment(dept, bg);
+}
+
+function isClientWideDept(dept: string): boolean {
+  const d = dept.trim();
+  return d === '' || d === 'N/A' || d === '通用';
+}
+
+/** 规则属于哪一层:通用(CSI) / 客户级 / 客户部门级。 */
+export function classifyTier(r: Record<string, unknown>): RuleProvenance['tier'] {
+  const ac = typeof r.applicableClient === 'string' ? r.applicableClient : '';
+  if (ac === '通用') return 'general';
+  const dept = typeof r.applicableDepartment === 'string' ? r.applicableDepartment : '';
+  return isClientWideDept(dept) ? 'client' : 'department';
+}
+
+/**
+ * 一条 API rule 的三层归属 + 纳入/排除证据。
+ * 回答"为什么抓/没抓这条规则" —— 日志 + audit UI 用。
+ */
+export function ruleProvenance(
+  r: Record<string, unknown>,
+  clientName: string | null,
+  bg: string | null,
+): RuleProvenance {
+  const rule_id = typeof r.id === 'string' ? r.id : '';
+  const tier = classifyTier(r);
+  const ac = typeof r.applicableClient === 'string' ? r.applicableClient : '';
+  const dept = typeof r.applicableDepartment === 'string' ? r.applicableDepartment : '';
+
+  if (r.executor !== 'Agent' || r.enforcementLevel !== 'mandatory') {
+    return {
+      rule_id,
+      tier,
+      included: false,
+      reason: `排除：executor=${String(r.executor)} / enforcement=${String(r.enforcementLevel)},非 Agent+mandatory`,
+    };
+  }
+
+  const clientOk = ac === '通用' || (!!clientName && ac === clientName);
+  if (!clientOk) {
+    return {
+      rule_id,
+      tier,
+      included: false,
+      reason: `排除：规则客户=${ac} ≠ 岗位客户=${clientName ?? '(未解析)'}`,
+    };
+  }
+
+  if (tier === 'general') {
+    return { rule_id, tier, included: true, reason: '通用规则(CSI),无条件纳入' };
+  }
+  if (tier === 'client') {
+    return { rule_id, tier, included: true, reason: `客户=${clientName} 命中,部门无限定,纳入` };
+  }
+  // department tier
+  if (matchesDepartment(dept, bg)) {
+    return { rule_id, tier, included: true, reason: `部门=${dept} 命中岗位 bg=${bg},纳入` };
+  }
+  if (!bg) {
+    return {
+      rule_id,
+      tier,
+      included: false,
+      reason: `排除：岗位 bg 未解析,部门专属规则(${dept})fail-closed`,
+    };
+  }
+  return {
+    rule_id,
+    tier,
+    included: false,
+    reason: `排除：规则部门=${dept} ≠ 岗位 bg=${bg}`,
+  };
+}
+
 export type RuleFetchResult = {
   /** 过完三重过滤的 rules,可直接注入 user prompt。 */
   rules: Rule[];
+  /** 每条 API rule 的三层归属 + 纳入/排除证据(含被排除的)。 */
+  provenance: RuleProvenance[];
   /** 按 ActionStep 分组的视图,prompt 用。 */
   steps: MatchResumeStepGroup[];
   /** Action 顶层 user_prompt(由 ontology 维护,UI/审计可显示)。 */
@@ -56,6 +165,8 @@ export type RuleFetchResult = {
   action_system_prompt?: string;
   /** 解析到的 client name(来自 Neo4j 或 normalize 兜底);null 表示完全 unresolved。 */
   client_name_resolved: string | null;
+  /** 解析到的事业群 token(IEG/CDG/...);null = unresolved(部门专属规则 fail-closed 排除)。 */
+  business_group_resolved: string | null;
   /** 客户端过滤前的 API rule 总数 — 审计用。 */
   api_rule_count: number;
   /** 客户端过滤后剩余规则数。 */
@@ -287,6 +398,73 @@ async function resolveClientName(
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Department → business-group resolver — 图查优先 / 字符串兜底
+// (用户 2026-05-26 指定:先图查 Client_Department,再回退 JR 字段字符串)
+// ──────────────────────────────────────────────────────────────────────
+
+const KNOWN_BG = new Set(['IEG', 'PCG', 'WXG', 'CDG', 'CSIG', 'TEG', 'TikTok']);
+
+/** 把图/字段里拿到的值归一成 BG token:已经是 token 直接用,否则按中文名解析。 */
+function coerceBg(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const v = raw.trim();
+  if (KNOWN_BG.has(v)) return v;
+  const upper = v.toUpperCase();
+  if (KNOWN_BG.has(upper)) return upper;
+  return deriveBgFromOrgName(v);
+}
+
+async function resolveDepartmentBg(
+  input: RuleFetchInput,
+  apiBase: string,
+  apiToken: string,
+  domain: string,
+  logger: AgentLogger,
+): Promise<{ bg: string | null; source: string }> {
+  const deptId = input.departmentId?.trim() || '';
+
+  // a) 图查:GET /instances/Client_Department/{id} — 拿 business_group / 部门名
+  if (deptId) {
+    try {
+      const r = await httpJson({
+        label: 'lookup-department.get-instance',
+        url: `${apiBase}/api/v1/ontology/instances/Client_Department/${encodeURIComponent(deptId)}?domain=${encodeURIComponent(domain)}`,
+        apiToken,
+        logger,
+        allow404: true,
+      });
+      if (r.ok && r.data && typeof r.data === 'object') {
+        const d = r.data as Record<string, unknown>;
+        const bg =
+          coerceBg(d.business_group) ??
+          coerceBg(d.client_business_group) ??
+          coerceBg(d.bg) ??
+          coerceBg(d.department_name) ??
+          coerceBg(d.name);
+        if (bg) return { bg, source: 'neo4j-instance' };
+      }
+    } catch (e) {
+      logger.event('department-bg.get-instance-failed', {
+        department_id: deptId,
+        error: (e as Error).message,
+      });
+    }
+  }
+
+  // b) 回退字符串:显式 client_business_group → department_id 编码 → sd_org_name
+  const explicit = coerceBg(input.businessGroup);
+  if (explicit) return { bg: explicit, source: 'jr-business-group' };
+
+  const fromDeptId = deriveBgFromDepartmentId(deptId || null);
+  if (fromDeptId) return { bg: fromDeptId, source: 'department-id-encoding' };
+
+  const fromOrgName = deriveBgFromOrgName(input.orgName);
+  if (fromOrgName) return { bg: fromOrgName, source: 'sd-org-name' };
+
+  return { bg: null, source: 'unresolved' };
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Main entry
 // ──────────────────────────────────────────────────────────────────────
 
@@ -302,12 +480,19 @@ export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<R
     throw new RuleFetchApiError('ALLMETA_API_KEY env not configured');
   }
 
-  // 1) 解析 client name
+  // 1) 解析 client name + department business-group
   const clientResolution = await resolveClientName(input.clientId, apiBase, apiToken, domain, input.logger);
   input.logger.event('rule-fetch.client-resolution', {
     raw_client_id: input.clientId ?? null,
     resolved_name: clientResolution.name,
     source: clientResolution.source,
+  });
+  const deptResolution = await resolveDepartmentBg(input, apiBase, apiToken, domain, input.logger);
+  input.logger.event('rule-fetch.department-resolution', {
+    raw_department_id: input.departmentId ?? null,
+    sd_org_name: input.orgName ?? null,
+    resolved_bg: deptResolution.bg,
+    source: deptResolution.source,
   });
 
   // 2) GET action with rules
@@ -327,23 +512,19 @@ export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<R
   const stepsRaw = (action.action_steps ?? action.actionSteps) as unknown;
   const flatRules = Array.isArray(action.rules) ? (action.rules as Array<Record<string, unknown>>) : [];
 
-  // 4) 客户端再过滤一次(防御性 + 加 client filter)
+  // 4) 客户端再过滤一次(防御性 + client + department filter)
   const clientName = clientResolution.name;
-  const passFilter = (r: Record<string, unknown>): boolean => {
-    if (r.executor !== 'Agent') return false;
-    if (r.enforcementLevel !== 'mandatory') return false;
-    const ac = typeof r.applicableClient === 'string' ? r.applicableClient : '';
-    if (ac === '通用') return true;
-    if (clientName && ac === clientName) return true;
-    return false;
-  };
+  const bg = deptResolution.bg;
 
-  // 5) build Rule[] from API rule shape
+  // 5) build Rule[] from API rule shape + 记录每条的三层归属/纳入证据
   const apiRuleById = new Map<string, Rule>();
   const filteredIds = new Set<string>();
+  const provenance: RuleProvenance[] = [];
   for (const r of flatRules) {
     if (typeof r.id !== 'string') continue;
-    if (!passFilter(r)) continue;
+    const prov = ruleProvenance(r, clientName, bg);
+    provenance.push(prov);
+    if (!prov.included) continue;
     apiRuleById.set(r.id, toRule(r));
     filteredIds.add(r.id);
   }
@@ -379,6 +560,8 @@ export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<R
     action_user_prompt: typeof action.user_prompt === 'string' ? (action.user_prompt as string) : undefined,
     action_system_prompt: typeof action.system_prompt === 'string' ? (action.system_prompt as string) : undefined,
     client_name_resolved: clientName,
+    business_group_resolved: bg,
+    provenance,
     api_rule_count: flatRules.length,
     filtered_rule_count: filteredIds.size,
     source: 'ontology-api',
@@ -388,6 +571,8 @@ export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<R
     api_rule_count: result.api_rule_count,
     filtered_rule_count: result.filtered_rule_count,
     client_name_resolved: result.client_name_resolved,
+    business_group_resolved: result.business_group_resolved,
+    provenance,
     filtered_rule_ids: Array.from(filteredIds),
     steps: stepGroups.map((s) => ({ step_id: s.step_id, rule_count: s.rules.length, rule_ids: s.rules.map((r) => r.id) })),
   });

@@ -18,6 +18,7 @@
 
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { currentLogger } from '@/lib/agent-logger';
+import { logApiCall } from '@/lib/external-api-log';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -134,35 +135,58 @@ async function loggedQuery<T extends QueryResultRow = QueryResultRow>(
   params: unknown[] | undefined,
   inTx: boolean,
 ): Promise<QueryResult<T>> {
+  // 2026-05-26: 独立 sink (logs/partner-pg-<date>.log + terminal echo) 必落,
+  // 绕过 AsyncLocalStorage — Inngest step.run 内部 currentLogger() 可能返 null
+  // 导致 SQL in/out 静默丢失 (跟 RoboHire 09:19 那条事故同一原因).
+  // agent file logger 路径保留(ALS context 在的话双写一份给 agent 自己的 log).
   const logger = currentLogger();
-  if (!logger) {
-    // No agent context — just run the query, skip telemetry.
-    return exec(text, params);
-  }
   const start = Date.now();
+  const label = sqlLabel(text);
+  const sqlPreview = text.length > 800 ? text.slice(0, 800) + '…' : text;
+  const url = inTx ? 'partner-pg://tx-query' : 'partner-pg://query';
   try {
     const r = await exec(text, params);
-    logger.apiCall(sqlLabel(text), {
-      url: inTx ? 'partner-pg://tx-query' : 'partner-pg://query',
+    const durationMs = Date.now() - start;
+    logApiCall({
+      category: 'partner-pg',
+      label,
+      url,
       method: 'POST',
-      request: { sql: text.length > 800 ? text.slice(0, 800) + '…' : text, params, in_tx: inTx },
       status: 200,
-      durationMs: Date.now() - start,
+      duration_ms: durationMs,
+      request: { sql: sqlPreview, params, in_tx: inTx },
+      response: { rowCount: r.rowCount },
+    });
+    logger?.apiCall(label, {
+      url,
+      method: 'POST',
+      request: { sql: sqlPreview, params, in_tx: inTx },
+      status: 200,
+      durationMs,
       response: { rowCount: r.rowCount },
     });
     return r;
   } catch (err) {
     const durationMs = Date.now() - start;
-    logger.apiCall(sqlLabel(text), {
-      url: inTx ? 'partner-pg://tx-query' : 'partner-pg://query',
+    logApiCall({
+      category: 'partner-pg',
+      label,
+      url,
       method: 'POST',
-      request: { sql: text.length > 800 ? text.slice(0, 800) + '…' : text, params, in_tx: inTx },
+      duration_ms: durationMs,
+      request: { sql: sqlPreview, params, in_tx: inTx },
+      error: (err as Error).message,
+    });
+    logger?.apiCall(label, {
+      url,
+      method: 'POST',
+      request: { sql: sqlPreview, params, in_tx: inTx },
       durationMs,
       error: (err as Error).message,
     });
     reportPgFailure(err, {
       phase: inTx ? 'tx-query' : 'query',
-      label: sqlLabel(text),
+      label,
       durationMs,
       sql: text,
       params,
@@ -198,6 +222,25 @@ function getPool(): Pool {
   pool.on('error', (err) => {
     reportPgFailure(err, { phase: 'idle', label: 'idle-client-error' });
   });
+  // ★ Print effective host:port on first pool creation so "I changed the env
+  //   but the app is still connecting to the old IP" is diagnosable in one
+  //   glance. pg.Pool caches the connectionString — it's NOT re-read on
+  //   subsequent calls — so any host change requires a full process restart.
+  //   This log is the canary that says "this is the host the pool actually
+  //   bound to". If it doesn't match your .env.local, you forgot to restart.
+  try {
+    const parsed = new URL(url);
+    const sourceVar = process.env.RAAS_PG_URL?.trim()
+      ? 'RAAS_PG_URL'
+      : 'RAAS_POSTGRES_URL';
+    console.log(
+      `[partner-pg] pool created · host=${parsed.host} · db=${parsed.pathname.replace(/^\//, '')} · source=${sourceVar} · ` +
+        `pid=${process.pid}. Restart the Next.js process if you change this env.`,
+    );
+  } catch {
+    // URL parse failed — connectionString format is off, but let pg report
+    // the real error on first query rather than hiding it here.
+  }
   if (process.env.NODE_ENV !== 'production') {
     // Survive Next.js HMR re-imports — see header comment.
     globalThis.__raasPgPool = pool;

@@ -118,7 +118,7 @@ describe('composeMatchResumePrompt', () => {
     expect(out.indexOf('Rule 10-99')).toBeLessThan(out.indexOf('Rule 10-2'));
   });
 
-  it('contains the strict-order + short-circuit constraint block', () => {
+  it('contains the strict-order constraint block (independent per-rule eval, no short-circuit)', () => {
     const out = composeMatchResumePrompt({
       input: baseInput,
       graph: baseCtx,
@@ -126,8 +126,35 @@ describe('composeMatchResumePrompt', () => {
     });
     expect(out).toContain('执行约束');
     expect(out).toContain('不得跳过 Set、不得乱序');
-    expect(out).toContain('立即停止后续所有 rule 的评估');
+    // 2026-05-20 rewrite: rules are evaluated independently — the prompt must
+    // tell the LLM NOT to short-circuit on an earlier fail.
+    expect(out).toContain('不要因为前面有规则 fail 就把后续标 not_executed');
     expect(out).toContain('not_executed');
+  });
+
+  it('warns the LLM about exclusion/cooldown rule polarity (满足放行条件 → pass, not fail)', () => {
+    // 陈思颖 bug:rule 10-42 是冷冻期"命中即阻断"规则。LLM 写 reason
+    // "离职超6个月，满足"(= 放行条件满足)却打了 status=fail — 极性判反。
+    // prompt 必须显式区分"命中阻断条件 → fail" vs "未命中(满足放行) → pass"。
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('排除类');
+    expect(out).toContain('放行');
+  });
+
+  it('does NOT falsely claim department is unconditionally server-pre-filtered', () => {
+    // 旧文案谎称"applicableDepartment 已在 server 端做过过滤,一定满足部门维度",
+    // 导致 LLM 跳过部门判断。现在 server 做了 client+部门过滤,但 prompt 仍要
+    // 指示 LLM 按 rule 文案校验场景,不能用"一定满足"这种绝对措辞。
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).not.toContain('一定满足客户/部门维度');
   });
 
   it('renders Set references dynamically — N=2 yields §4.1 → §4.2 not §4.1 → §4.4', () => {
@@ -205,6 +232,24 @@ describe('composeMatchResumePrompt', () => {
     expect(out).toContain('每条规则都必须有一条对应的');
     expect(out).toContain('rule_results');
     expect(out).toContain('按 Set 顺序、Set 内列出顺序输出');
+  });
+
+  it('requires next_action in the output schema with the enum + status mapping', () => {
+    const out = composeMatchResumePrompt({ input: baseInput, graph: baseCtx, steps: baseSteps });
+    expect(out).toContain('next_action');
+    expect(out).toContain('continue');
+    expect(out).toContain('block');
+    expect(out).toContain('supplement');
+  });
+
+  it('instructs a DETAILED reason for fail (触发判定→字段取值→逻辑→结论)', () => {
+    const out = composeMatchResumePrompt({ input: baseInput, graph: baseCtx, steps: baseSteps });
+    expect(out).toContain('详细');
+  });
+
+  it('decision-fold block no longer routes pending to REVIEW (pending folds to PASS)', () => {
+    const out = composeMatchResumePrompt({ input: baseInput, graph: baseCtx, steps: baseSteps });
+    expect(out).not.toContain('decision="REVIEW"');
   });
 
   it('renders enforcement + failure policy in rule block header', () => {

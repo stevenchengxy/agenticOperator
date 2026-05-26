@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useApp } from '@/lib/i18n';
 import { formatDateTime, statusLabel } from '@/components/monitor/i18n-utils';
 import { EvidenceTrail } from '@/components/monitor/EvidenceTrail';
+import { describeStep } from '@/lib/monitor-step-descriptor';
 
 type StepDetail = {
   name: string;
@@ -168,7 +169,7 @@ export function RunDetailDrawer({
                 ) : (
                   <div className="space-y-2">
                     {detail.steps.map((s, i) => (
-                      <StepCard key={`${s.stepID ?? s.name}-${i}`} step={s} />
+                      <StepCard key={`${s.stepID ?? s.name}-${i}`} step={s} stepIndex={i + 1} />
                     ))}
                   </div>
                 )}
@@ -205,7 +206,7 @@ function Field({ label, value, highlight }: { label: string; value: string; high
   );
 }
 
-function StepCard({ step }: { step: StepDetail }) {
+function StepCard({ step, stepIndex }: { step: StepDetail; stepIndex: number }) {
   const { t } = useApp();
   const [expanded, setExpanded] = useState(true);
 
@@ -222,6 +223,8 @@ function StepCard({ step }: { step: StepDetail }) {
     : 'text-ink-4';
 
   const hasBody = step.output != null || step.input != null || step.error != null;
+  // 2026-05-26 — 翻译 cryptic step.name 成业务语义 + 数据流向(不暴露底层存储).
+  const desc = describeStep(step.name);
 
   return (
     <div className="border border-line rounded bg-surface overflow-hidden">
@@ -231,12 +234,16 @@ function StepCard({ step }: { step: StepDetail }) {
         className={`w-full flex items-center gap-2 px-2.5 py-1.5 ${hasBody ? 'hover:bg-surface-hover cursor-pointer' : 'cursor-default'}`}
       >
         <span className={`w-1.5 h-1.5 rounded-full ${dotColor} shrink-0`} />
-        {step.stepOp && (
-          <span className="text-[9px] mono px-1 py-px rounded-sm border border-line text-ink-4 uppercase shrink-0">
-            {step.stepOp.toLowerCase()}
+        <span className="text-[10px] mono text-ink-4 shrink-0 tabular-nums">
+          第 {stepIndex} 步
+        </span>
+        <span className="text-[11.5px] text-ink-1 font-medium truncate text-left">{desc.label}</span>
+        {desc.fromTo && (
+          <span className="text-[10px] mono text-accent-1 bg-accent-bg/40 px-1 py-px rounded-sm shrink-0">
+            {desc.fromTo}
           </span>
         )}
-        <span className="text-[11px] mono text-ink-1 truncate flex-1 text-left">{step.name}</span>
+        <span className="shrink-0 ml-auto" />
         {step.attempts != null && step.attempts > 1 && (
           <span className="text-[10px] mono text-warn shrink-0">
             · {t('monitor_timeline_retry')} {step.attempts}
@@ -264,19 +271,24 @@ function StepCard({ step }: { step: StepDetail }) {
             </div>
           )}
           {step.input != null && (
-            <details className="border-b border-line">
-              <summary className="text-[10px] mono text-ink-4 px-2.5 py-1 cursor-pointer hover:bg-surface-hover">
-                input
+            <details open className="border-b border-line">
+              <summary className="text-[10px] mono uppercase text-accent-1 px-2.5 py-1 cursor-pointer bg-accent-bg/20 hover:bg-accent-bg/30">
+                📥 入参 (传入这一步的数据)
               </summary>
-              <pre className="text-[10px] mono px-2.5 py-1.5 overflow-x-auto whitespace-pre-wrap break-words">
-                {JSON.stringify(step.input, null, 2)}
+              <pre className="text-[10px] mono px-2.5 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[360px] overflow-y-auto">
+                {typeof step.input === 'string' ? step.input : JSON.stringify(step.input, null, 2)}
               </pre>
             </details>
           )}
           {step.output != null && (
-            <pre className="text-[10.5px] mono px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-words">
-              {typeof step.output === 'string' ? step.output : JSON.stringify(step.output, null, 2)}
-            </pre>
+            <details open>
+              <summary className="text-[10px] mono uppercase text-ok px-2.5 py-1 cursor-pointer bg-ok/10 hover:bg-ok/15">
+                📤 出参 (这一步返回的数据)
+              </summary>
+              <pre className="text-[10.5px] mono px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-words max-h-[360px] overflow-y-auto">
+                {typeof step.output === 'string' ? step.output : JSON.stringify(step.output, null, 2)}
+              </pre>
+            </details>
           )}
         </div>
       )}

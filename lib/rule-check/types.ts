@@ -75,13 +75,40 @@ export type RuleStatus =
   | 'not_triggered'
   | 'not_executed';
 
+/**
+ * 下一步动作 — 2026-05-26 起 LLM 必填,UI 因果链第②步显示(不再"(未给)")。
+ *   continue   放行(pass / not_triggered)
+ *   block      阻断(fail)
+ *   supplement 补充材料(insufficient_info)
+ *   review     人工复核(pending；不阻断,仅提示)
+ */
+export type RuleNextAction = 'continue' | 'block' | 'supplement' | 'review';
+
+/**
+ * 规则三层归属 + 为何纳入/排除 —— 解释"为什么抓/没抓这条规则"。
+ * 由 api-rule-fetcher.ruleProvenance 计算,落 audit 供 UI 展示。
+ */
+export type RuleProvenance = {
+  rule_id: string;
+  /** 通用(CSI) / 客户级 / 客户部门级 */
+  tier: 'general' | 'client' | 'department';
+  included: boolean;
+  reason: string;
+};
+
 export type RuleResult = {
   rule_id: string;
   rule_name: string;
   step_id: string;
   status: RuleStatus;
-  /** Required when status ≠ 'pass' and ≠ 'not_triggered'. */
+  /**
+   * 详细判定依据。fail/pending/insufficient_info 写详细(触发判定→字段取值→
+   * 逻辑套用含极性→结论);pass/not_triggered 写简短。
+   * Required when status ≠ 'pass' and ≠ 'not_triggered'.
+   */
   reason?: string;
+  /** 下一步动作；缺省时由 status 推导(fail→block, pass→continue, …)。 */
+  next_action?: RuleNextAction;
 };
 
 export type RuleExplanation = {
@@ -90,6 +117,7 @@ export type RuleExplanation = {
   step_id: string;
   status: Exclude<RuleStatus, 'pass' | 'not_triggered'>;
   reason: string;
+  next_action?: RuleNextAction;
 };
 
 export type MatchResumeCheckStats = {
@@ -139,6 +167,8 @@ export type MatchResumeCheckResult = {
     llm_raw_text?: string;
     /** System prompt used (constant per release) — for audit display. */
     system_prompt?: string;
+    /** 每条 API rule 的三层归属 + 纳入/排除证据(含被排除的)。 */
+    rule_provenance?: RuleProvenance[];
   };
 };
 

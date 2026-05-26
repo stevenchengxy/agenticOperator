@@ -180,8 +180,22 @@ export type InterviewInvitationRequestedPayload = {
   client_id?: string | null;
   /** RaaS-side resume PK(用于 partner-pg 回查 parsed_content)。 */
   resume_id?: string | null;
-  /** RaaS-side recruiter/operator;落 Communication_Log.message_sender 兜底. */
-  operator_id?: string | null;
+  /**
+   * RaaS-side 发起本次邀请的招聘者工号. 落 Communication_Log.message_sender
+   * 与 Interview_Record.interviewer_employee_id. RaaS 实际发的字段名就是
+   * recruiter_id(非 operator_id);别的事件(RESUME_DOWNLOADED / rule-check
+   * 路径)走 operator_id 与此独立.
+   */
+  recruiter_id?: string | null;
+
+  /** RaaS-side 跨服务关联 id(纯 trace/audit). */
+  correlation_id?: string | null;
+  /** RaaS-side job posting PK(派生于 job_requisition_id;纯 trace). */
+  job_posting_id?: string | null;
+  /** RaaS 端事件发起时间戳 ISO-8601(用于 SLA 监控). */
+  requested_at?: string | null;
+  /** 邀请触发来源:'manual_candidate_card' / 'hsm_auto' / 'bulk_invite' 等. */
+  trigger_source?: string | null;
 
   // ── RoboHire 调用入参直透(参见 lib/robohire-client.ts inviteCandidateDirect)──
   /** 优先直接传 resume 文本;为空则按 candidate_id+resume_id 从 partner-pg 回查 parsed_content. */
@@ -233,6 +247,11 @@ export type InterviewInvitationSentPayload = {
   job_requisition_id: string;
   application_id?: string | null;
   candidate_match_result_id?: string | null;
+  /**
+   * RaaS-side 本次邀请的业务关联键, 来自 _REQUESTED payload.
+   * RaaS 用它把 _SENT 事件 join 回 interview_invitation 表行.
+   */
+  correlation_id?: string | null;
   /** AO 新建的 Interview_Record Neo4j PK. */
   interview_record_id: string;
   /** AO 新建的 Communication_Log Neo4j PK. */
@@ -358,9 +377,9 @@ export type MatchRuleCheckPassedData = {
   resume_id: string | null;
   job_requisition_id: string;
   client_id: string;
-  /** Canonical: '通过' | '待人工复核'(REVIEW 走 PASS 路径,reason 标记 HSM 需介入) */
-  rule_check_result: '通过' | '待人工复核';
-  /** 通过时为空;REVIEW 时列出待复核规则 */
+  /** Canonical: '通过'(2026-05-26 起 PASS 路径只剩 '通过';pending/REVIEW 已折成 PASS) */
+  rule_check_result: '通过';
+  /** PASS 路径恒为空字符串 */
   rule_check_reason: string;
 
   // ── partner conv 字段(便利 + matchResumeAgent 用) ──

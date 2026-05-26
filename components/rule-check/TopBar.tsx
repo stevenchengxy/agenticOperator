@@ -2,18 +2,12 @@
 
 import React from "react";
 import { Btn } from "@/components/shared/atoms";
+import { useApp } from "@/lib/i18n";
 
 const MODELS = [
   { label: 'Gemini-3-flash-preview', value: 'gemini-3-flash-preview' },
   { label: 'Claude Opus 4.7', value: 'claude-opus-4-7' },
   { label: 'Kimi K2.6', value: 'kimi-k2.6' },
-];
-
-const CLIENTS = [
-  { label: '— No override —', value: '' },
-  { label: '字节跳动', value: 'CLI_BYTEDANCE' },
-  { label: '腾讯', value: 'CLI_TENCENT_PCG' },
-  { label: '华为', value: 'CLI_HUAWEI' },
 ];
 
 export type TopBarRunItem = { id: string; startedAt: string; model: string; passCount: number; totalScenarios: number };
@@ -35,30 +29,37 @@ export type TopBarProps = {
 };
 
 export function TopBar(props: TopBarProps) {
+  const { t } = useApp();
+  const CLIENTS = [
+    { label: t("rc_topbar_no_override"), value: '' },
+    { label: '字节跳动', value: 'CLI_BYTEDANCE' },
+    { label: '腾讯', value: 'CLI_TENCENT_PCG' },
+    { label: '华为', value: 'CLI_HUAWEI' },
+  ];
   return (
     <div className="flex flex-wrap items-center gap-3 p-3 border-b border-line bg-surface">
       <Btn variant="primary" onClick={props.onRunAll} disabled={props.isRunning}>
-        {props.isRunning ? '⏳ Running…' : '▶ Run All'}
+        {props.isRunning ? t("rc_btn_running") : t("rc_btn_run_all")}
       </Btn>
-      <Btn variant="ghost" onClick={props.onReplayFailed} disabled={props.isRunning}>↻ Replay Failed</Btn>
-      <Btn variant="ghost" onClick={props.onExport} disabled={props.isRunning}>⤴ Export</Btn>
+      <Btn variant="ghost" onClick={props.onReplayFailed} disabled={props.isRunning}>{t("rc_btn_replay_failed")}</Btn>
+      <Btn variant="ghost" onClick={props.onExport} disabled={props.isRunning}>{t("rc_btn_export")}</Btn>
 
-      <Selector label="Model" value={props.model} onChange={props.setModel} options={MODELS} />
-      <Selector label="Client" value={props.clientOverride} onChange={props.setClientOverride} options={CLIENTS} />
+      <Selector label={t("rc_topbar_model")} value={props.model} onChange={props.setModel} options={MODELS} />
+      <Selector label={t("rc_topbar_client")} value={props.clientOverride} onChange={props.setClientOverride} options={CLIENTS} />
 
       <RunSelector
-        label="Run"
+        label={t("rc_topbar_run")}
         value={props.currentRunId ?? ''}
         onChange={(v) => props.setCurrentRunId(v || null)}
         runs={props.runs}
-        placeholder="— latest live —"
+        placeholder={t("rc_topbar_latest_live")}
       />
       <RunSelector
-        label="Compare"
+        label={t("rc_topbar_compare")}
         value={props.compareRunId ?? ''}
         onChange={(v) => props.setCompareRunId(v || null)}
         runs={props.runs.filter((r) => r.id !== props.currentRunId)}
-        placeholder="— none —"
+        placeholder={t("rc_topbar_none")}
       />
     </div>
   );

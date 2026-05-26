@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import neo4j, { type Driver } from 'neo4j-driver';
 import { prisma } from '@/server/db';
+import { severityForRuleId } from '@/lib/rule-check/ontology';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +57,13 @@ export type RuleCheckAuditDetail = {
     applicable_client: string;
     applicable_department: string;
     executor: string;
+    reason: string;
+  }>;
+  /** 三层抓取证据:为何纳入/排除每条规则。 */
+  rule_provenance: Array<{
+    rule_id: string;
+    tier: 'general' | 'client' | 'department';
+    included: boolean;
     reason: string;
   }>;
   user_prompt: string | null;
@@ -158,6 +166,16 @@ function parseFilteredOut(v: string | null): RuleCheckAuditDetail['filtered_out_
   }
 }
 
+function parseProvenance(v: string | null): RuleCheckAuditDetail['rule_provenance'] {
+  if (!v) return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * 从 llm_raw_text 抠 rule 结果 —— audit row 漏写时(早期 writer 过滤掉
  * applicable=false)用来还原完整规则评估。LLM raw 始终是全的,DB 才是被裁的。
@@ -194,6 +212,22 @@ function statusToApplicable(status: string): boolean {
   return s !== 'not_triggered';
 }
 
+const VALID_NEXT_ACTIONS = new Set(['continue', 'block', 'supplement', 'review']);
+
+/** status → 下一步动作默认映射(与 runner.defaultNextAction 对齐)。 */
+function statusToNextAction(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'fail':
+      return 'block';
+    case 'insufficient_info':
+      return 'supplement';
+    case 'pending':
+      return 'review';
+    default:
+      return 'continue';
+  }
+}
+
 function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag> {
   const out = new Map<string, RawFlag>();
   if (!llmRawText || !llmRawText.trim()) return out;
@@ -210,17 +244,31 @@ function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag
   if (Array.isArray(ruleResults)) {
     for (const r of ruleResults) {
       if (!r || typeof r !== 'object') continue;
-      const o = r as { rule_id?: unknown; status?: unknown; reason?: unknown; rule_name?: unknown };
+      const o = r as {
+        rule_id?: unknown;
+        status?: unknown;
+        reason?: unknown;
+        rule_name?: unknown;
+        next_action?: unknown;
+      };
       if (typeof o.rule_id !== 'string' || !o.rule_id) continue;
       const status = typeof o.status === 'string' ? o.status : 'not_triggered';
+      // next_action: 用 LLM 给的合法值,否则按 status 推导(不再硬编码空串 →
+      // UI 因果链第②步不再显示"(未给)")。
+      const nextAction =
+        typeof o.next_action === 'string' && VALID_NEXT_ACTIONS.has(o.next_action)
+          ? o.next_action
+          : statusToNextAction(status);
       out.set(o.rule_id, {
         rule_id: o.rule_id,
         rule_name: typeof o.rule_name === 'string' ? o.rule_name : undefined,
-        severity: 'flag_only',
+        // LLM rule_results 不带 severity —— 查 rule catalog 拿真值,别再硬编码
+        // flag_only(否则 terminal 阻断规则会被误显成"提示规则不影响推进")。
+        severity: severityForRuleId(o.rule_id),
         applicable: statusToApplicable(status),
         result: statusToResult(status),
         evidence: typeof o.reason === 'string' ? o.reason : '',
-        next_action: '',
+        next_action: nextAction,
       });
     }
     if (out.size > 0) return out;
@@ -340,6 +388,7 @@ export async function GET(
       partial_resume_fields: parseStringArray(audit.partial_resume_fields),
       failure_reasons: parseStringArray(audit.failure_reasons),
       filtered_out_rules: parseFilteredOut(audit.filtered_out_rules),
+      rule_provenance: parseProvenance(audit.rule_provenance),
       user_prompt: audit.user_prompt,
       system_prompt: audit.system_prompt,
       llm_raw_text: audit.llm_raw_text,

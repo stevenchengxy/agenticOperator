@@ -18,7 +18,11 @@ function isAllmetaConfigured(): boolean {
   return !!process.env.ALLMETA_BASE_URL;
 }
 
-const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? 'http://localhost:3500';
+// Empty-string fallback (not localhost) — the listCMRsByCandidate path is
+// gated by isAllmetaConfigured() before use, so this constant is only read
+// when the env IS set. Removing the localhost default keeps the codebase
+// from silently aiming at a wrong host in misconfigured deploys.
+const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? '';
 const ALLMETA_TOKEN = process.env.ALLMETA_API_KEY ?? '';
 const ALLMETA_DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
 

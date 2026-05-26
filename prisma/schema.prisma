@@ -281,6 +281,41 @@ model AgentConfigHistory {
   @@index([createdAt])
 }
 
+// Phase 0: Agent 版本表 — 配置快照 + 未来 codegen 落库目标。
+// 见 docs/2026-05-25-ao-behavior-codegen-research.md §8.1
+model AgentVersion {
+  id           String   @id @default(cuid())
+  // short = AGENT_MAP 里的 short code (e.g. "JDGenerator")
+  // slug  = Inngest function id (e.g. "create-jd-agent") — 也是 AgentConfig.id
+  short        String
+  slug         String
+  versionLabel String   // 'v1.9.4' 或 '2026-05-25-1830' 自动生成
+  status       String   @default("draft")  // 'draft' | 'active' | 'archived'
+
+  // Phase 0 实际使用
+  configJson   String?  // JSON: AgentConfig 快照
+  configHash   String?  // sha256(configJson) — 用于去重
+  capturedFrom String?  // 'current-config' | 'manual' | 'codegen'
+  notes        String?
+
+  // Phase 1+ 留空字段 (nullable,Phase 0 不写)
+  codeBlob     String?
+  codeHash     String?
+  specJson     String?
+  promptText   String?
+  modelUsed    String?
+
+  // Provenance
+  generatedBy  String   @default("operator-unknown")
+  createdAt    DateTime @default(now())
+  deployedAt   DateTime?
+
+  @@unique([short, versionLabel])
+  @@index([short, createdAt])
+  @@index([slug])
+  @@index([status])
+}
+
 // =====================================================================
 // EM — Runtime / Gateway / Outbound (Q1: no Editor)
 // =====================================================================
@@ -611,6 +646,7 @@ model RuleCheckAudit {
   rule_source           String   // neo4j-direct | ontology-api | json-fallback
   partial_resume_fields String   // JSON array
   filtered_out_rules    String?  // JSON array
+  rule_provenance       String?  // JSON array of {rule_id, tier, included, reason}
 
   // 完整 input snapshot
   parsed_resume_json    String?

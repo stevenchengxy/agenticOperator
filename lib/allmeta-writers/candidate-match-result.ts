@@ -28,7 +28,7 @@ export type WriteCMRInput = {
   /** Per canonical: 引用 Job_Requisition (字段名是 job_position_id). */
   job_requisition_id: string;
   // ── 阶段一 (rule-check) 字段 ──
-  rule_check_result?: '通过' | '未通过' | '待人工复核';
+  rule_check_result?: '通过' | '未通过';
   rule_check_reason?: string;
   // ── 阶段二 (matchResume) 字段 ──
   overall_match_score?: number | null;

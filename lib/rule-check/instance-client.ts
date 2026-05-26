@@ -3,11 +3,14 @@
 //
 // Env-driven config:
 //   ALLMETA_BASE_URL — e.g. "http://localhost:3500"
-//   ALLMETA_API_KEY — bearer
-//
-// All endpoints scope to the RAAS-v1 domain (matches what fetchAction uses).
+//   ALLMETA_API_KEY  — bearer
+//   ALLMETA_DOMAIN   — ontology domain (default "RAAS-v1"); must match the
+//                       value lib/allmeta-client.ts uses, otherwise rule-check
+//                       reads from a different ontology than agents write to.
 
-const DOMAIN = 'RAAS-v1';
+import { getInstanceFallback, hasInstanceFallback } from './pg-fallback';
+
+const DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
 
 function getConfig(): { base: string; token: string } {
   const base = process.env.ALLMETA_BASE_URL;
@@ -46,7 +49,7 @@ export async function getInstance(
     label,
   )}/${encodeURIComponent(value)}?domain=${DOMAIN}`;
   const res = await fetch(url, { headers: authHeaders(token) });
-  if (res.status === 404) return null;
+  if (res.status === 404) return instanceFallback(label, value);
   if (!res.ok) {
     let body = '';
     try {
@@ -58,7 +61,27 @@ export async function getInstance(
       `Ontology API getInstance(${label}, ${value}) -> ${res.status}. Body: ${body}`,
     );
   }
-  return (await res.json()) as Record<string, unknown>;
+  const json = (await res.json()) as Record<string, unknown> | null;
+  // Neo4j returned 200 but an empty/null body → still a miss, try pg.
+  if (!json || (typeof json === 'object' && Object.keys(json).length === 0)) {
+    return instanceFallback(label, value);
+  }
+  return json;
+}
+
+/** Neo4j miss → partner-pg fallback (only for registered, field-compatible
+ *  entities). Logs every hit/miss so silent store divergence is visible. */
+async function instanceFallback(
+  label: string,
+  value: string,
+): Promise<Record<string, unknown> | null> {
+  if (!hasInstanceFallback(label)) return null;
+  const row = await getInstanceFallback(label, value);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[instance-client] Neo4j miss ${label}/${value} → partner-pg fallback ${row ? 'HIT' : 'MISS'}`,
+  );
+  return row;
 }
 
 /**

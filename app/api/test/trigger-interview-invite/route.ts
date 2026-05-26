@@ -27,7 +27,12 @@ type Body = Partial<{
   candidate_match_result_id: string;
   client_id: string;
   resume_id: string;
-  operator_id: string;
+  recruiter_id: string;
+  // RaaS 透传 trace 字段
+  correlation_id: string;
+  job_posting_id: string;
+  requested_at: string;
+  trigger_source: string;
   // RoboHire 入参直透
   resume_text: string;
   jd_text: string;
@@ -43,7 +48,7 @@ type Body = Partial<{
   interview_duration: number;
   interview_mode: string;
   passing_score: number;
-  linked_assessment_id: string;
+  linked_assessment_id: string | null;
 }>;
 
 export async function POST(req: Request): Promise<Response> {
@@ -68,7 +73,11 @@ export async function POST(req: Request): Promise<Response> {
     "candidate_match_result_id",
     "client_id",
     "resume_id",
-    "operator_id",
+    "recruiter_id",
+    "correlation_id",
+    "job_posting_id",
+    "requested_at",
+    "trigger_source",
     "resume_text",
     "jd_text",
     "robohire_resume_id",
@@ -83,11 +92,15 @@ export async function POST(req: Request): Promise<Response> {
     "interview_duration",
     "interview_mode",
     "passing_score",
-    "linked_assessment_id",
   ] as const;
   for (const k of optionalFields) {
     const v = (body as Record<string, unknown>)[k];
     if (v !== undefined && v !== null && v !== "") payload[k] = v;
+  }
+  // linked_assessment_id 单独处理 — null 是合法值(对齐 RaaS 真实发送形态),
+  // 上面的 if (v !== null) 过滤会吞掉,所以这里显式透传 null.
+  if ("linked_assessment_id" in body) {
+    payload.linked_assessment_id = body.linked_assessment_id ?? null;
   }
   // 兜底:既无 resume_text 也无 robohire_resume_id 也无 resume_id 时,
   // 注入一个 stub resume_text — 否则 backfill 会失败 + emit _FAILED

@@ -286,66 +286,67 @@ function DetailHeader({
   return (
     <>
       <DecisionBanner detail={detail} summary={summary} />
-      <div
-        className="border-b border-line bg-panel grid"
-        style={{
-          padding: "18px 22px",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: "16px 28px",
-        }}
-      >
-      <Kv label="decision">
-        <Badge variant={detail.decision === "PASS" ? "ok" : "err"}>
-          {detail.decision}
-        </Badge>
-        {detail.llm_decision !== detail.decision ? (
-          <span className="text-ink-3 mono text-[10.5px] ml-2">
-            (llm: {detail.llm_decision})
-          </span>
-        ) : null}
-      </Kv>
-      <Kv label="client × bg × studio">
-        <span className="mono text-[11.5px]">
-          {detail.client_name || "—"}
-          {detail.business_group ? ` × ${detail.business_group}` : ""}
-          {detail.studio ? ` × ${detail.studio}` : ""}
-        </span>
-      </Kv>
-      <Kv label="model · latency">
-        <span className="mono text-[11.5px]">
-          {detail.llm_model || "—"} · {detail.llm_duration_ms}ms
-        </span>
-      </Kv>
-      <Kv label="tokens (in/out)">
-        <span className="mono text-[11.5px]">
-          {detail.llm_prompt_tokens ?? "—"} / {detail.llm_completion_tokens ?? "—"}
-        </span>
-      </Kv>
-      <Kv label="candidate_id">
-        <span className="mono text-[11px]">{detail.candidate_id || "—"}</span>
-      </Kv>
-      <Kv label="job_requisition_id">
-        <span className="mono text-[11px]">{detail.job_requisition_id || "—"}</span>
-      </Kv>
-      <Kv label="rules_evaluated">
-        <span
-          className="mono text-[11.5px]"
-          title={t("rc_rules_evaluated_title")
-            .replace("{total}", String(detail.rules_total_in_ontology))
-            .replace("{evaluated}", String(detail.rules_evaluated))
-            .replace("{applicable}", String(detail.flags.filter((f) => f.applicable).length))
-            .replace("{not_applicable}", String(detail.flags.filter((f) => !f.applicable).length))}
+      {/* 2026-05-26: 精简头部 — 只留 4 个有用字段;decision 已在 banner,
+          长 UUID 标识符收进默认折叠的 <details>。 */}
+      <div className="border-b border-line bg-panel" style={{ padding: "16px 22px" }}>
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "14px 28px" }}
         >
-          {t("rc_rules_evaluated_label")
-            .replace("{total}", String(detail.rules_total_in_ontology))
-            .replace("{evaluated}", String(detail.rules_evaluated))}
-          {" → "}applicable={detail.flags.filter((f) => f.applicable).length} · NOT_APPLICABLE={detail.flags.filter((f) => !f.applicable).length}
-        </span>
-        <Badge variant="default">{detail.rule_source}</Badge>
-      </Kv>
-      <Kv label="trace_id">
-        <span className="mono text-[11px]">{detail.trace_id || "—"}</span>
-      </Kv>
+          <Kv label={t("rc_kv_client_bg_studio")}>
+            <span className="mono text-[11.5px]">
+              {detail.client_name || "—"}
+              {detail.business_group ? ` × ${detail.business_group}` : ""}
+              {detail.studio ? ` × ${detail.studio}` : ""}
+            </span>
+          </Kv>
+          <Kv label={t("rc_kv_model_latency")}>
+            <span className="mono text-[11.5px]">
+              {detail.llm_model || "—"} · {detail.llm_duration_ms}ms
+            </span>
+          </Kv>
+          <Kv label={t("rc_kv_tokens")}>
+            <span className="mono text-[11.5px]">
+              {detail.llm_prompt_tokens ?? "—"} / {detail.llm_completion_tokens ?? "—"}
+            </span>
+          </Kv>
+          <Kv label={t("rc_kv_rules_evaluated")}>
+            <span
+              className="mono text-[11.5px]"
+              title={t("rc_rules_evaluated_title")
+                .replace("{total}", String(detail.rules_total_in_ontology))
+                .replace("{evaluated}", String(detail.rules_evaluated))
+                .replace("{applicable}", String(detail.flags.filter((f) => f.applicable).length))
+                .replace("{not_applicable}", String(detail.flags.filter((f) => !f.applicable).length))}
+            >
+              {t("rc_rules_evaluated_label")
+                .replace("{total}", String(detail.rules_total_in_ontology))
+                .replace("{evaluated}", String(detail.rules_evaluated))}
+              {" → applicable="}{detail.flags.filter((f) => f.applicable).length}
+              {" · N/A="}{detail.flags.filter((f) => !f.applicable).length}
+            </span>
+            <Badge variant="default">{detail.rule_source}</Badge>
+          </Kv>
+        </div>
+        <details className="mt-3">
+          <summary className="hint cursor-pointer select-none" style={{ fontSize: 11.5 }}>
+            {t("rc_identifiers")}
+          </summary>
+          <div
+            className="grid mt-2"
+            style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "10px 28px" }}
+          >
+            <Kv label={t("rc_kv_candidate_id")}>
+              <span className="mono text-[11px]">{detail.candidate_id || "—"}</span>
+            </Kv>
+            <Kv label={t("rc_kv_jr_id")}>
+              <span className="mono text-[11px]">{detail.job_requisition_id || "—"}</span>
+            </Kv>
+            <Kv label={t("rc_kv_trace_id")}>
+              <span className="mono text-[11px]">{detail.trace_id || "—"}</span>
+            </Kv>
+          </div>
+        </details>
       </div>
       {detail.failure_reasons.length > 0 && (
         <div
@@ -1191,7 +1192,7 @@ function InferenceChainCard({
           <>
             <ChainStep
               step="1"
-              label="LLM evidence"
+              label={t("rc_chain_step1_evidence")}
               ok={flag.result === "PASS"}
               warn={flag.result === "FAIL"}
               content={flag.evidence || t("rc_evidence_no_llm")}
@@ -1206,7 +1207,11 @@ function InferenceChainCard({
                   ? t("rc_chain_step2_block")
                   : flag.next_action === "continue"
                     ? t("rc_chain_step2_continue")
-                    : flag.next_action || t("rc_chain_step2_not_given")
+                    : flag.next_action === "supplement"
+                      ? t("rc_chain_step2_supplement")
+                      : flag.next_action === "review"
+                        ? t("rc_chain_step2_review")
+                        : flag.next_action || t("rc_chain_step2_not_given")
               }
             />
             <ChainStep
@@ -1353,7 +1358,7 @@ function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
       ) : null}
       <div>
         <div className="hint flex items-center" style={{ gap: 8, marginBottom: 6 }}>
-          <span>LLM Raw Response</span>
+          <span>{t("rc_llm_raw_response")}</span>
           <span className="mono text-ink-3 text-[10.5px]">
             {detail.llm_raw_text?.length ?? 0} chars
           </span>
@@ -1427,17 +1432,17 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
         </div>
         <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <InstanceCard
-            title=":Candidate"
+            title={t("rc_snapshot_candidate")}
             data={detail.candidate_snapshot}
             note={t("rc_anchor_candidate_note")}
           />
           <InstanceCard
-            title=":Resume"
+            title={t("rc_snapshot_resume")}
             data={detail.resume_snapshot}
             note={t("rc_anchor_resume_note")}
           />
           <InstanceCard
-            title=":JobRequisition"
+            title={t("rc_snapshot_jr")}
             data={detail.jr_snapshot}
             note={t("rc_anchor_jr_note")}
           />

@@ -9,6 +9,7 @@ import { fetchJson } from "@/lib/api/client";
 import type { AgentsResponse, AgentRow } from "@/lib/api/types";
 import { isReal, deploymentKind, type DeploymentKind } from "@/lib/agent-mapping";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
+import { VersionsTab } from "./versions/VersionsTab";
 
 // Fleet IA v2.1 — agent detail page (`/fleet/[short]`).
 // Matches the Claude-style tightening applied to FleetContent: serif h1,
@@ -49,7 +50,6 @@ const TAB_DEFS = [
   { id: "runs", labelK: "ad_tab_runs" },
   { id: "alerts", labelK: "ad_tab_alerts" },
   { id: "events", labelK: "ad_tab_events" },
-  { id: "perm", labelK: "ad_tab_perm" },
   { id: "audit", labelK: "ad_tab_audit" },
 ] as const;
 type TabId = typeof TAB_DEFS[number]["id"];
@@ -194,7 +194,8 @@ export function AgentDetailContent({ short }: { short: string }) {
       <TabBar tab={tab} setTab={setTab} t={t} />
       <div className="flex-1 min-h-0" style={{ padding: "24px 32px 48px" }}>
         {tab === "overview" && <OverviewTab agent={agent} t={t} />}
-        {tab !== "overview" && <StubTab tabId={tab} t={t} />}
+        {tab === "versions" && <VersionsTab short={short} />}
+        {tab !== "overview" && tab !== "versions" && <StubTab tabId={tab} t={t} />}
       </div>
     </div>
   );

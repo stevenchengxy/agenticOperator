@@ -15,17 +15,305 @@ import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/rou
 import { NeighborhoodPanel } from "./NeighborhoodPanel";
 import { RecentEntitiesPanel } from "./RecentEntitiesPanel";
 import { AgentChatbot } from "./AgentChatbot";
-import { NODES, EDGES, GRAPH_VIEWBOX, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, type WorkflowNode } from "@/lib/workflow-graph-meta";
+import { NODES, EDGES, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, type WorkflowNode } from "@/lib/workflow-graph-meta";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 import { LiveAgentPanel } from "./LiveAgentPanel";
 import Link from "next/link";
 
 export function WorkflowContent() {
   const { t } = useApp();
-  const [selectedId, setSelectedId] = React.useState("jd");
+  // "trig" matches NODE_LAYOUT[0].id. Previous default "jd" never matched any
+  // node, which left the canvas with no highlighted card on first render.
+  const [selectedId, setSelectedId] = React.useState("trig");
 
-  const nodes = NODES;
+  const baseNodes = NODES;
   const edges = EDGES;
+
+  // ── Draggable node positions ──────────────────────────────────────
+  // Static NODES carries the initial layout; positions overrides x/y when
+  // the user drags a node. Edges read from positionedNodes so connection
+  // lines follow whatever the user has moved.
+  const svgRef = React.useRef<SVGSVGElement>(null);
+  const [positions, setPositions] = React.useState<Map<string, { x: number; y: number }>>(() => {
+    const m = new Map<string, { x: number; y: number }>();
+    for (const n of baseNodes) m.set(n.id, { x: n.x, y: n.y });
+    return m;
+  });
+  const dragRef = React.useRef<{
+    id: string;
+    startNode: { x: number; y: number };
+    startPointerSvg: { x: number; y: number };
+    startClientX: number;
+    startClientY: number;
+    moved: boolean;
+  } | null>(null);
+  const [draggingId, setDraggingId] = React.useState<string | null>(null);
+
+  // ── Canvas pan + zoom ────────────────────────────────────────────────
+  // viewBox is derived from `view`: scale shrinks the visible window
+  // (zoom in), and (x, y) shifts its top-left corner (pan).
+  const MIN_SCALE = 0.25;
+  const MAX_SCALE = 3;
+  const [view, setView] = React.useState<{ x: number; y: number; scale: number }>({
+    x: 0,
+    y: 0,
+    scale: 1,
+  });
+  const viewRef = React.useRef(view);
+  React.useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  const panRef = React.useRef<{
+    startClientX: number;
+    startClientY: number;
+    startView: { x: number; y: number };
+    ctmA: number;
+    ctmD: number;
+    moved: boolean;
+  } | null>(null);
+  const [panning, setPanning] = React.useState(false);
+
+  const nodes = React.useMemo(
+    () =>
+      baseNodes.map((n) => {
+        const p = positions.get(n.id);
+        return p ? { ...n, x: p.x, y: p.y } : n;
+      }),
+    [baseNodes, positions],
+  );
+
+  const clientToSvg = React.useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } | null => {
+      const svg = svgRef.current;
+      if (!svg) return null;
+      const pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      const out = pt.matrixTransform(ctm.inverse());
+      return { x: out.x, y: out.y };
+    },
+    [],
+  );
+
+  const handleNodePointerDown = React.useCallback(
+    (e: React.PointerEvent<SVGGElement>, nodeId: string) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const svgPt = clientToSvg(e.clientX, e.clientY);
+      const current = positions.get(nodeId);
+      if (!svgPt || !current) return;
+      // Pin the pointer to the node so subsequent move/up events are routed
+      // to the same element and can't accidentally trigger the SVG's
+      // pointerdown (which would start a canvas pan).
+      try {
+        (e.target as Element).setPointerCapture?.(e.pointerId);
+      } catch {
+        // setPointerCapture can throw if the target was unmounted; safe to ignore.
+      }
+      dragRef.current = {
+        id: nodeId,
+        startNode: { x: current.x, y: current.y },
+        startPointerSvg: svgPt,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        moved: false,
+      };
+      setDraggingId(nodeId);
+    },
+    [clientToSvg, positions],
+  );
+
+  React.useEffect(() => {
+    if (!draggingId) return;
+    function onMove(e: PointerEvent) {
+      const d = dragRef.current;
+      if (!d) return;
+      // Threshold check uses SCREEN coords so the click-vs-drag gate doesn't
+      // become sub-pixel sensitive at low zoom levels (3 graph units could
+      // be < 1 screen pixel when the canvas is zoomed out).
+      const dxScreen = e.clientX - d.startClientX;
+      const dyScreen = e.clientY - d.startClientY;
+      if (!d.moved) {
+        if (Math.hypot(dxScreen, dyScreen) <= 5) return;
+        d.moved = true;
+      }
+      const svgPt = clientToSvg(e.clientX, e.clientY);
+      if (!svgPt) return;
+      const dx = svgPt.x - d.startPointerSvg.x;
+      const dy = svgPt.y - d.startPointerSvg.y;
+      const nx = d.startNode.x + dx;
+      const ny = d.startNode.y + dy;
+      setPositions((prev) => {
+        const next = new Map(prev);
+        next.set(d.id, { x: nx, y: ny });
+        return next;
+      });
+    }
+    function onUp() {
+      const d = dragRef.current;
+      // Treat as a click when the pointer barely moved.
+      if (d && !d.moved) setSelectedId(d.id);
+      dragRef.current = null;
+      setDraggingId(null);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [draggingId, clientToSvg]);
+
+  const resetLayout = React.useCallback(() => {
+    const m = new Map<string, { x: number; y: number }>();
+    for (const n of baseNodes) m.set(n.id, { x: n.x, y: n.y });
+    setPositions(m);
+    setView({ x: 0, y: 0, scale: 1 });
+  }, [baseNodes]);
+
+  // SVG-level pointerdown — fires only when the pointer is on empty canvas
+  // (nodes call stopPropagation so they don't initiate a pan).
+  const handleSvgPointerDown = React.useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      if (e.button !== 0) return;
+      if (dragRef.current) return; // a node drag is in progress
+      const svg = svgRef.current;
+      if (!svg) return;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      e.preventDefault();
+      panRef.current = {
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startView: { x: viewRef.current.x, y: viewRef.current.y },
+        // CTM.a/.d encode screen-pixels-per-graph-unit. Captured at pan start
+        // so the conversion stays consistent as view updates each frame.
+        ctmA: ctm.a,
+        ctmD: ctm.d,
+        moved: false,
+      };
+      setPanning(true);
+    },
+    [],
+  );
+
+  React.useEffect(() => {
+    if (!panning) return;
+    function onMove(e: PointerEvent) {
+      const p = panRef.current;
+      if (!p) return;
+      const dxScreen = e.clientX - p.startClientX;
+      const dyScreen = e.clientY - p.startClientY;
+      // Same drag threshold as the node-drag handler — clicks must not pan.
+      if (!p.moved) {
+        if (Math.hypot(dxScreen, dyScreen) <= 5) return;
+        p.moved = true;
+      }
+      // Screen → graph delta: divide by CTM scale captured at pan start.
+      const dxGraph = dxScreen / p.ctmA;
+      const dyGraph = dyScreen / p.ctmD;
+      setView((v) => ({ ...v, x: p.startView.x - dxGraph, y: p.startView.y - dyGraph }));
+    }
+    function onUp() {
+      panRef.current = null;
+      setPanning(false);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [panning]);
+
+  // Wheel zoom — native listener with `passive: false` so we can preventDefault
+  // and avoid the browser scrolling the outer page during zoom.
+  React.useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const v = viewRef.current;
+      const factor = e.deltaY > 0 ? 1 / 1.15 : 1.15;
+      const nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * factor));
+      if (nextScale === v.scale) return;
+      const rect = svg!.getBoundingClientRect();
+      // Graph point under cursor BEFORE the zoom (using current viewBox).
+      const vw = GRAPH_WIDTH / v.scale;
+      const vh = GRAPH_HEIGHT / v.scale;
+      const s = Math.min(rect.width / vw, rect.height / vh); // preserveAspectRatio="meet"
+      const padX = (rect.width - vw * s) / 2;
+      const padY = (rect.height - vh * s) / 2;
+      const graphX = v.x + (e.clientX - rect.left - padX) / s;
+      const graphY = v.y + (e.clientY - rect.top - padY) / s;
+      // Compute new viewBox so the same graph point stays under the cursor.
+      const vwNew = GRAPH_WIDTH / nextScale;
+      const vhNew = GRAPH_HEIGHT / nextScale;
+      const sNew = Math.min(rect.width / vwNew, rect.height / vhNew);
+      const padXNew = (rect.width - vwNew * sNew) / 2;
+      const padYNew = (rect.height - vhNew * sNew) / 2;
+      const nextX = graphX - (e.clientX - rect.left - padXNew) / sNew;
+      const nextY = graphY - (e.clientY - rect.top - padYNew) / sNew;
+      setView({ x: nextX, y: nextY, scale: nextScale });
+    }
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const zoomBy = React.useCallback((factor: number) => {
+    setView((v) => {
+      const nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * factor));
+      if (nextScale === v.scale) return v;
+      // Anchor zoom-around-center: keep the canvas center fixed.
+      const cx = v.x + GRAPH_WIDTH / v.scale / 2;
+      const cy = v.y + GRAPH_HEIGHT / v.scale / 2;
+      const nextX = cx - GRAPH_WIDTH / nextScale / 2;
+      const nextY = cy - GRAPH_HEIGHT / nextScale / 2;
+      return { x: nextX, y: nextY, scale: nextScale };
+    });
+  }, []);
+
+  const fitView = React.useCallback(() => {
+    setView({ x: 0, y: 0, scale: 1 });
+  }, []);
+
+  const viewBox = `${view.x} ${view.y} ${GRAPH_WIDTH / view.scale} ${GRAPH_HEIGHT / view.scale}`;
+
+  // Dynamic per-node width — fits the rendered label so long names like
+  // "Interview Inviter Agent" don't overflow the card.
+  const nodeWidths = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const n of nodes) m.set(n.id, computeNodeWidth(nodeTitleLabel(n)));
+    return m;
+  }, [nodes]);
+
+  // Neighbor index — for highlighting the selected node + its immediate
+  // upstream/downstream cards when the user clicks one.
+  const { predecessors, successors } = React.useMemo(() => {
+    const preds = new Map<string, Set<string>>();
+    const succs = new Map<string, Set<string>>();
+    for (const e of edges) {
+      if (!preds.has(e.to)) preds.set(e.to, new Set());
+      preds.get(e.to)!.add(e.from);
+      if (!succs.has(e.from)) succs.set(e.from, new Set());
+      succs.get(e.from)!.add(e.to);
+    }
+    return { predecessors: preds, successors: succs };
+  }, [edges]);
+
+  const neighborIds = React.useMemo(() => {
+    const set = new Set<string>();
+    predecessors.get(selectedId)?.forEach((id) => set.add(id));
+    successors.get(selectedId)?.forEach((id) => set.add(id));
+    return set;
+  }, [selectedId, predecessors, successors]);
 
   const sel = nodes.find((n) => n.id === selectedId) || nodes[0];
 
@@ -151,9 +439,16 @@ export function WorkflowContent() {
             }}
           />
           <svg
-            viewBox={GRAPH_VIEWBOX}
+            ref={svgRef}
+            viewBox={viewBox}
             preserveAspectRatio="xMidYMid meet"
             className="absolute inset-0 w-full h-full"
+            style={{
+              touchAction: "none",
+              userSelect: "none",
+              cursor: panning ? "grabbing" : "grab",
+            }}
+            onPointerDown={handleSvgPointerDown}
           >
             <defs>
               <marker id="arrowhead-b" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
@@ -161,6 +456,9 @@ export function WorkflowContent() {
               </marker>
               <marker id="arrowhead-b-dim" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
                 <path d="M0,0 L0,6 L9,3 z" fill="var(--c-ink-4)" />
+              </marker>
+              <marker id="arrowhead-b-accent" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L9,3 z" fill="var(--c-accent)" />
               </marker>
             </defs>
 
@@ -171,49 +469,84 @@ export function WorkflowContent() {
               const a = nodes.find((n) => n.id === e.from);
               const b = nodes.find((n) => n.id === e.to);
               if (!a || !b) return null;
-              const ax = a.x + 140;
-              const ay = a.y + 22;  // node height 44 → center at 22
+              const sourceW = nodeWidths.get(a.id) ?? NODE_BASE_WIDTH;
+              const ax = a.x + sourceW;
+              const ay = a.y + NODE_HEIGHT / 2;
               const bx = b.x;
-              const by = b.y + 22;
+              const by = b.y + NODE_HEIGHT / 2;
               const mid = (ax + bx) / 2;
               const d = `M ${ax} ${ay} C ${mid} ${ay}, ${mid} ${by}, ${bx} ${by}`;
 
-              // Active edge = edge leading INTO a live agent that currently
-              // has running steps. Renders marching-ants flow animation.
+              // Every edge animates with marching dashes — the canvas reads as
+              // a living pipeline. Active edges (leading into a live agent that
+              // currently has running steps) flow faster + green; fallback
+              // (e.dashed) edges flow slower and dimmer.
               const destLive = liveOverlay.byWsId.get(b.wsId);
               const isActive = !!destLive && destLive.running > 0 && !destLive.paused;
-              const strokeColor = isActive
-                ? "var(--c-ok)"
-                : e.dashed ? "var(--c-ink-4)" : "var(--c-ink-3)";
-              const strokeOpacity = isActive ? 0.85 : e.dashed ? 0.55 : 0.65;
+              const isFallback = !!e.dashed;
+              // Edge is in the selected node's "neighborhood" if either endpoint
+              // is the selected node. Used to spotlight the path through the
+              // graph when the user clicks a card.
+              const isInNeighborhood = e.from === selectedId || e.to === selectedId;
+              const strokeColor = isInNeighborhood
+                ? "var(--c-accent)"
+                : isActive
+                  ? "var(--c-ok)"
+                  : isFallback
+                    ? "var(--c-ink-4)"
+                    : "var(--c-ink-3)";
+              const baseOpacity = isActive ? 0.9 : isFallback ? 0.45 : 0.65;
+              const strokeOpacity = isInNeighborhood ? 0.95 : baseOpacity * 0.45;
+              const strokeWidth = isInNeighborhood ? 1.8 : isActive ? 1.6 : 1.1;
+              const dashPattern = isActive ? "8 4" : isFallback ? "3 5" : "6 5";
+              // animation length = 2× cycle length → seamless wrap
+              const dashTo = isActive ? -24 : isFallback ? -16 : -22;
+              const animDur = isInNeighborhood
+                ? "0.6s"
+                : isActive
+                  ? "0.6s"
+                  : isFallback
+                    ? "2.4s"
+                    : "1.5s";
 
               return (
                 <g key={i}>
                   <path
                     d={d}
                     stroke={strokeColor}
-                    strokeWidth={isActive ? 1.6 : 1.2}
-                    strokeDasharray={isActive ? "6 4" : e.dashed ? "3 4" : "none"}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={dashPattern}
                     strokeOpacity={strokeOpacity}
                     fill="none"
-                    markerEnd={e.dashed ? "url(#arrowhead-b-dim)" : "url(#arrowhead-b)"}
+                    markerEnd={
+                      isInNeighborhood
+                        ? "url(#arrowhead-b-accent)"
+                        : isFallback
+                          ? "url(#arrowhead-b-dim)"
+                          : "url(#arrowhead-b)"
+                    }
                   >
-                    {isActive && (
-                      <animate
-                        attributeName="stroke-dashoffset"
-                        from="0" to="-20" dur="0.8s" repeatCount="indefinite"
-                      />
-                    )}
+                    <animate
+                      attributeName="stroke-dashoffset"
+                      from="0"
+                      to={String(dashTo)}
+                      dur={animDur}
+                      repeatCount="indefinite"
+                    />
                   </path>
                   {e.label && (
-                    <g transform={`translate(${mid} ${(ay + by) / 2 - 2})`}>
+                    <g
+                      transform={`translate(${mid} ${(ay + by) / 2 - 2})`}
+                      opacity={isInNeighborhood ? 1 : 0.55}
+                    >
                       <rect
                         x="-18" y="-8" width="36" height="14" rx="7"
                         fill="var(--c-bg)" opacity="0.95"
                       />
                       <text
                         x="0" y="3" textAnchor="middle" fontSize="9"
-                        fontFamily="var(--f-sans)" fill="var(--c-ink-3)"
+                        fontFamily="var(--f-sans)"
+                        fill={isInNeighborhood ? "var(--c-accent)" : "var(--c-ink-3)"}
                       >
                         {e.label}
                       </text>
@@ -231,15 +564,24 @@ export function WorkflowContent() {
               const liveAgent = liveOverlay.byWsId.get(n.wsId) ?? null;
               const isBlueprintStub =
                 n.kind === "agent" && !liveAgent;
+              const isSelected = n.id === selectedId;
+              const isNeighbor = neighborIds.has(n.id);
+              const highlight: NodeHighlight = isSelected
+                ? "selected"
+                : isNeighbor
+                  ? "neighbor"
+                  : "dim";
               return (
                 <WFNode
                   key={n.id}
                   node={n}
+                  width={nodeWidths.get(n.id) ?? NODE_BASE_WIDTH}
                   liveHealth={liveHealth}
                   liveAgent={liveAgent}
                   isBlueprintStub={isBlueprintStub}
-                  selected={n.id === selectedId}
-                  onSelect={() => setSelectedId(n.id)}
+                  highlight={highlight}
+                  dragging={draggingId === n.id}
+                  onPointerDown={(e) => handleNodePointerDown(e, n.id)}
                 />
               );
             })}
@@ -249,13 +591,49 @@ export function WorkflowContent() {
           <div className="absolute top-3 left-3 flex gap-1.5 bg-surface border border-line rounded-md p-[3px] shadow-sh-1">
             <Btn size="sm" variant="ghost" style={{ height: 22, width: 22, padding: 0 }} title="undo">↶</Btn>
             <Btn size="sm" variant="ghost" style={{ height: 22, width: 22, padding: 0 }} title="redo">↷</Btn>
+            <span className="w-px bg-line my-1" />
+            <Btn
+              size="sm"
+              variant="ghost"
+              style={{ height: 22, padding: "0 8px", fontSize: 11 }}
+              title="重置节点布局到默认位置"
+              onClick={resetLayout}
+            >
+              重置布局
+            </Btn>
           </div>
           <div className="absolute bottom-3 left-3 flex gap-1.5 items-center bg-surface border border-line rounded-md mono text-[11px] text-ink-3 shadow-sh-1" style={{ padding: "3px 8px" }}>
-            <Btn size="sm" variant="ghost" style={{ height: 22, width: 22, padding: 0 }}>−</Btn>
-            <span>84%</span>
-            <Btn size="sm" variant="ghost" style={{ height: 22, width: 22, padding: 0 }}>+</Btn>
+            <Btn
+              size="sm"
+              variant="ghost"
+              style={{ height: 22, width: 22, padding: 0 }}
+              onClick={() => zoomBy(1 / 1.2)}
+              title="缩小"
+            >
+              −
+            </Btn>
+            <span className="tabular-nums" style={{ minWidth: 34, textAlign: "center" }}>
+              {Math.round(view.scale * 100)}%
+            </span>
+            <Btn
+              size="sm"
+              variant="ghost"
+              style={{ height: 22, width: 22, padding: 0 }}
+              onClick={() => zoomBy(1.2)}
+              title="放大"
+            >
+              +
+            </Btn>
             <span className="w-px h-3 bg-line mx-1" />
-            <span>fit</span>
+            <button
+              type="button"
+              onClick={fitView}
+              className="bg-transparent border-0 cursor-pointer text-ink-3 hover:text-ink-1"
+              style={{ fontFamily: "inherit", fontSize: "inherit", padding: 0 }}
+              title="重置视图"
+            >
+              fit
+            </button>
           </div>
           <div className="absolute bottom-3 right-3 bg-surface border border-line rounded-md text-[11px] text-ink-3 shadow-sh-1 flex gap-2.5 items-center" style={{ padding: "6px 10px" }}>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent-bg border border-accent-line" /> 触发</span>
@@ -320,6 +698,24 @@ function nodeAgentShort(node: WorkflowNode): string | null {
   return null;
 }
 
+// Card sizing — base width is 140 (keeps short names visually consistent
+// with the original design). Longer names auto-expand up to 200px; beyond
+// that the label still ellipsizes inside the card. The Resume column was
+// shifted right (workflow-graph-meta.ts ruleCheck x=1130) so widened cards
+// don't collide with the next column.
+const NODE_BASE_WIDTH = 140;
+const NODE_MAX_WIDTH = 200;
+const NODE_HEIGHT = 44;
+// Approx px-per-char for the 11.5px medium-weight sans label. Slightly
+// generous so two-word English names get a couple px of breathing room.
+const APPROX_CHAR_PX = 6.5;
+const NODE_LABEL_PADDING = 50; // icon (16) + left padding (11) + right padding (16) + buffer (7)
+
+function computeNodeWidth(labelText: string): number {
+  const w = Math.ceil(labelText.length * APPROX_CHAR_PX) + NODE_LABEL_PADDING;
+  return Math.max(NODE_BASE_WIDTH, Math.min(NODE_MAX_WIDTH, w));
+}
+
 // Human label for a node — prefers the Inngest function name so the canvas
 // matches the Fleet / Monitor / Events UIs. Falls back to the raw title for
 // non-agent nodes (triggers, terminals, etc.).
@@ -341,26 +737,39 @@ const HEALTH_TONE: Record<AgentHealthStatus, { color: string; label: string; pul
   failed: { color: "var(--c-err)", label: "failed", pulse: true },
 };
 
+type NodeHighlight = "selected" | "neighbor" | "dim";
+
 function WFNode({
   node,
+  width,
   liveHealth,
   liveAgent,
   isBlueprintStub,
-  selected,
-  onSelect,
+  highlight,
+  dragging,
+  onPointerDown,
 }: {
   node: WorkflowNode;
+  width: number;
   liveHealth: AgentHealth | null;
   liveAgent: LiveAgentState | null;
   isBlueprintStub: boolean;
-  selected: boolean;
-  onSelect: () => void;
+  highlight: NodeHighlight;
+  dragging: boolean;
+  onPointerDown: (e: React.PointerEvent<SVGGElement>) => void;
 }) {
-  const w = 140;
-  const h = 44;
+  const w = width;
+  const h = NODE_HEIGHT;
+  const selected = highlight === "selected";
+  const isNeighbor = highlight === "neighbor";
+  const isDim = highlight === "dim";
   // Dim blueprint stubs visually — they're not deployed, so don't pretend
-  // they have status.
+  // they have status. When the user has selected another node + that node's
+  // neighbors, push non-neighbor cards further down so the highlighted path
+  // reads clearly.
   const stubOpacity = isBlueprintStub ? 0.55 : 1;
+  const highlightOpacity = isDim ? 0.32 : 1;
+  const renderOpacity = stubOpacity * highlightOpacity;
   const isLive = !!liveAgent && !liveAgent.paused;
   const style = (() => {
     switch (node.kind) {
@@ -398,19 +807,39 @@ function WFNode({
   return (
     <g
       transform={`translate(${node.x} ${node.y})`}
-      style={{ cursor: "pointer", opacity: stubOpacity }}
-      onClick={onSelect}
+      style={{
+        cursor: dragging ? "grabbing" : "grab",
+        opacity: renderOpacity,
+        transition: dragging ? undefined : "opacity 180ms ease",
+        touchAction: "none",
+      }}
+      onPointerDown={onPointerDown}
       className="wf-node"
     >
+      {/* Neighborhood halo — soft accent ring, drawn behind the selection ring.
+          pointerEvents none so the halo (which extends beyond the rect) doesn't
+          swallow clicks intended for the card or steal them from the SVG pan. */}
+      {isNeighbor && (
+        <rect
+          x="-3" y="-3" width={w + 6} height={h + 6} rx="9"
+          fill="none" stroke="var(--c-accent)" strokeWidth="1.5"
+          strokeDasharray="4 3" opacity="0.7"
+          pointerEvents="none"
+        />
+      )}
       {/* Selection: subtle dark border ring */}
       {selected && (
         <rect
           x="-3" y="-3" width={w + 6} height={h + 6} rx="9"
           fill="none" stroke="var(--c-ink-1)" strokeWidth="1.5" opacity="0.9"
+          pointerEvents="none"
         />
       )}
 
-      {/* Base card with subtle drop shadow on LIVE */}
+      {/* Base card — the SOLE hit target for the node. Decorative children
+          below all have pointerEvents="none" so clicks reliably reach this
+          rect and bubble to the g's onPointerDown (which then calls
+          stopPropagation to keep the SVG-level pan from firing). */}
       <rect
         x="0" y="0" width={w} height={h} rx="6"
         fill={style.fill}
@@ -419,9 +848,20 @@ function WFNode({
         filter={isLive ? "drop-shadow(0 1px 3px color-mix(in oklab, var(--c-ok) 25%, transparent))" : undefined}
       />
 
-      {/* Icon */}
-      <foreignObject x="11" y={(h - 16) / 2} width="16" height="16">
-        <div className="w-[16px] h-[16px] grid place-items-center" style={{ color: style.accent }}>
+      {/* Icon — foreignObject was leaking pointer events; force them off so the
+          rect underneath is what captures clicks. */}
+      <foreignObject
+        x="11"
+        y={(h - 16) / 2}
+        width="16"
+        height="16"
+        pointerEvents="none"
+        style={{ pointerEvents: "none" }}
+      >
+        <div
+          className="w-[16px] h-[16px] grid place-items-center"
+          style={{ color: style.accent, pointerEvents: "none" }}
+        >
           <Icon />
         </div>
       </foreignObject>
@@ -433,13 +873,14 @@ function WFNode({
         fill="var(--c-ink-1)"
         style={{ fontFamily: "var(--f-sans)" }}
         dominantBaseline="middle"
+        pointerEvents="none"
       >
         {nodeTitleLabel(node)}
       </text>
 
       {/* Status dot (top-right) — pulse uses a soft breathing ripple */}
       {statusDot && (
-        <g transform={`translate(${w - 11} 10)`}>
+        <g transform={`translate(${w - 11} 10)`} pointerEvents="none">
           {statusPulse && (
             <>
               <circle r="3.5" fill={statusDot} opacity="0.25">
@@ -465,7 +906,11 @@ function WFNode({
 
       {/* Blueprint marker — tiny corner label */}
       {isBlueprintStub && (
-        <text x={w - 7} y={h - 5} textAnchor="end" fontSize="8.5" fill="var(--c-ink-4)" style={{ fontFamily: "var(--f-sans)" }}>
+        <text
+          x={w - 7} y={h - 5} textAnchor="end" fontSize="8.5" fill="var(--c-ink-4)"
+          style={{ fontFamily: "var(--f-sans)" }}
+          pointerEvents="none"
+        >
           蓝图
         </text>
       )}
@@ -475,6 +920,7 @@ function WFNode({
         <text
           x={w - 7} y={h - 5} textAnchor="end" fontSize="9" fontWeight="500"
           fill="var(--c-ink-2)" style={{ fontFamily: "var(--f-mono)" }}
+          pointerEvents="none"
         >
           {liveAgent.completed}✓{liveAgent.failed > 0 ? ` ${liveAgent.failed}✗` : ""}{liveAgent.running > 0 ? ` ${liveAgent.running}●` : ""}
         </text>

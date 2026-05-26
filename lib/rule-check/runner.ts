@@ -19,6 +19,7 @@ import type {
   RuleCheckInput,
   RuleCheckRuntimeContext,
   RuleExplanation,
+  RuleNextAction,
   RuleResult,
   RuleStatus,
 } from './types';
@@ -163,7 +164,23 @@ function parseLlmJson(
   }
 }
 
-function coerceRuleResults(
+/** status → 下一步动作的默认映射(LLM 没给或给了非法值时兜底)。 */
+export function defaultNextAction(status: RuleStatus): RuleNextAction {
+  switch (status) {
+    case 'fail':
+      return 'block';
+    case 'insufficient_info':
+      return 'supplement';
+    case 'pending':
+      return 'review';
+    default:
+      return 'continue'; // pass / not_triggered / not_executed
+  }
+}
+
+const NEXT_ACTIONS = new Set<RuleNextAction>(['continue', 'block', 'supplement', 'review']);
+
+export function coerceRuleResults(
   raw: unknown,
   steps: MatchResumeStepGroup[],
 ): RuleResult[] {
@@ -204,12 +221,16 @@ function coerceRuleResults(
     const reason = typeof r.reason === 'string' ? r.reason : undefined;
     const reasonRequired = status !== 'pass' && status !== 'not_triggered';
     if (reasonRequired && !reason) continue;
+    const next_action: RuleNextAction = NEXT_ACTIONS.has(r.next_action as RuleNextAction)
+      ? (r.next_action as RuleNextAction)
+      : defaultNextAction(status);
     out.push({
       rule_id: r.rule_id,
       rule_name: meta.rule_name,
       step_id: meta.step_id,
       status,
       reason,
+      next_action,
     });
   }
   return out;
@@ -224,6 +245,7 @@ function deriveExplanations(rule_results: RuleResult[]): RuleExplanation[] {
       step_id: r.step_id,
       status: r.status as RuleExplanation['status'],
       reason: r.reason ?? '',
+      next_action: r.next_action,
     }));
 }
 
@@ -241,13 +263,15 @@ function statsFromResults(results: RuleResult[]): MatchResumeCheckStats {
   return s;
 }
 
-function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['decision'] {
+export function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['decision'] {
   // Only REAL rule violations (status='fail') block matching. Missing data
   // (status='insufficient_info') folds to PASS — we shouldn't penalize the
-  // candidate for incomplete graph context. Only `pending` (rule triggered
-  // and explicitly needs HSM judgment) still goes to REVIEW.
+  // candidate for incomplete graph context.
+  //
+  // 2026-05-26: `pending`(规则要求 HSM 主观判断)不再单列 REVIEW、不再阻断 —
+  // 直接折成 PASS,流程继续(rule_check_result 二元化:通过/未通过)。
+  // 这条 rule 的 pending 仍会在 audit/flag 里单独显示,只是不影响整体推进。
   if (stats.fail > 0) return 'FAIL';
-  if (stats.pending > 0) return 'REVIEW';
   return 'PASS';
 }
 
@@ -271,13 +295,19 @@ export async function runRuleCheck(
   // 不再读 rules.json,不再 fallback。
   let sourceResult;
   try {
-    // raw client_id 从 JR 上取(extractDims normalize 过的会丢失原始 ID,这里用原 JR)
-    const rawClientId =
-      typeof input.job_requisition.client_id === 'string'
-        ? (input.job_requisition.client_id as string)
-        : null;
+    // raw client_id / department 从 JR 上取(extractDims normalize 过的会丢失原始 ID,这里用原 JR)
+    const jr = input.job_requisition;
+    const rawClientId = typeof jr.client_id === 'string' ? jr.client_id : null;
+    const rawDepartmentId =
+      typeof jr.client_department_id === 'string' ? jr.client_department_id : null;
+    const rawBusinessGroup =
+      typeof jr.client_business_group === 'string' ? jr.client_business_group : null;
+    const rawOrgName = typeof jr.sd_org_name === 'string' ? jr.sd_org_name : null;
     sourceResult = await fetchRulesViaOntologyApi({
       clientId: rawClientId,
+      departmentId: rawDepartmentId,
+      businessGroup: rawBusinessGroup,
+      orgName: rawOrgName,
       logger,
     });
   } catch (err) {
@@ -363,6 +393,19 @@ export async function runRuleCheck(
     user_prompt: userPrompt,
     rules_in_prompt: expectedRuleCount,
   });
+  // 2026-05-26 — 也走 agent fileLogger(带 run_id),让 LLM 入参进 per-run 审计.
+  // ruleCheckLog 写 lib/rule-check/logs/ 无 run_id,审计页 /api/audit/runs 找不到.
+  logger.event('llm.request', {
+    from: '智能体 → AI 模型',
+    to: 'AI 模型',
+    model: opts.model ?? null,
+    system_prompt: MATCH_RESUME_SYSTEM_PROMPT,   // 完整 system prompt
+    user_prompt: userPrompt,                      // 完整 user prompt(简历+JD+规则)
+    system_chars: MATCH_RESUME_SYSTEM_PROMPT.length,
+    user_chars: userPrompt.length,
+    rules_in_prompt: expectedRuleCount,
+    max_tokens: 16000,
+  });
 
   let llmResult;
   try {
@@ -391,6 +434,7 @@ export async function runRuleCheck(
       ? 'tool-use-loop-exceeded'
       : 'llm-call-error';
     ruleCheckLog.error('llm.failed', { reason, message: msg });
+    logger.event('llm.failed', { from: 'AI 模型', to: '智能体', reason, message: msg });
     return failSafe(reason, {
       rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
@@ -406,6 +450,20 @@ export async function runRuleCheck(
     prompt_tokens: llmResult.usage?.promptTokens,
     completion_tokens: llmResult.usage?.completionTokens,
     text: llmResult.text,
+  });
+  // 也走 agent fileLogger(带 run_id),LLM 出参进 per-run 审计.
+  logger.event('llm.response', {
+    from: 'AI 模型',
+    to: '智能体',
+    model: llmResult.modelUsed,
+    duration_ms: llmResult.durationMs,
+    tool_rounds: llmResult.toolUseIterations,
+    finish_reason: llmResult.finishReason,
+    prompt_tokens: llmResult.usage?.promptTokens,
+    completion_tokens: llmResult.usage?.completionTokens,
+    total_tokens:
+      (llmResult.usage?.promptTokens ?? 0) + (llmResult.usage?.completionTokens ?? 0) || null,
+    text: llmResult.text,    // 完整 LLM 原始输出
   });
 
   const parsed = parseLlmJson(llmResult.text);
@@ -464,6 +522,7 @@ export async function runRuleCheck(
       user_prompt: userPrompt,
       system_prompt: MATCH_RESUME_SYSTEM_PROMPT,
       llm_raw_text: llmResult.text,
+      rule_provenance: sourceResult.provenance,
     },
   };
 }

@@ -15,6 +15,8 @@ export type AuditLogRow = {
   eventName: string;
   traceId: string;
   payloadDigest: string;
+  /** 完整事件 payload(JSON 字符串). UI 展开查看全量审计内容. */
+  payload: string;
   source: string;
   createdAt: string;
 };
@@ -53,6 +55,7 @@ export async function GET(req: Request): Promise<Response> {
           eventName: true,
           traceId: true,
           payloadDigest: true,
+          payload: true,
           source: true,
           createdAt: true,
         },
@@ -64,6 +67,7 @@ export async function GET(req: Request): Promise<Response> {
       eventName: r.eventName,
       traceId: r.traceId,
       payloadDigest: r.payloadDigest,
+      payload: r.payload,
       source: r.source,
       createdAt: r.createdAt.toISOString(),
     }));

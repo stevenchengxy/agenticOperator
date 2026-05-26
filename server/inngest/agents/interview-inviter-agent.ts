@@ -26,7 +26,8 @@ import {
 import { inviteCandidateDirect, RobohireApiError } from '@/lib/robohire-client';
 import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
-import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
+import { markInterviewInvitationSent } from '@/lib/partner-pg/interview-invitations';
+import { createAgentLogger, currentLogger, runWithLogger } from '@/lib/agent-logger';
 import {
   inngest,
   type InterviewInvitationRequestedData,
@@ -91,10 +92,26 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       candidate_id: candidateId,
       job_requisition_id: jrId,
       application_id: applicationId,
+      recruiter_id: payload.recruiter_id ?? null,
+      correlation_id: payload.correlation_id ?? null,
+      job_posting_id: payload.job_posting_id ?? null,
+      trigger_source: payload.trigger_source ?? null,
+      requested_at: payload.requested_at ?? null,
       has_resume_text: Boolean(payload.resume_text),
       has_jd_text: Boolean(payload.jd_text),
       has_robohire_resume_id: Boolean(payload.robohire_resume_id),
       has_robohire_job_id: Boolean(payload.robohire_job_id),
+    });
+
+    // STEP 1 完整入参 — RAAS → AO 原始 event envelope (含 trace + 全部 RAAS payload 字段).
+    // 2026-05-26 加: handler.start 上面只记 anchors+flags,实际 candidate_email /
+    // recruiter_email / job_title / company_name / interview_duration 等 RAAS 给的
+    // 全部参数没落地,Inngest dev event store 又会 evict,事故后 1 天就丢证据.
+    fileLogger.event('handler.raw_input', {
+      from: 'RAAS',
+      to: 'AO.interviewInviter',
+      event_name: event.name,
+      raw_event_data: event.data,
     });
 
     // ── anchors 校验 — 缺关键字段直接 NonRetriable + emit FAILED ────────
@@ -189,7 +206,9 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
         logger.info(
           `[${AGENT_NAME}] RoboHire invite OK · requestId=${r.requestId} reused=${r.data?.reused ?? false}`,
         );
-        return { ok: true as const, data: r.data, requestId: r.requestId };
+        // raw = 完整 RoboHire envelope (含 success/data/requestId), 给 partner-pg
+        // gohire_invite_log 字段做 1:1 JSON.stringify 用. 不要在这里 cherry-pick.
+        return { ok: true as const, data: r.data, requestId: r.requestId, raw: r };
       } catch (e) {
         if (e instanceof RobohireApiError) {
           // 4xx(含 402/403 quota)— 不重试,转 emit FAILED
@@ -298,7 +317,7 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       const r = await writeCommunicationLogInstance({
         communication_log_id: communicationLogId,
         application_id: applicationId,
-        message_sender: payload.operator_id ?? 'AO.InterviewInviter',
+        message_sender: payload.recruiter_id ?? 'AO.InterviewInviter',
         message_receiver: candidateEmail ?? candidateId,
         interaction_type: '面试邀请',
         message_content: contentLines.join('\n') || '已通过 RoboHire 发出 AI 视频面试邀请',
@@ -326,7 +345,7 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       const r = await writeInterviewRecordInstance({
         interview_record_id: interviewRecordId,
         application_id: applicationId,
-        interviewer_employee_id: payload.operator_id ?? null,
+        interviewer_employee_id: payload.recruiter_id ?? null,
         interview_type: '我司面试',
         interview_round: '一面',
         interview_mode: payload.interview_mode ?? 'AI视频面试',
@@ -340,6 +359,51 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       else logger.warn(`[${AGENT_NAME}] allmeta Interview_Record write failed: ${r.error}`);
       return r;
     });
+
+    // ── 3b. partner-pg dual-write:UPDATE interview_invitation by correlation_id ─
+    //
+    // RaaS emit _REQUESTED 前已经在 partner-pg INSERT 了一行 (status='requested');
+    // AO 这边按 correlation_id 找到那行, 写回 GoHire 回执 (login_url / qrcode_url /
+    // gohire_user_id / request_introduction_id) + 把 RoboHire 响应原文塞进
+    // gohire_invite_log + status='sent'. UPDATE 天然幂等.
+    //
+    // Soft-fail: 候选人已经收到邮件 (login_url 是事实), partner-pg 写挂或没命中
+    // 行不该把整条 run 拖死;落 warn 日志, 继续 emit _SENT, RaaS 可以从事件
+    // payload 自行 reconcile.
+    const correlationId = nullableString(payload.correlation_id);
+    if (correlationId) {
+      await step.run(`update-invitation-pg-${stepKey}`, async () => {
+        const r = await markInterviewInvitationSent(correlationId, {
+          login_url: loginUrl,
+          qrcode_url: qrcodeUrl,
+          gohire_user_id:
+            typeof userId === 'string' || typeof userId === 'number' ? userId : null,
+          request_introduction_id: requestIntroductionId,
+          // RoboHire 响应原始 JSON 字符串 — 1:1 stringify, 不重排不 cherry-pick.
+          gohire_invite_log: JSON.stringify(inviteResult.raw),
+        });
+        if (r.ok && r.updated) {
+          logger.info(
+            `[${AGENT_NAME}] ✓ partner-pg interview_invitation UPDATE · correlation_id=${correlationId}`,
+          );
+        } else if (r.ok) {
+          logger.warn(
+            `[${AGENT_NAME}] partner-pg interview_invitation correlation_id=${correlationId} ` +
+              '命中 0 行 — RaaS 可能未先 INSERT, 仍 emit _SENT 让 RaaS 自行 reconcile',
+          );
+        } else {
+          logger.warn(
+            `[${AGENT_NAME}] partner-pg interview_invitation UPDATE 失败 · ` +
+              `correlation_id=${correlationId} err=${r.error} — soft-fail, 仍 emit _SENT`,
+          );
+        }
+        return r;
+      });
+    } else {
+      logger.warn(
+        `[${AGENT_NAME}] payload 缺 correlation_id, 跳过 partner-pg interview_invitation UPDATE`,
+      );
+    }
 
     // ── 4a. PERSISTENCE_WARNING 旁路:Neo4j 写完后仍要 emit _FAILED 通知 ──
     if (persistenceWarning) {
@@ -362,6 +426,7 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       job_requisition_id: jrId,
       application_id: applicationId,
       candidate_match_result_id: payload.candidate_match_result_id ?? null,
+      correlation_id: correlationId,
       interview_record_id: interviewRecordId,
       communication_log_id: communicationLogId,
       login_url: loginUrl,
@@ -378,11 +443,14 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
     };
 
     fileLogger.event('emit.invitation-sent', {
+      from: 'AO.interviewInviter',
+      to: 'RAAS (Inngest event INTERVIEW_INVITATION_SENT)',
       candidate_id: candidateId,
       job_requisition_id: jrId,
       interview_record_id: interviewRecordId,
       communication_log_id: communicationLogId,
       login_url: loginUrl,
+      full_payload: sentPayload,    // 完整 emit payload 全字段
     });
     await step.sendEvent(`emit-invitation-sent-${stepKey}`, {
       name: 'INTERVIEW_INVITATION_SENT',
@@ -400,10 +468,18 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
         `interview_record_id=${interviewRecordId}`,
     );
     fileLogger.event('handler.done', {
+      from: 'AO.interviewInviter',
+      to: '(handler return)',
       candidate_id: candidateId,
       job_requisition_id: jrId,
       interview_record_id: interviewRecordId,
+      communication_log_id: communicationLogId,
       reused: inviteResult.data?.reused === true,
+      login_url: loginUrl,
+      qrcode_url: qrcodeUrl,
+      user_id: userId,
+      robohire_request_id: inviteResult.requestId ?? null,
+      sent_at: sentAt,
     });
     return {
       ok: true,
@@ -426,6 +502,13 @@ async function emitFailed(
   failedPayload: InterviewInvitationFailedPayload,
   traceId: string | undefined,
 ): Promise<void> {
+  const logger = currentLogger();
+  logger?.event('emit.invitation-failed', {
+    from: 'AO.interviewInviter',
+    to: 'RAAS (Inngest event INTERVIEW_INVITATION_FAILED)',
+    error_code: failedPayload.error_code,
+    full_payload: failedPayload,    // 完整 _FAILED payload
+  });
   await step.sendEvent(`emit-invitation-failed-${stepKey}-${failedPayload.error_code}`, {
     name: 'INTERVIEW_INVITATION_FAILED',
     data: {
@@ -459,12 +542,15 @@ async function backfillResumeText(
           : '';
     if (!text.trim()) return { ok: false, error: 'parsed_content 与 raw_parse_result 均空' };
     fileLogger.event('backfill.resume.ok', {
+      from: '候选人数据库',
+      to: '智能体 (→ 外部面试服务)',
       candidate_id: candidateId,
       resume_id: resumeId,
       src: typeof r.parsed_content === 'string' && r.parsed_content.trim().length > 0
         ? 'parsed_content'
         : 'raw_parse_result_json',
       chars: text.length,
+      text,    // 完整简历正文 — 让对比"AO 拉到的 vs GoHire 邮件称谓"成为可能
     });
     return { ok: true, text };
   } catch (e) {
@@ -481,7 +567,13 @@ async function backfillJdText(
     if (!req) return { ok: false, error: `partner-pg 找不到 JR ${jrId}` };
     const text = flattenRequirementForJd(req as unknown as Record<string, unknown>);
     if (!text.trim()) return { ok: false, error: 'JR 行存在但展平后 jd 文本为空' };
-    fileLogger.event('backfill.jd.ok', { job_requisition_id: jrId, chars: text.length });
+    fileLogger.event('backfill.jd.ok', {
+      from: '岗位数据库',
+      to: '智能体 (→ 外部面试服务)',
+      job_requisition_id: jrId,
+      chars: text.length,
+      text,    // 完整 JD 文本
+    });
     return { ok: true, text };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

@@ -11,8 +11,19 @@
 // 2026-05-21 — 每次 RoboHire 调用通过 currentLogger().apiCall(...) 落 file
 // log 一行,terminal 同步 echo。这样 matchResume / parseResume / generateJd
 // 的完整 request + response JSON 都能事后查。
+//
+// 2026-05-26 — currentLogger() 依赖 AsyncLocalStorage,而 Inngest step.run 在
+// replay/retry 时不保留 ALS context → apiCall 静默 noop. 2026-05-25 陈昊_前端
+// 简历.pdf 被 RoboHire 解析返 name="性别" 但 file log 一条都没,partner-pg 已
+// 被污染才发现 — 整个 RoboHire 响应是黑盒. 加独立的 robohire-<date>.log sink,
+// 直接 fs.appendFile,不依赖 ALS,绝不能被吞掉. agent logger 路径保留(并行)。
+//
+//   Sink 文件: logs/robohire-YYYY-MM-DD.log   (覆盖 AO_LOG_DIR env)
+//   每行 1 个 JSON: { ts, label, url, method, status, duration_ms, request, response/error }
+//   全字段 in/out — 不 truncate, 不 cherry-pick.
 
 import { currentLogger } from './agent-logger';
+import { logApiCall } from './external-api-log';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -24,13 +35,26 @@ async function instrumentedFetch<T>(
   request: unknown,
   fetchFn: () => Promise<Response>,
   parse: (res: Response) => Promise<T>,
+  traceId?: string,
 ): Promise<T> {
+  // Agent logger 兜底(ALS context 在 → 一并写一份, 让现有 agent file log 也能看到)
   const logger = currentLogger();
   const start = Date.now();
   let res: Response;
   try {
     res = await fetchFn();
   } catch (err) {
+    // 独立 sink — 必落,绕过 ALS,失败路径
+    logApiCall({
+      category: 'robohire',
+      label,
+      url,
+      method,
+      trace_id: traceId ?? null,
+      duration_ms: Date.now() - start,
+      request,
+      error: (err as Error).message,
+    });
     logger?.apiCall(label, {
       url,
       method,
@@ -54,6 +78,19 @@ async function instrumentedFetch<T>(
       responseBody = null;
     }
   }
+  // 独立 sink — 必落,绕过 ALS,完整 in/out
+  logApiCall({
+    category: 'robohire',
+    label,
+    url,
+    method,
+    trace_id: traceId ?? null,
+    status,
+    duration_ms: Date.now() - start,
+    request,
+    response: responseBody,
+  });
+  // Agent logger 兜底(ALS context 在的话同步一份)
   logger?.apiCall(label, {
     url,
     method,
@@ -163,6 +200,7 @@ export async function parseResumeDirect(
         throw new RobohireApiError(0, 'NETWORK', `parse-resume fetch failed: ${(e as Error).message}`);
       }),
     (res) => handleJsonResponse<RobohireParseResumeResponse>(res, 'parse-resume'),
+    opts.traceId,
   );
 }
 
@@ -218,6 +256,7 @@ export async function matchResumeDirect(
         throw new RobohireApiError(0, 'NETWORK', `match-resume fetch failed: ${(e as Error).message}`);
       }),
     (res) => handleJsonResponse<RobohireMatchResumeResponse>(res, 'match-resume'),
+    opts.traceId,
   );
 }
 
@@ -293,6 +332,7 @@ export async function generateJdDirect(
         throw new RobohireApiError(0, 'NETWORK', `jobs/generate-jd fetch failed: ${(e as Error).message}`);
       }),
     (res) => handleJsonResponse<RobohireGenerateJdResponse>(res, 'jobs/generate-jd'),
+    opts.traceId,
   );
 }
 
@@ -415,6 +455,7 @@ export async function inviteCandidateDirect(
         throw new RobohireApiError(0, 'NETWORK', `invite-candidate fetch failed: ${(e as Error).message}`);
       }),
     (res) => handleJsonResponse<RobohireInviteCandidateResponse>(res, 'invite-candidate'),
+    opts.traceId,
   );
 }
 

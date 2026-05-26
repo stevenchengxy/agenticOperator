@@ -98,7 +98,7 @@ export function RuleCheckAuditsContent() {
           placeholder={t("rc_filter_client_placeholder")}
         />
         <FilterInput
-          label="job_req_id"
+          label={t("rc_audits_jr_filter")}
           value={jrId}
           onChange={(v) => setFilter("jrId", v)}
           placeholder="JR_..."

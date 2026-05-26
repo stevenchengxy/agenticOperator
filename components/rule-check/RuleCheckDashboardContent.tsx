@@ -206,7 +206,7 @@ export function RuleCheckDashboardContent() {
             最近 {windowDays} 天 · {audits?.length ?? 0} 条审计 × {matrix?.rules.length ?? 0} 条规则 · 每个 cell 是该规则在该审计中的判定
           </div>
         </div>
-        <WindowToggle value={windowDays} onChange={setWindowDays} />
+        <WindowToggle value={windowDays} onChange={setWindowDays} t={t} />
       </div>
 
       {/* Fallback warn badge */}
@@ -229,11 +229,11 @@ export function RuleCheckDashboardContent() {
 
       {/* KPI strip */}
       <div className="grid gap-x-8 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
-        <Kpi label="审计总数" value={stats?.total != null ? String(stats.total) : "—"} />
-        <Kpi label="通过" value={stats?.pass != null ? String(stats.pass) : "—"} tone="ok" sub={passRate != null ? `${passRate.toFixed(1)}%` : undefined} />
-        <Kpi label="失败" value={stats?.fail != null ? String(stats.fail) : "—"} tone={stats && stats.fail > 0 ? "err" : "muted"} />
-        <Kpi label="拦截的 RoboHire 调用" value={stats?.blocked_robohire_calls != null ? String(stats.blocked_robohire_calls) : "—"} tone="ok" sub={stats ? `节省 $${stats.estimated_robohire_savings_usd.toFixed(2)}` : undefined} />
-        <Kpi label="覆盖的 rules" value={matrix ? String(matrix.rules.length) : "—"} sub={lowCoverage.length > 0 ? `${lowCoverage.length} 条低覆盖` : undefined} />
+        <Kpi label={t("rc_kpi_total")} value={stats?.total != null ? String(stats.total) : "—"} />
+        <Kpi label={t("rc_kpi_pass")} value={stats?.pass != null ? String(stats.pass) : "—"} tone="ok" sub={passRate != null ? `${passRate.toFixed(1)}%` : undefined} />
+        <Kpi label={t("rc_kpi_fail")} value={stats?.fail != null ? String(stats.fail) : "—"} tone={stats && stats.fail > 0 ? "err" : "muted"} />
+        <Kpi label={t("rc_kpi_blocked_robohire")} value={stats?.blocked_robohire_calls != null ? String(stats.blocked_robohire_calls) : "—"} tone="ok" sub={stats ? `${t("rc_kpi_savings_prefix")}${stats.estimated_robohire_savings_usd.toFixed(2)}` : undefined} />
+        <Kpi label={t("rc_kpi_covered_rules")} value={matrix ? String(matrix.rules.length) : "—"} sub={lowCoverage.length > 0 ? t("rc_kpi_low_coverage_sub").replace("{n}", String(lowCoverage.length)) : undefined} />
         {ontology && matrix ? (
           <Kpi
             label={t("rc_kpi_coverage")}
@@ -247,12 +247,12 @@ export function RuleCheckDashboardContent() {
 
       {/* The hero grid — rules × audits */}
       <Section
-        title="规则 × 审计 网格"
-        hint={grid ? `${grid.rules.length} 条规则 × ${audits?.length ?? 0} 条审计` : "加载中…"}
+        title={t("rc_grid_title")}
+        hint={grid ? t("rc_grid_hint").replace("{rules}", String(grid.rules.length)).replace("{audits}", String(audits?.length ?? 0)) : t("rc_loading")}
         action={
           audits && audits.length === auditLimit && (
             <button onClick={() => setAuditLimit((n) => n + 12)} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 12 }}>
-              加载更多 →
+              {t("rc_load_more")}
             </button>
           )
         }
@@ -260,16 +260,16 @@ export function RuleCheckDashboardContent() {
         {grid && audits ? (
           <RuleAuditGrid grid={grid} audits={audits} t={t} />
         ) : (
-          <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>加载中…</div>
+          <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{t("rc_loading")}</div>
         )}
       </Section>
 
       {/* Legend */}
-      <Legend />
+      <Legend t={t} />
 
       {/* Failure & coverage */}
       <div className="grid gap-6" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}>
-        <Section title="失败次数最高的 rules">
+        <Section title={t("rc_section_top_fail")}>
           {stats?.top_failure_rules && stats.top_failure_rules.length > 0 ? (
             <div className="border-t border-line">
               {stats.top_failure_rules.map((r) => {
@@ -289,11 +289,11 @@ export function RuleCheckDashboardContent() {
               })}
             </div>
           ) : (
-            <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{stats ? "近期无失败" : "加载中…"}</div>
+            <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{stats ? t("rc_empty_no_recent_fail") : t("rc_loading")}</div>
           )}
         </Section>
 
-        <Section title="低覆盖率 rules" hint="触发次数 ≤ 10% — Dead Rule 候选">
+        <Section title={t("rc_section_low_coverage")} hint={t("rc_section_low_coverage_hint")}>
           {lowCoverage.length > 0 ? (
             <div className="border-t border-line">
               {lowCoverage.slice(0, 8).map((r) => (
@@ -305,12 +305,12 @@ export function RuleCheckDashboardContent() {
                 >
                   <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 12 }}>{r.rule_id}</code>
                   <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{r.rule_name}</span>
-                  <span className="tabular-nums" style={{ textAlign: "right", fontSize: 12, color: "var(--c-ink-3)" }}>{r.total} 次</span>
+                  <span className="tabular-nums" style={{ textAlign: "right", fontSize: 12, color: "var(--c-ink-3)" }}>{r.total} {t("rc_times_suffix")}</span>
                 </Link>
               ))}
             </div>
           ) : (
-            <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{matrix ? "所有 rule 都达到阈值" : "加载中…"}</div>
+            <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{matrix ? t("rc_empty_all_above_threshold") : t("rc_loading")}</div>
           )}
         </Section>
       </div>
@@ -320,15 +320,15 @@ export function RuleCheckDashboardContent() {
 
 // ── The hero rule × audit grid ────────────────────────────────────────
 
-const CELL_STYLE: Record<string, { bg: string; fg: string; symbol: string; label: string }> = {
-  PASS:              { bg: "var(--c-ok-bg)",   fg: "var(--c-ok)",          symbol: "✓", label: "通过" },
-  FAIL:              { bg: "var(--c-err-bg)",  fg: "var(--c-err)",         symbol: "✗", label: "失败" },
-  NOT_APPLICABLE:    { bg: "var(--c-surface)", fg: "var(--c-ink-4)",       symbol: "·", label: "不适用" },
-  NOT_EXECUTED:      { bg: "var(--c-panel)",   fg: "var(--c-ink-4)",       symbol: "⊘", label: "未执行" },
-  PENDING:           { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)",   symbol: "⏸", label: "挂起" },
-  INSUFFICIENT_INFO: { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)",   symbol: "?", label: "信息不足" },
+const CELL_STYLE: Record<string, { bg: string; fg: string; symbol: string; labelKey: string }> = {
+  PASS:              { bg: "var(--c-ok-bg)",   fg: "var(--c-ok)",          symbol: "✓", labelKey: "rc_status_pass" },
+  FAIL:              { bg: "var(--c-err-bg)",  fg: "var(--c-err)",         symbol: "✗", labelKey: "rc_status_fail" },
+  NOT_APPLICABLE:    { bg: "var(--c-surface)", fg: "var(--c-ink-4)",       symbol: "·", labelKey: "rc_status_not_applicable" },
+  NOT_EXECUTED:      { bg: "var(--c-panel)",   fg: "var(--c-ink-4)",       symbol: "⊘", labelKey: "rc_status_not_executed" },
+  PENDING:           { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)",   symbol: "⏸", labelKey: "rc_status_pending" },
+  INSUFFICIENT_INFO: { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)",   symbol: "?", labelKey: "rc_status_insufficient_info" },
 };
-const MISSING_CELL = { bg: "transparent", fg: "var(--c-ink-4)", symbol: "·", label: "无数据" };
+const MISSING_CELL = { bg: "transparent", fg: "var(--c-ink-4)", symbol: "·", labelKey: "rc_status_missing" };
 
 function RuleAuditGrid({
   grid, audits, t,
@@ -413,7 +413,7 @@ function RuleAuditGrid({
               <Link
                 key={a.audit_id}
                 href={`/rule-check?view=audits&auditId=${encodeURIComponent(a.audit_id)}`}
-                title={cell ? `${r.rule_id} · ${style.label} · audit ${a.audit_id.slice(-10)}` : "未加载"}
+                title={cell ? `${r.rule_id} · ${t(style.labelKey)} · audit ${a.audit_id.slice(-10)}` : t("rc_cell_not_loaded")}
                 className="grid place-items-center rounded transition-transform hover:scale-110"
                 style={{
                   width: cellSize, height: cellSize,
@@ -435,7 +435,7 @@ function RuleAuditGrid({
   );
 }
 
-function Legend() {
+function Legend({ t }: { t: (k: string) => string }) {
   const items = [
     { ...CELL_STYLE.PASS },
     { ...CELL_STYLE.FAIL },
@@ -446,9 +446,9 @@ function Legend() {
   ];
   return (
     <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-      <span className="text-ink-3" style={{ fontSize: 11.5 }}>图例</span>
+      <span className="text-ink-3" style={{ fontSize: 11.5 }}>{t("rc_legend")}</span>
       {items.map((it) => (
-        <span key={it.label} className="flex items-center gap-1.5 text-ink-2" style={{ fontSize: 11.5 }}>
+        <span key={it.labelKey} className="flex items-center gap-1.5 text-ink-2" style={{ fontSize: 11.5 }}>
           <span
             className="grid place-items-center rounded"
             style={{
@@ -460,7 +460,7 @@ function Legend() {
           >
             {it.symbol}
           </span>
-          {it.label}
+          {t(it.labelKey)}
         </span>
       ))}
     </div>
@@ -508,11 +508,11 @@ function Section({ title, hint, action, children }: { title: string; hint?: stri
   );
 }
 
-function WindowToggle({ value, onChange }: { value: 7 | 30 | 90; onChange: (v: 7 | 30 | 90) => void }) {
+function WindowToggle({ value, onChange, t }: { value: 7 | 30 | 90; onChange: (v: 7 | 30 | 90) => void; t: (k: string) => string }) {
   const opts: { id: 7 | 30 | 90; label: string }[] = [
-    { id: 7, label: "近 7d" },
-    { id: 30, label: "近 30d" },
-    { id: 90, label: "近 90d" },
+    { id: 7, label: t("rc_range_7d") },
+    { id: 30, label: t("rc_range_30d") },
+    { id: 90, label: t("rc_range_90d") },
   ];
   return (
     <div className="flex items-center gap-1">

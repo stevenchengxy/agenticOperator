@@ -182,7 +182,7 @@ function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
           <EmptyState
             icon={<Ic.search />}
             title="暂无事件实例"
-            hint="EventInstance 行由 em.publish 写入。raas-bridge 上 VPN 后会自动产生流量；离线时可用 POST /api/em/publish 发测试事件。"
+            hint="EventInstance 行由 em.publish 写入。shared Inngest 上 RaaS 直接 send 事件即可路由到订阅 agent；离线时可用 POST /api/em/publish 发测试事件。"
             variant="info"
           />
         </div>

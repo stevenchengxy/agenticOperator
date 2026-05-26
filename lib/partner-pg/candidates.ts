@@ -84,6 +84,7 @@ function nonEmpty(s: unknown): string | null {
   return typeof s === 'string' && s.trim() ? s.trim() : null;
 }
 
+
 /** Coerce unknown → string[]. Filters falsy. */
 function toStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
@@ -243,11 +244,17 @@ export async function saveCandidateToPartnerPg(
       );
       candidate_id = existing.rows[0]?.candidate_id ?? null;
     }
-    if (!candidate_id && email) {
+    // 2026-05-26 — email-dedup 加 name 联合约束.
+    // 原来"仅 email 匹配"在测试场景会把不同人合并: RAAS 测试用同一个测试邮箱
+    // (zyjjust@gmail.com) 上传 4 份不同候选人 PDF, 都被 dedup 到陈昊那行,
+    // 后续 RoboHire 正解的姓名(周婧雯/林佳琪/陈思颖)走 UPDATE 分支后被丢弃,
+    // 陈昊那行 name='性别' 永远 stuck. 生产场景同人换简历不会改姓名,
+    // 同时要求 name 匹配才合并是安全的.
+    if (!candidate_id && email && name && name !== '未命名候选人') {
       const existing = await c.query<{ candidate_id: string }>(
         `SELECT candidate_id FROM candidate
-          WHERE email = $1 LIMIT 1`,
-        [email],
+          WHERE email = $1 AND name = $2 LIMIT 1`,
+        [email, name],
       );
       candidate_id = existing.rows[0]?.candidate_id ?? null;
     }
@@ -287,8 +294,12 @@ export async function saveCandidateToPartnerPg(
         ],
       );
     } else {
-      // Patch lightweight fields (don't clobber name; refresh contact + current_*
-      // + back-fill sourcing_channel_id / employee_id / data_source if previously empty)
+      // dedup 命中 — 同一候选人换简历, patch 联系信息 + skills + 当前公司/职位 + name.
+      // name 字段也跟着 RoboHire `parsed.name` 走 — 老 row 卡在错值时, 同人重传
+      // 让新 RoboHire 输出能覆盖. RoboHire 返空(置 '未命名候选人' 占位)则不
+      // 覆盖, 用 COALESCE 保留原值. 不在 AO 这层做姓名校验/过滤 — 上游 RoboHire
+      // 是 source of truth, RoboHire 输出不对要上游修.
+      const incomingNameForUpdate = name === '未命名候选人' ? null : name;
       await c.query(
         `UPDATE candidate SET
             mobile = COALESCE($2, mobile),
@@ -304,6 +315,7 @@ export async function saveCandidateToPartnerPg(
             sourcing_channel_id = COALESCE(sourcing_channel_id, $10),
             employee_id = COALESCE(employee_id, $11),
             data_source = COALESCE(data_source, 'agentic_operator'),
+            name = COALESCE($12, name),
             updated_at = NOW()
          WHERE candidate_id = $1`,
         [
@@ -318,6 +330,7 @@ export async function saveCandidateToPartnerPg(
           languagesList,
           sourcingChannelId,
           uploadedBy,
+          incomingNameForUpdate,
         ],
       );
     }

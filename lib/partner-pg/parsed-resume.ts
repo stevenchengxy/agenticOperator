@@ -32,10 +32,16 @@ export type ParsedResumeResult = {
    * structured JSON. Null when RoboHire didn't return rawText.
    */
   parsed_content: string | null;
-  /** Optional snapshot of candidate fields at time of parse (name / phone / email). */
+  /**
+   * Optional snapshot of candidate fields at time of parse.
+   * Field naming follows partner-pg `candidate` table columns —
+   * partner schema uses `mobile`, not `phone`. (Earlier `phone` alias was
+   * aspirational and never matched partner-pg; caused production
+   * `column c.phone does not exist` on 2026-05-25.)
+   */
   candidate_snapshot?: {
     name: string | null;
-    phone: string | null;
+    mobile: string | null;
     email: string | null;
     current_company: string | null;
     current_title: string | null;
@@ -77,7 +83,7 @@ export async function getParsedResume(
       r.parse_status,
       r.uploaded_at,
       c.name           AS c_name,
-      c.phone          AS c_phone,
+      c.mobile         AS c_mobile,
       c.email          AS c_email,
       c.current_company,
       c.current_title
@@ -100,7 +106,7 @@ export async function getParsedResume(
     parse_status: string | null;
     uploaded_at: Date | string | null;
     c_name: string | null;
-    c_phone: string | null;
+    c_mobile: string | null;
     c_email: string | null;
     current_company: string | null;
     current_title: string | null;
@@ -116,7 +122,7 @@ export async function getParsedResume(
     parsed_content: row.parsed_content,
     candidate_snapshot: {
       name: row.c_name,
-      phone: row.c_phone,
+      mobile: row.c_mobile,
       email: row.c_email,
       current_company: row.current_company,
       current_title: row.current_title,

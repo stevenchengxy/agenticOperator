@@ -149,7 +149,15 @@ const INTERVIEW_INVITATION_REQUESTED_v1 = envelope(
     candidate_match_result_id: z.string().nullable().optional(),
     client_id: z.string().nullable().optional(),
     resume_id: z.string().nullable().optional(),
-    operator_id: z.string().nullable().optional(),
+    // RaaS 实际发的字段名是 recruiter_id(非 operator_id)— 这是发起本次邀请的
+    // 招聘者工号,落 Communication_Log.message_sender + Interview_Record.interviewer_employee_id.
+    recruiter_id: z.string().nullable().optional(),
+
+    // RaaS 透传字段(纯 trace/audit;agent 仅落日志,不影响 RoboHire 调用)
+    correlation_id: z.string().nullable().optional(),
+    job_posting_id: z.string().nullable().optional(),
+    requested_at: z.string().nullable().optional(),
+    trigger_source: z.string().nullable().optional(),
 
     // RoboHire 入参直透 — 全可选,缺失时 agent 端按 anchors 回查 partner-pg
     resume_text: z.string().optional(),
@@ -166,7 +174,9 @@ const INTERVIEW_INVITATION_REQUESTED_v1 = envelope(
     interview_duration: z.number().positive().optional(),
     interview_mode: z.string().optional(),
     passing_score: z.number().min(0).max(100).optional(),
-    linked_assessment_id: z.string().optional(),
+    // RaaS 在未绑 assessment 时显式发 null;之前 z.string().optional() 会拒收 null,
+    // 导致 em.publish 422 全量丢弃事件。
+    linked_assessment_id: z.string().nullable().optional(),
 
     runtime_context: z.record(z.string(), z.unknown()).optional(),
   }).passthrough(),
@@ -178,6 +188,8 @@ const INTERVIEW_INVITATION_SENT_v1 = envelope(
     job_requisition_id: z.string().min(1),
     application_id: z.string().nullable().optional(),
     candidate_match_result_id: z.string().nullable().optional(),
+    // RaaS-side 业务关联键(原样回带), RaaS 端用它 join interview_invitation 表行.
+    correlation_id: z.string().nullable().optional(),
     interview_record_id: z.string().min(1),
     communication_log_id: z.string().min(1),
     login_url: z.string().nullable(),

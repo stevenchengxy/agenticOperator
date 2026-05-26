@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useApp } from '@/lib/i18n';
 import { formatDateTime, statusLabel } from './i18n-utils';
 import { EvidenceTrail } from './EvidenceTrail';
+import { describeStep } from '@/lib/monitor-step-descriptor';
 
 type FlowDetail = {
   flowId: string;
@@ -199,17 +200,22 @@ function RunRow({
                 const statusColor = upper === 'COMPLETED' ? 'text-ok'
                   : upper === 'FAILED' || upper === 'CANCELLED' ? 'text-err'
                   : 'text-warn';
-                const hasBody = s.output != null || s.error != null;
+                const hasBody = s.output != null || s.input != null || s.error != null;
+                const desc = describeStep(s.name);
                 return (
                   <details key={`${s.stepID ?? s.name}-${i}`} className="text-[11px] border border-line rounded bg-panel/30">
                     <summary className={`flex items-baseline gap-2 px-2 py-1 ${hasBody ? 'cursor-pointer hover:bg-panel/60' : 'cursor-default'}`}>
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-                      {s.stepOp && (
-                        <span className="text-[9px] mono px-1 py-px rounded-sm border border-line text-ink-4 uppercase shrink-0">
-                          {s.stepOp.toLowerCase()}
+                      <span className="text-[10px] mono text-ink-4 shrink-0 tabular-nums">
+                        第 {i + 1} 步
+                      </span>
+                      <span className="text-ink-1 font-medium truncate">{desc.label}</span>
+                      {desc.fromTo && (
+                        <span className="text-[10px] text-accent-1 mono px-1 py-px rounded-sm bg-accent-bg/40 shrink-0">
+                          {desc.fromTo}
                         </span>
                       )}
-                      <span className="mono text-ink-1 truncate flex-1">{s.name}</span>
+                      <span className="shrink-0 ml-auto"></span>
                       {s.attempts != null && s.attempts > 1 && (
                         <span className="text-warn shrink-0">· {t('monitor_timeline_retry')} {s.attempts}</span>
                       )}
@@ -225,10 +231,25 @@ function RunRow({
                             <span className="font-medium">{s.error.name}:</span> {s.error.message}
                           </div>
                         )}
+                        {s.input != null && (
+                          <details open className="border-b border-line">
+                            <summary className="cursor-pointer text-[10px] mono uppercase text-accent-1 px-2 py-1 bg-accent-bg/20">
+                              📥 INPUT (传入这一步的数据)
+                            </summary>
+                            <pre className="mono text-[10px] px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[260px] overflow-y-auto">
+                              {typeof s.input === 'string' ? s.input : JSON.stringify(s.input, null, 2)}
+                            </pre>
+                          </details>
+                        )}
                         {s.output != null && (
-                          <pre className="mono text-[10px] px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[260px] overflow-y-auto">
-                            {typeof s.output === 'string' ? s.output : JSON.stringify(s.output, null, 2)}
-                          </pre>
+                          <details open>
+                            <summary className="cursor-pointer text-[10px] mono uppercase text-ok px-2 py-1 bg-ok/10">
+                              📤 OUTPUT (这一步返回的数据)
+                            </summary>
+                            <pre className="mono text-[10px] px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[260px] overflow-y-auto">
+                              {typeof s.output === 'string' ? s.output : JSON.stringify(s.output, null, 2)}
+                            </pre>
+                          </details>
                         )}
                       </div>
                     )}

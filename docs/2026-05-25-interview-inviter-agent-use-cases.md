@@ -21,13 +21,20 @@ matchResumeAgent emit MATCH_PASSED_NEED_INTERVIEW
 RaaS backend 消费 → HSM 风控 / 招聘者审批 / 客户档案校验
         │
         ▼
+RaaS INSERT partner-pg interview_invitation 行(status='requested',correlation_id=…)
+        │
 RaaS emit INTERVIEW_INVITATION_REQUESTED ──────────► AO interviewInviterAgent
                                                       │
                                                       ├─ (可选) partner-pg backfill resume/jd
                                                       ├─ POST RoboHire /api/v1/invite-candidate
                                                       ├─ allmeta 写 Communication_Log + Interview_Record
+                                                      ├─ partner-pg UPDATE interview_invitation
+                                                      │  WHERE correlation_id=…
+                                                      │  SET status='sent', login_url, qrcode_url,
+                                                      │      gohire_user_id, request_introduction_id,
+                                                      │      gohire_invite_log=raw JSON
                                                       ▼
-                                                    emit INTERVIEW_INVITATION_SENT (200)
+                                                    emit INTERVIEW_INVITATION_SENT(payload 含 correlation_id)
                                                       或
                                                     emit INTERVIEW_INVITATION_FAILED (error_code)
                                                       │ (shared Inngest)
@@ -59,7 +66,7 @@ RaaS emit INTERVIEW_INVITATION_REQUESTED ──────────► AO in
   "application_id": "APP-001",
   "candidate_match_result_id": "cmr_C-12345_JR-7890",
   "client_id": "CLI-bytedance",
-  "operator_id": "EMP-0000199059",
+  "recruiter_id": "EMP-0000199059",
   "resume_text": "张三 / 5 年后端 / Java + Spring + Kafka + Redis ...",
   "jd_text": "职位: 高级后端工程师\n工作城市: 深圳\n必备技能: Java, Kafka",
   "candidate_email": "zhangsan@example.com",
@@ -102,7 +109,7 @@ RaaS emit INTERVIEW_INVITATION_REQUESTED ──────────► AO in
   "job_requisition_id": "JR-7890",
   "application_id": "APP-001",
   "resume_id": "RSM-99",
-  "operator_id": "EMP-0000199059",
+  "recruiter_id": "EMP-0000199059",
   "interview_language": "zh"
 }
 ```
@@ -133,7 +140,7 @@ RaaS emit INTERVIEW_INVITATION_REQUESTED ──────────► AO in
   "job_requisition_id": "JR-7890",
   "robohire_resume_id": "rsm_robohire_internal_abc",
   "robohire_job_id": "job_robohire_internal_xyz",
-  "operator_id": "EMP-0000199059"
+  "recruiter_id": "EMP-0000199059"
 }
 ```
 
@@ -279,7 +286,7 @@ curl -s -X POST http://localhost:3002/api/test/trigger-interview-invite \
     "application_id": "APP-test-001",
     "candidate_match_result_id": "cmr_C-test-001_JR-test-001",
     "client_id": "CLI-test",
-    "operator_id": "0000199059",
+    "recruiter_id": "0000199059",
     "resume_text": "测试候选人 / 5 年 Java 后端经验",
     "jd_text": "高级后端工程师 / 深圳 / Java + Kafka",
     "candidate_email": "test-candidate@example.com",
@@ -373,6 +380,8 @@ RaaS 后端在以下时机 emit `INTERVIEW_INVITATION_REQUESTED`:
 
 ### 5.2 必填字段
 
+> **2026-05-25 对齐**: 跟 RaaS 端实发 payload 对齐 — recruiter 字段命名为 `recruiter_id`(不是 `operator_id`);新增 4 个 RaaS 透传 trace 字段;`linked_assessment_id` 允许 `null`(RaaS 未绑 assessment 时显式 null)。
+
 ```ts
 interface InterviewInvitationRequestedPayload {
   // 必填(zod min(1))
@@ -380,14 +389,21 @@ interface InterviewInvitationRequestedPayload {
   job_requisition_id: string;    // RaaS Job_Requisition PK
 
   // 强烈建议带(避免 Neo4j 孤儿节点)
-  application_id?: string;       // RaaS Application PK
-  candidate_match_result_id?: string;  // 跨系统 trace
-  client_id?: string;
-  operator_id?: string;          // 真实工号,落 Communication_Log.message_sender
+  application_id?: string | null;       // RaaS Application PK
+  candidate_match_result_id?: string | null;  // 跨系统 trace
+  client_id?: string | null;
+  recruiter_id?: string | null;  // 真实工号,落 Communication_Log.message_sender +
+                                 // Interview_Record.interviewer_employee_id
+
+  // RaaS 端透传 trace / audit 字段(agent 仅落日志,不影响 RoboHire 调用)
+  correlation_id?: string | null;  // 跨服务关联 id
+  job_posting_id?: string | null;  // RaaS-side job posting PK(派生于 JR)
+  requested_at?: string | null;    // RaaS 端发起时间戳 ISO-8601(SLA 监控)
+  trigger_source?: string | null;  // 'manual_candidate_card' / 'hsm_auto' / 'bulk_invite' 等
 
   // 二选一(给 AO 的简历来源)
   resume_text?: string;          // RaaS 端有就直接传(模式 A)
-  resume_id?: string;            // 否则给 RaaS 端的 resume PK,AO 自己回查 partner-pg(模式 B)
+  resume_id?: string | null;     // 否则给 RaaS 端的 resume PK,AO 自己回查 partner-pg(模式 B)
   robohire_resume_id?: string;   // 或:已在 RoboHire 注册过的 Resume id(模式 C)
 
   // 二选一(给 AO 的 JD 来源)
@@ -405,7 +421,7 @@ interface InterviewInvitationRequestedPayload {
   interview_mode?: string;       // 'ai_video' 等
   passing_score?: number;        // 0-100,RoboHire-side 面试通过门槛
   interviewer_requirement?: string;  // 自由文本评估指引
-  linked_assessment_id?: string;
+  linked_assessment_id?: string | null;  // RaaS 未绑 assessment 时为 null
   hiring_request_id?: string;
 
   // trace
@@ -413,7 +429,53 @@ interface InterviewInvitationRequestedPayload {
 }
 ```
 
-### 5.3 RaaS 端订阅 AO 回发的事件
+**RaaS 实际发送形态参考(2026-05-25 抓包)**:
+```json
+{
+  "candidate_email": "zyjjust@gmail.com",
+  "candidate_id": "269eeeb5-...",
+  "company_name": "中软国际",
+  "correlation_id": "70d5e1c2-...",
+  "interview_duration": 30,
+  "interview_language": "zh",
+  "interview_mode": "ai_video",
+  "job_posting_id": "e0d8257d-...",
+  "job_requisition_id": "JRQ-cb932a56-...",
+  "job_title": "游戏测试工程师",
+  "linked_assessment_id": null,
+  "passing_score": 60,
+  "recruiter_email": "zhangyuanjun002@chinasofti.com",
+  "recruiter_id": "0000023911",
+  "requested_at": "2026-05-25T12:59:12.731Z",
+  "resume_id": "7593ccc7-...",
+  "trigger_source": "manual_candidate_card"
+}
+```
+注意 RaaS 此形态是 **thin event**(只发 IDs,不带 resume_text/jd_text/robohire_*_id),AO 会按 `(candidate_id, resume_id)` 与 `job_requisition_id` 从 partner-pg backfill,见 UC-2。
+
+### 5.3 partner-pg `interview_invitation` 表 dual-write 契约(2026-05-25 加)
+
+**职责切分**:
+- **RaaS** 在 emit `INTERVIEW_INVITATION_REQUESTED` **之前** `INSERT` 一行到 partner-pg `interview_invitation`:
+  - `correlation_id`(UUID,本次邀请的业务关联键,同时塞进事件 payload)
+  - `status='requested'`
+  - 其它 RaaS-side 字段(candidate_id / job_requisition_id / recruiter_id / 时间戳等)
+- **AO** 调完 RoboHire 成功后,按 `correlation_id` `UPDATE` 同一行(见 [`lib/partner-pg/interview-invitations.ts`](../lib/partner-pg/interview-invitations.ts) `markInterviewInvitationSent`):
+  - `status='sent'`
+  - `login_url` ← RoboHire `data.login_url`
+  - `qrcode_url` ← RoboHire `data.qrcode_url`
+  - `gohire_user_id` ← RoboHire `data.user_id`
+  - `request_introduction_id` ← RoboHire `data.request_introduction_id`
+  - `gohire_invite_log` ← `JSON.stringify(整个 RoboHire 响应)`(不 parse 重排,1:1 原文落库)
+  - `updated_at = NOW()`
+
+**幂等性**: UPDATE WHERE 天然幂等。同 correlation_id 重发 → 同一行被覆盖到同样的最终状态。
+
+**Soft-fail**: AO 这一步即使挂了(table 没建 / 网不通 / correlation_id 没命中),仍然继续 emit `INTERVIEW_INVITATION_SENT` — 候选人已经收到 GoHire 邮件这件事是事实,partner-pg 写盘不该把整个 run 拖死。RaaS 可以从 `_SENT` 事件 payload 拿到全部字段,自行 reconcile。
+
+**`_SENT` payload 含 `correlation_id` 回带**: RaaS 订阅端用这个 key 把事件 join 回 `interview_invitation` 行。
+
+### 5.4 RaaS 端订阅 AO 回发的事件
 
 | AO emit | RaaS subscriber | 处理 |
 |---|---|---|

@@ -33,12 +33,15 @@ vi.mock('@/lib/allmeta-writers', () => ({
   writeInterviewRecordInstance: vi.fn(async () => ({ ok: true, instance: {} })),
 }));
 
-// 4) partner-pg backfill
+// 4) partner-pg backfill + interview_invitation UPDATE
 vi.mock('@/lib/partner-pg/parsed-resume', () => ({
   getParsedResume: vi.fn(),
 }));
 vi.mock('@/lib/partner-pg/requirements', () => ({
   getRequirementDetail: vi.fn(),
+}));
+vi.mock('@/lib/partner-pg/interview-invitations', () => ({
+  markInterviewInvitationSent: vi.fn(async () => ({ ok: true, updated: true })),
 }));
 
 // 5) agent-logger — runWithLogger 必须 unwrap callback;createAgentLogger
@@ -49,6 +52,10 @@ vi.mock('@/lib/agent-logger', () => ({
     apiCall: vi.fn(),
   })),
   runWithLogger: vi.fn(async (_l: unknown, fn: () => unknown) => fn()),
+  currentLogger: vi.fn(() => ({
+    event: vi.fn(),
+    apiCall: vi.fn(),
+  })),
 }));
 
 import { interviewInviterAgentHandler } from './interview-inviter-agent';
@@ -59,12 +66,14 @@ import {
 } from '@/lib/allmeta-writers';
 import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
+import { markInterviewInvitationSent } from '@/lib/partner-pg/interview-invitations';
 
 const mockInvite = inviteCandidateDirect as ReturnType<typeof vi.fn>;
 const mockWriteComm = writeCommunicationLogInstance as ReturnType<typeof vi.fn>;
 const mockWriteIvr = writeInterviewRecordInstance as ReturnType<typeof vi.fn>;
 const mockGetParsedResume = getParsedResume as ReturnType<typeof vi.fn>;
 const mockGetRequirementDetail = getRequirementDetail as ReturnType<typeof vi.fn>;
+const mockMarkSent = markInterviewInvitationSent as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -111,8 +120,9 @@ function envelope(payload: Record<string, unknown>) {
 // ── tests ──────────────────────────────────────────────────────────────
 
 describe('interviewInviterAgentHandler — happy path', () => {
-  it('调 RoboHire → 写 Comm_Log + Interview_Record → emit _SENT', async () => {
-    mockInvite.mockResolvedValueOnce({
+  it('调 RoboHire → 写 Comm_Log + Interview_Record → UPDATE partner-pg interview_invitation → emit _SENT', async () => {
+    const robohireResponse = {
+      success: true,
       data: {
         login_url: 'https://gohire.top/i/abc',
         qrcode_url: 'https://gohire.top/qr/abc.png',
@@ -123,14 +133,16 @@ describe('interviewInviterAgentHandler — happy path', () => {
         job_interview_duration: 30,
       },
       requestId: 'req_invite_1',
-    });
+    };
+    mockInvite.mockResolvedValueOnce(robohireResponse);
 
     const { step, calls } = fakeStep();
     const event = envelope({
       candidate_id: 'C1',
       job_requisition_id: 'JR1',
       application_id: 'APP1',
-      operator_id: 'EMP_TEST',
+      recruiter_id: 'EMP_TEST',
+      correlation_id: 'corr_abc_123',
       resume_text: 'resume text body',
       jd_text: 'jd text body',
       interview_language: 'zh',
@@ -153,6 +165,16 @@ describe('interviewInviterAgentHandler — happy path', () => {
     expect(mockGetParsedResume).not.toHaveBeenCalled();
     expect(mockGetRequirementDetail).not.toHaveBeenCalled();
 
+    // partner-pg interview_invitation UPDATE 按 correlation_id 调一次,字段 1:1 透传
+    expect(mockMarkSent).toHaveBeenCalledTimes(1);
+    expect(mockMarkSent).toHaveBeenCalledWith('corr_abc_123', {
+      login_url: 'https://gohire.top/i/abc',
+      qrcode_url: 'https://gohire.top/qr/abc.png',
+      gohire_user_id: 1234,
+      request_introduction_id: 'rii_xyz',
+      gohire_invite_log: JSON.stringify(robohireResponse),
+    });
+
     // 只 emit _SENT,无 _FAILED
     const emits = calls.events.map((e) => e.payload.name);
     expect(emits).toEqual(['INTERVIEW_INVITATION_SENT']);
@@ -162,6 +184,7 @@ describe('interviewInviterAgentHandler — happy path', () => {
       candidate_id: 'C1',
       job_requisition_id: 'JR1',
       application_id: 'APP1',
+      correlation_id: 'corr_abc_123',
       login_url: 'https://gohire.top/i/abc',
       qrcode_url: 'https://gohire.top/qr/abc.png',
       user_id: 1234,
@@ -172,6 +195,83 @@ describe('interviewInviterAgentHandler — happy path', () => {
     });
     expect(sent.interview_record_id).toBe('ivr_C1_JR1_inv');
     expect(sent.communication_log_id).toMatch(/^comm_invite_C1_JR1_\d+$/);
+  });
+
+  it('payload 缺 correlation_id → 跳过 partner-pg UPDATE,仍 emit _SENT', async () => {
+    mockInvite.mockResolvedValueOnce({
+      success: true,
+      data: { login_url: 'https://x', user_id: 1 },
+      requestId: 'r_no_corr',
+    });
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C2',
+        job_requisition_id: 'JR2',
+        resume_text: 'r',
+        jd_text: 'j',
+        // 故意不带 correlation_id
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: true });
+    expect(mockMarkSent).not.toHaveBeenCalled();
+    const emits = calls.events.map((e) => e.payload.name);
+    expect(emits).toEqual(['INTERVIEW_INVITATION_SENT']);
+    expect(calls.events[0].payload.data.payload.correlation_id).toBeNull();
+  });
+
+  it('partner-pg UPDATE 命中 0 行 → soft-fail,仍 emit _SENT', async () => {
+    mockInvite.mockResolvedValueOnce({
+      success: true,
+      data: { login_url: 'https://x', user_id: 1 },
+      requestId: 'r_no_row',
+    });
+    mockMarkSent.mockResolvedValueOnce({ ok: true, updated: false });
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C3',
+        job_requisition_id: 'JR3',
+        correlation_id: 'corr_orphan',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: true });
+    expect(mockMarkSent).toHaveBeenCalledTimes(1);
+    const emits = calls.events.map((e) => e.payload.name);
+    expect(emits).toEqual(['INTERVIEW_INVITATION_SENT']);
+  });
+
+  it('partner-pg UPDATE 抛错 → soft-fail,仍 emit _SENT', async () => {
+    mockInvite.mockResolvedValueOnce({
+      success: true,
+      data: { login_url: 'https://x', user_id: 1 },
+      requestId: 'r_pg_err',
+    });
+    mockMarkSent.mockResolvedValueOnce({ ok: false, error: 'connection refused' });
+    const { step, calls } = fakeStep();
+    const out = await interviewInviterAgentHandler({
+      event: envelope({
+        candidate_id: 'C4',
+        job_requisition_id: 'JR4',
+        correlation_id: 'corr_err',
+        resume_text: 'r',
+        jd_text: 'j',
+      }),
+      step,
+      logger: fakeLogger(),
+      runId: 'r1',
+    });
+    expect(out).toMatchObject({ ok: true });
+    const emits = calls.events.map((e) => e.payload.name);
+    expect(emits).toEqual(['INTERVIEW_INVITATION_SENT']);
   });
 });
 

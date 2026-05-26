@@ -2,6 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { Ic } from "@/components/shared/Ic";
+import { describeStep } from "@/lib/monitor-step-descriptor";
 
 // Shared run-detail / trace components.
 // Used by /monitor (run inspection) and /fleet/[short] (light "today's stats"
@@ -406,12 +407,16 @@ export function RunDetailBody({
             Steps · {detail.stepOutputs.length}
           </div>
           <div className="flex flex-col gap-1.5">
-            {detail.stepOutputs.map((s) => (
-              <StepOutputRow key={s.spanID} step={s} />
+            {detail.stepOutputs.map((s, i) => (
+              <StepOutputRow key={s.spanID} step={s} stepIndex={i + 1} />
             ))}
           </div>
         </div>
       )}
+
+      {/* 智能体完整日志 — surface AO 自己的 file log(按 run_id),补 Inngest trace
+          漏 step + 无 input 的缺口。每一步全量 in/out。 */}
+      {run.id && <AgentFullLog runId={run.id} />}
 
       {/* output */}
       {detail.output != null && (
@@ -512,7 +517,151 @@ function JsonPanel({
   );
 }
 
-function StepOutputRow({ step }: { step: RunStepOutput }) {
+// ── 智能体完整日志 (2026-05-26) ────────────────────────────────────────────
+//
+// 从 /api/inngest-admin/runs/[runId]/agent-log 拉 AO 自己 file log 里这次 run 的
+// 所有结构化事件(handler.raw_input / 各 step / emit / handler.done)。
+// 这是**完整**源 — 不受 Inngest trace 漏 step / 无 input 限制。
+// 每条事件展示 kind + from→to + 完整 payload JSON。
+
+type AgentLogEvent = {
+  ts: string;
+  agent: string;
+  run_id: string;
+  kind: string;
+  anchors?: Record<string, unknown>;
+  payload?: unknown;
+};
+
+function AgentFullLog({ runId }: { runId: string }) {
+  const [events, setEvents] = React.useState<AgentLogEvent[] | null>(null);
+  const [open, setOpen] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/inngest-admin/runs/${runId}/agent-log`)
+      .then((r) => r.json())
+      .then((b) => {
+        if (!cancelled) setEvents(b.events ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  if (events == null) return null;        // loading — 不闪
+  if (events.length === 0) return null;   // 这个 run 没 file log(老 run / 非本机)
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-ink-3 hover:text-ink-1 mb-2"
+        style={{ fontSize: 11.5, letterSpacing: "0.02em" }}
+      >
+        <Ic.chev
+          style={{
+            width: 10, height: 10, transition: "transform 0.15s",
+            transform: open ? "rotate(90deg)" : "rotate(0deg)",
+          }}
+        />
+        🔍 智能体完整日志 · 每一步 in/out · {events.length} 条
+      </button>
+      {open && (
+        <div className="flex flex-col gap-1.5">
+          {events.map((e, i) => (
+            <AgentLogRow key={`${e.ts}-${i}`} event={e} index={i + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentLogRow({ event, index }: { event: AgentLogEvent; index: number }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  const from = typeof p.from === "string" ? p.from : null;
+  const to = typeof p.to === "string" ? p.to : null;
+  // kind → 人类可读
+  const kindLabel = AGENT_LOG_KIND_LABEL[event.kind] ?? event.kind;
+  const hasPayload = event.payload != null;
+  return (
+    <div style={{ border: "1px solid var(--c-line)", borderRadius: 4, background: "var(--c-surface)" }}>
+      <button
+        type="button"
+        onClick={() => hasPayload && setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 text-left hover:bg-[color:var(--c-panel)]"
+        style={{ padding: "6px 10px", fontSize: 11.5, cursor: hasPayload ? "pointer" : "default" }}
+      >
+        {hasPayload && (
+          <Ic.chev
+            style={{
+              width: 10, height: 10, transition: "transform 0.15s",
+              transform: expanded ? "rotate(90deg)" : "rotate(0deg)", color: "var(--c-ink-4)",
+            }}
+          />
+        )}
+        <span className="text-ink-4 tabular-nums shrink-0" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>
+          {index}
+        </span>
+        <span className="text-ink-1 truncate" style={{ fontWeight: 500 }}>{kindLabel}</span>
+        {(from || to) && (
+          <span
+            className="shrink-0"
+            style={{
+              fontFamily: "var(--f-mono)", fontSize: 10,
+              color: "var(--c-accent)", background: "var(--c-accent-bg)",
+              padding: "1px 5px", borderRadius: 3,
+            }}
+          >
+            {from ?? "?"} → {to ?? "?"}
+          </span>
+        )}
+        <span className="flex-1" />
+        <span className="text-ink-4 tabular-nums shrink-0" style={{ fontSize: 10.5 }}>
+          {event.ts.slice(11, 23)}
+        </span>
+      </button>
+      {expanded && hasPayload && (
+        <pre
+          className="text-ink-1 whitespace-pre-wrap break-words"
+          style={{
+            fontFamily: "var(--f-mono)", fontSize: 11, margin: 0,
+            padding: "8px 10px", borderTop: "1px solid var(--c-line)",
+            background: "var(--c-bg)", maxHeight: 360, overflow: "auto", lineHeight: 1.55,
+          }}
+        >
+          {JSON.stringify(event.payload, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+const AGENT_LOG_KIND_LABEL: Record<string, string> = {
+  "handler.start": "▶ 开始处理",
+  "handler.raw_input": "📥 完整入参 (上游 → 智能体)",
+  "handler.done": "✅ 处理完成",
+  "backfill.resume.ok": "🔄 回查简历正文",
+  "backfill.jd.ok": "🔄 回查 JD 文本",
+  "emit.invitation-sent": "📡 回发「邀约已送达」",
+  "emit.invitation-failed": "📡 回发「邀约失败」",
+  "emit.resume-processed": "📡 回发「简历已解析」",
+  "save-candidate.ok": "💾 保存候选人 + 简历",
+  "save-candidate.failed": "❌ 保存候选人失败",
+  "step.start": "▶ 步骤开始",
+  "step.end": "■ 步骤结束",
+  "llm.request": "🧠 大模型入参 (prompt)",
+  "llm.response": "🧠 大模型出参 (回复)",
+  "llm.failed": "❌ 大模型调用失败",
+  "runRuleCheck.start": "▶ 规则检查开始",
+};
+
+function StepOutputRow({ step, stepIndex }: { step: RunStepOutput; stepIndex: number }) {
   const [expanded, setExpanded] = React.useState(false);
   const statusColor =
     step.status === "FAILED" || step.status === "Failed"
@@ -530,6 +679,8 @@ function StepOutputRow({ step }: { step: RunStepOutput }) {
       pretty = step.output;
     }
   }
+  // 2026-05-26 — 把 cryptic step.name 翻译成业务语义 + 数据流向(不暴露底层存储).
+  const desc = describeStep(step.name);
   return (
     <div
       style={{
@@ -553,18 +704,25 @@ function StepOutputRow({ step }: { step: RunStepOutput }) {
             color: "var(--c-ink-4)",
           }}
         />
-        <span
-          className="flex-1 min-w-0 truncate text-ink-1"
-          style={{ fontFamily: "var(--f-mono)" }}
-          title={step.name}
-        >
-          {step.name}
+        <span className="text-ink-4 tabular-nums shrink-0" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>
+          第 {stepIndex} 步
         </span>
-        {step.stepOp && (
-          <span className="text-ink-4 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 10.5 }}>
-            {step.stepOp}
+        <span className="text-ink-1 truncate" style={{ fontWeight: 500 }}>
+          {desc.label}
+        </span>
+        {desc.fromTo && (
+          <span
+            className="shrink-0"
+            style={{
+              fontFamily: "var(--f-mono)", fontSize: 10,
+              color: "var(--c-accent)", background: "var(--c-accent-bg)",
+              padding: "1px 5px", borderRadius: 3,
+            }}
+          >
+            {desc.fromTo}
           </span>
         )}
+        <span className="flex-1" />
         {step.durationMs != null && (
           <span className="text-ink-3 tabular-nums" style={{ fontSize: 11 }}>
             {formatDur(step.durationMs)}
@@ -824,11 +982,11 @@ function DataWritesSummary({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="text-ink-3" style={{ fontSize: 11.5, letterSpacing: "0.02em" }}>
-        数据写入 · Postgres {live.loading ? "…" : pgLiveExists.length}
+        数据写入 · 业务数据库 {live.loading ? "…" : pgLiveExists.length}
         {pgLiveMissing.length > 0 && (
           <span style={{ color: "var(--c-err)" }}> ({pgLiveMissing.length} 缺失)</span>
         )}
-        {" · Ontology "}
+        {" · 实例库 "}
         {live.loading ? "…" : neoLiveExists.length}
         {neoLiveMissing.length > 0 && (
           <span style={{ color: "var(--c-err)" }}> ({neoLiveMissing.length} 缺失)</span>
@@ -836,14 +994,14 @@ function DataWritesSummary({
       </div>
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <Neo4jLiveColumn
-          title="Postgres (partner DB · 实时反查)"
+          title="业务数据库 · 实时反查"
           loading={live.loading}
           error={live.error}
           entities={live.pgEntities}
           stepFallback={pgFromSteps}
         />
         <Neo4jLiveColumn
-          title="Ontology (via allmeta · 实时反查)"
+          title="实例库 · 实时反查"
           loading={live.loading}
           error={live.error}
           entities={live.neoEntities}

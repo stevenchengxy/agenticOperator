@@ -36,9 +36,17 @@ export async function isAgentPaused(slug: string): Promise<boolean> {
     const paused = cfg ? cfg.enabled === false : false;
     cache.set(slug, { paused, loadedAt: Date.now() });
     return paused;
-  } catch {
-    // If table missing or DB unavailable, default to NOT paused (don't block).
-    return false;
+  } catch (e) {
+    // DB transiently unavailable (SQLite locked mid-write, etc.) — preserve
+    // the last-known pause state instead of silently treating the agent as
+    // active. The previous fail-open behavior caused paused agents to
+    // briefly reappear as "deployed" every time the 5s cache expired and
+    // a read happened to race a writer. If we've never read this slug,
+    // fall through to NOT paused (don't block on first-ever query).
+    console.warn(
+      `[agent-pause-guard] isAgentPaused(${slug}) DB error; preserving last-known value: ${(e as Error).message}`,
+    );
+    return hit?.paused ?? false;
   }
 }
 
@@ -78,8 +86,18 @@ export async function getPausedSlugs(): Promise<Set<string>> {
     const set = new Set(rows.map((r) => r.id));
     pausedSetCache = { set, loadedAt: Date.now() };
     return set;
-  } catch {
-    return new Set();
+  } catch (e) {
+    // DB read failed — preserve the last-known paused set instead of
+    // returning empty. Returning empty caused two visible bugs:
+    //   1. Inngest serve handler rebuilt with all functions live → paused
+    //      agent silently re-registered and got events again.
+    //   2. /api/inngest-admin/functions reported paused agents as deployed
+    //      → fleet UI flickered them back to "online" every cache cycle.
+    // Falling back to last-known is strictly safer than fail-open.
+    console.warn(
+      `[agent-pause-guard] getPausedSlugs DB error; preserving last-known set: ${(e as Error).message}`,
+    );
+    return pausedSetCache?.set ?? new Set();
   }
 }
 

@@ -145,7 +145,9 @@ const NODE_LAYOUT: NodeLayout[] = [
   { id: 'resumeFixer',      wsId: '9-2',   x: 920,  y: 560, kind: 'hitl',    icon: 'user'     },
 
   // ── Col 4.5: RULE CHECK (AO-owned, not in canonical JSON) ────────────────
-  { id: 'ruleCheck',        wsId: '10-5',  x: 1070, y: 400, kind: 'agent',   icon: 'shield'   },
+  // x bumped from 1070 → 1130 so the Resume column (x=920) can widen to fit
+  // "Resume Parser Agent" / "Match Resume Agent" without colliding.
+  { id: 'ruleCheck',        wsId: '10-5',  x: 1130, y: 400, kind: 'agent',   icon: 'shield'   },
 
   // ── Col 5: MATCHING ──────────────────────────────────────────────────────
   { id: 'matcher',          wsId: '10',    x: 1370, y: 400, kind: 'agent',   icon: 'sparkle'  },

@@ -82,6 +82,14 @@ export const resumeParserAgent = inngest.createFunction(
       _raw_keys: Object.keys(raw).sort(),
     });
 
+    // 2026-05-26 — STEP 1 完整入参: RAAS → AO 原始 event envelope (RESUME_DOWNLOADED).
+    fileLogger.event('handler.raw_input', {
+      from: 'RAAS',
+      to: 'AO.resumeParser',
+      event_name: event.name,
+      raw_event_data: event.data,
+    });
+
     // ── 提取 anchor 字段 ──
     const upload_id = raw.upload_id ?? raw.uploadId;
     const bucket = raw.bucket;
@@ -239,10 +247,16 @@ export const resumeParserAgent = inngest.createFunction(
             `candidate_created=${r.candidate_created} resume_created=${r.resume_created}`,
         );
         fileLogger.event('save-candidate.ok', {
+          from: 'AO.resumeParser',
+          to: '候选人数据库',
           upload_id,
           candidate_id: r.candidate_id,
           resume_id: r.resume_id,
           application_id: r.application_id,
+          candidate_created: r.candidate_created,
+          resume_created: r.resume_created,
+          full_input_to_save: input,        // 完整传给 saveCandidateToPartnerPg 的入参
+          full_robohire_parsed: parsed,     // 完整 RoboHire parse-resume 输出
         });
         return r;
       } catch (e) {
@@ -358,6 +372,8 @@ export const resumeParserAgent = inngest.createFunction(
     // RESUME_PROCESSED emit carries upload_id (partner / RAAS subscribers
     // anchor on this field).
     fileLogger.event('emit.resume-processed', {
+      from: 'AO.resumeParser',
+      to: 'AO.ruleCheck + RAAS (Inngest event RESUME_PROCESSED)',
       upload_id,
       candidate_id: saveResult.candidate_id,
       resume_id: saveResult.resume_id,
@@ -368,6 +384,7 @@ export const resumeParserAgent = inngest.createFunction(
       filename: (filename ?? 'resume.pdf').trim(),
       bucket,
       object_key,
+      full_payload: processedPayload,    // 完整 emit payload (含 parsed.data, snapshot 等)
     });
     await step.sendEvent('emit-resume-processed', {
       name: 'RESUME_PROCESSED',
@@ -379,10 +396,15 @@ export const resumeParserAgent = inngest.createFunction(
         `candidate_id=${saveResult.candidate_id}`,
     );
     fileLogger.event('handler.done', {
+      from: 'AO.resumeParser',
+      to: '(handler return)',
       upload_id,
       candidate_id: saveResult.candidate_id,
+      resume_id: saveResult.resume_id,
+      application_id: saveResult.application_id,
       is_new_candidate: saveResult.candidate_created,
       is_new_resume: saveResult.resume_created,
+      robohire_request_id: robohireRequestId,
     });
 
     return {

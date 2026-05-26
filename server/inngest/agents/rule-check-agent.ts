@@ -25,6 +25,7 @@ import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { getRequirementsAgentView } from '@/lib/partner-pg/agent-view';
 import { getRecruitingJobsAsRequirements } from '@/lib/partner-pg/recruiting-jobs';
 import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
+import { saveRuleCheckFailToPartnerPg } from '@/lib/partner-pg/rule-check-result';
 /**
  * RequirementsAgentViewItem stays loose (Record<string, unknown>) here on
  * purpose — both path A merged shape and path B agent-view items flow through
@@ -89,6 +90,14 @@ export async function ruleCheckAgentHandler({
     candidate_id: candidateId,
     employee_id: employeeId,
     resume_id: resumeId,
+  });
+
+  // 2026-05-26 — STEP 1 完整入参: 上游 → AO 原始 event envelope (RESUME_PROCESSED).
+  fileLogger.event('handler.raw_input', {
+    from: 'AO.resumeParser (or RAAS thin-event)',
+    to: 'AO.ruleCheck',
+    event_name: event.name,
+    raw_event_data: event.data,
   });
 
   if (!uploadId && !candidateId) {
@@ -300,7 +309,13 @@ export async function ruleCheckAgentHandler({
     }
 
     const result = await step.run(`rule-check-${stepKey}`, async () => {
-      fileLogger.event('step.start', { step_id: `rule-check-${stepKey}`, jr_id: jrid, client_id: clientId });
+      fileLogger.event('step.start', {
+        from: 'AO.ruleCheck',
+        to: 'AO.ruleCheck.runner (LLM)',
+        step_id: `rule-check-${stepKey}`,
+        jr_id: jrid,
+        client_id: clientId,
+      });
       const input = buildRuleCheckInput({
         runtime_context: runtimeContext,
         parsed_resume: parsedData,
@@ -308,10 +323,14 @@ export async function ruleCheckAgentHandler({
       });
       const r = await runRuleCheck(input, { logger: fileLogger });
       fileLogger.event('step.end', {
+        from: 'AO.ruleCheck.runner',
+        to: 'AO.ruleCheck',
         step_id: `rule-check-${stepKey}`,
         decision: r.decision,
         stats: r.stats,
         rules_evaluated: r.audit.rules_evaluated,
+        explanations: r.explanations,         // 完整 per-rule 判定列表 + reason
+        audit: r.audit,                       // 完整 audit (含 llm_model, llm_round_trips 等)
       });
       logger.info(
         `[${AGENT_NAME}] jr=${jrid} decision=${r.decision} ` +
@@ -377,6 +396,8 @@ export async function ruleCheckAgentHandler({
             rules_total_in_ontology: result.audit.rules_evaluated ?? 0,
             rule_source: result.audit.rule_source ?? 'unknown',
             partial_resume_fields: '[]',
+            // 2026-05-26: 三层抓取证据(为何纳入/排除每条规则)落 audit,供 UI 展示。
+            rule_provenance: JSON.stringify(result.audit.rule_provenance ?? []),
             // 2026-05-20: persist prompts + raw LLM response so the
             // /rule-check Audit detail UI (User Prompt / LLM Response /
             // Rule Flags tabs) has data. Slice to 200k to avoid blowing
@@ -412,12 +433,9 @@ export async function ruleCheckAgentHandler({
     //   Soft-fail: write errors don't block emit downstream.
     await step.run(`write-cmr-${stepKey}`, async () => {
       const cmrId = `cmr_${candidateId || 'unknown'}_${jrid}`;
-      const ruleCheckResult: '通过' | '未通过' | '待人工复核' =
-        result.decision === 'FAIL'
-          ? '未通过'
-          : result.decision === 'REVIEW'
-            ? '待人工复核'
-            : '通过';
+      // 2026-05-26: rule_check_result 二元化(REVIEW 折成 PASS,不再有 待人工复核)。
+      const ruleCheckResult: '通过' | '未通过' =
+        result.decision === 'FAIL' ? '未通过' : '通过';
       const ruleCheckReason =
         result.decision === 'FAIL'
           ? result.explanations
@@ -425,13 +443,7 @@ export async function ruleCheckAgentHandler({
               .map((e) => `[${e.rule_id}] ${e.rule_name}: ${e.reason ?? ''}`)
               .join(' | ')
               .slice(0, 1000)
-          : result.decision === 'REVIEW'
-            ? result.explanations
-                .filter((e) => e.status === 'pending')
-                .map((e) => `[${e.rule_id}] ${e.rule_name}`)
-                .join(', ')
-                .slice(0, 1000)
-            : '';
+          : '';
       const r = await writeCandidateMatchResultInstance({
         candidate_match_result_id: cmrId,
         client_id: clientId,
@@ -450,29 +462,17 @@ export async function ruleCheckAgentHandler({
       return r;
     });
 
-    // Policy 2026-05-20: 信息缺失放行,只有违反才 FAIL。
-    // PASS + REVIEW 都进 MATCH_RULE_CHECK_PASSED 路径 — 流程继续,REVIEW
-    // 案例通过 /rule-check UI + Candidate_Match_Result.rule_check_reason
-    // 给到 HSM 复核。
+    // Policy 2026-05-26: 信息缺失 / pending(原 REVIEW)都放行,只有违反才 FAIL。
+    // foldDecision 已把 insufficient_info + pending 都折成 PASS,decision 只剩
+    // PASS / FAIL 两态。PASS → rule_check_result='通过',直接进 MATCH_RULE_CHECK_PASSED。
     if (result.decision !== 'FAIL') {
-      // PASS(无违规)→ rule_check_result='通过'
-      // REVIEW(规则要求 HSM 人工复核)→ rule_check_result='待人工复核',原因写明
-      const isReview = result.decision === 'REVIEW';
-      const reviewReason = isReview
-        ? '待人工复核:' +
-          result.explanations
-            .filter((e) => e.status === 'pending')
-            .map((e) => `[${e.rule_id}] ${e.rule_name}`)
-            .join(', ')
-            .slice(0, 1000)
-        : '';
       const payload: MatchRuleCheckPassedData = {
         candidate_id: candidateId ?? null,
         resume_id: resumeId || null,
         job_requisition_id: jrid,
         client_id: clientId,
-        rule_check_result: isReview ? '待人工复核' : '通过',
-        rule_check_reason: reviewReason,
+        rule_check_result: '通过',
+        rule_check_reason: '',
         upload_id: uploadId ?? null,
         employee_id: employeeId,
         audit,
@@ -501,6 +501,40 @@ export async function ruleCheckAgentHandler({
         .map((r) => `[${r.rule_id}] ${r.rule_name}: ${r.reason ?? ''}`)
         .join(' | ')
         .slice(0, 1000);
+
+      // 2026-05-26 — rule-check FAIL 用专用精简 writer 无条件写 partner-pg 主表.
+      // 之前复用通用 saveMatchResultsToPartnerPg:主表行被 `if (resolvedJobPostingId)`
+      // 守卫,没 job_posting 的 JR(路径 A/reassign)FAIL 不落主表;还带 runtime_state +
+      // sparser 守卫这些跟 rule-check 失败无关的逻辑。改用 saveRuleCheckFailToPartnerPg:
+      // 只 upsert candidate_match_result(match_status='未通过' + match_reason),无条件落,
+      // 不依赖 posting,不写 runtime_state。partner-pg 没有 rule_check_* 列,失败结果
+      // 映射到 match_status/match_reason(rule_check_* 只在 Allmeta/Neo4j)。
+      // PK 跟 Allmeta CMR 对齐: `cmr_<candidate>_<jr>`. Soft-fail: 写挂不阻塞 emit.
+      const cmrIdForPg = `cmr_${candidateId || 'unknown'}_${jrid}`;
+      if (candidateId && isPartnerPgConfigured()) {
+        await step.run(`persist-cmr-pg-fail-${stepKey}`, async () => {
+          try {
+            const r = await saveRuleCheckFailToPartnerPg({
+              candidate_match_result_id: cmrIdForPg,
+              candidate_id: candidateId,
+              job_requisition_id: jrid,
+              client_id: clientId,
+              match_reason: failureReason,
+              created_by: 'ai_engine.ruleCheck',
+            });
+            logger.info(
+              `[${AGENT_NAME}] ✓ partner-pg candidate_match_result UPSERT (FAIL) · ${r.candidate_match_result_id} created=${r.created} jp=${r.job_posting_id ?? '-'}`,
+            );
+            return { ok: true, ...r };
+          } catch (e) {
+            logger.warn(
+              `[${AGENT_NAME}] partner-pg CMR FAIL write failed · cmr=${cmrIdForPg} err=${(e as Error).message} — soft-fail, 仍 emit _FAILED`,
+            );
+            return { ok: false, error: (e as Error).message };
+          }
+        });
+      }
+
       const failedPayload: MatchRuleCheckFailedData = {
         candidate_id: candidateId || null,
         resume_id: resumeId || null,
@@ -526,6 +560,11 @@ export async function ruleCheckAgentHandler({
   }
 
   fileLogger.event('handler.done', {
+    from: 'AO.ruleCheck',
+    to: '(handler return)',
+    upload_id: uploadId,
+    candidate_id: candidateId,
+    employee_id: employeeId,
     requested_count: requirements.length,
     passed,
     failed,

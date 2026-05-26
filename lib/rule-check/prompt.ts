@@ -28,7 +28,7 @@ const STATUS_DECISION_TREE = `## 5. 单条 rule 的 status 决策树（**严格�
 1. **rule 描述的触发条件在本场景下不成立** → \`not_triggered\`
    - 例：rule 是"外籍候选需补充工作签证有效期"，候选人 nationality="中国"。
    - 例：rule 是"高管岗位需 HR 主管审批"，本岗位 level="L4"，不属高管。
-   - 注意：**applicableClient / applicableDepartment 已在 server 端做过过滤**，到这里的 rule 一定满足客户/部门维度；但 rule 文案内部还可能有"针对 X 类候选/X 类岗位"的限定，由你判断。
+   - server 端已按 applicableClient + applicableDepartment 过滤过一轮，但你**仍须**按 rule 文案(submissionCriteria / logic)里"针对 X 客户/X 事业群/X 类候选/X 类岗位"的限定再校验一次：若本场景明显不落在该限定内(例如 rule 限定"腾讯CDG事业群"、而本岗位部门是互娱IEG)，标 \`not_triggered\`，reason 写明不匹配维度。
 
 2. **rule 要评估某字段，但 GRAPH_CONTEXT 中该字段为 null / 缺失 / 空数组** → \`insufficient_info\`
    - 例：rule 是"工作年限 ≥ 2 年"，但 \`candidate.work_years\` 为 null → \`insufficient_info\`，reason="简历未提供 work_years"。
@@ -47,6 +47,11 @@ const STATUS_DECISION_TREE = `## 5. 单条 rule 的 status 决策树（**严格�
    - 例：rule 是"形象气质需 HSM 复核"。
    - reason 写"需 HSM 复核 <具体维度>"。
 
+⚠ **极性陷阱 —— 排除类/冷冻期/竞对/黑名单规则**：这类规则是"命中坏条件 → 阻断(fail)；未命中 → 放行(pass)"，极性跟"达标类"相反，最易判反：
+   - 例：rule "腾讯离职**不足**6个月则阻断"。候选人离职已**满**6个月 → 未命中阻断条件 → 满足放行 → \`pass\`，reason="离职满6个月，放行"。**绝不能因为 reason 里出现"满足"二字就打 fail**——这里"满足"指满足放行条件。
+   - 只有候选人**确实命中**阻断条件(如离职仅3个月)才 \`fail\`，reason="离职仅3个月<6，命中冷冻期"。
+   - 先判清这条 rule 是"达标类"(满足要求→pass)还是"排除类"(命中坏条件→fail)，再定 status，别让 reason 文字误导。
+
 ⚠ **最常见的错误是把 \`insufficient_info\` 误判为 \`fail\`**。在判断为 fail 之前，再问自己：
 > 我引用的字段在 GRAPH_CONTEXT 里真的非 null 吗？真的有具体数值吗？
 
@@ -56,8 +61,7 @@ const DECISION_FOLD_BLOCK = `## 6. 决策结算（仅供你参考，最终由 se
 
 逐 rule 评估完后 server 端会按下列规则汇总；你**只**输出 rule_results[]，不要输出 decision：
 - 任一 rule status="fail" → \`decision="FAIL"\`
-- 否则任一 rule status="pending" → \`decision="REVIEW"\`
-- 否则 → \`decision="PASS"\`（\`insufficient_info\` 不影响 decision，server 会在 audit 中单独显示）
+- 否则 → 整体 \`PASS\`（\`insufficient_info\` 与 \`pending\` 都**不**阻断，server 会在 audit 中单独显示这两类，但不影响整体推进）
 
 不要根据自己的判断重新归类 rule status；按 §5 决策树独立评估每条规则。`;
 
@@ -68,21 +72,22 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
 \`\`\`json
 {
   "rule_results": [
-    { "rule_id": "<id>", "status": "<status>", "reason": "<≤40 字>" }
+    { "rule_id": "<id>", "status": "<status>", "reason": "<判定依据>", "next_action": "<action>" }
   ]
 }
 \`\`\`
 
 **关键规则（违反即视为无效输出）：**
 - status ∈ {pass, fail, pending, insufficient_info, not_triggered, not_executed}。
+- next_action ∈ {continue, block, supplement, review}，**必填**，按 status 取值：fail→block(阻断)；insufficient_info→supplement(补充材料)；pending→review(人工复核，不阻断)；pass / not_triggered→continue(放行)。
 - 每条规则都必须有一条对应的 \`rule_results\` 条目，按 Set 顺序、Set 内列出顺序输出。
 - \`reason\` 字段 **必填**（每条 rule 都要写，所有 status 都要写）：
-  - status='pass'：写 ≤40 字简要依据，比如"work_years=3 ≥ 2，满足"
-  - status='fail'：写 ≤40 字违反点，**必须引用 GRAPH_CONTEXT 中具体字段+数值**，比如"work_years=1 < 2"
-  - status='insufficient_info'：写 ≤40 字缺哪个字段，比如"candidate.work_years 为 null"
-  - status='not_triggered'：写 ≤40 字为何不触发，比如"非外籍候选，跳过本规则"
-  - status='pending'：写 ≤40 字待人工复核原因
-  - status='not_executed'：本批通常用不到；如果用了写 ≤40 字说明上游断链原因
+  - status='fail'：写**详细**判定链(≤120 字)——①触发判定:为何本规则适用本候选人 ②引用 GRAPH_CONTEXT 的具体字段+数值 ③套用规则逻辑(注意极性:排除/冷冻类是"命中坏条件→fail"，别被"满足"二字误导)④结论。例:"目标岗位归属CDG适用；employment_links 最近腾讯离职 2024.02 距今约3个月<6；命中冷冻期阻断条件→未通过"
+  - status='pending'：写**详细**待复核理由(≤120 字)——为何需 HSM、复核哪个维度、当前已知信息
+  - status='insufficient_info'：写详细缺哪个字段+为何无法判定(≤80 字)，例:"candidate.work_years 为 null，规则要求≥2年无法结算"
+  - status='pass'：写 ≤40 字简要依据，例:"work_years=3 ≥ 2，满足"
+  - status='not_triggered'：写 ≤40 字为何不触发，例:"目标部门=IEG≠规则限定CDG，本规则不适用"
+  - status='not_executed'：本批通常用不到；如用了写 ≤40 字上游断链原因
 - \`reason\` 限 40 个中文字符内，只写最关键依据，**不要复述规则名或重复信息**。
 - 不要输出 \`rule_name\`、\`step_id\`、\`decision\`、\`stats\`、\`explanations\` 等任何额外字段——runner 会基于 \`rule_results\` 重新计算。`;
 
