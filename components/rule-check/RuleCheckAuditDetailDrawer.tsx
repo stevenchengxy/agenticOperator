@@ -755,12 +755,14 @@ function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
     return a.rule_id.localeCompare(b.rule_id);
   });
 
+  // 每条规则的抓取证据(为何纳入)— 内联到每条 rule 卡片,替代原来的独立"抓取链路"卡片。
+  const provById = new Map(
+    (detail.rule_provenance ?? []).map((p) => [p.rule_id, p]),
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <CandidateProfileCard detail={detail} />
-
-      {/* 抓取链路证明 — 给用户看 51 条 ontology 规则全审视过 */}
-      <RuleFetchProvenanceCard detail={detail} />
 
       {/* ① 已评估的规则(applicable=true)— LLM 实际跑了逻辑判定的 */}
       {orderedApplicable.length > 0 ? (
@@ -774,6 +776,7 @@ function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
               flag={f}
               auditId={detail.audit_id}
               ctx={ctx}
+              provenance={provById.get(f.rule_id) ?? null}
             />
           ))}
         </>
@@ -818,66 +821,6 @@ function deriveCandidateContext(
     jrTitle: pickStr(j.client_job_title) || t("rc_jr_no_title"),
     failureRuleIds,
   };
-}
-
-/**
- * 抓取链路证明面板 — 显示规则是从哪来的(neo4j/api/json)+ 链路三段数:
- *   ontology N → 经 filter → LLM 评估 M → applicable=true K
- * 用户看到这个面板,就知道"规则 10-29 在 ontology 里,但本次 applicable=false"。
- */
-function RuleFetchProvenanceCard({ detail }: { detail: RuleCheckAuditDetail }) {
-  const { t } = useApp();
-  const applicableCount = detail.flags.filter((f) => f.applicable).length;
-  const notApplicableCount = detail.flags.filter((f) => !f.applicable).length;
-  const ontologyCount = detail.rules_total_in_ontology;
-  const evaluatedCount = detail.rules_evaluated;
-  const filteredOut = ontologyCount - evaluatedCount;
-
-  const sourceTag =
-    detail.rule_source === "neo4j-direct"
-      ? t("rc_provenance_neo4j_direct")
-      : detail.rule_source === "ontology-api"
-        ? t("rc_provenance_ontology_api")
-        : t("rc_provenance_json_fallback");
-
-  return (
-    <div
-      className="border border-line rounded-sm bg-panel"
-      style={{ padding: "10px 14px" }}
-    >
-      <div className="hint" style={{ marginBottom: 6 }}>
-        🔍 {t("rc_provenance_title").replace("{total}", String(ontologyCount))}
-      </div>
-      <div
-        className="grid items-center"
-        style={{
-          gridTemplateColumns: "auto 1fr auto 1fr auto 1fr auto",
-          gap: "0 10px",
-          fontSize: 12,
-        }}
-      >
-        <span className="mono text-ink-1 font-semibold">{ontologyCount}</span>
-        <span className="text-ink-3">{t("rc_provenance_ontology_label")}</span>
-        <span className="text-ink-3">→</span>
-        <span className="mono text-ink-1 font-semibold">{evaluatedCount}</span>
-        <span className="text-ink-3">{t("rc_provenance_filtered_label")}</span>
-        <span className="text-ink-3">→</span>
-        <span className="mono text-ink-1 font-semibold">{applicableCount}</span>
-      </div>
-      <div className="mono text-[11px] text-ink-3" style={{ marginTop: 6 }}>
-        {t("rc_provenance_summary")
-          .replace("{filtered}", String(filteredOut))
-          .replace("{evaluated}", String(evaluatedCount))
-          .replace("{applicable}", String(applicableCount))
-          .replace("{not_applicable}", String(notApplicableCount))}
-      </div>
-      <div className="mono text-[11px] text-ink-3" style={{ marginTop: 4 }}>
-        {t("rc_provenance_source")
-          .replace("{source}", detail.rule_source)
-          .replace("{tag}", sourceTag)}
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -1104,10 +1047,19 @@ function pickStr(v: unknown): string {
  *
  * step 3 文案带候选人 / JD 上下文,让 leader / 客户能看到"是谁因为什么不通过/通过"。
  */
+/** 规则三层归属 → i18n 标签。 */
+function tierLabel(tier: string, t: (k: string) => string): string {
+  if (tier === "general") return t("rc_tier_general");
+  if (tier === "client") return t("rc_tier_client");
+  if (tier === "department") return t("rc_tier_department");
+  return tier;
+}
+
 function InferenceChainCard({
   flag,
   auditId,
   ctx,
+  provenance,
 }: {
   flag: {
     flag_id: string;
@@ -1121,6 +1073,7 @@ function InferenceChainCard({
   };
   auditId: string;
   ctx: CandidateContext;
+  provenance: { tier: string; reason: string } | null;
 }) {
   const { t } = useApp();
   const isBottomLine = flag.severity === "terminal" || flag.severity === "needs_human";
@@ -1185,6 +1138,18 @@ function InferenceChainCard({
           .replace("{name}", ctx.name)
           .replace("{jr}", ctx.jrTitle)}
       </div>
+
+      {/* 为何抓取此规则 — 三层归属 + 纳入证据(替代原独立"抓取链路"卡片) */}
+      {provenance ? (
+        <div
+          className="flex items-center gap-2 flex-wrap"
+          style={{ padding: "8px 14px 0" }}
+        >
+          <span className="hint">🔗 {t("rc_why_fetched")}</span>
+          <Badge variant="default">{tierLabel(provenance.tier, t)}</Badge>
+          <span className="text-[11.5px] text-ink-3">{provenance.reason}</span>
+        </div>
+      ) : null}
 
       {/* Inference chain: 3 steps */}
       <div className="flex flex-col" style={{ padding: "10px 14px", gap: 6 }}>
