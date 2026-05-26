@@ -85,10 +85,10 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
   - status='fail'：写**详细**判定链(≤120 字)——①触发判定:为何本规则适用本候选人 ②引用 GRAPH_CONTEXT 的具体字段+数值 ③套用规则逻辑(注意极性:排除/冷冻类是"命中坏条件→fail"，别被"满足"二字误导)④结论。例:"目标岗位归属CDG适用；employment_links 最近腾讯离职 2024.02 距今约3个月<6；命中冷冻期阻断条件→未通过"
   - status='pending'：写**详细**待复核理由(≤120 字)——为何需 HSM、复核哪个维度、当前已知信息
   - status='insufficient_info'：写详细缺哪个字段+为何无法判定(≤80 字)，例:"candidate.work_years 为 null，规则要求≥2年无法结算"
-  - status='pass'：写 ≤40 字简要依据，例:"work_years=3 ≥ 2，满足"
-  - status='not_triggered'：写 ≤40 字为何不触发，例:"目标部门=IEG≠规则限定CDG，本规则不适用"
+  - status='pass'：写 ≤60 字判定依据，**引用候选人简历里的具体内容**(最近经历/公司/技能/字段值)来支撑，别只写"未发现X"。例:"最近一段为字节跳动行政文秘(2024.03至今)，工作经历无华为/荣耀任职，未命中竞对冷冻，放行"
+  - status='not_triggered'：写 ≤50 字为何不触发(引用本场景维度)，例:"目标部门=IEG≠规则限定CDG，本规则不适用"
   - status='not_executed'：本批通常用不到；如用了写 ≤40 字上游断链原因
-- \`reason\` 限 40 个中文字符内，只写最关键依据，**不要复述规则名或重复信息**。
+- \`reason\` 要写成**完整判定句**(可引用候选人姓名 + 简历里的具体事实)，让人单看这一句就懂"是谁、依据什么、得出什么结论"，别只写"未发现X""满足"这种空泛片段；字数按上面各 status 上限，**不要复述规则名或编造 GRAPH_CONTEXT 里没有的信息**。
 - 不要输出 \`rule_name\`、\`step_id\`、\`decision\`、\`stats\`、\`explanations\` 等任何额外字段——runner 会基于 \`rule_results\` 重新计算。`;
 
 const SELF_CHECK_MATCH_RESUME = `## 8. 自检

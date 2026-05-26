@@ -224,15 +224,17 @@ export function RuleCheckAuditDetailBody({
             </TabBtn>
           </div>
           <div className="flex-1 overflow-auto" style={{ padding: "16px 18px" }}>
-            {tab === "prompt" ? (
-              <PromptTab detail={data.detail} />
-            ) : tab === "rules" ? (
-              <RulesTab detail={data.detail} />
-            ) : tab === "response" ? (
-              <ResponseTab detail={data.detail} />
-            ) : (
-              <InstancesTab detail={data.detail} />
-            )}
+            <div key={tab} className="rc-fade-in">
+              {tab === "prompt" ? (
+                <PromptTab detail={data.detail} />
+              ) : tab === "rules" ? (
+                <RulesTab detail={data.detail} />
+              ) : tab === "response" ? (
+                <ResponseTab detail={data.detail} />
+              ) : (
+                <InstancesTab detail={data.detail} />
+              )}
+            </div>
           </div>
         </>
       )}
@@ -257,7 +259,7 @@ export function RuleCheckAuditDetailBody({
       onClick={onClose}
     >
       <div
-        className="bg-surface border-l border-line flex flex-col"
+        className="bg-surface border-l border-line flex flex-col rc-drawer-in"
         style={{ width: "min(940px, 92vw)" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -745,44 +747,84 @@ function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const applicable = detail.flags.filter((f) => f.applicable);
   const notApplicable = detail.flags.filter((f) => !f.applicable);
 
-  const orderedApplicable = [...applicable].sort((a, b) => {
-    const ra = a.result === "FAIL" ? 0 : a.result === "PASS" ? 2 : 3;
-    const rb = b.result === "FAIL" ? 0 : b.result === "PASS" ? 2 : 3;
-    if (ra !== rb) return ra - rb;
-    const sa = a.severity === "terminal" || a.severity === "needs_human" ? 0 : 1;
-    const sb = b.severity === "terminal" || b.severity === "needs_human" ? 0 : 1;
-    if (sa !== sb) return sa - sb;
-    return a.rule_id.localeCompare(b.rule_id);
-  });
+  // ① 有结论需要看的(FAIL / 待复核 / 信息不足)→ 展开成完整卡片,FAIL 优先
+  // ② PASS → 折叠成一行(大多数都 PASS,默认不占视觉空间)
+  // ③ 不触发(applicable=false)→ 原有折叠区
+  const consequential = applicable
+    .filter((f) => f.result !== "PASS")
+    .sort((a, b) => {
+      const ra = a.result === "FAIL" ? 0 : 1;
+      const rb = b.result === "FAIL" ? 0 : 1;
+      if (ra !== rb) return ra - rb;
+      const sa = a.severity === "terminal" || a.severity === "needs_human" ? 0 : 1;
+      const sb = b.severity === "terminal" || b.severity === "needs_human" ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      return a.rule_id.localeCompare(b.rule_id);
+    });
+  const passed = applicable
+    .filter((f) => f.result === "PASS")
+    .sort((a, b) => a.rule_id.localeCompare(b.rule_id));
 
   // 每条规则的抓取证据(为何纳入)— 内联到每条 rule 卡片,替代原来的独立"抓取链路"卡片。
   const provById = new Map(
     (detail.rule_provenance ?? []).map((p) => [p.rule_id, p]),
   );
 
+  const counts = {
+    fail: applicable.filter((f) => f.result === "FAIL").length,
+    pass: passed.length,
+    review: applicable.filter((f) => f.result === "REVIEW").length,
+    info: applicable.filter((f) => f.result === "INSUFFICIENT_INFO").length,
+    na: notApplicable.length,
+  };
+  const failingIds = consequential.filter((f) => f.result === "FAIL").map((f) => f.rule_id);
+
   return (
     <div className="flex flex-col gap-3">
       <CandidateProfileCard detail={detail} />
 
-      {/* ① 已评估的规则(applicable=true)— LLM 实际跑了逻辑判定的 */}
-      {orderedApplicable.length > 0 ? (
+      {/* B — 结果概览条:计数 + 失败规则可点击直达卡片 */}
+      <ResultOverviewStrip total={detail.flags.length} counts={counts} failingIds={failingIds} t={t} />
+
+      {/* ① 有结论的规则(FAIL / 待复核 / 信息不足)— 默认展开,完整推理 + 规则定义 */}
+      {consequential.map((f, i) => (
+        <div
+          key={f.flag_id}
+          id={`rc-rule-${f.rule_id}`}
+          className="rc-row-in"
+          style={{ ["--rc-i"]: Math.min(i, 10) } as React.CSSProperties}
+        >
+          <InferenceChainCard
+            flag={f}
+            auditId={detail.audit_id}
+            ctx={ctx}
+            provenance={provById.get(f.rule_id) ?? null}
+            defaultOpen
+          />
+        </div>
+      ))}
+
+      {/* ② 已通过的规则 — 默认折叠(只显示头部一行),点开看完整推理/规则定义/为何抓取 */}
+      {passed.length > 0 ? (
         <>
           <div className="hint" style={{ marginTop: 4, marginBottom: 2 }}>
-            {t("rc_rules_evaluated_section").replace("{count}", String(orderedApplicable.length))}
+            {t("rc_passed_section").replace("{count}", String(passed.length))}
           </div>
-          {orderedApplicable.map((f) => (
-            <InferenceChainCard
-              key={f.flag_id}
-              flag={f}
-              auditId={detail.audit_id}
-              ctx={ctx}
-              provenance={provById.get(f.rule_id) ?? null}
-            />
+          {passed.map((f) => (
+            <div key={f.flag_id} id={`rc-rule-${f.rule_id}`}>
+              <InferenceChainCard
+                flag={f}
+                auditId={detail.audit_id}
+                ctx={ctx}
+                provenance={provById.get(f.rule_id) ?? null}
+                defaultOpen={false}
+              />
+            </div>
           ))}
         </>
       ) : null}
 
-      {/* ② 不适用的规则(applicable=false)— 折叠分区,证明被审视过 */}
+      {/* ③ 不触发的规则(applicable=false)— 折叠分区,证明被审视过 */}
       {notApplicable.length > 0 ? (
         <NotApplicableRulesSection
           flags={notApplicable.sort((a, b) => a.rule_id.localeCompare(b.rule_id))}
@@ -793,6 +835,66 @@ function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
   );
 }
 
+/** B — 结果概览条:总数 + 各 status 计数(图标),失败规则做成可点击 chip 直达卡片。 */
+function ResultOverviewStrip({
+  total,
+  counts,
+  failingIds,
+  t,
+}: {
+  total: number;
+  counts: { fail: number; pass: number; review: number; info: number; na: number };
+  failingIds: string[];
+  t: (k: string) => string;
+}) {
+  const seg = (icon: string, n: number, color: string) =>
+    n > 0 ? (
+      <span className="inline-flex items-center gap-1" style={{ color }}>
+        <span>{icon}</span>
+        <span className="mono font-semibold">{n}</span>
+      </span>
+    ) : null;
+  return (
+    <div
+      className="border border-line rounded-sm bg-panel flex items-center flex-wrap"
+      style={{ padding: "8px 14px", gap: "6px 16px", fontSize: 12 }}
+    >
+      <span className="hint">{t("rc_overview_total").replace("{n}", String(total))}</span>
+      {seg("✗", counts.fail, "var(--c-err)")}
+      {seg("✓", counts.pass, "var(--c-ok)")}
+      {seg("⏸", counts.review, "oklch(0.5 0.14 75)")}
+      {seg("?", counts.info, "oklch(0.5 0.14 75)")}
+      {seg("⊘", counts.na, "var(--c-ink-4)")}
+      {failingIds.length > 0 ? (
+        <span className="flex items-center gap-1.5" style={{ marginLeft: "auto" }}>
+          {failingIds.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() =>
+                document
+                  .getElementById(`rc-rule-${id}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" })
+              }
+              className="mono rounded-sm transition-colors"
+              style={{
+                fontSize: 11,
+                padding: "1px 7px",
+                background: "var(--c-err-bg)",
+                color: "var(--c-err)",
+                cursor: "pointer",
+              }}
+            >
+              {id} →
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** A — 已通过规则折叠区:默认一行"已通过 (N)",展开后每条一行(rule_id · 名称 · 部门 · 依据)。 */
 /**
  * 从 detail 派生候选人 + JD 上下文,供 InferenceChainCard / NotApplicableRulesSection
  * 在 step 3 / 不适用文案里引用具体姓名,而不是冷冰冰的"无负面影响"。
@@ -1020,18 +1122,7 @@ function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
           </div>
         </div>
       </div>
-
-      {/* Gating rule conflicts (from failure_reasons) */}
-      {detail.failure_reasons.length > 0 ? (
-        <div style={{ gridColumn: "1 / -1", paddingTop: 4, borderTop: "1px solid var(--c-line)" }}>
-          <div className="hint" style={{ marginBottom: 4 }}>
-            ⚠ {t("rc_failure_hit")}
-          </div>
-          <div className="text-[12px] text-err" style={{ lineHeight: 1.5 }}>
-            {detail.failure_reasons.join(" · ")}
-          </div>
-        </div>
-      ) : null}
+      {/* 2026-05-26: 移除重复的"命中底线规则"callout — 失败原因已在页头 + 概览条 + 失败卡里展示。 */}
     </div>
   );
 }
@@ -1055,11 +1146,20 @@ function tierLabel(tier: string, t: (k: string) => string): string {
   return tier;
 }
 
+/** next_action → 简短中英文标签(卡片头部小标签用)。 */
+function nextActionLabel(a: string, t: (k: string) => string): string {
+  if (a === "block") return t("rc_action_block");
+  if (a === "supplement") return t("rc_action_supplement");
+  if (a === "review") return t("rc_action_review");
+  return t("rc_action_continue");
+}
+
 function InferenceChainCard({
   flag,
   auditId,
   ctx,
   provenance,
+  defaultOpen = true,
 }: {
   flag: {
     flag_id: string;
@@ -1074,8 +1174,11 @@ function InferenceChainCard({
   auditId: string;
   ctx: CandidateContext;
   provenance: { tier: string; reason: string } | null;
+  /** PASS 默认折叠、FAIL/待复核默认展开 — 折叠时只显示头部一行,详情(推理/规则定义/为何抓取)点开即见。 */
+  defaultOpen?: boolean;
 }) {
   const { t } = useApp();
+  const [open, setOpen] = React.useState(defaultOpen);
   const isBottomLine = flag.severity === "terminal" || flag.severity === "needs_human";
   const isFail = flag.result === "FAIL";
   const blocks = isBottomLine && isFail;
@@ -1103,16 +1206,33 @@ function InferenceChainCard({
     t,
   });
 
+  // 左侧色条 — 跟列表行一致,FAIL/PASS 一眼可扫
+  const accentBar = blocks
+    ? "var(--c-err)"
+    : isFail
+      ? "oklch(0.5 0.14 75)"
+      : flag.result === "PASS"
+        ? "var(--c-ok)"
+        : "var(--c-line)";
   return (
     <div
       className="border border-line rounded-sm overflow-hidden"
-      style={{ background: "var(--c-bg)" }}
+      style={{ background: "var(--c-bg)", borderLeft: `3px solid ${accentBar}` }}
     >
-      {/* 头部:rule_id · name · severity · result · 跳 Neo4j */}
-      <div
-        className="flex items-center gap-2"
-        style={{ padding: "10px 14px", background: headerBg }}
+      {/* 头部(可点击折叠/展开):chevron · rule_id · name · severity · result · next_action */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 text-left transition-colors"
+        style={{ padding: "10px 14px", background: headerBg, cursor: "pointer" }}
       >
+        <span
+          className="text-ink-3 select-none flex-shrink-0"
+          style={{ fontSize: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 160ms ease" }}
+        >
+          ▶
+        </span>
         <span className="mono text-[12.5px] text-ink-1 font-semibold">
           {flag.rule_id}
         </span>
@@ -1127,80 +1247,64 @@ function InferenceChainCard({
         <Badge variant={flag.result === "PASS" ? "ok" : flag.result === "FAIL" ? "err" : "default"}>
           {flag.result}
         </Badge>
-      </div>
+        {/* next_action 缩成头部小标签 */}
+        <Badge variant={flag.next_action === "block" ? "err" : flag.next_action === "continue" ? "ok" : "default"}>
+          {nextActionLabel(flag.next_action, t)}
+        </Badge>
+      </button>
 
-      {/* Candidate + JD context row */}
-      <div
-        className="text-[11px] text-ink-3"
-        style={{ padding: "6px 14px 0", lineHeight: 1.5 }}
-      >
-        {t("rc_candidate_context_line")
-          .replace("{name}", ctx.name)
-          .replace("{jr}", ctx.jrTitle)}
-      </div>
+      {/* 详情(折叠时隐藏)— 候选人/JD 上下文 + 为何抓取 + LLM 推理判定 + 原规则定义 */}
+      {open ? (
+        <div className="rc-fade-in">
+          {/* 为何抓取此规则 — 三层归属 + 纳入证据(含来自哪个客户/部门) */}
+          {provenance ? (
+            <div
+              className="flex items-center gap-2 flex-wrap"
+              style={{ padding: "10px 14px 0" }}
+            >
+              <span className="hint">🔗 {t("rc_why_fetched")}</span>
+              <Badge variant="default">{tierLabel(provenance.tier, t)}</Badge>
+              <span className="text-[11.5px] text-ink-3">{provenance.reason}</span>
+            </div>
+          ) : null}
 
-      {/* 为何抓取此规则 — 三层归属 + 纳入证据(替代原独立"抓取链路"卡片) */}
-      {provenance ? (
-        <div
-          className="flex items-center gap-2 flex-wrap"
-          style={{ padding: "8px 14px 0" }}
-        >
-          <span className="hint">🔗 {t("rc_why_fetched")}</span>
-          <Badge variant="default">{tierLabel(provenance.tier, t)}</Badge>
-          <span className="text-[11.5px] text-ink-3">{provenance.reason}</span>
+          {/* LLM 推理/判定依据(主体,含候选人+岗位上下文) + 仅 FAIL 显示"对整体决策影响" */}
+          <div className="flex flex-col" style={{ padding: "10px 14px", gap: 6 }}>
+            {flag.applicable ? (
+              <>
+                <ChainStep
+                  step="1"
+                  label={t("rc_chain_step1_evidence")}
+                  ok={flag.result === "PASS"}
+                  warn={flag.result === "FAIL"}
+                  content={flag.evidence || t("rc_evidence_no_llm")}
+                />
+                {isFail ? (
+                  <ChainStep
+                    step="2"
+                    label={t("rc_chain_step3_label")}
+                    ok={!blocks}
+                    warn={blocks}
+                    content={impactSentence}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <ChainStep
+                step="—"
+                label={t("rc_chain_na_label")}
+                ok
+                content={t("rc_chain_na_content")
+                  .replace("{name}", ctx.name)
+                  .replace("{jr}", ctx.jrTitle)}
+              />
+            )}
+          </div>
+
+          {/* 原规则定义(submissionCriteria / 判定逻辑 / applicableClient / applicableDepartment 等)*/}
+          <RuleDefinitionPanel ruleId={flag.rule_id} />
         </div>
       ) : null}
-
-      {/* Inference chain: 3 steps */}
-      <div className="flex flex-col" style={{ padding: "10px 14px", gap: 6 }}>
-        {flag.applicable ? (
-          <>
-            <ChainStep
-              step="1"
-              label={t("rc_chain_step1_evidence")}
-              ok={flag.result === "PASS"}
-              warn={flag.result === "FAIL"}
-              content={flag.evidence || t("rc_evidence_no_llm")}
-            />
-            <ChainStep
-              step="2"
-              label={isBottomLine ? t("rc_flag_step2_bottomline") : t("rc_flag_step2_tip")}
-              ok={flag.next_action === "continue"}
-              warn={flag.next_action === "block"}
-              content={
-                flag.next_action === "block"
-                  ? t("rc_chain_step2_block")
-                  : flag.next_action === "continue"
-                    ? t("rc_chain_step2_continue")
-                    : flag.next_action === "supplement"
-                      ? t("rc_chain_step2_supplement")
-                      : flag.next_action === "review"
-                        ? t("rc_chain_step2_review")
-                        : flag.next_action || t("rc_chain_step2_not_given")
-              }
-            />
-            <ChainStep
-              step="3"
-              label={t("rc_chain_step3_label")}
-              ok={!blocks}
-              warn={blocks}
-              content={impactSentence}
-            />
-          </>
-        ) : (
-          <ChainStep
-            step="—"
-            label={t("rc_chain_na_label")}
-            ok
-            content={t("rc_chain_na_content")
-              .replace("{name}", ctx.name)
-              .replace("{jr}", ctx.jrTitle)}
-          />
-        )}
-      </div>
-
-      {/* 可展开:点开看 Neo4j 上的原规则定义(submissionCriteria / 判定逻辑等)*/}
-      <RuleDefinitionPanel ruleId={flag.rule_id} />
     </div>
   );
 }

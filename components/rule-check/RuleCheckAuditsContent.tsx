@@ -145,8 +145,14 @@ export function RuleCheckAuditsContent() {
         ) : (
           <>
             <div className="flex flex-col gap-1">
-              {data.rows.map((r) => (
-                <AuditCard key={r.audit_id} row={r} onOpen={openDetail} t={t} lang={lang} />
+              {data.rows.map((r, i) => (
+                <div
+                  key={r.audit_id}
+                  className="rc-row-in"
+                  style={{ ["--rc-i"]: Math.min(i, 14) } as React.CSSProperties}
+                >
+                  <AuditCard row={r} onOpen={openDetail} t={t} lang={lang} />
+                </div>
               ))}
             </div>
             {data.rows.length > 0 && data.total > data.rows.length && (
@@ -304,7 +310,7 @@ function AuditCard({
     <button
       type="button"
       onClick={() => onOpen(row.audit_id)}
-      className="text-left cursor-pointer rounded-lg transition-all"
+      className="text-left cursor-pointer rounded-lg transition-all w-full"
       style={{
         padding: "12px 14px",
         background: "var(--c-surface)",
@@ -337,10 +343,26 @@ function AuditCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[13px] text-ink-1 truncate" style={{ fontFamily: SERIF, fontWeight: 500 }}>
-              {row.client_name || "—"}{row.business_group ? ` × ${row.business_group}` : ""}
+              {row.candidate_name || (row.candidate_id ? row.candidate_id.slice(0, 8) : "—")}
+              <span className="text-ink-3" style={{ fontWeight: 400 }}> · </span>
+              {row.jr_title || (row.job_requisition_id ? row.job_requisition_id.slice(-10) : "—")}
+              {row.dept_label ? (
+                <span
+                  className="ml-2 rounded-sm align-middle"
+                  style={{
+                    fontFamily: "var(--f-mono)",
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    background: "var(--c-panel)",
+                    color: "var(--c-ink-3)",
+                  }}
+                >
+                  {row.dept_label}
+                </span>
+              ) : null}
             </div>
-            <div className="text-[10.5px] text-ink-3 mono truncate mt-0.5">
-              {row.candidate_id || "—"} → {row.job_requisition_id || "—"}
+            <div className="text-[10.5px] text-ink-4 mono truncate mt-0.5">
+              {row.job_requisition_id || "—"}
             </div>
           </div>
         </div>
