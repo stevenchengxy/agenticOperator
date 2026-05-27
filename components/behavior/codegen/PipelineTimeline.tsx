@@ -17,6 +17,7 @@ import React from "react";
 import { useApp } from "@/lib/i18n";
 
 export type PipelineStage =
+  | "promptgen"
   | "prompt"
   | "spec"
   | "render"
@@ -26,7 +27,7 @@ export type PipelineStage =
 
 export type StageState = "idle" | "active" | "ok" | "err";
 
-const STAGE_ORDER: PipelineStage[] = ["prompt", "spec", "render", "body", "compile", "review"];
+const STAGE_ORDER: PipelineStage[] = ["promptgen", "prompt", "spec", "render", "body", "compile", "review"];
 
 export function PipelineTimeline({
   states,
