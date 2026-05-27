@@ -16,6 +16,37 @@
 
 ---
 
+## Revision 2026-05-27b — static sources (authoritative; overrides any stale code block below)
+
+Generation is a **static, design-time activity** — it reads only curated registries, never
+a live DB/Neo4j query (matches existing codegen; see spec Part 4). Task 2 above is already
+rewritten for this. Apply these deltas wherever a later task's code block still shows the
+old live/real-payload shape:
+
+- **`EventContext`** is `{ name, stage, summary, direction, payloadFields }` only.
+  **Removed:** `publishers`, `subscribers`, `realPayloadSamples`. `payloadFields` is `[]`
+  in v1 (reserved for the deferred offline snapshot, spec Part 9).
+- **`context-sources.ts`** exports the synchronous `eventContexts(domain)` only.
+  **Removed:** `mapEventDefinitionRow`, `loadEventContexts` (live), `loadRealPayloadSamples`,
+  and the `import { prisma }`.
+- **Task 3 (`context-select`)**: "topological neighbors" = **same-`stage`** events (the
+  static registry has no publisher/subscriber edges). Drop any `publishers`/`subscribers`
+  references from both the test fixtures and the impl; rank/keep by stage + intent keywords.
+- **Task 4 (`context-assembler`)**: drop the `sourceBadge` param and the real-payload-sample
+  rendering. Render `payloadFields` only when non-empty (it is empty in v1, so that block is
+  inert). Its signature becomes `assembleSystemPrompt({ selected, locked })`.
+- **Task 6 (`prompt-gen`)**: call `eventContexts(domain)` synchronously; **remove** the
+  `loadEventContexts`/`loadRealPayloadSamples` calls and the trigger-sample attachment block.
+- **`GenerateAgentPromptResult` (Task 6) + route response (Task 7)**: drop `sourceBadge`.
+- **UI (Tasks 9, 11)**: drop the source badge and the `pg_source_neo4j` / `pg_source_static`
+  i18n keys — there is only one (static) source.
+- **Multi-trigger (prompt-only, spec Part 11 / Part 9):** add an optional
+  `additionalTriggerEvents?: string[]` to the `AgentPrompt` (Task 1 schema) — captured in the
+  prompt for review. `render-agent.ts` stays single-trigger in v1; when the prompt declares
+  extra triggers, surface them as a hand-finish note (code-layer render is deferred).
+
+---
+
 ## Chunk 1: Data layer (types + sources + selection + assembly)
 
 The testable core. All four files are pure or thin-over-Prisma, so logic lives in pure functions that vitest covers directly.
@@ -175,9 +206,11 @@ git commit -m "feat(promptgen): AgentPrompt types + Zod/JSON schema" -- \
 
 ---
 
-### Task 2: Context source types + pure mappers (`context-sources.ts`, pure half)
+### Task 2: Context sources (`context-sources.ts`) — STATIC only
 
-The Prisma-touching async loaders are thin; all logic lives in pure mappers tested here. The async loaders are added in Step 6 and verified by the route test in Chunk 2.
+Generation is static and reproducible: this reads only the curated `EVENT_REGISTRY_RAAS`
+(the same source existing codegen uses). **No Prisma / Neo4j query on the generation
+path.** (Live payload-schema snapshotting is a deferred offline script — spec Part 9.)
 
 **Files:**
 - Create: `lib/agent-codegen/prompt-gen/context-sources.ts`
@@ -188,37 +221,18 @@ The Prisma-touching async loaders are thin; all logic lives in pure mappers test
 ```ts
 // context-sources.test.ts
 import { describe, it, expect } from 'vitest';
-import { mapEventDefinitionRow, staticEventContexts, EventContext } from './context-sources';
+import { eventContexts, type EventContext } from './context-sources';
 
-describe('mapEventDefinitionRow', () => {
-  it('normalizes a neo4j eventDefinition row into EventContext with payload fields + topology', () => {
-    const row = {
-      name: 'RESUME_PROCESSED',
-      description: 'Resume parsed.',
-      payload: JSON.stringify([{ name: 'candidate_id', type: 'String', required: true }]),
-      publishersJson: JSON.stringify(['ResumeParser']),
-      subscribersJson: JSON.stringify(['RuleCheck']),
-    };
-    const ec = mapEventDefinitionRow(row);
-    expect(ec.name).toBe('RESUME_PROCESSED');
-    expect(ec.payloadFields).toEqual([{ name: 'candidate_id', type: 'String', required: true }]);
-    expect(ec.publishers).toEqual(['ResumeParser']);
-    expect(ec.subscribers).toEqual(['RuleCheck']);
-  });
-  it('tolerates malformed JSON columns (returns empty arrays, never throws)', () => {
-    const ec = mapEventDefinitionRow({ name: 'X', description: '', payload: 'not json', publishersJson: null, subscribersJson: undefined });
-    expect(ec.payloadFields).toEqual([]);
-    expect(ec.publishers).toEqual([]);
-  });
-});
-
-describe('staticEventContexts (fallback)', () => {
+describe('eventContexts', () => {
   it('builds EventContext[] from the static codegen event registry', () => {
-    const ecs = staticEventContexts('raas');
+    const ecs = eventContexts('raas');
     expect(ecs.length).toBeGreaterThan(10);
     const r = ecs.find((e: EventContext) => e.name === 'RESUME_PROCESSED');
     expect(r?.stage).toBe('resume');
-    expect(r?.payloadFields).toEqual([]); // static registry carries no payload schema
+    expect(typeof r?.summary).toBe('string');
+  });
+  it('returns [] for a domain with no registered events (r7)', () => {
+    expect(eventContexts('r7')).toEqual([]);
   });
 });
 ```
@@ -228,15 +242,15 @@ describe('staticEventContexts (fallback)', () => {
 Run: `npx vitest run lib/agent-codegen/prompt-gen/context-sources.test.ts`
 Expected: FAIL — cannot resolve `./context-sources`.
 
-- [ ] **Step 3: Write the pure mappers + types**
+- [ ] **Step 3: Implement (static, synchronous)**
 
 ```ts
 // context-sources.ts
-// PromptGen data layer. Prefers live (prisma.eventDefinition synced from
-// Allmeta Ontology); falls back to the static codegen event registry when no
-// neo4j rows exist (off-VPN / fresh DB) — same degradation as
-// app/api/events/route.ts. Pure mappers are unit-tested; the async loaders are
-// thin and exercised by the route test.
+// PromptGen data layer — STATIC. Reads the curated codegen event registry, the
+// same source existing codegen uses (event-registry.raas.ts: "the auditable
+// source of truth for now"). No DB / Neo4j query: generation is deterministic
+// and reproducible. `payloadFields` is reserved for a future offline snapshot
+// (spec Part 9); it is [] today.
 
 import type { DomainId } from '@/lib/domains';
 import { getEventRegistry } from '../registries';
@@ -247,56 +261,17 @@ export type EventContext = {
   name: string;
   stage: string;
   summary: string;
-  payloadFields: EventPayloadField[];
-  publishers: string[];
-  subscribers: string[];
-  realPayloadSamples: string[]; // filled by loadRealPayloadSamples; [] otherwise
+  direction: 'consume' | 'produce' | 'both';
+  payloadFields: EventPayloadField[]; // [] until the offline snapshot lands (Part 9)
 };
 
-function safeJsonArray<T>(v: unknown): T[] {
-  if (typeof v !== 'string') return [];
-  try {
-    const parsed = JSON.parse(v);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Normalize a prisma.eventDefinition row into EventContext. Tolerant of
- *  malformed/absent JSON columns — never throws. */
-export function mapEventDefinitionRow(row: {
-  name: string;
-  description?: string | null;
-  payload?: string | null;
-  publishersJson?: string | null;
-  subscribersJson?: string | null;
-  stage?: string | null;
-}): EventContext {
-  const rawFields = safeJsonArray<{ name?: string; type?: string; required?: boolean }>(row.payload);
-  return {
-    name: row.name,
-    stage: row.stage ?? 'system',
-    summary: row.description ?? '',
-    payloadFields: rawFields
-      .filter((f) => typeof f?.name === 'string')
-      .map((f) => ({ name: f.name as string, type: f.type ?? 'String', required: Boolean(f.required) })),
-    publishers: safeJsonArray<string>(row.publishersJson),
-    subscribers: safeJsonArray<string>(row.subscribersJson),
-    realPayloadSamples: [],
-  };
-}
-
-/** Static fallback: the curated codegen event registry. No payload schema. */
-export function staticEventContexts(domain: DomainId): EventContext[] {
+export function eventContexts(domain: DomainId): EventContext[] {
   return getEventRegistry(domain).map((e) => ({
     name: e.name,
     stage: e.stage,
     summary: e.summary,
+    direction: e.direction,
     payloadFields: [],
-    publishers: [],
-    subscribers: [],
-    realPayloadSamples: [],
   }));
 }
 ```
@@ -304,68 +279,19 @@ export function staticEventContexts(domain: DomainId): EventContext[] {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run lib/agent-codegen/prompt-gen/context-sources.test.ts`
-Expected: PASS (4 tests).
+Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git commit -m "feat(promptgen): context-source types + pure event mappers + static fallback" -- \
+git commit -m "feat(promptgen): static event-context source over the curated registry" -- \
   lib/agent-codegen/prompt-gen/context-sources.ts \
   lib/agent-codegen/prompt-gen/context-sources.test.ts
 ```
 
-- [ ] **Step 6: Add the async loaders (live → static fallback + real payloads)**
-
-Append to `context-sources.ts`:
-
-```ts
-import { prisma } from '@/server/db';
-
-/** Live-first event contexts. Mirrors app/api/events/route.ts: neo4j rows when
- *  present, else the static registry. Returns which source won (for UI badge). */
-export async function loadEventContexts(
-  domain: DomainId,
-): Promise<{ events: EventContext[]; source: 'neo4j' | 'static' }> {
-  try {
-    const rows = await prisma.eventDefinition.findMany({
-      where: { source: 'neo4j', retiredAt: null },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    });
-    if (rows.length > 0) {
-      return { events: rows.map(mapEventDefinitionRow), source: 'neo4j' };
-    }
-  } catch {
-    // fall through to static
-  }
-  return { events: staticEventContexts(domain), source: 'static' };
-}
-
-/** Up to `limit` real observed payloads for an event (Bundle N minimal slice).
- *  Silent [] when none / DB unavailable — never blocks generation. */
-export async function loadRealPayloadSamples(eventName: string, limit = 2): Promise<string[]> {
-  try {
-    const rows = await prisma.eventInstance.findMany({
-      where: { name: eventName, payloadSummary: { not: null } },
-      orderBy: { ts: 'desc' },
-      take: limit,
-      select: { payloadSummary: true },
-    });
-    return rows.map((r) => r.payloadSummary as string);
-  } catch {
-    return [];
-  }
-}
-```
-
-Run: `npm run build`
-Expected: PASS (typecheck clean — confirms Prisma field names `eventDefinition` / `eventInstance.payloadSummary` are correct).
-
-- [ ] **Step 7: Commit**
-
-```bash
-git commit -m "feat(promptgen): live-first event loader + real payload samples (graceful fallback)" -- \
-  lib/agent-codegen/prompt-gen/context-sources.ts
-```
+> Note: `EventContext` keeps a `payloadFields` slot so the deferred offline-snapshot script
+> (spec Part 9) can populate it later without changing downstream consumers. The selection
+> and assembler layers already handle an empty `payloadFields`.
 
 ---
 
