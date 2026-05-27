@@ -1,4 +1,4 @@
-# Bundle P — PromptGen: AI-authored Agent Prompt as the front-stage of CodeGen
+# AI-Native Agent Authoring — PromptGen + CodeGen + Tool Generator (one closed loop)
 
 > 2026-05-27 · Design doc
 > Companion to [AI-native codegen feasibility](../../2026-05-25-ai-native-codegen-feasibility.md),
@@ -10,32 +10,58 @@
 
 ## TL;DR
 
-The leader's framing: *"先有 prompt，才能生成 code"* — an LLM should **generate a prompt
-first**, and that prompt is **injected into CodeGen** to produce the agent's code.
+The leader's framing, in full: *"先有 prompt，才能生成 code；需要 API 调用，就写出工具来。"*
+An LLM authors a **prompt** first; the prompt is **injected into CodeGen** to produce the
+agent's code; and when the agent needs an external API the registry doesn't have yet, a
+**tool is generated** and registered before code-gen proceeds.
 
-Today there is **no prompt-authoring stage**. The operator hand-writes the
-`businessLogic` prose, and the existing pipeline (LLM-A → LLM-B → render → compile →
-eval) consumes it directly. The textarea labelled "Prompt" in the UI is just that
-hand-written prose — it is neither AI-generated nor the agent's runtime brain.
+That is **three pillars bound by one registry, in one closed loop** — and two of the three
+already exist in this repo:
 
-Bundle P adds a **front-stage** upstream of the existing pipeline:
+| Pillar | What it generates | Status |
+|---|---|---|
+| **PromptGen** | a structured, reviewable `AgentPrompt` from a light intent | **NEW — this spec (Bundle P)** |
+| **CodeGen** | the Inngest agent `.ts` from the approved prompt | exists (`runPipeline`: LLM-A → LLM-B → render → compile → eval) |
+| **Tool Generator** | an `@/lib/*` HTTP-client wrapper + a `TOOL_REGISTRY` entry, from curl/NL | exists (Library CodeGen, `/behavior/codegen/library`) — this is the leader's "写工具" |
+
+`TOOL_REGISTRY` (+ the event registry) is **the seam**: AI generates strictly within the
+registry's surface (so output is grounded, bounded, safe); humans extend that surface via
+the Tool Generator. The whole point of this doc is to **wire the three pillars into a
+single operator flow** — they exist today as three disconnected pages.
 
 ```
-[NEW] light operator input
-   → LLM-PromptGen → structured Agent Prompt (reviewable, versionable)
-   → [human review/edit gate]
-   → injected into existing CodeGen (LLM-A → LLM-B → render → compile → eval)
-   → code + eval → save version
+operator intent
+   │
+   ├─(does it need a tool the registry lacks?)──► Tool Generator ──► new TOOL_REGISTRY entry
+   │                                                (Library CodeGen — leader's "写工具")
+   ▼
+PromptGen ──► AgentPrompt (grounded in registry tools + event registry)   ← NEW
+   │            [human confirm gate: trigger + slug]
+   ▼
+CodeGen ──► agent .ts ──► eval (L1–L8) ──► save version ──► PR ──► deploy
+   │
+   ▼
+agent emits/consumes real events ──► composes into the running workflow chain
 ```
 
-`runPipeline()` does **not** change. Injection = deserialize the approved Agent Prompt
-into `(AgentFormFields, businessLogic)` and call the existing pipeline. Minimal blast
-radius; maximum reuse.
+`runPipeline()` does **not** change. PromptGen→CodeGen injection = deserialize the approved
+`AgentPrompt` into `(AgentFormFields, businessLogic)` and call the existing pipeline.
+Minimal blast radius; maximum reuse.
 
-**Scope decision (settled in brainstorming):** the prompt is a **CodeGen input spec**
-(reading B), authored by an LLM — *not* the agent's runtime brain (reading A). AO agents
-remain deterministic Inngest workflows. What becomes AI-native is the *authoring* path:
-intent → prompt → code, with the prompt as a first-class reviewable artifact.
+**Scope decisions (settled in brainstorming):**
+- The prompt is a **CodeGen input spec** (reading B), authored by an LLM — *not* the agent's
+  runtime brain. AO agents stay deterministic Inngest workflows; the *authoring* path
+  becomes AI-native (intent → prompt → code).
+- **Generation is static** — it reads only curated registries, never a live DB/Neo4j query
+  (Part 4).
+- **AI generates within the registry surface; it never self-extends it.** A missing
+  capability routes to the Tool Generator (human-curated), per the leader's rule.
+
+**Honest boundary (Part 1a):** an AI-generated agent slots into the *existing* event chain
+when (a) it follows the canonical shape, (b) every tool it needs is already in the registry
+(or generated first), and (c) every event it triggers/emits already exists. Building a whole
+*new* multi-agent workflow from scratch is **assisted, not one-click** — new events + new
+tools + cross-agent wiring stay human-curated.
 
 ---
 
@@ -74,6 +100,74 @@ So AI authors the prose-level prompt and *drafts* the form; the human still owns
 
 ---
 
+## Part 1a — The closed loop: three pillars + the tool-gap protocol
+
+Agents do **not** call each other directly — they communicate over the **Inngest event
+bus**: agent A `emit X`, agent B `trigger on X`. So "agents compose into a workflow" reduces
+to *every agent declaring the right `triggerEvent` / `emitEvents`*. Because PromptGen grounds
+those names to the **event registry**, a newly generated agent's `emit X` is consumed by the
+existing downstream agent — it **wires itself into the running chain**. No glue code.
+
+### The three pillars and the registry seam
+
+```
+              ┌──────────────────────────────────────────────────────┐
+              │  TOOL_REGISTRY  +  EVENT_REGISTRY  (static, human-curated) │  ← the seam
+              └──────────────────────────────────────────────────────┘
+                 ▲ extends surface              │ grounds generation
+                 │                              ▼
+   Tool Generator (Library CodeGen)      PromptGen ──► CodeGen ──► agent .ts
+   curl/NL → @/lib/* wrapper             intent → AgentPrompt → runPipeline → eval
+   → new TOOL_REGISTRY entry             (NEW)        (exists)
+   (exists — leader's "写工具")
+```
+
+- **AI generates strictly inside the registry surface** → output is groundable, bounded,
+  and safe (AI can't reach an arbitrary API).
+- **Humans extend the surface through the Tool Generator** → new capability is a deliberate,
+  reviewed act, consistent with the established "tool-registry curation stays human" limit.
+
+### The tool-gap protocol (the leader's rule, made operational)
+
+When the operator's intent (or the PromptGen draft) references a capability that is **not** a
+`TOOL_REGISTRY` id:
+
+1. PromptGen flags the gap: it lists the **missing tools** (intents like "call X API",
+   "translate the JD") it could not ground to a registry id, instead of silently inventing a
+   library path.
+2. The flow offers to **jump to the Tool Generator** (Library CodeGen) pre-seeded with that
+   need. The operator supplies curl/NL; it generates the `@/lib/*` wrapper + a suggested
+   `TOOL_REGISTRY` entry; the operator reviews and commits it.
+3. PromptGen **re-runs** with the now-complete registry; the previously-missing capability is
+   a real tool id; CodeGen can fill the step.
+
+This makes the registry the single source of truth and turns "I need a new API" into a
+first-class, reviewed step rather than a generation failure. v1 implements the **flag + jump**
+(detect missing tools, link to the Tool Generator); deep auto-handoff (auto-invoke Library
+CodeGen mid-PromptGen) is a phase-2 polish.
+
+### Worked example — regenerating `create-jd-agent`
+
+| Dimension | Reality | Verdict |
+|---|---|---|
+| Tools it needs | `partner-pg.getRequirement`, `allmeta.writeJobRequisition`, `robohire.generateJdDirect`, `partner-pg.syncJd`, `allmeta.writeJobPosting`, `inngest.send` | **all already in the registry** → no tool-gap |
+| Events | in `REQUIREMENT_LOGGED`; out `JD_GENERATED` (consumed by the downstream JD-publish chain) | **both in the event registry** → emits wire into the chain automatically |
+| Where the tool-gap protocol would fire | hypothetically adding "translate the JD to English via a new API" | → Tool Generator writes a `translateJd` wrapper + registry entry **first**, then PromptGen can use it |
+
+**Honest limits the example exposes (v1 gets ~80%, human finishes ~20%):**
+- `create-jd-agent` carries `pickRequisitionIdFromEnvelope` — fallback across `entity_id` /
+  `payload.requirement_id` / `raw_input_data.job_requisition_id`. That is the **L7 gap** (real
+  payload shape vs. declared), deferred here; AI follows the declared contract and may miss
+  the historical fallbacks.
+- It also carries a 130-line `buildPromptFromRequirement` domain helper — the **domain-helper
+  gap**; the thin template doesn't render free-standing helpers, so LLM-B inlines or the
+  operator hand-finishes.
+
+So: **insert-into-existing-chain is realistic today; whole-new-workflow-from-scratch is
+assisted** (each agent through the loop, plus human-curated new events/tools/wiring).
+
+---
+
 ## Part 2 — The Agent Prompt artifact
 
 The prompt is a **structured document**, not free prose. It must be (a) human-readable
@@ -90,7 +184,7 @@ interface AgentPrompt {
     additionalEvents?: string[];     // real agents fan in on multiple triggers
                                      // (e.g. create-jd: REQUIREMENT_LOGGED +
                                      // CLARIFICATION_READY + JD_REJECTED). Captured
-                                     // in the prompt; code-layer render deferred (Part 11).
+                                     // in the prompt; code-layer render deferred (Part 9).
     payloadExpectations: string;     // what fields the handler reads off event.data
     confirmed: boolean;              // false until operator accepts at the gate
   };
@@ -291,6 +385,10 @@ No new route. Extend `/behavior/codegen`:
   trigger/slug.
 - **[Accept & Generate Code]** flows the approved prompt into the existing pipeline; it is
   disabled until trigger event + slug are confirmed.
+- **Tool-gap banner (the leader's rule in the UI):** when PromptGen reports `missingTools`
+  (capabilities it could not ground to a `TOOL_REGISTRY` id), show them with a
+  **[Generate this tool →]** link to Library CodeGen (`/behavior/codegen/library`). After the
+  operator creates + registers the tool, **[Re-generate Prompt]** picks it up.
 - Add a "PromptGen" stage to the existing `PipelineTimeline.tsx`.
 
 ---
@@ -304,12 +402,14 @@ lib/agent-codegen/prompt-gen/
                          EVENT_REGISTRY_RAAS + canonical-schemas + tool-registry + agents
   context-select.ts      heuristic selection: relevant events/tools/entities/blueprint
   context-assembler.ts   selected sources → system prompt
-  prompt-gen.ts          LLM call, tool_choice submit_agent_prompt, reuses gateway.ts
+  prompt-gen.ts          LLM call, tool_choice submit_agent_prompt, reuses gateway.ts;
+                         also computes missingTools = prompt.tools \ registry ids (tool-gap)
   to-codegen-input.ts    AgentPrompt → (AgentFormFields, businessLogic)
-app/api/codegen/prompt-gen/route.ts   POST → AgentPrompt draft
+app/api/codegen/prompt-gen/route.ts   POST → { prompt, missingTools, modelUsed, timings }
 components/behavior/codegen/
   PromptPanel.tsx        (upgrade) Stage-0 intent panel
   AgentPromptView.tsx    (new) editable structured prompt + provenance + confirm gate
+                         + tool-gap banner linking to Library CodeGen (Tool Generator)
 ```
 
 **No new runtime read path.** `context-sources.ts` reads only static curated files
@@ -326,6 +426,10 @@ payload), i18n dictionary (new `pg_*` keys, zh + en).
 
 ## Part 9 — Scope / phasing
 
+The three pillars are positioned as: **CodeGen** (exists, unchanged), **Tool Generator** =
+Library CodeGen (exists, unchanged), **PromptGen** (built here). This spec's net-new work is
+**PromptGen + wiring the three into one operator flow**.
+
 **Phase 1 (this spec):** Agent PromptGen — intent panel, PromptGen LLM call, AgentPrompt
 artifact + schema, **static data layer** (context-sources over the curated registries +
 heuristic context-select + context-assembler), review/confirm gate, injection into the
@@ -333,8 +437,14 @@ existing pipeline, prompt versioning, UI. Generation is static and reproducible 
 live DB/Neo4j query on the generation path.** The prompt captures payload shape via
 `payloadExpectations` (authored by the LLM from the static event registry + blueprint).
 Multi-trigger (`trigger.additionalEvents`) is captured in the prompt for review.
+**Tool-gap protocol — flag + jump (Part 1a):** PromptGen returns `missingTools`; the UI shows
+them with a link to the Tool Generator (Library CodeGen); after the operator registers the
+tool, re-running PromptGen picks it up. (This is the loop-closing integration with the
+existing Tool Generator — light to build, since both pages already exist.)
 
 **Phase 2 (noted, not specced — YAGNI for v1):**
+- **Deep tool-gap auto-handoff** — auto-invoke Library CodeGen mid-PromptGen and resume,
+  instead of the manual flag + jump.
 - **Offline payload-schema snapshot** — a script that reads `prisma.eventDefinition` /
   `EventInstance` *at author time* and bakes event payload fields (and optionally real
   samples) into a committed static registry file (like `canonical-schemas.ts` was
@@ -364,5 +474,7 @@ Multi-trigger (`trigger.additionalEvents`) is captured in the prompt for review.
 | Static registry drifts from live events | Same trade-off existing codegen already accepts (registry is "the auditable source of truth for now"); refreshed by the offline snapshot script when needed (Part 9) — not a generation-time concern |
 | Context too big / token blow-up | Heuristic selection layer trims to relevant subset (Part 4, Crux) |
 
-**Non-goals:** changing the agent runtime model; auto-extending the tool registry;
-auto-confirming trigger/slug; Library PromptGen (phase 2).
+**Non-goals:** changing the agent runtime model; **AI self-extending the tool registry**
+(new tools always go through the human-driven Tool Generator + review); auto-confirming
+trigger/slug; deep tool-gap auto-handoff (phase 2); one-click whole-new-workflow generation
+(assisted only — Part 1a); changing CodeGen (`runPipeline`) or the Tool Generator internals.

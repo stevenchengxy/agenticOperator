@@ -40,10 +40,19 @@ old live/real-payload shape:
 - **`GenerateAgentPromptResult` (Task 6) + route response (Task 7)**: drop `sourceBadge`.
 - **UI (Tasks 9, 11)**: drop the source badge and the `pg_source_neo4j` / `pg_source_static`
   i18n keys — there is only one (static) source.
-- **Multi-trigger (prompt-only, spec Part 11 / Part 9):** add an optional
+- **Multi-trigger (prompt-only, spec Part 9):** add an optional
   `additionalTriggerEvents?: string[]` to the `AgentPrompt` (Task 1 schema) — captured in the
   prompt for review. `render-agent.ts` stays single-trigger in v1; when the prompt declares
   extra triggers, surface them as a hand-finish note (code-layer render is deferred).
+- **Tool-gap protocol — flag + jump (spec Part 1a, the three-pillar loop):**
+  - Task 6 (`prompt-gen`): after validating the draft, compute
+    `missingTools = prompt.tools.filter(t => !registryIds.has(t))` (where `registryIds` =
+    `new Set(getToolRegistry(domain).map(t => t.id))`) and return it in the result.
+  - Task 7 (route): include `missingTools` in the JSON response.
+  - Task 12 (`AgentPromptView`): when `missingTools.length > 0`, render a banner listing them
+    with a link to `/behavior/codegen/library` (the Tool Generator) and a **[Re-generate
+    Prompt]** action. Add a unit test in Task 6 asserting `missingTools` contains a tool id
+    the prompt referenced that is absent from the registry.
 
 ---
 
