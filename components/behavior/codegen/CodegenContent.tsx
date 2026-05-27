@@ -22,7 +22,8 @@
 import React from "react";
 import { useApp } from "@/lib/i18n";
 import { useDomain, getDomain } from "@/lib/domains";
-import { byInngestSlug } from "@/lib/agent-mapping";
+import { byInngestSlug, AGENT_MAP } from "@/lib/agent-mapping";
+import { getEventRegistry } from "@/lib/agent-codegen/registries";
 import { CodeEditor } from "./CodeEditor";
 import { CompilerPanel } from "./CompilerPanel";
 import {
@@ -41,6 +42,12 @@ import { SaveAsVersionButton } from "./SaveAsVersionButton";
 import { EvaluationPanel } from "./EvaluationPanel";
 import { CodeFixerDialog, type FixSuggestion } from "./CodeFixerDialog";
 import { AutoIterateDialog, type OnAdoptArgs } from "./AutoIterateDialog";
+import { IntentPanel } from "./IntentPanel";
+import { AgentPromptView } from "./AgentPromptView";
+import type { AgentPrompt } from "@/lib/agent-codegen/prompt-gen/prompt-types";
+import type { AgentFormFields } from "@/lib/agent-codegen/spec-types";
+import { toCodegenInput } from "@/lib/agent-codegen/prompt-gen/to-codegen-input";
+import { serializePromptText } from "@/lib/agent-codegen/prompt-gen/prompt-version";
 import type { AutoIterateRunResult } from "@/lib/agent-codegen/eval/auto-iterate";
 import type { CompileResult } from "@/lib/agent-codegen/compiler/types";
 import type { AgentSpec } from "@/lib/agent-codegen/spec-types";
@@ -108,6 +115,30 @@ export function CodegenContent() {
   const [fixerSuggestion, setFixerSuggestion] = React.useState<FixSuggestion | null>(null);
   const [fixerRunning, setFixerRunning] = React.useState(false);
   const [fixerError, setFixerError] = React.useState<string | null>(null);
+  // Stage-0 PromptGen state ─────────────────────────────────────────────────
+  const [intent, setIntent] = React.useState("");
+  const [locked, setLocked] = React.useState<Partial<AgentFormFields>>({});
+  const [blueprintSlug, setBlueprintSlug] = React.useState<string | undefined>(undefined);
+  const [agentPrompt, setAgentPrompt] = React.useState<AgentPrompt | null>(null);
+  const [missingTools, setMissingTools] = React.useState<string[]>([]);
+  const [pgLoading, setPgLoading] = React.useState(false);
+  const [pgError, setPgError] = React.useState<string | null>(null);
+
+  // Blueprint slugs from AGENT_MAP (domain-filtered) + event names for IntentPanel
+  const eventNames = React.useMemo(
+    () => getEventRegistry(domain).map((e) => e.name),
+    [domain],
+  );
+  const blueprintSlugs = React.useMemo(
+    () =>
+      AGENT_MAP.filter((a) => a.domain === domain).map(
+        (a) =>
+          a.inngestId ??
+          a.short.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase() + "-agent",
+      ),
+    [domain],
+  );
+
   // Bundle M — AI auto-iteration loop. Triggered from EvaluationPanel.
   const [autoIterOpen, setAutoIterOpen] = React.useState(false);
   const [autoIterRunning, setAutoIterRunning] = React.useState(false);
@@ -141,6 +172,9 @@ export function CodegenContent() {
   const pipelineStates: Partial<Record<PipelineStage, StageState>> =
     React.useMemo(() => {
       const s: Partial<Record<PipelineStage, StageState>> = {};
+      // Stage 0 — promptgen
+      if (pgLoading) s.promptgen = "active";
+      else if (agentPrompt) s.promptgen = "ok";
       // Stage 1 — form filled (slug + trigger required as proxy for "configured")
       if (form.slug && form.triggerEvent) s.prompt = "ok";
       // Stage 2-4 — generated artifacts present
@@ -157,9 +191,58 @@ export function CodegenContent() {
       // Active LLM round-trip overrides
       if (pipelineStage) s[pipelineStage] = "active";
       return s;
-    }, [form.slug, form.triggerEvent, spec, pipelineStage, compiling, compileResult]);
+    }, [form.slug, form.triggerEvent, spec, pipelineStage, compiling, compileResult, pgLoading, agentPrompt]);
 
   // Actions -----------------------------------------------------------------
+
+  // Stage-0: generate a structured AgentPrompt from intent + locked fields
+  const handleGeneratePrompt = React.useCallback(async () => {
+    setPgError(null);
+    setPgLoading(true);
+    try {
+      const r = await fetch("/api/codegen/prompt-gen", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ intent, domain, locked, blueprintSlug }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(j.message ?? j.error ?? `HTTP ${r.status}`);
+      }
+      const result = await r.json() as {
+        prompt: AgentPrompt;
+        missingTools: string[];
+        modelUsed: string;
+      };
+      setAgentPrompt(result.prompt);
+      setMissingTools(result.missingTools ?? []);
+      // Seed form from inferred fields (without confirming trigger/slug)
+      setForm((prev) => ({
+        ...prev,
+        triggerEvent: result.prompt.trigger.event || prev.triggerEvent,
+        emitEvents: result.prompt.emits.length > 0 ? result.prompt.emits : prev.emitEvents,
+      }));
+    } catch (e) {
+      setPgError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPgLoading(false);
+    }
+  }, [intent, domain, locked, blueprintSlug]);
+
+  const runPipelineRef = React.useRef<(() => void) | null>(null);
+
+  // Stage-0 → Stage-1: accept the reviewed AgentPrompt and feed existing pipeline
+  const handleAcceptPrompt = React.useCallback(async () => {
+    if (!agentPrompt) return;
+    if (!agentPrompt.trigger.confirmed) return;
+    if (!form.slug?.trim()) return;
+    const { businessLogic: bl } = toCodegenInput(agentPrompt, toApiPayload(form));
+    setBusinessLogic(bl);
+    // Kick off the existing pipeline on the next microtask (after state flush)
+    // via the ref to avoid a forward-reference on runPipeline.
+    setTimeout(() => { runPipelineRef.current?.(); }, 0);
+  }, [agentPrompt, form]);
+
   const runPipeline = React.useCallback(async () => {
     setPipelineError(null);
     setPipelineTimings(null);
@@ -231,6 +314,12 @@ export function CodegenContent() {
       setPipelineStage(null);
     }
   }, [form, businessLogic, domain]);
+
+  // Keep the ref up-to-date so handleAcceptPrompt can call runPipeline
+  // without a forward reference.
+  React.useEffect(() => {
+    runPipelineRef.current = runPipeline;
+  }, [runPipeline]);
 
   const runEvaluation = React.useCallback(async () => {
     if (!spec) return;
@@ -438,6 +527,45 @@ export function CodegenContent() {
           className="border-r border-line bg-surface p-4 flex flex-col gap-4 overflow-auto"
           style={{ width: 320, minWidth: 320 }}
         >
+          {/* Stage-0: IntentPanel */}
+          <IntentPanel
+            intent={intent}
+            onIntentChange={setIntent}
+            locked={locked}
+            onLockedChange={setLocked}
+            eventNames={eventNames}
+            blueprintSlugs={blueprintSlugs}
+            onGenerate={handleGeneratePrompt}
+            loading={pgLoading}
+          />
+
+          {pgError && (
+            <ErrorCard label="PromptGen failed" message={pgError} />
+          )}
+
+          {/* Stage-0 output: AgentPromptView (shown once a prompt is generated) */}
+          {agentPrompt && (
+            <div
+              className="border-t border-line pt-3"
+            >
+              <AgentPromptView
+                prompt={agentPrompt}
+                onChange={setAgentPrompt}
+                missingTools={missingTools}
+                onRegenerate={handleGeneratePrompt}
+                form={toApiPayload(form)}
+                onFormChange={(f) =>
+                  setForm((prev) => ({ ...prev, ...f }))
+                }
+                onAccept={handleAcceptPrompt}
+                busy={pipelineStage !== null}
+              />
+            </div>
+          )}
+
+          {/* Divider */}
+          <div className="border-t border-line" />
+
           <AgentConfigForm
             state={form}
             setState={setForm}
@@ -568,7 +696,7 @@ export function CodegenContent() {
           saveButton={
             <SaveAsVersionButton
               slug={spec?.slug ?? form.slug ?? null}
-              prompt={businessLogic}
+              prompt={agentPrompt ? serializePromptText(agentPrompt) : businessLogic}
               spec={specJsonText}
               code={code}
               modelUsed={pipelineTimings?.modelUsed ?? null}
