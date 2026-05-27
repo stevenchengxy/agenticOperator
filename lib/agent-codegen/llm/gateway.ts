@@ -43,3 +43,10 @@ export function pickCodegenGateway(): GatewayConfig {
 export function makeClient(g: GatewayConfig): OpenAI {
   return new OpenAI({ baseURL: g.baseURL, apiKey: g.apiKey });
 }
+
+// PromptGen prefers a stronger model than codegen (synthesis benefits from
+// reasoning); falls back to the codegen model, then AI_MODEL.
+export function pickPromptGenGateway(): GatewayConfig {
+  const base = pickCodegenGateway();
+  return { ...base, model: process.env.AI_PROMPTGEN_MODEL || base.model };
+}
