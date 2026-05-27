@@ -15,6 +15,7 @@
 // will automate both (research doc §B.6).
 
 import React from "react";
+import { useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { CodeEditor } from "../CodeEditor";
 import { CompilerPanel } from "../CompilerPanel";
@@ -41,7 +42,20 @@ const STARTER_CODE = `// Fill the form on the left + paste a few endpoint exampl
 `;
 
 export function LibraryCodegenContent() {
+  return (
+    <React.Suspense fallback={null}>
+      <LibraryCodegenInner />
+    </React.Suspense>
+  );
+}
+
+function LibraryCodegenInner() {
   const { t } = useApp();
+  const searchParams = useSearchParams();
+  const fromPromptGen = searchParams?.get("from") === "promptgen";
+  const needParam = searchParams?.get("need") ?? null;
+  const needDecoded = needParam ? decodeURIComponent(needParam) : null;
+
   const [form, setForm] = React.useState<LibraryFormFields>(EMPTY_FORM);
   const [examples, setExamples] = React.useState<CurlExample[]>([]);
   const [code, setCode] = React.useState(STARTER_CODE);
@@ -55,6 +69,30 @@ export function LibraryCodegenContent() {
   const [busy, setBusy] = React.useState(false);
   const [pipelineError, setPipelineError] = React.useState<string | null>(null);
   const [timings, setTimings] = React.useState<{ totalMs: number; modelUsed: string } | null>(null);
+
+  // Pre-seed form when arriving from PromptGen tool-gap link
+  React.useEffect(() => {
+    if (!fromPromptGen || !needDecoded) return;
+    // Only pre-seed if form is still in its initial empty state
+    setForm((current) => {
+      const isEmpty = current.name === "" && current.description === "";
+      if (!isEmpty) return current;
+      const firstToken = needDecoded.split(",")[0].trim();
+      // Slugify the first token: lowercase, replace non-alnum with -, trim hyphens
+      const slug = firstToken
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      // Convert slug to camelCase for the name field
+      const camelName = slug.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+      return {
+        ...current,
+        name: camelName || slug,
+        description: `供 PromptGen 使用的工具：${needDecoded}`,
+      };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needParam]);
 
   const canGenerate =
     form.name.length >= 2 &&
@@ -173,6 +211,16 @@ export function LibraryCodegenContent() {
           className="border-r border-line bg-surface p-4 flex flex-col gap-4 overflow-auto"
           style={{ width: 360, minWidth: 360 }}
         >
+          {/* PromptGen loop banner */}
+          {fromPromptGen && needDecoded && (
+            <div className="px-3 py-2.5 rounded-md border border-line bg-accent-bg text-[11.5px]">
+              <div className="font-semibold text-ink-2 mb-1">{t("lib_loop_banner")}</div>
+              <div className="text-[11px] text-ink-3">
+                <span className="font-medium text-ink-3">{t("lib_loop_need")}:</span>{" "}
+                <span className="mono">{needDecoded}</span>
+              </div>
+            </div>
+          )}
           <Section title={t("lib_section_identity")}>
             <Field label={t("lib_form_name")}>
               <input
@@ -274,6 +322,17 @@ export function LibraryCodegenContent() {
           >
             {busy ? t("codegen_generating") : t("lib_generate")}
           </button>
+
+          {/* Back link to PromptGen after successful generation */}
+          {fromPromptGen && (registrySuggestion.length > 0 || compileResult !== null) && (
+            <a
+              href="/behavior/codegen"
+              className="text-[12px] text-center py-2 px-3 rounded-md border border-line bg-panel text-ink-2 no-underline hover:bg-surface"
+              style={{ display: "block" }}
+            >
+              {t("lib_loop_back")}
+            </a>
+          )}
         </aside>
 
         {/* Middle — editor tabs */}
