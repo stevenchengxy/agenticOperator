@@ -146,18 +146,64 @@ just shift fields from `inferred` → `locked`.
 
 ## Part 4 — Mechanism: how the LLM generates the prompt
 
-### Context assembly (where the value is)
+### What the prompt needs, and where each piece comes from
 
-`context-assembler.ts` builds the PromptGen system prompt from AO's existing domain
-sources — the same sources LLM-A/B already read, so no new data plumbing:
+PromptGen needs a **superset of what LLM-A/B already read**. Each section of the
+`AgentPrompt` (Part 2) maps to a concrete, already-existing data source:
 
-- the 28-event Inngest catalog (`lib/events-catalog.ts`) — so `trigger` and `emits`
-  suggestions reference real events
-- `TOOL_REGISTRY` (`tool-registry.raas.ts`) — so `tools` and `inputs` reference real,
-  reachable wrappers (incl. `canonicalEntity` from Bundle J)
-- the `stage` enum and dual-write contract (Postgres + Neo4j) as hard constraints
-- the selected blueprint agent's source as a few-shot example
-- locked fields, injected as "these are fixed, do not change them"
+| Prompt section | Needs to know | Source |
+|---|---|---|
+| `trigger.event` + payloadExpectations | which events exist + their **real payload fields** | `prisma.eventDefinition` via `/api/events` (synced from Allmeta Ontology by the Neo4j sync worker); each row carries `fields[]` + JSON `schema`. Cold-start fallback only: `lib/events-catalog.ts` (32 rows, `@deprecated`) |
+| `inputs` (data it reads) | which entities/tables/nodes + their fields | `lib/agent-codegen/ontology/canonical-schemas.ts` (8 Allmeta entities w/ PK/FK/required); `prisma/schema.prisma`; live ontology API (:7688) |
+| `steps` | domain task decomposition + **AO code idioms** | the 5 production agents' source (`server/inngest/agents/`); `tool-registry` `exampleCalls` (real call-site snippets lifted from those agents) |
+| `tools` | what is callable | `tool-registry.raas.ts` (`signature`/`importFrom`/`sideEffects`/`category`/`canonicalEntity`) |
+| `emits` | which events to emit + who consumes them | `EventDef.subscribers`/`emits`/`publishers` (the event-chain topology is built into the catalog) |
+| `constraints` | dual-write, idempotency, NonRetriableError conventions | static reviewer's 8+1 rules; Bundle J canonical-field guidance; agent source |
+| `acceptance` | what "correct" looks like; **real fired payloads** | `EventInstance.payloadSummary` (real events that actually fired, + `causedByEventId` causality chain) |
+| where-it-fits (topology) | upstream/downstream agents | `EventDef.publishers`/`subscribers` + `EventInstance.causedBy*` |
+| blueprint | a similar existing agent | the 5 agents' source + their `AgentVersion` rows |
+
+The 5 production agents are **read-only ground truth / few-shot** here; PromptGen never
+modifies them (explicit user constraint: "我们不动现有 agents").
+
+### Three source tiers
+
+- **Tier 1 — static, already in-repo (zero new plumbing):** tool-registry,
+  canonical-schemas, stage enum, the 5 agents' source, reviewer rules. Structured
+  arrays/objects, imported directly; LLM-A/B already read them.
+- **Tier 2 — live (needs a read path):** `prisma.eventDefinition` (authoritative event
+  contract, via `/api/events`), `EventInstance.payloadSummary` (real observed payloads),
+  live ontology API (:7688).
+- **Tier 3 — derived:** cross-agent event topology, computed from publishers/subscribers +
+  `causedBy` — gives PromptGen "where my agent sits in the chain."
+
+### `context-assembler.ts`
+
+Pulls the above into a structured `PromptGenContext`. Two technical cruxes:
+
+**Crux 1 — live data degrades gracefully.** The authoritative event data is live
+(Allmeta Ontology → sync worker → `prisma.eventDefinition`), but sync fails off-VPN, and
+`EventInstance` rows may be absent on a fresh DB. The assembler **prefers live, falls back
+to static silently** — the same degradation pattern AO already uses (the `@deprecated`
+fallback comment in `events-catalog.ts`). No hard dependency on :7688 / RAAS being online.
+Specifically: no real `EventInstance` payload for the trigger → fall back to the declared
+contract (`eventDefinition.schema`); no `eventDefinition` at all → fall back to the
+hardcoded catalog.
+
+**Crux 2 — context is too big → selection layer.** 32 events × full schema + the whole
+registry + 8 entities × ~30 fields + 5 agents × ~150 LoC will blow the token budget and
+dilute signal. The assembler **selects a relevant subset** keyed off intent + locked
+fields:
+- events: keyword/stage match on intent, or (if locked) the locked event + its
+  topological neighbors (up/downstream);
+- tools: filter registry by stage + the entities the selected events touch;
+- entities: include canonical schema only for entities the selected tools write;
+- blueprint: pick the existing agent whose trigger/stage/emits best match (or
+  operator-selected).
+
+v1 uses **heuristic selection** (enum match + topology neighbors + registry filter by
+`category`/`canonicalEntity`) — explainable and sufficient. Embedding/RAG retrieval is a
+phase-2 upgrade, only if heuristics prove imprecise (YAGNI).
 
 ### The call
 
@@ -244,8 +290,11 @@ No new route. Extend `/behavior/codegen`:
 
 ```
 lib/agent-codegen/prompt-gen/
-  prompt-types.ts        AgentPrompt Zod schema + PromptStep
-  context-assembler.ts   catalog + registry + blueprint + stage enum → system prompt
+  prompt-types.ts        AgentPrompt Zod schema + PromptStep + PromptGenContext
+  context-sources.ts     read layer: eventDefinition (live) + EventInstance payloads
+                         + canonical-schemas + tool-registry + agents; live→static fallback
+  context-select.ts      heuristic selection: relevant events/tools/entities/blueprint
+  context-assembler.ts   selected sources → system prompt
   prompt-gen.ts          LLM call, tool_choice submit_agent_prompt, reuses gateway.ts
   to-codegen-input.ts    AgentPrompt → (AgentFormFields, businessLogic)
 app/api/codegen/prompt-gen/route.ts   POST → AgentPrompt draft
@@ -253,6 +302,10 @@ components/behavior/codegen/
   PromptPanel.tsx        (upgrade) Stage-0 intent panel
   AgentPromptView.tsx    (new) editable structured prompt + provenance + confirm gate
 ```
+
+The only **new read path** is `EventInstance.payloadSummary` (a Prisma query in
+`context-sources.ts`). Everything else reuses existing read paths (`/api/events` /
+`prisma.eventDefinition`, `canonical-schemas.ts`, `tool-registry.raas.ts`, agent source).
 
 Touched existing files: `PipelineTimeline.tsx` (+1 stage), `CodegenContent.tsx`
 (orchestrate Stage-0 → gate → existing flow), `AgentVersion` type/storage (promptText
@@ -263,8 +316,13 @@ payload), i18n dictionary (new `pg_*` keys, zh + en).
 ## Part 9 — Scope / phasing
 
 **Phase 1 (this spec):** Agent PromptGen — intent panel, PromptGen LLM call, AgentPrompt
-artifact + schema, context assembler, review/confirm gate, injection into the existing
-pipeline, prompt versioning, UI.
+artifact + schema, **data layer** (context-sources + heuristic context-select +
+context-assembler, with live→static fallback), review/confirm gate, injection into the
+existing pipeline, prompt versioning, UI. **Real event payloads included, lightweight:**
+pull 1–2 recent `EventInstance.payloadSummary` rows for the trigger event to ground
+`payloadExpectations` + `acceptance`; silently fall back to the declared
+`eventDefinition.schema` when none exist. (Overlaps Bundle N's L7 goal — this is the
+minimal slice of it.)
 
 **Phase 2 (noted, not specced — YAGNI for v1):**
 - **Library PromptGen mirror** — "describe the API in one line" → PromptGen drafts the
@@ -284,6 +342,9 @@ pipeline, prompt versioning, UI.
 | Scope creep into reading A (LLM-runtime agents) | Explicitly out of scope; agents stay deterministic Inngest workflows |
 | Cost of an extra LLM call | One call per generation; cheaper than a wasted hand-written prose round; bounded |
 | Overlap with LLM-A | PromptGen stops at human-readable prose; never emits `steps[]` (Part 2) |
+| Live data unavailable (off-VPN, sync failed, fresh DB) | Assembler prefers live, falls back to static silently (Part 4, Crux 1); no hard dependency on :7688 / RAAS |
+| Context too big / token blow-up | Heuristic selection layer trims to relevant subset (Part 4, Crux 2) |
+| Stale real payloads mislead the prompt | Only used to ground `payloadExpectations`/`acceptance`; declared `eventDefinition.schema` remains the contract of record |
 
 **Non-goals:** changing the agent runtime model; auto-extending the tool registry;
 auto-confirming trigger/slug; Library PromptGen (phase 2).
