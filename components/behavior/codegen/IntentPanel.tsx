@@ -63,7 +63,7 @@ export function IntentPanel({
       <div
         className="text-[10px] uppercase tracking-[0.08em] text-ink-4 font-medium"
       >
-        Stage 0 — PromptGen
+        {t("pg_stage0_title")}
       </div>
 
       {/* Intent textarea */}
@@ -118,7 +118,7 @@ export function IntentPanel({
 
         {/* Stage lock */}
         <LockRow
-          label="Stage"
+          label={t("pg_lock_stage")}
           checked={lockStage}
           onToggle={(v) => toggleLock("stage", v)}
         >
@@ -146,7 +146,7 @@ export function IntentPanel({
 
         {/* Emit events lock */}
         <LockRow
-          label="Emit events"
+          label={t("pg_lock_emits")}
           checked={lockEmits}
           onToggle={(v) => toggleLock("emitEvents", v)}
         >

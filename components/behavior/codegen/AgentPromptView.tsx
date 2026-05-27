@@ -100,7 +100,7 @@ export function AgentPromptView({
           </div>
           <div className="flex items-center gap-3">
             <a
-              href="/behavior/codegen/library"
+              href={`/behavior/codegen/library?need=${encodeURIComponent(missingTools.join(","))}&from=promptgen`}
               className="text-[11.5px] underline"
               style={{ color: "oklch(0.5 0.14 75)" }}
             >
@@ -118,8 +118,8 @@ export function AgentPromptView({
       )}
 
       {/* Prompt sections */}
-      <Section title="Intent / Role">
-        <FieldRow label="Intent" origin={prompt.fieldOrigin["intent"]}>
+      <Section title={t("pg_sec_intent_role")}>
+        <FieldRow label={t("pg_field_intent")} origin={prompt.fieldOrigin["intent"]}>
           <textarea
             value={prompt.intent}
             onChange={(e) => setPromptField("intent", e.target.value)}
@@ -128,7 +128,7 @@ export function AgentPromptView({
             style={{ color: "var(--c-ink-1)" }}
           />
         </FieldRow>
-        <FieldRow label="Role" origin={prompt.fieldOrigin["role"]}>
+        <FieldRow label={t("pg_field_role")} origin={prompt.fieldOrigin["role"]}>
           <textarea
             value={prompt.role}
             onChange={(e) => setPromptField("role", e.target.value)}
@@ -140,7 +140,7 @@ export function AgentPromptView({
       </Section>
 
       {/* Trigger */}
-      <Section title="Trigger">
+      <Section title={t("pg_sec_trigger")}>
         <FieldRow label="Event" origin={prompt.fieldOrigin["triggerEvent"]}>
           <div className="flex items-center gap-2">
             <span
@@ -194,7 +194,7 @@ export function AgentPromptView({
       </Section>
 
       {/* Slug (lives in form, not prompt) */}
-      <Section title="Slug">
+      <Section title={t("pg_sec_slug")}>
         <FieldRow label="slug" origin={prompt.fieldOrigin["slug"]}>
           <div className="flex items-center gap-2">
             <input
@@ -225,7 +225,7 @@ export function AgentPromptView({
       </Section>
 
       {/* Steps */}
-      <CollapsibleSection title={`Steps (${prompt.steps.length})`}>
+      <CollapsibleSection title={`${t("pg_sec_steps")} (${prompt.steps.length})`}>
         {prompt.steps.map((step, i) => (
           <div
             key={step.id}
@@ -263,7 +263,7 @@ export function AgentPromptView({
       </CollapsibleSection>
 
       {/* Tools */}
-      <CollapsibleSection title={`Tools (${prompt.tools.length})`}>
+      <CollapsibleSection title={`${t("pg_sec_tools")} (${prompt.tools.length})`}>
         <StringListEditor
           items={prompt.tools}
           onChange={(v) => setPromptField("tools", v)}
@@ -271,7 +271,7 @@ export function AgentPromptView({
       </CollapsibleSection>
 
       {/* Emits */}
-      <CollapsibleSection title={`Emits (${prompt.emits.length})`}>
+      <CollapsibleSection title={`${t("pg_sec_emits")} (${prompt.emits.length})`}>
         <StringListEditor
           items={prompt.emits}
           onChange={(v) => setPromptField("emits", v)}
@@ -287,7 +287,7 @@ export function AgentPromptView({
       </CollapsibleSection>
 
       {/* Constraints */}
-      <CollapsibleSection title={`Constraints (${prompt.constraints.length})`}>
+      <CollapsibleSection title={`${t("pg_sec_constraints")} (${prompt.constraints.length})`}>
         <StringListEditor
           items={prompt.constraints}
           onChange={(v) => setPromptField("constraints", v)}
@@ -295,7 +295,7 @@ export function AgentPromptView({
       </CollapsibleSection>
 
       {/* Acceptance */}
-      <CollapsibleSection title={`Acceptance (${prompt.acceptance.length})`}>
+      <CollapsibleSection title={`${t("pg_sec_acceptance")} (${prompt.acceptance.length})`}>
         <StringListEditor
           items={prompt.acceptance}
           onChange={(v) => setPromptField("acceptance", v)}
@@ -322,17 +322,17 @@ export function AgentPromptView({
       <div className="flex flex-col gap-1.5 pt-1">
         {!prompt.trigger.confirmed && (
           <p className="text-[10.5px] text-ink-4 m-0">
-            Confirm the trigger event above to enable code generation.
+            {t("pg_gate_confirm_trigger")}
           </p>
         )}
         {(!form.slug?.trim() || !slugOk) && (
           <p className="text-[10.5px] text-ink-4 m-0">
-            Slug must be kebab-case ending in <span className="mono">-agent</span> (e.g. <span className="mono">my-thing-agent</span>).
+            {t("pg_gate_slug_format")}
           </p>
         )}
         {form.slug?.trim() && slugOk && !slugConfirmed && (
           <p className="text-[10.5px] text-ink-4 m-0">
-            Click "Confirm slug" above to lock the slug before generating code.
+            {t("pg_gate_confirm_slug")}
           </p>
         )}
         {!displayNameOk && (
@@ -355,7 +355,7 @@ export function AgentPromptView({
             opacity: canAccept ? 1 : 0.4,
           }}
         >
-          {busy ? "Generating…" : t("pg_accept_generate")}
+          {busy ? t("pg_generating") : t("pg_accept_generate")}
         </button>
       </div>
     </div>
