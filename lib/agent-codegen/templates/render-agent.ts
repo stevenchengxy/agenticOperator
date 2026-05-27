@@ -131,9 +131,12 @@ function collectImports(
     map.set(from, set);
   };
 
-  // Always-needed runtime imports.
+  // Always-needed runtime imports. NonRetriableError is part of the AO error
+  // idiom (every production agent imports it for null-guards / 4xx short-circuit),
+  // so emit it unconditionally rather than relying on the LLM to declare it.
   add('@/server/inngest/client', ['inngest']);
   add('@/lib/agent-logger', ['createAgentLogger', 'runWithLogger']);
+  add('inngest', ['NonRetriableError']);
 
   // Per-step lib hints from the spec.
   for (const step of spec.steps) {
