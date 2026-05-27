@@ -81,8 +81,8 @@ export const ${camelName} = inngest.createFunction(
     id: AGENT_ID,
     name: '${spec.displayName}',
     retries: ${spec.retries},
+    triggers: [{ event: '${spec.triggerEvent}' }],
   },
-  { event: '${spec.triggerEvent}' },
   async ({ event, step, logger, runId }) => {
     const log = createAgentLogger({
       agent: AGENT_NAME,
@@ -133,7 +133,7 @@ function collectImports(
 
   // Always-needed runtime imports.
   add('@/server/inngest/client', ['inngest']);
-  add('@/server/agent-logger', ['createAgentLogger', 'runWithLogger']);
+  add('@/lib/agent-logger', ['createAgentLogger', 'runWithLogger']);
 
   // Per-step lib hints from the spec.
   for (const step of spec.steps) {
