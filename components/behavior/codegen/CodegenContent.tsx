@@ -216,12 +216,44 @@ export function CodegenContent() {
       };
       setAgentPrompt(result.prompt);
       setMissingTools(result.missingTools ?? []);
-      // Seed form from inferred fields (without confirming trigger/slug)
-      setForm((prev) => ({
-        ...prev,
-        triggerEvent: result.prompt.trigger.event || prev.triggerEvent,
-        emitEvents: result.prompt.emits.length > 0 ? result.prompt.emits : prev.emitEvents,
-      }));
+      // Seed form from inferred fields (without confirming trigger/slug).
+      // Also seed displayName and ownerTeam defaults so the Accept gate
+      // (AgentFormFieldsSchema) doesn't 400 on the happy path (C1 fix).
+      setForm((prev) => {
+        const suggestedSlug: string = result.prompt.trigger.event
+          ? result.prompt.trigger.event
+              .replace(/\//g, "-")
+              .replace(/[^a-z0-9-]/g, "-")
+              .replace(/-+/g, "-")
+              .replace(/^-|-$/g, "") + "-agent"
+          : prev.slug && /^[a-z][a-z0-9-]*-agent$/.test(prev.slug)
+          ? prev.slug
+          : prev.slug && prev.slug.trim()
+          ? (/^[a-z][a-z0-9-]*$/.test(prev.slug.trim())
+              ? prev.slug.trim() + "-agent"
+              : prev.slug.trim())
+          : prev.slug;
+        const nextSlug = prev.slug ? prev.slug : suggestedSlug;
+        const normalizedSlug =
+          nextSlug && !nextSlug.endsWith("-agent") && /^[a-z][a-z0-9-]*$/.test(nextSlug)
+            ? nextSlug + "-agent"
+            : nextSlug;
+        const defaultDisplayName = normalizedSlug
+          ? normalizedSlug
+              .replace(/-agent$/, "")
+              .split("-")
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(" ") + " Agent"
+          : "";
+        return {
+          ...prev,
+          triggerEvent: result.prompt.trigger.event || prev.triggerEvent,
+          emitEvents: result.prompt.emits.length > 0 ? result.prompt.emits : prev.emitEvents,
+          slug: normalizedSlug || prev.slug,
+          displayName: prev.displayName.trim() ? prev.displayName : defaultDisplayName,
+          ownerTeam: prev.ownerTeam.trim() ? prev.ownerTeam : "recruiting",
+        };
+      });
     } catch (e) {
       setPgError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -229,21 +261,8 @@ export function CodegenContent() {
     }
   }, [intent, domain, locked, blueprintSlug]);
 
-  const runPipelineRef = React.useRef<(() => void) | null>(null);
-
-  // Stage-0 → Stage-1: accept the reviewed AgentPrompt and feed existing pipeline
-  const handleAcceptPrompt = React.useCallback(async () => {
-    if (!agentPrompt) return;
-    if (!agentPrompt.trigger.confirmed) return;
-    if (!form.slug?.trim()) return;
-    const { businessLogic: bl } = toCodegenInput(agentPrompt, toApiPayload(form));
-    setBusinessLogic(bl);
-    // Kick off the existing pipeline on the next microtask (after state flush)
-    // via the ref to avoid a forward-reference on runPipeline.
-    setTimeout(() => { runPipelineRef.current?.(); }, 0);
-  }, [agentPrompt, form]);
-
-  const runPipeline = React.useCallback(async () => {
+  const runPipeline = React.useCallback(async (blOverride?: string) => {
+    const effectiveBl = blOverride ?? businessLogic;
     setPipelineError(null);
     setPipelineTimings(null);
     setCompileError(null);
@@ -255,7 +274,7 @@ export function CodegenContent() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           form: toApiPayload(form),
-          businessLogic,
+          businessLogic: effectiveBl,
           domain,
         }),
       });
@@ -290,7 +309,7 @@ export function CodegenContent() {
             body: JSON.stringify({
               spec: result.spec,
               code: result.code.content,
-              prompt: businessLogic,
+              prompt: effectiveBl,
               domain,
               modelUsed: result.modelUsed,
               pipelineTotalMs: result.timings.totalMs,
@@ -315,11 +334,15 @@ export function CodegenContent() {
     }
   }, [form, businessLogic, domain]);
 
-  // Keep the ref up-to-date so handleAcceptPrompt can call runPipeline
-  // without a forward reference.
-  React.useEffect(() => {
-    runPipelineRef.current = runPipeline;
-  }, [runPipeline]);
+  // Stage-0 → Stage-1: accept the reviewed AgentPrompt and feed existing pipeline
+  const handleAcceptPrompt = React.useCallback(async () => {
+    if (!agentPrompt) return;
+    if (!agentPrompt.trigger.confirmed) return;
+    if (!form.slug?.trim()) return;
+    const { businessLogic: bl } = toCodegenInput(agentPrompt, toApiPayload(form));
+    setBusinessLogic(bl);
+    await runPipeline(bl);
+  }, [agentPrompt, form, runPipeline]);
 
   const runEvaluation = React.useCallback(async () => {
     if (!spec) return;

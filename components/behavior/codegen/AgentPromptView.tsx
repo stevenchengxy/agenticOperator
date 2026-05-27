@@ -35,11 +35,21 @@ export function AgentPromptView({
 }: Props) {
   const { t } = useApp();
 
-  // Confirm gate: trigger must be confirmed AND slug must be non-empty
+  // Slug regex mirrors AgentFormFieldsSchema / AgentConfigForm.formIsValid
+  const SLUG_RE = /^[a-z][a-z0-9-]*-agent$/;
+
+  // Confirm gate: trigger confirmed, slug confirmed + valid, displayName, ownerTeam
+  const slugOk = SLUG_RE.test(form.slug ?? "");
+  const slugConfirmed = prompt.fieldOrigin["slug"] === "confirmed";
+  const displayNameOk = !!form.displayName?.trim();
+  const ownerTeamOk = !!form.ownerTeam?.trim();
   const canAccept =
     !busy &&
     prompt.trigger.confirmed &&
-    !!form.slug?.trim();
+    slugConfirmed &&
+    slugOk &&
+    displayNameOk &&
+    ownerTeamOk;
 
   function setPromptField<K extends keyof AgentPrompt>(key: K, val: AgentPrompt[K]) {
     onChange({ ...prompt, [key]: val });
@@ -54,10 +64,6 @@ export function AgentPromptView({
   }
 
   function confirmSlug() {
-    onFormChange({
-      ...form,
-      // mark as confirmed via fieldOrigin on the prompt side
-    });
     onChange({
       ...prompt,
       fieldOrigin: { ...prompt.fieldOrigin, slug: "confirmed" },
@@ -319,9 +325,24 @@ export function AgentPromptView({
             Confirm the trigger event above to enable code generation.
           </p>
         )}
-        {!form.slug?.trim() && (
+        {(!form.slug?.trim() || !slugOk) && (
           <p className="text-[10.5px] text-ink-4 m-0">
-            Enter and confirm a slug to enable code generation.
+            Slug must be kebab-case ending in <span className="mono">-agent</span> (e.g. <span className="mono">my-thing-agent</span>).
+          </p>
+        )}
+        {form.slug?.trim() && slugOk && !slugConfirmed && (
+          <p className="text-[10.5px] text-ink-4 m-0">
+            Click "Confirm slug" above to lock the slug before generating code.
+          </p>
+        )}
+        {!displayNameOk && (
+          <p className="text-[10.5px] text-ink-4 m-0">
+            A display name is required (set it in the form below).
+          </p>
+        )}
+        {!ownerTeamOk && (
+          <p className="text-[10.5px] text-ink-4 m-0">
+            An owner team is required (set it in the form below).
           </p>
         )}
         <button
@@ -389,7 +410,6 @@ function FieldRow({
   origin: FieldOrigin | undefined;
   children: React.ReactNode;
 }) {
-  const { t } = useApp();
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-2">
