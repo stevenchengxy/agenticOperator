@@ -404,7 +404,7 @@ async function runToolLoop(
   toolCallsExecuted?: number;
 }> {
   const cfg = pickGateway();
-  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
   const sources: Source[] = [];
 
   // Build conversation: system + preamble + user history.
@@ -560,7 +560,7 @@ function streamingResponse(
     try {
       const cfg = pickGateway();
       modelUsed = cfg.model;
-      const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+      const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
       const convo: OpenAI.ChatCompletionMessageParam[] = [
         { role: "system", content: SYSTEM_PROMPT + "\n\nRun context:\n" + preamble },
         ...messages.map((m) => ({ role: m.role, content: m.content }) as OpenAI.ChatCompletionMessageParam),

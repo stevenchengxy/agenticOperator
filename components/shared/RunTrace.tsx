@@ -2,7 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { Ic } from "@/components/shared/Ic";
-import { describeStep } from "@/lib/monitor-step-descriptor";
+import { describeStep, describeLogKind } from "@/lib/monitor-step-descriptor";
 
 // Shared run-detail / trace components.
 // Used by /monitor (run inspection) and /fleet/[short] (light "today's stats"
@@ -47,6 +47,9 @@ export type RunDetail = {
   startedAt: string;
   finishedAt: string | null;
   output: unknown;
+  /** Structured error from the failed step (V2 trace) — used by the Event
+   *  panel's "Error details" tab. Falls back to parsing `output` when absent. */
+  error?: { name?: string; message?: string; stack?: string } | null;
   steps: Array<{ stepName: string; states: RunHistoryEvent[] }>;
   history: RunHistoryEvent[];
   /** Inngest V2 trace API per-step outputs — preferred over `steps` for
@@ -92,6 +95,23 @@ export function fmtTime(iso: string): string {
 export function formatDur(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
+}
+
+// Single Inngest app in this deployment. Function slugs are
+// `agentic-operator-main-<fnId>`; the app portion is the constant prefix.
+const INNGEST_APP_ID = "agentic-operator-main";
+export function appFromSlug(slug: string | undefined | null): string | null {
+  if (!slug) return null;
+  return slug.startsWith(INNGEST_APP_ID) ? INNGEST_APP_ID : slug;
+}
+
+export function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("zh-CN", { hour12: false });
+  } catch {
+    return iso;
+  }
 }
 
 export function extractErrorMessage(output: unknown): string | null {
@@ -293,12 +313,27 @@ export function RunDetailBody({
   const fStepName = isFailed ? failedStepName(detail) : null;
   const timeline = buildTimeline(detail, run.startedAt, run.finishedAt);
   const [showOutput, setShowOutput] = React.useState(false);
+  const app = appFromSlug(run.function?.slug);
+  const fnName = run.function?.name ?? null;
+  const poll = run.status === "Running";
 
   return (
     <div className="flex flex-col gap-3">
       {/* meta + cross-link row */}
       <div className="flex items-baseline gap-x-5 gap-y-1 flex-wrap text-ink-3" style={{ fontSize: 11.5 }}>
-        <MetaCell label="Run" value={<span className="tabular-nums">{run.id.slice(0, 16)}…</span>} />
+        <MetaCell
+          label="Run"
+          value={
+            <span
+              className="select-all"
+              style={{ fontFamily: "var(--f-mono)", color: "var(--c-ink-1)", wordBreak: "break-all" }}
+            >
+              {run.id}
+            </span>
+          }
+        />
+        {app && <MetaCell label="App" value={<span style={{ fontFamily: "var(--f-mono)" }}>{app}</span>} />}
+        {fnName && <MetaCell label="Function" value={<span style={{ color: "var(--c-ink-1)" }}>{fnName}</span>} />}
         {run.startedAt && <MetaCell label="Started" value={fmtTime(run.startedAt)} />}
         {run.finishedAt && <MetaCell label="Ended" value={fmtTime(run.finishedAt)} />}
         <MetaCell
@@ -385,18 +420,12 @@ export function RunDetailBody({
         </div>
       )}
 
-      {/* event input — trigger payload that fired this run. Same data shown
-          under "Input" in Inngest dev UI. */}
-      {detail.event && (
-        <JsonPanel
-          label="Input"
-          sublabel={detail.event.name}
-          json={detail.event.payload}
-        />
-      )}
+      {/* event panel — trigger event (name / id / received-at) with
+          Input / Error details / Metadata tabs, mirroring Inngest dev UI. */}
+      {detail.event && <EventPanel run={run} detail={detail} />}
 
       {/* 数据写入摘要 — Postgres step trace + Neo4j 实时反查 */}
-      <DataWritesSummary runId={run.id} stepOutputs={detail.stepOutputs ?? []} />
+      <DataWritesSummary runId={run.id} stepOutputs={detail.stepOutputs ?? []} poll={poll} />
 
 
       {/* per-step outputs — one expandable row per step.run / step.sendEvent.
@@ -416,7 +445,7 @@ export function RunDetailBody({
 
       {/* 智能体完整日志 — surface AO 自己的 file log(按 run_id),补 Inngest trace
           漏 step + 无 input 的缺口。每一步全量 in/out。 */}
-      {run.id && <AgentFullLog runId={run.id} />}
+      {run.id && <AgentFullLog runId={run.id} poll={poll} />}
 
       {/* output */}
       {detail.output != null && (
@@ -451,68 +480,125 @@ export function RunDetailBody({
   );
 }
 
-// Collapsible JSON viewer — shared by Input panel and per-step output rows.
-function JsonPanel({
-  label,
-  sublabel,
-  json,
-  defaultExpanded = false,
-}: {
-  label: string;
-  sublabel?: string;
-  json: string | null | undefined;
-  defaultExpanded?: boolean;
-}) {
-  const [expanded, setExpanded] = React.useState(defaultExpanded);
-  let pretty = json ?? "";
-  if (json) {
-    try {
-      pretty = JSON.stringify(JSON.parse(json), null, 2);
-    } catch {
-      pretty = json;
-    }
-  }
+// Shared monospace JSON / text block.
+function Pre({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 text-ink-3 hover:text-ink-1"
-        style={{ fontSize: 11.5 }}
-      >
-        <Ic.chev
-          style={{
-            width: 10,
-            height: 10,
-            transition: "transform 0.15s",
-            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
-          }}
-        />
-        {label}
-        {sublabel && (
-          <span className="text-ink-4" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>
-            · {sublabel}
-          </span>
+    <pre
+      className="text-ink-1 whitespace-pre-wrap break-words"
+      style={{
+        fontFamily: "var(--f-mono)", fontSize: 11, margin: 0,
+        padding: "8px 10px", background: "var(--c-bg)",
+        border: "1px solid var(--c-line)", borderRadius: 4,
+        maxHeight: 320, overflow: "auto", lineHeight: 1.55,
+      }}
+    >
+      {children}
+    </pre>
+  );
+}
+
+// ── Event panel ─────────────────────────────────────────────────
+//
+// Mirrors Inngest dev UI's right-hand event drawer: an event header
+// (name · id · received-at) + Input / Error details / Metadata tabs.
+// All data already comes from /api/inngest-admin/runs/[runId]
+// (detail.event + detail.error + detail.output) — no extra fetch.
+
+function EventPanel({ run, detail }: { run: RunRow; detail: RunDetail }) {
+  type EventTab = "input" | "error" | "metadata";
+  const ev = detail.event!;
+  const [tab, setTab] = React.useState<EventTab>("input");
+
+  let payloadPretty = ev.payload ?? "";
+  if (ev.payload) {
+    try { payloadPretty = JSON.stringify(JSON.parse(ev.payload), null, 2); } catch { payloadPretty = ev.payload; }
+  }
+
+  const err = detail.error ?? null;
+  const errMsgFallback = run.status === "Failed" ? extractErrorMessage(detail.output) : null;
+  const hasError = !!err || !!errMsgFallback;
+
+  const metaRows: Array<[string, string]> = [
+    ["Event name", ev.name],
+    ["Event ID", ev.id],
+    ["Received at", fmtDateTime(ev.createdAt)],
+    ["Run ID", run.id],
+    ["App", appFromSlug(run.function?.slug) ?? "—"],
+    ["Function", run.function?.name ?? run.function?.slug ?? "—"],
+    ["Status", run.status],
+  ];
+
+  const tabs: Array<{ id: EventTab; label: string }> = [
+    { id: "input", label: "Input" },
+    { id: "error", label: "Error details" },
+    { id: "metadata", label: "Metadata" },
+  ];
+
+  return (
+    <div style={{ border: "1px solid var(--c-line)", borderRadius: 6, background: "var(--c-surface)" }}>
+      {/* header */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--c-line)" }}>
+        <div className="text-ink-1" style={{ fontSize: 12.5, fontWeight: 600 }}>{ev.name}</div>
+        <div className="flex items-baseline gap-x-4 gap-y-0.5 flex-wrap mt-1" style={{ fontSize: 11 }}>
+          <MetaCell label="Event ID" value={<span className="select-all" style={{ fontFamily: "var(--f-mono)" }}>{ev.id}</span>} />
+          <MetaCell label="Received at" value={<span className="tabular-nums">{fmtDateTime(ev.createdAt)}</span>} />
+        </div>
+      </div>
+      {/* tab bar */}
+      <div className="flex items-center gap-1" style={{ padding: "0 10px", borderBottom: "1px solid var(--c-line)" }}>
+        {tabs.map((tb) => {
+          const active = tab === tb.id;
+          const isErrTab = tb.id === "error";
+          return (
+            <button
+              key={tb.id}
+              onClick={() => setTab(tb.id)}
+              style={{
+                padding: "6px 8px",
+                fontSize: 11.5,
+                borderBottom: active ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
+                color: active
+                  ? "var(--c-ink-1)"
+                  : isErrTab && hasError
+                    ? "var(--c-err)"
+                    : "var(--c-ink-3)",
+                fontWeight: active ? 500 : 400,
+                marginBottom: -1,
+                background: "transparent",
+              }}
+            >
+              {tb.label}
+              {isErrTab && hasError && <span style={{ marginLeft: 4, color: "var(--c-err)" }}>•</span>}
+            </button>
+          );
+        })}
+      </div>
+      {/* tab body */}
+      <div style={{ padding: "8px 10px" }}>
+        {tab === "input" && <Pre>{payloadPretty || "(empty)"}</Pre>}
+        {tab === "error" && (
+          err ? (
+            <Pre>
+              {(err.name ? `${err.name}: ` : "") + (err.message ?? "")}
+              {err.stack ? `\n\n${err.stack}` : ""}
+            </Pre>
+          ) : errMsgFallback ? (
+            <Pre>{errMsgFallback}</Pre>
+          ) : (
+            <div className="text-ink-4" style={{ fontSize: 11 }}>无错误 · No error</div>
+          )
         )}
-      </button>
-      {expanded && (
-        <pre
-          className="text-ink-1 whitespace-pre-wrap break-words mt-1.5"
-          style={{
-            fontFamily: "var(--f-mono)",
-            fontSize: 11,
-            margin: 0,
-            padding: "8px 10px",
-            background: "var(--c-surface)",
-            border: "1px solid var(--c-line)",
-            borderRadius: 4,
-            maxHeight: 280,
-            overflow: "auto",
-            lineHeight: 1.55,
-          }}
-        >
-          {pretty || "(empty)"}
-        </pre>
-      )}
+        {tab === "metadata" && (
+          <div className="flex flex-col gap-1">
+            {metaRows.map(([k, v]) => (
+              <div key={k} className="flex items-baseline gap-3" style={{ fontSize: 11 }}>
+                <span className="text-ink-4" style={{ minWidth: 92, flexShrink: 0 }}>{k}</span>
+                <span className="text-ink-1 select-all" style={{ fontFamily: "var(--f-mono)", wordBreak: "break-all" }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -533,24 +619,30 @@ type AgentLogEvent = {
   payload?: unknown;
 };
 
-function AgentFullLog({ runId }: { runId: string }) {
+function AgentFullLog({ runId, poll }: { runId: string; poll?: boolean }) {
   const [events, setEvents] = React.useState<AgentLogEvent[] | null>(null);
   const [open, setOpen] = React.useState(true);
 
   React.useEffect(() => {
     let cancelled = false;
-    fetch(`/api/inngest-admin/runs/${runId}/agent-log`)
-      .then((r) => r.json())
-      .then((b) => {
-        if (!cancelled) setEvents(b.events ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setEvents([]);
-      });
+    const load = () => {
+      fetch(`/api/inngest-admin/runs/${runId}/agent-log`)
+        .then((r) => r.json())
+        .then((b) => {
+          if (!cancelled) setEvents(b.events ?? []);
+        })
+        .catch(() => {
+          // keep prior events on a transient error so the live view doesn't blank
+          if (!cancelled) setEvents((prev) => prev ?? []);
+        });
+    };
+    load();
+    const timer = poll ? setInterval(load, 4000) : null;
     return () => {
       cancelled = true;
+      if (timer) clearInterval(timer);
     };
-  }, [runId]);
+  }, [runId, poll]);
 
   if (events == null) return null;        // loading — 不闪
   if (events.length === 0) return null;   // 这个 run 没 file log(老 run / 非本机)
@@ -587,7 +679,7 @@ function AgentLogRow({ event, index }: { event: AgentLogEvent; index: number }) 
   const from = typeof p.from === "string" ? p.from : null;
   const to = typeof p.to === "string" ? p.to : null;
   // kind → 人类可读
-  const kindLabel = AGENT_LOG_KIND_LABEL[event.kind] ?? event.kind;
+  const kindLabel = describeLogKind(event.kind);
   const hasPayload = event.payload != null;
   return (
     <div style={{ border: "1px solid var(--c-line)", borderRadius: 4, background: "var(--c-surface)" }}>
@@ -641,25 +733,6 @@ function AgentLogRow({ event, index }: { event: AgentLogEvent; index: number }) 
     </div>
   );
 }
-
-const AGENT_LOG_KIND_LABEL: Record<string, string> = {
-  "handler.start": "▶ 开始处理",
-  "handler.raw_input": "📥 完整入参 (上游 → 智能体)",
-  "handler.done": "✅ 处理完成",
-  "backfill.resume.ok": "🔄 回查简历正文",
-  "backfill.jd.ok": "🔄 回查 JD 文本",
-  "emit.invitation-sent": "📡 回发「邀约已送达」",
-  "emit.invitation-failed": "📡 回发「邀约失败」",
-  "emit.resume-processed": "📡 回发「简历已解析」",
-  "save-candidate.ok": "💾 保存候选人 + 简历",
-  "save-candidate.failed": "❌ 保存候选人失败",
-  "step.start": "▶ 步骤开始",
-  "step.end": "■ 步骤结束",
-  "llm.request": "🧠 大模型入参 (prompt)",
-  "llm.response": "🧠 大模型出参 (回复)",
-  "llm.failed": "❌ 大模型调用失败",
-  "runRuleCheck.start": "▶ 规则检查开始",
-};
 
 function StepOutputRow({ step, stepIndex }: { step: RunStepOutput; stepIndex: number }) {
   const [expanded, setExpanded] = React.useState(false);
@@ -907,9 +980,11 @@ type Neo4jProbeResult = {
 function DataWritesSummary({
   runId,
   stepOutputs,
+  poll,
 }: {
   runId: string;
   stepOutputs: RunStepOutput[];
+  poll?: boolean;
 }) {
   const writes = React.useMemo(() => {
     const out: DataWriteEntry[] = [];
@@ -931,38 +1006,43 @@ function DataWritesSummary({
   React.useEffect(() => {
     if (!runId) return;
     let cancelled = false;
-    fetch(`/api/monitor/run-neo4j-instances?runId=${encodeURIComponent(runId)}`)
-      .then((r) => r.json())
-      .then((b) => {
-        if (cancelled) return;
-        if (b.entities || b.postgres_entities) {
-          setLive({
-            loading: false,
-            neoEntities: b.entities ?? [],
-            pgEntities: b.postgres_entities ?? [],
-          });
-        } else {
+    const load = () => {
+      fetch(`/api/monitor/run-neo4j-instances?runId=${encodeURIComponent(runId)}`)
+        .then((r) => r.json())
+        .then((b) => {
+          if (cancelled) return;
+          if (b.entities || b.postgres_entities) {
+            setLive({
+              loading: false,
+              neoEntities: b.entities ?? [],
+              pgEntities: b.postgres_entities ?? [],
+            });
+          } else {
+            setLive({
+              loading: false,
+              neoEntities: [],
+              pgEntities: [],
+              error: b.reason ?? b.error ?? 'unknown',
+            });
+          }
+        })
+        .catch((e) => {
+          if (cancelled) return;
           setLive({
             loading: false,
             neoEntities: [],
             pgEntities: [],
-            error: b.reason ?? b.error ?? 'unknown',
+            error: (e as Error).message ?? 'fetch-failed',
           });
-        }
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setLive({
-          loading: false,
-          neoEntities: [],
-          pgEntities: [],
-          error: (e as Error).message ?? 'fetch-failed',
         });
-      });
+    };
+    load();
+    const timer = poll ? setInterval(load, 5000) : null;
     return () => {
       cancelled = true;
+      if (timer) clearInterval(timer);
     };
-  }, [runId]);
+  }, [runId, poll]);
 
   // Step-based detection kept as fallback when live probe returns nothing
   const pgFromSteps = writes.filter((w) => w.target === "Postgres");
@@ -1291,11 +1371,19 @@ export async function fetchRunDetail(runId: string): Promise<RunDetail | null> {
     const res = await fetch(`/api/inngest-admin/runs/${encodeURIComponent(runId)}`);
     if (!res.ok) return null;
     const body = await res.json();
+    // The API returns V2 step objects with a structured `error` ({name,message,stack}).
+    // Pull the failed step's error so the Event panel's "Error details" tab is rich.
+    const rawSteps: Array<{ status?: string; error?: { name?: string; message?: string; stack?: string } | null }> =
+      Array.isArray(body.steps) ? body.steps : [];
+    const failedStep =
+      rawSteps.find((s) => s && s.error && /fail|error/i.test(String(s.status ?? ""))) ??
+      rawSteps.find((s) => s && s.error);
     return {
       status: body.status,
       startedAt: body.startedAt,
       finishedAt: body.finishedAt,
       output: body.output,
+      error: failedStep?.error ?? null,
       steps: body.steps ?? [],
       history: body.history ?? [],
       stepOutputs: Array.isArray(body.stepOutputs) ? body.stepOutputs : undefined,

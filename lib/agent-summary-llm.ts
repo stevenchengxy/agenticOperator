@@ -97,7 +97,7 @@ export async function generateAgentSummary(input: AgentSummaryInput): Promise<{
     };
   }
   const start = Date.now();
-  const client = new OpenAI({ baseURL: gw.baseURL, apiKey: gw.apiKey });
+  const client = new OpenAI({ baseURL: gw.baseURL, apiKey: gw.apiKey, timeout: 300_000 });
   const res = await client.chat.completions.create({
     model: gw.model,
     messages: [

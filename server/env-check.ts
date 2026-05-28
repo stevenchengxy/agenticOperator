@@ -23,7 +23,7 @@ export type EnvCheckResult = {
 const REQUIRED = [
   {
     name: "DATABASE_URL",
-    reason: "SQLite path for AO's operational state (Prisma).",
+    reason: "Local Postgres conn string for AO's operational state (Prisma); port 5433.",
   },
 ] as const;
 

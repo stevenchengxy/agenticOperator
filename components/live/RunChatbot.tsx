@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn } from "@/components/shared/atoms";
 import { Markdown } from "@/components/shared/Markdown";
@@ -54,11 +55,11 @@ type SseEvent =
   | { type: "done"; sources: Source[]; modelUsed?: string; toolCallsExecuted?: number }
   | { type: "error"; message: string };
 
-const SUGGESTIONS = [
-  "为什么这条 run 比以往慢？",
-  "Matcher 在这条 run 里给了什么决策？",
-  "RAAS 那边对我们的事件做了什么？",
-  "这条 run 失败的根因是什么？",
+const SUGGESTION_KEYS = [
+  "lvx_chat_suggest_1",
+  "lvx_chat_suggest_2",
+  "lvx_chat_suggest_3",
+  "lvx_chat_suggest_4",
 ];
 
 // Cap history per run so localStorage doesn't bloat. Older messages
@@ -98,6 +99,7 @@ function clearHistory(runId: string): void {
 }
 
 export function RunChatbot({ runId }: { runId: string }) {
+  const { t } = useApp();
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -245,9 +247,9 @@ export function RunChatbot({ runId }: { runId: string }) {
         className="border-b border-line flex items-center gap-2"
         style={{ padding: "10px 12px" }}
       >
-        <span className="text-[13px] font-semibold flex-1">AI 助手</span>
-        <Badge variant="info">作用域 · 仅这条 run</Badge>
-        <Badge variant="default">tool-using · 只读</Badge>
+        <span className="text-[13px] font-semibold flex-1">{t("lvx_chat_title")}</span>
+        <Badge variant="info">{t("lvx_chat_scope")}</Badge>
+        <Badge variant="default">{t("lvx_chat_readonly")}</Badge>
         {messages.length > 0 && (
           <Btn
             size="sm"
@@ -256,7 +258,7 @@ export function RunChatbot({ runId }: { runId: string }) {
               setMessages([]);
               clearHistory(runId);
             }}
-            title="清空对话（同时清 localStorage）"
+            title={t("lvx_chat_clear_tip")}
             style={{ padding: "0 6px" }}
           >
             <Ic.cross />
@@ -281,29 +283,31 @@ export function RunChatbot({ runId }: { runId: string }) {
               <div className="flex items-center gap-1.5 mb-1">
                 <span style={{ color: "var(--c-info)" }}>✨</span>
                 <span className="font-semibold text-ink-1 text-[12.5px]">
-                  scope · 仅这条 run
+                  {t("lvx_chat_scope_label")}
                 </span>
               </div>
               <div className="text-[11.5px] text-ink-3">
-                问关于这条 run 的任何问题。AI 会调底层 API 取真数据，每条回答带引用，
-                不会编造数字 / agent 名字，也不会修改任何状态。
+                {t("lvx_chat_empty_hint")}
               </div>
             </div>
             <div>
               <div className="text-[10.5px] text-ink-4 mb-1.5 tracking-[0.06em] uppercase">
-                建议问题（点击直接发送）
+                {t("lvx_chat_suggestions")}
               </div>
               <div className="grid gap-1.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => void send(s)}
-                    className="bg-panel border border-line rounded-sm cursor-pointer text-[11.5px] text-ink-2 hover:text-ink-1 hover:border-line-strong text-left"
-                    style={{ padding: "6px 10px", lineHeight: 1.4 }}
-                  >
-                    {s}
-                  </button>
-                ))}
+                {SUGGESTION_KEYS.map((k) => {
+                  const s = t(k);
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => void send(s)}
+                      className="bg-panel border border-line rounded-sm cursor-pointer text-[11.5px] text-ink-2 hover:text-ink-1 hover:border-line-strong text-left"
+                      style={{ padding: "6px 10px", lineHeight: 1.4 }}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -316,7 +320,7 @@ export function RunChatbot({ runId }: { runId: string }) {
         {loading && (
           <div className="flex items-center gap-2 mt-2 text-[11.5px] text-ink-3 mono">
             <span className="anim-pulse" style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--c-accent)" }} />
-            AI 正在调工具 + 思考…
+            {t("lvx_chat_thinking")}
           </div>
         )}
 
@@ -344,13 +348,13 @@ export function RunChatbot({ runId }: { runId: string }) {
               void send(input);
             }
           }}
-          placeholder={loading ? "等回答中…" : "问一个关于这条 run 的问题…"}
+          placeholder={loading ? t("lvx_chat_input_waiting") : t("lvx_chat_input_placeholder")}
           disabled={loading}
           className="flex-1 border border-line bg-panel rounded-sm text-ink-1 outline-none mono text-[12px]"
           style={{ height: 28, padding: "0 10px" }}
         />
         <Btn size="sm" variant="primary" onClick={() => void send(input)} disabled={loading || !input.trim()}>
-          <Ic.arrowR /> 发送
+          <Ic.arrowR /> {t("lvx_chat_send")}
         </Btn>
       </div>
     </div>
@@ -358,6 +362,7 @@ export function RunChatbot({ runId }: { runId: string }) {
 }
 
 function Bubble({ message }: { message: ChatMessage }) {
+  const { t } = useApp();
   const isUser = message.role === "user";
   return (
     <div className="mb-3" style={{ marginLeft: isUser ? 32 : 0, marginRight: isUser ? 0 : 32 }}>
@@ -367,9 +372,9 @@ function Bubble({ message }: { message: ChatMessage }) {
       >
         <span>
           {isUser
-            ? "👤 你"
+            ? t("lvx_chat_role_you")
             : message.modelUsed === "fallback"
-              ? "🤖 AI · fallback (无 LLM 网关)"
+              ? t("lvx_chat_role_ai_fallback")
               : `🤖 AI${message.modelUsed ? ` · ${message.modelUsed}` : ""}`}
         </span>
       </div>
@@ -421,16 +426,16 @@ function Bubble({ message }: { message: ChatMessage }) {
         ) : (
           // Empty AI bubble = stream just started, tools running.
           <span className="text-[11.5px] text-ink-4 mono">
-            {message.toolEvents && message.toolEvents.some((t) => t.status === "running")
-              ? "调工具中…"
-              : "AI 正在思考…"}
+            {message.toolEvents && message.toolEvents.some((te) => te.status === "running")
+              ? t("lvx_chat_tools_running")
+              : t("lvx_chat_thinking_short")}
           </span>
         )}
       </div>
       {!isUser && message.sources && message.sources.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1 items-center">
           <span className="text-[9.5px] text-ink-4 mono uppercase tracking-[0.06em] mr-0.5">
-            引用
+            {t("lvx_chat_citations")}
           </span>
           {message.sources.map((s, i) => (
             <span

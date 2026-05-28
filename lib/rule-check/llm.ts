@@ -44,7 +44,7 @@ export async function runLlm(args: {
   max_tokens?: number;
 }): Promise<LlmRunResult> {
   const cfg = pickGateway();
-  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
   const modelUsed = args.model ?? cfg.model;
   const started = Date.now();
 

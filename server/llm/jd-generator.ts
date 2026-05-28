@@ -193,7 +193,7 @@ export async function llmGenerateJd(
   const client = new OpenAI({
     baseURL: gateway.baseURL,
     apiKey: gateway.apiKey,
-    timeout: 60_000,
+    timeout: 300_000,
   });
 
   const lines = [

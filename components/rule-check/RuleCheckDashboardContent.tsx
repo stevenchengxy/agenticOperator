@@ -85,7 +85,8 @@ export function RuleCheckDashboardContent() {
   // Default 50 (was 12 — too easy to overlook the "加载更多" button, and
   // gave the false impression that the system only had 12 audits ever).
   // Page polls below, so this many cells × 27 rules stays performant.
-  const [auditLimit, setAuditLimit] = React.useState(50);
+  // 只展示最新 10 条审计 — 网格更聚焦,也少 10 个详情预取(同时减轻外部源压力)。
+  const [auditLimit, setAuditLimit] = React.useState(10);
 
   // Load top-level stats + audit list + per-rule matrix with 10s polling
   // so newly-completed rule-check runs surface on the open page without
@@ -200,10 +201,13 @@ export function RuleCheckDashboardContent() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: "-0.01em" }}>
-            总览
+            {t("rc_dash_overview")}
           </h2>
           <div className="text-ink-3 mt-1" style={{ fontSize: 12.5 }}>
-            最近 {windowDays} 天 · {audits?.length ?? 0} 条审计 × {matrix?.rules.length ?? 0} 条规则 · 每个 cell 是该规则在该审计中的判定
+            {t("rc_dash_overview_sub")
+              .replace("{days}", String(windowDays))
+              .replace("{audits}", String(audits?.length ?? 0))
+              .replace("{rules}", String(matrix?.rules.length ?? 0))}
           </div>
         </div>
         <WindowToggle value={windowDays} onChange={setWindowDays} t={t} />
@@ -245,74 +249,82 @@ export function RuleCheckDashboardContent() {
         )}
       </div>
 
-      {/* The hero grid — rules × audits */}
-      <Section
-        title={t("rc_grid_title")}
-        hint={grid ? t("rc_grid_hint").replace("{rules}", String(grid.rules.length)).replace("{audits}", String(audits?.length ?? 0)) : t("rc_loading")}
-        action={
-          audits && audits.length === auditLimit && (
-            <button onClick={() => setAuditLimit((n) => n + 12)} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 12 }}>
-              {t("rc_load_more")}
-            </button>
-          )
-        }
+      {/* Main: rule×audit heatmap (left) + failure / coverage summaries (right).
+          The matrix is intrinsically narrow, so the side panels balance the row
+          and fill the width instead of leaving a big right-hand gap. */}
+      <div
+        className="grid gap-6 items-start"
+        style={{ gridTemplateColumns: "minmax(0, 1.7fr) minmax(260px, 1fr)" }}
       >
-        {grid && audits ? (
-          <RuleAuditGrid grid={grid} audits={audits} t={t} />
-        ) : (
-          <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{t("rc_loading")}</div>
-        )}
-      </Section>
+        {/* left column — heatmap + legend */}
+        <div className="flex flex-col gap-4 min-w-0">
+          <Section
+            title={t("rc_grid_title")}
+            hint={grid ? t("rc_grid_hint").replace("{rules}", String(grid.rules.length)).replace("{audits}", String(audits?.length ?? 0)) : t("rc_loading")}
+            action={
+              audits && audits.length === auditLimit && (
+                <button onClick={() => setAuditLimit((n) => n + 12)} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 12 }}>
+                  {t("rc_load_more")}
+                </button>
+              )
+            }
+          >
+            {grid && audits ? (
+              <RuleAuditGrid grid={grid} audits={audits} t={t} />
+            ) : (
+              <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{t("rc_loading")}</div>
+            )}
+          </Section>
+          <Legend t={t} />
+        </div>
 
-      {/* Legend */}
-      <Legend t={t} />
+        {/* right column — top-failure + low-coverage, stacked */}
+        <div className="flex flex-col gap-6 min-w-0">
+          <Section title={t("rc_section_top_fail")}>
+            {stats?.top_failure_rules && stats.top_failure_rules.length > 0 ? (
+              <div className="border-t border-line">
+                {stats.top_failure_rules.map((r) => {
+                  const meta = matrix?.rules.find((m) => m.rule_id === r.rule_id);
+                  return (
+                    <Link
+                      key={r.rule_id}
+                      href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
+                      className="grid items-center border-b border-line hover:bg-panel transition-colors"
+                      style={{ gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, padding: "10px 6px", textDecoration: "none" }}
+                    >
+                      <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 12 }}>{r.rule_id}</code>
+                      <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{meta?.rule_name && meta.rule_name !== r.rule_id ? meta.rule_name : ""}</span>
+                      <span className="tabular-nums" style={{ textAlign: "right", fontSize: 13, color: "var(--c-err)" }}>✗ {r.count}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{stats ? t("rc_empty_no_recent_fail") : t("rc_loading")}</div>
+            )}
+          </Section>
 
-      {/* Failure & coverage */}
-      <div className="grid gap-6" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}>
-        <Section title={t("rc_section_top_fail")}>
-          {stats?.top_failure_rules && stats.top_failure_rules.length > 0 ? (
-            <div className="border-t border-line">
-              {stats.top_failure_rules.map((r) => {
-                const meta = matrix?.rules.find((m) => m.rule_id === r.rule_id);
-                return (
+          <Section title={t("rc_section_low_coverage")} hint={t("rc_section_low_coverage_hint")}>
+            {lowCoverage.length > 0 ? (
+              <div className="border-t border-line">
+                {lowCoverage.slice(0, 8).map((r) => (
                   <Link
                     key={r.rule_id}
                     href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
                     className="grid items-center border-b border-line hover:bg-panel transition-colors"
-                    style={{ gridTemplateColumns: "120px minmax(0, 1fr) 60px", padding: "10px 6px", textDecoration: "none" }}
+                    style={{ gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, padding: "10px 6px", textDecoration: "none" }}
                   >
                     <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 12 }}>{r.rule_id}</code>
-                    <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{meta?.rule_name ?? "—"}</span>
-                    <span className="tabular-nums" style={{ textAlign: "right", fontSize: 13, color: "var(--c-err)" }}>✗ {r.count}</span>
+                    <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{r.rule_name && r.rule_name !== r.rule_id ? r.rule_name : ""}</span>
+                    <span className="tabular-nums" style={{ textAlign: "right", fontSize: 12, color: "var(--c-ink-3)" }}>{r.total} {t("rc_times_suffix")}</span>
                   </Link>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{stats ? t("rc_empty_no_recent_fail") : t("rc_loading")}</div>
-          )}
-        </Section>
-
-        <Section title={t("rc_section_low_coverage")} hint={t("rc_section_low_coverage_hint")}>
-          {lowCoverage.length > 0 ? (
-            <div className="border-t border-line">
-              {lowCoverage.slice(0, 8).map((r) => (
-                <Link
-                  key={r.rule_id}
-                  href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
-                  className="grid items-center border-b border-line hover:bg-panel transition-colors"
-                  style={{ gridTemplateColumns: "120px minmax(0, 1fr) 60px", padding: "10px 6px", textDecoration: "none" }}
-                >
-                  <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 12 }}>{r.rule_id}</code>
-                  <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{r.rule_name}</span>
-                  <span className="tabular-nums" style={{ textAlign: "right", fontSize: 12, color: "var(--c-ink-3)" }}>{r.total} {t("rc_times_suffix")}</span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{matrix ? t("rc_empty_all_above_threshold") : t("rc_loading")}</div>
-          )}
-        </Section>
+                ))}
+              </div>
+            ) : (
+              <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{matrix ? t("rc_empty_all_above_threshold") : t("rc_loading")}</div>
+            )}
+          </Section>
+        </div>
       </div>
     </div>
   );
@@ -337,8 +349,22 @@ function RuleAuditGrid({
   audits: AuditListRow[];
   t: (k: string) => string;
 }) {
-  const cellSize = 22;
-  const cellGap = 2;
+  const cellSize = 26;
+  const cellGap = 4;
+  const [showAll, setShowAll] = React.useState(false);
+  // Name column is capped; the audit cells share the remaining width (each a
+  // 1fr track ≥ cellSize), so the heatmap fills its column with no gaps. When
+  // many audits load the tracks hit their min and the box scrolls horizontally.
+  const colTemplate = `minmax(140px, 200px) repeat(${audits.length}, minmax(${cellSize}px, 1fr))`;
+
+  // Only rules that actually fired in the window (have a cell, or matrix
+  // coverage > 0) show by default; the untriggered long tail collapses behind a
+  // toggle so the grid isn't a wall of empty "未触发" dots.
+  const isActive = (r: MatrixRule) => grid.cells.has(r.rule_id) || r.total > 0;
+  const activeRules = grid.rules.filter(isActive);
+  const visibleRules = showAll || activeRules.length === 0 ? grid.rules : activeRules;
+  const inactiveCount = grid.rules.length - activeRules.length;
+
   return (
     <div
       className="border border-line rounded"
@@ -347,11 +373,7 @@ function RuleAuditGrid({
       {/* column header — audit IDs (truncated) + decision dot */}
       <div
         className="grid items-end"
-        style={{
-          gridTemplateColumns: `minmax(220px, 280px) repeat(${audits.length}, ${cellSize}px)`,
-          gap: cellGap,
-          marginBottom: 6,
-        }}
+        style={{ gridTemplateColumns: colTemplate, gap: cellGap, marginBottom: 6 }}
       >
         <div className="text-ink-3" style={{ fontSize: 11.5 }}>Rule \ Audit →</div>
         {audits.map((a, i) => (
@@ -359,8 +381,13 @@ function RuleAuditGrid({
             key={a.audit_id}
             href={`/rule-check?view=audits&auditId=${encodeURIComponent(a.audit_id)}`}
             className="flex flex-col items-center gap-1 hover:opacity-80 transition-opacity"
-            style={{ width: cellSize, textDecoration: "none" }}
-            title={`审计 #${i + 1}\n${a.audit_id}\n决策 ${a.decision} · ${a.client_name} · ${fmtDate(a.created_at)}\n点击进 审计 详情`}
+            style={{ width: "100%", textDecoration: "none" }}
+            title={t("rc_grid_audit_col_tip")
+              .replace("{n}", String(i + 1))
+              .replace("{id}", a.audit_id)
+              .replace("{decision}", a.decision)
+              .replace("{client}", a.client_name)
+              .replace("{date}", fmtDate(a.created_at))}
           >
             <span
               className="rounded-full"
@@ -377,12 +404,14 @@ function RuleAuditGrid({
       </div>
 
       {/* rows: rule × cells */}
-      {grid.rules.map((r) => (
+      {visibleRules.map((r) => {
+        const active = isActive(r);
+        return (
         <div
           key={r.rule_id}
           className="grid items-center"
           style={{
-            gridTemplateColumns: `minmax(220px, 280px) repeat(${audits.length}, ${cellSize}px)`,
+            gridTemplateColumns: colTemplate,
             gap: cellGap,
             marginBottom: cellGap,
           }}
@@ -390,14 +419,16 @@ function RuleAuditGrid({
           <Link
             href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
             className="flex items-baseline gap-2 truncate hover:bg-panel transition-colors rounded"
-            style={{ padding: "2px 6px", textDecoration: "none", opacity: r.total === 0 ? 0.55 : 1 }}
+            style={{ padding: "2px 6px", textDecoration: "none", opacity: active ? 1 : 0.5 }}
             title={r.rule_name}
           >
             <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 11, minWidth: 48 }}>
               {r.rule_id}
             </code>
-            <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.rule_name}</span>
-            {r.total === 0 && (
+            {r.rule_name && r.rule_name !== r.rule_id && (
+              <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.rule_name}</span>
+            )}
+            {!active && (
               <span
                 className="tabular-nums"
                 style={{ fontSize: 9.5, color: "var(--c-ink-4)", marginLeft: "auto", letterSpacing: "0.05em" }}
@@ -414,14 +445,19 @@ function RuleAuditGrid({
                 key={a.audit_id}
                 href={`/rule-check?view=audits&auditId=${encodeURIComponent(a.audit_id)}`}
                 title={cell ? `${r.rule_id} · ${t(style.labelKey)} · audit ${a.audit_id.slice(-10)}` : t("rc_cell_not_loaded")}
-                className="grid place-items-center rounded transition-transform hover:scale-110"
+                className="grid place-items-center rounded transition-transform hover:scale-105"
                 style={{
-                  width: cellSize, height: cellSize,
+                  width: "100%", height: cellSize,
                   background: style.bg,
                   color: style.fg,
-                  fontSize: 12,
-                  fontWeight: 500,
-                  border: cell === "FAIL" ? "1px solid color-mix(in oklab, var(--c-err) 25%, transparent)" : "1px solid transparent",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border:
+                    cell === "FAIL"
+                      ? "1px solid color-mix(in oklab, var(--c-err) 30%, transparent)"
+                      : cell === "PASS"
+                        ? "1px solid color-mix(in oklab, var(--c-ok) 22%, transparent)"
+                        : "1px solid transparent",
                   textDecoration: "none",
                 }}
               >
@@ -430,7 +466,20 @@ function RuleAuditGrid({
             );
           })}
         </div>
-      ))}
+        );
+      })}
+      {activeRules.length > 0 && inactiveCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowAll((s) => !s)}
+          className="text-ink-3 hover:text-ink-1 transition-colors"
+          style={{ fontSize: 11.5, marginTop: 8, padding: "4px 6px", background: "transparent", border: 0, cursor: "pointer" }}
+        >
+          {showAll
+            ? `▾ ${t("rc_grid_collapse_inactive")}`
+            : `▸ ${t("rc_grid_show_inactive").replace("{n}", String(inactiveCount))}`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -477,7 +526,7 @@ function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: 
     "var(--c-ink-1)";
   return (
     <div>
-      <div className="text-ink-3" style={{ fontSize: 12 }}>{label}</div>
+      <div className="text-ink-4 uppercase font-medium" style={{ fontSize: 10.5, letterSpacing: "0.06em" }}>{label}</div>
       <div className="mt-1.5">
         <span
           className="tabular-nums"

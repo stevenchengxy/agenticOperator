@@ -129,7 +129,7 @@ async function main() {
     method: "POST",
     headers: { Authorization: `Bearer ${RH_KEY}` },
     body: form,
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(300_000),
   });
   parserDurationMs = Date.now() - parseT0;
   const parseHeaders = headersToObject(parseRes.headers);
@@ -215,7 +215,7 @@ async function main() {
     if (!aiBaseUrl || !aiKey) {
       throw new Error("AI_BASE_URL / AI_API_KEY required for fallback");
     }
-    const client = new OpenAI({ baseURL: aiBaseUrl, apiKey: aiKey, timeout: 60_000 });
+    const client = new OpenAI({ baseURL: aiBaseUrl, apiKey: aiKey, timeout: 300_000 });
     const completion = await client.chat.completions.create({
       model: aiModel,
       messages: [
@@ -316,7 +316,7 @@ async function main() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ resume: resumeText, jd: jd.jdText }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(300_000),
     });
     matchMs = Date.now() - matchT0;
     matchHeaders = headersToObject(matchRes.headers);

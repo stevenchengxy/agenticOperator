@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
+import { useApp } from "@/lib/i18n";
 import { fetchJson } from "@/lib/api/client";
 import { getInngestUrlClient } from "@/lib/inngest-url-client";
 import type { EventInstanceDetail } from "@/app/api/em/event-instances/[id]/route";
@@ -27,6 +28,7 @@ export function InstanceTrailContent({
   eventName: string;
   instanceId: string;
 }) {
+  const { t } = useApp();
   const router = useRouter();
   const [data, setData] = React.useState<EventInstanceDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -43,7 +45,7 @@ export function InstanceTrailContent({
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <span className="text-ink-3 text-[12px]">加载中…</span>
+        <span className="text-ink-3 text-[12px]">{t("evx_loading")}</span>
       </div>
     );
   }
@@ -52,12 +54,12 @@ export function InstanceTrailContent({
       <div className="flex-1 flex items-center justify-center">
         <EmptyState
           icon={<Ic.alert />}
-          title="加载失败"
+          title={t("evx_load_failed")}
           hint={error}
           variant="warn"
           action={
             <Btn size="sm" onClick={() => router.refresh()}>
-              重试
+              {t("evx_retry")}
             </Btn>
           }
         />
@@ -69,11 +71,11 @@ export function InstanceTrailContent({
       <div className="flex-1 flex items-center justify-center">
         <EmptyState
           icon={<Ic.search />}
-          title="找不到此事件实例"
-          hint={`id ${instanceId} 不存在或已超过 EventInstance 保留期`}
+          title={t("evx_instance_not_found")}
+          hint={`id ${instanceId} ${t("evx_instance_not_found_hint")}`}
           action={
             <Link href={`/events?event=${encodeURIComponent(eventName)}`}>
-              <Btn size="sm">返回 {eventName}</Btn>
+              <Btn size="sm">{t("evx_back_to")} {eventName}</Btn>
             </Link>
           }
         />
@@ -83,19 +85,19 @@ export function InstanceTrailContent({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <Header data={data} />
+      <Header data={data} t={t} />
       <div
         className="flex-1 grid min-h-0"
         style={{ gridTemplateColumns: "1fr 360px" }}
       >
-        <Trail data={data} />
-        <Causality data={data} />
+        <Trail data={data} t={t} />
+        <Causality data={data} t={t} />
       </div>
     </div>
   );
 }
 
-function Header({ data }: { data: EventInstanceDetail }) {
+function Header({ data, t }: { data: EventInstanceDetail; t: (k: string) => string }) {
   const ts = new Date(data.ts);
   return (
     <div
@@ -114,13 +116,13 @@ function Header({ data }: { data: EventInstanceDetail }) {
           <span className="mono text-[11.5px] text-ink-3 truncate">
             {data.id.slice(0, 8)}…
           </span>
-          <StatusBadge status={data.status} />
+          <StatusBadge status={data.status} t={t} />
           {data.schemaVersionUsed && (
             <Badge variant="info">v{data.schemaVersionUsed}</Badge>
           )}
         </div>
         <div className="text-[11.5px] text-ink-3 mono">
-          {ts.toLocaleString(undefined, { hour12: false })} · 来源 {data.source}
+          {ts.toLocaleString(undefined, { hour12: false })} · {t("evx_source")} {data.source}
           {data.externalEventId && (
             <>
               {" · "}external{" "}
@@ -131,7 +133,7 @@ function Header({ data }: { data: EventInstanceDetail }) {
       </div>
       <Link href={`/events?subtab=instances&q=${encodeURIComponent(data.name)}`}>
         <Btn size="sm" variant="ghost">
-          <Ic.chev /> 返回列表
+          <Ic.chev /> {t("evx_back_to_list")}
         </Btn>
       </Link>
     </div>
@@ -149,7 +151,7 @@ type Step = {
   detail?: React.ReactNode;
 };
 
-function buildSteps(data: EventInstanceDetail): Step[] {
+function buildSteps(data: EventInstanceDetail, t: (k: string) => string): Step[] {
   const isAccepted = data.status === "accepted";
   const rejectedSchema = data.status === "rejected_schema";
   const rejectedFilter = data.status === "rejected_filter";
@@ -159,19 +161,19 @@ function buildSteps(data: EventInstanceDetail): Step[] {
   // Step 1: filter
   const filterStep: Step = {
     id: "filter",
-    title: "① Filter (gateway 规则)",
+    title: t("evx_step_filter"),
     status: rejectedFilter ? "fail" : "ok",
     detail: rejectedFilter ? (
       <Plain>{data.rejectionReason ?? "—"}</Plain>
     ) : (
-      <Muted>Phase 3 启用真实规则。当前 Phase 1 默认放行所有事件。</Muted>
+      <Muted>{t("evx_step_filter_detail")}</Muted>
     ),
   };
 
   // Step 2: schema validate
   const schemaStep: Step = {
     id: "schema",
-    title: "② Schema 校验",
+    title: t("evx_step_schema"),
     status: rejectedFilter ? "skip" : rejectedSchema ? "fail" : "ok",
     detail: rejectedSchema ? (
       <div>
@@ -189,21 +191,21 @@ function buildSteps(data: EventInstanceDetail): Step[] {
           </ul>
         )}
         {data.triedVersions && data.triedVersions.length > 0 && (
-          <Muted>尝试版本: {data.triedVersions.join(", ")}</Muted>
+          <Muted>{t("evx_tried_versions")}{data.triedVersions.join(", ")}</Muted>
         )}
       </div>
     ) : data.schemaVersionUsed ? (
-      <Muted>通过 schema v{data.schemaVersionUsed}</Muted>
+      <Muted>{t("evx_passed_schema")} v{data.schemaVersionUsed}</Muted>
     ) : null,
   };
 
   // Step 3: dedup
   const dedupStep: Step = {
     id: "dedup",
-    title: "③ Dedup 去重",
+    title: t("evx_step_dedup"),
     status: rejectedSchema || rejectedFilter ? "skip" : duplicate ? "fail" : "ok",
     detail: duplicate ? (
-      <Plain>external_event_id 已存在；静默丢弃（不发 EVENT_REJECTED）</Plain>
+      <Plain>{t("evx_step_dedup_dup")}</Plain>
     ) : (
       <Muted>
         idempotency key ={" "}
@@ -215,7 +217,7 @@ function buildSteps(data: EventInstanceDetail): Step[] {
   // Step 4: persist
   const persistStep: Step = {
     id: "persist",
-    title: "④ 持久化 EventInstance + AuditLog",
+    title: t("evx_step_persist"),
     status:
       rejectedSchema || rejectedFilter
         ? "ok" // Even rejected events get an EventInstance row (but no audit row)
@@ -237,23 +239,23 @@ function buildSteps(data: EventInstanceDetail): Step[] {
         ? "ok" // EVENT_REJECTED was sent; that's how we got a meta_rejection row
         : "skip",
     detail: isAccepted ? (
-      <Muted>已投递到 Inngest 总线，订阅者函数 fan-out</Muted>
+      <Muted>{t("evx_step_send_delivered")}</Muted>
     ) : meta ? (
-      <Muted>这是一条 EVENT_REJECTED meta event，已投递</Muted>
+      <Muted>{t("evx_step_send_meta")}</Muted>
     ) : (
-      <Muted>事件未通过校验，未投递到 Inngest</Muted>
+      <Muted>{t("evx_step_send_skipped")}</Muted>
     ),
   };
 
   return [filterStep, schemaStep, dedupStep, persistStep, sendStep];
 }
 
-function Trail({ data }: { data: EventInstanceDetail }) {
-  const steps = buildSteps(data);
+function Trail({ data, t }: { data: EventInstanceDetail; t: (k: string) => string }) {
+  const steps = buildSteps(data, t);
   return (
     <div className="overflow-auto" style={{ padding: "16px 22px" }}>
-      <div className="text-[12px] font-semibold tracking-tight mb-3 text-ink-1">
-        em.publish 流水
+      <div className="text-[10.5px] uppercase tracking-[0.12em] font-medium mb-3 text-ink-4">
+        {t("evx_publish_pipeline")}
       </div>
       <ol className="flex flex-col gap-2">
         {steps.map((s) => (
@@ -263,8 +265,8 @@ function Trail({ data }: { data: EventInstanceDetail }) {
 
       {data.payloadSummary && (
         <div className="mt-6">
-          <div className="text-[12px] font-semibold tracking-tight mb-2 text-ink-1">
-            Payload 摘要
+          <div className="text-[10.5px] uppercase tracking-[0.12em] font-medium mb-2 text-ink-4">
+            {t("evx_payload_summary_overline")}
           </div>
           <pre
             className="mono text-[10.5px] text-ink-2 bg-panel border border-line rounded-md overflow-auto"
@@ -273,16 +275,16 @@ function Trail({ data }: { data: EventInstanceDetail }) {
             {prettyJson(data.payloadSummary)}
           </pre>
           <Muted className="mt-1">
-            完整原文存于 Inngest（
+            {t("evx_full_payload_in_inngest_pre")}
             <a
               href={`${getInngestUrlClient()}/stream/${encodeURIComponent(data.externalEventId ?? data.id)}`}
               target="_blank"
               rel="noreferrer"
               className="text-ink-3 underline hover:text-ink-1"
             >
-              在 Inngest dashboard 查看
+              {t("evx_view_in_inngest")}
             </a>
-            ）
+            {t("evx_full_payload_in_inngest_post")}
           </Muted>
         </div>
       )}
@@ -319,29 +321,29 @@ function StepRow({ step }: { step: Step }) {
 
 // ── Causality (parent + children + jump-to-correlation) ──────────────────
 
-function Causality({ data }: { data: EventInstanceDetail }) {
+function Causality({ data, t }: { data: EventInstanceDetail; t: (k: string) => string }) {
   return (
     <aside
       className="border-l border-line bg-surface overflow-auto flex flex-col gap-3"
       style={{ padding: 16 }}
     >
-      <div className="text-[12px] font-semibold tracking-tight text-ink-1">
-        因果链
+      <div className="text-[10.5px] uppercase tracking-[0.12em] font-medium text-ink-4">
+        {t("evx_causality_chain")}
       </div>
 
       {/* Parent */}
       <div>
-        <div className="hint mb-1">上游</div>
+        <div className="hint mb-1">{t("evx_upstream")}</div>
         {data.parent ? (
-          <RelLink instance={data.parent} />
+          <RelLink instance={data.parent} t={t} />
         ) : (
-          <Muted>这是因果链的根</Muted>
+          <Muted>{t("evx_causality_root")}</Muted>
         )}
       </div>
 
       {/* Self */}
       <div>
-        <div className="hint mb-1">本事件</div>
+        <div className="hint mb-1">{t("evx_this_event")}</div>
         <div
           className="mono text-[11px] text-ink-1 px-2 py-1.5 border border-line rounded-sm"
           style={{ background: "color-mix(in oklab, var(--c-accent) 5%, transparent)" }}
@@ -352,13 +354,13 @@ function Causality({ data }: { data: EventInstanceDetail }) {
 
       {/* Children */}
       <div>
-        <div className="hint mb-1">下游 {data.children.length > 0 && `(${data.children.length})`}</div>
+        <div className="hint mb-1">{t("evx_downstream")} {data.children.length > 0 && `(${data.children.length})`}</div>
         {data.children.length === 0 ? (
-          <Muted>尚无下游事件</Muted>
+          <Muted>{t("evx_no_downstream")}</Muted>
         ) : (
           <div className="flex flex-col gap-1">
             {data.children.map((c) => (
-              <RelLink key={c.id} instance={c} />
+              <RelLink key={c.id} instance={c} t={t} />
             ))}
           </div>
         )}
@@ -366,13 +368,13 @@ function Causality({ data }: { data: EventInstanceDetail }) {
 
       {/* Jump out */}
       <Muted className="mt-2">
-        想看完整跨系统时间线？
+        {t("evx_want_cross_system_timeline")}
         {data.externalEventId && (
           <Link
             href={`/correlations/${encodeURIComponent(data.externalEventId)}`}
             className="ml-1 text-ink-2 underline hover:text-ink-1 no-underline"
           >
-            打开 /correlations/{data.externalEventId.slice(0, 8)}…
+            {t("evx_open_correlations")}/correlations/{data.externalEventId.slice(0, 8)}…
           </Link>
         )}
       </Muted>
@@ -380,7 +382,7 @@ function Causality({ data }: { data: EventInstanceDetail }) {
   );
 }
 
-function RelLink({ instance }: { instance: { id: string; name: string; status: string } }) {
+function RelLink({ instance, t }: { instance: { id: string; name: string; status: string }; t: (k: string) => string }) {
   const url = `/events/${encodeURIComponent(instance.name)}/instances/${encodeURIComponent(instance.id)}`;
   return (
     <Link
@@ -391,7 +393,7 @@ function RelLink({ instance }: { instance: { id: string; name: string; status: s
         <span className="mono text-[11px] text-ink-1 flex-1 min-w-0 truncate">
           {instance.name}
         </span>
-        <StatusBadge status={instance.status} compact />
+        <StatusBadge status={instance.status} compact t={t} />
       </div>
       <div className="mono text-[10px] text-ink-3 mt-0.5">{instance.id.slice(0, 12)}…</div>
     </Link>
@@ -400,11 +402,11 @@ function RelLink({ instance }: { instance: { id: string; name: string; status: s
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-function StatusBadge({ status, compact }: { status: string; compact?: boolean }) {
+function StatusBadge({ status, compact, t }: { status: string; compact?: boolean; t: (k: string) => string }) {
   const map: Record<string, { variant: "ok" | "warn" | "err" | "info" | "default"; label: string }> = {
     accepted: { variant: "ok", label: "accepted" },
-    rejected_schema: { variant: "err", label: "schema 失败" },
-    rejected_filter: { variant: "warn", label: "filter 拒绝" },
+    rejected_schema: { variant: "err", label: t("evx_status_schema_fail") },
+    rejected_filter: { variant: "warn", label: t("evx_status_filter_reject") },
     duplicate: { variant: "info", label: "duplicate" },
     meta_rejection: { variant: "warn", label: "meta-rejection" },
     em_degraded: { variant: "warn", label: "em degraded" },

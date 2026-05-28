@@ -20,6 +20,45 @@ import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from
 import { LiveAgentPanel } from "./LiveAgentPanel";
 import Link from "next/link";
 
+// Zoom bounds — module-level so the fit helper and the wheel/zoom handlers
+// share one source of truth.
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 3;
+
+// Fit the canvas to the actual node bounding box (+ padding) instead of the raw
+// GRAPH_WIDTH×GRAPH_HEIGHT box. The raw box left a ~100px gap on the left AND
+// clipped the rightmost node (origin x=2230 + its width spilled past
+// GRAPH_WIDTH=2350), so the graph opened off-center with a node cut off. Fitting
+// the real bbox centers the graph and shows every node on first paint. We keep
+// the GRAPH_WIDTH:GRAPH_HEIGHT window aspect that the pan/zoom math relies on.
+function fitViewForNodes(nodes: WorkflowNode[]): { x: number; y: number; scale: number } {
+  const PAD = 90;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    const w = computeNodeWidth(nodeTitleLabel(n));
+    if (n.x < minX) minX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.x + w > maxX) maxX = n.x + w;
+    if (n.y + NODE_HEIGHT > maxY) maxY = n.y + NODE_HEIGHT;
+  }
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, scale: 1 };
+  const bx = minX - PAD;
+  const by = minY - PAD;
+  const bw = maxX - minX + PAD * 2;
+  const bh = maxY - minY + PAD * 2;
+  // The visible window is GRAPH_WIDTH/scale × GRAPH_HEIGHT/scale; pick the scale
+  // that makes it just contain the bbox, then center the window on the bbox.
+  const scale = Math.max(
+    MIN_SCALE,
+    Math.min(MAX_SCALE, Math.min(GRAPH_WIDTH / bw, GRAPH_HEIGHT / bh)),
+  );
+  const winW = GRAPH_WIDTH / scale;
+  const winH = GRAPH_HEIGHT / scale;
+  const cx = bx + bw / 2;
+  const cy = by + bh / 2;
+  return { x: cx - winW / 2, y: cy - winH / 2, scale };
+}
+
 export function WorkflowContent() {
   const { t } = useApp();
   // "trig" matches NODE_LAYOUT[0].id. Previous default "jd" never matched any
@@ -52,13 +91,9 @@ export function WorkflowContent() {
   // ── Canvas pan + zoom ────────────────────────────────────────────────
   // viewBox is derived from `view`: scale shrinks the visible window
   // (zoom in), and (x, y) shifts its top-left corner (pan).
-  const MIN_SCALE = 0.25;
-  const MAX_SCALE = 3;
-  const [view, setView] = React.useState<{ x: number; y: number; scale: number }>({
-    x: 0,
-    y: 0,
-    scale: 1,
-  });
+  const [view, setView] = React.useState<{ x: number; y: number; scale: number }>(
+    () => fitViewForNodes(NODES),
+  );
   const viewRef = React.useRef(view);
   React.useEffect(() => {
     viewRef.current = view;
@@ -173,7 +208,7 @@ export function WorkflowContent() {
     const m = new Map<string, { x: number; y: number }>();
     for (const n of baseNodes) m.set(n.id, { x: n.x, y: n.y });
     setPositions(m);
-    setView({ x: 0, y: 0, scale: 1 });
+    setView(fitViewForNodes(baseNodes));
   }, [baseNodes]);
 
   // SVG-level pointerdown — fires only when the pointer is on empty canvas
@@ -281,8 +316,8 @@ export function WorkflowContent() {
   }, []);
 
   const fitView = React.useCallback(() => {
-    setView({ x: 0, y: 0, scale: 1 });
-  }, []);
+    setView(fitViewForNodes(nodes));
+  }, [nodes]);
 
   const viewBox = `${view.x} ${view.y} ${GRAPH_WIDTH / view.scale} ${GRAPH_HEIGHT / view.scale}`;
 
@@ -362,44 +397,49 @@ export function WorkflowContent() {
   return (
     <div className="flex-1 flex flex-col min-w-0">
       {/* sub-header */}
-      <div className="flex items-center gap-4 border-b border-line bg-surface" style={{ padding: "14px 22px" }}>
-        <div className="flex-1">
+      <div className="flex items-center gap-3 border-b border-line bg-surface" style={{ padding: "14px 22px" }}>
+        <div className="flex-1 min-w-0">
           <div className="text-[15px] font-semibold tracking-tight">{t("wf_title")}</div>
           <div className="text-ink-3 text-[12px] mt-px">{t("wf_sub")}</div>
         </div>
-        <HeaderHealthSummary summary={summary} />
-        <Badge variant="info">{WORKFLOW_META.version} · {WORKFLOW_META.status}</Badge>
-        <div className="w-px h-5 bg-line" />
-        <Link
-          href="/monitor"
-          className="text-[12px] text-accent hover:underline flex items-center gap-1"
-          title="切到运行监控 dashboard 看 agent 实时状态 / runs / DLQ"
-        >
-          <Ic.pulse /> 实时监控
-        </Link>
-        <div className="text-[11px] text-ink-3 mono">
-          <span className="text-ok font-semibold">{liveOverlay.byWsId.size}</span> 已注册 ·{" "}
-          <span className="text-ink-4">{nodes.filter(n => n.kind === "agent").length - liveOverlay.byWsId.size}</span> 蓝图
+        {/* Status cluster — health + version + registration counts read as one block */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <HeaderHealthSummary summary={summary} />
+          <Badge variant="info">{WORKFLOW_META.version} · {WORKFLOW_META.status}</Badge>
+          <Link
+            href="/monitor"
+            className="text-[12px] text-accent hover:underline flex items-center gap-1"
+            title={t("wfx_liveMonitorTip")}
+          >
+            <Ic.pulse /> {t("wfx_liveMonitor")}
+          </Link>
+          <div className="text-[11px] text-ink-3 mono">
+            <span className="text-ok font-semibold">{liveOverlay.byWsId.size}</span> {t("wfx_registered")} ·{" "}
+            <span className="text-ink-4">{nodes.filter(n => n.kind === "agent" && !liveOverlay.byWsId.get(n.wsId)).length}</span> {t("wfx_blueprint")}
+          </div>
         </div>
-        <div className="w-px h-5 bg-line" />
+        <div className="w-px h-5 bg-line shrink-0" />
         <AgenticToggle />
-        <div className="w-px h-5 bg-line" />
-        <Btn size="sm"><Ic.clock /> 版本历史</Btn>
-        <Btn size="sm"><Ic.play /> 试运行</Btn>
-        <Btn variant="primary" size="sm">发布</Btn>
+        <div className="w-px h-5 bg-line shrink-0" />
+        {/* Action cluster — secondary actions grouped tight, 发布 is the lone primary */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Btn size="sm"><Ic.clock /> {t("wfx_versionHistory")}</Btn>
+          <Btn size="sm"><Ic.play /> {t("wfx_dryRun")}</Btn>
+          <Btn variant="primary" size="sm">{t("wfx_publish")}</Btn>
+        </div>
       </div>
 
       {/* work area */}
       <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: "200px 1fr 300px" }}>
         {/* palette */}
         <aside className="border-r border-line bg-surface overflow-auto">
-          <PaletteSection title="触发 · TRIGGERS" items={[
-            { icon: "bolt", label: "客户 RMS 同步 / SCHEDULED_SYNC" },
-            { icon: "plug", label: "渠道 Webhook (新简历)" },
-            { icon: "calendar", label: "定时重扫" },
-            { icon: "mail", label: "HSM 手动发起" },
+          <PaletteSection title={t("wfx_paletteTriggers")} items={[
+            { icon: "bolt", label: t("wfx_trigRmsSync") },
+            { icon: "plug", label: t("wfx_trigWebhook") },
+            { icon: "calendar", label: t("wfx_trigRescan") },
+            { icon: "mail", label: t("wfx_trigHsmManual") },
           ]} />
-          <PaletteSection title="智能体 · AGENTS" items={[
+          <PaletteSection title={t("wfx_paletteAgents")} items={[
             { icon: "db", label: "ReqSync" },
             { icon: "sparkle", label: "ReqAnalyzer" },
             { icon: "sparkle", label: agentDisplayName("JDGenerator") },
@@ -413,18 +453,18 @@ export function WorkflowContent() {
             { icon: "book", label: "PackageBuilder" },
             { icon: "mail", label: "PortalSubmitter" },
           ]} />
-          <PaletteSection title="控制流 · LOGIC" items={[
-            { icon: "branch", label: "分支 (匹配 / 完整性)" },
-            { icon: "clock", label: "等待 / 重试" },
-            { icon: "user", label: "HSM 审批" },
-            { icon: "shield", label: "合规 / 黑名单护栏" },
-            { icon: "db", label: "分布式锁" },
+          <PaletteSection title={t("wfx_paletteLogic")} items={[
+            { icon: "branch", label: t("wfx_logicBranch") },
+            { icon: "clock", label: t("wfx_logicWaitRetry") },
+            { icon: "user", label: t("wfx_logicHsmApproval") },
+            { icon: "shield", label: t("wfx_logicGuardrail") },
+            { icon: "db", label: t("wfx_logicDistLock") },
           ]} />
-          <PaletteSection title="输出 · OUTPUT" items={[
-            { icon: "plug", label: "渠道发布 API" },
-            { icon: "mail", label: "客户门户提交" },
-            { icon: "db", label: "写入知识库" },
-            { icon: "check", label: "完成 Done" },
+          <PaletteSection title={t("wfx_paletteOutput")} items={[
+            { icon: "plug", label: t("wfx_outChannelApi") },
+            { icon: "mail", label: t("wfx_outPortalSubmit") },
+            { icon: "db", label: t("wfx_outWriteKb") },
+            { icon: "check", label: t("wfx_outDone") },
           ]} />
         </aside>
 
@@ -596,10 +636,10 @@ export function WorkflowContent() {
               size="sm"
               variant="ghost"
               style={{ height: 22, padding: "0 8px", fontSize: 11 }}
-              title="重置节点布局到默认位置"
+              title={t("wfx_resetLayoutTip")}
               onClick={resetLayout}
             >
-              重置布局
+              {t("wfx_resetLayout")}
             </Btn>
           </div>
           <div className="absolute bottom-3 left-3 flex gap-1.5 items-center bg-surface border border-line rounded-md mono text-[11px] text-ink-3 shadow-sh-1" style={{ padding: "3px 8px" }}>
@@ -608,7 +648,7 @@ export function WorkflowContent() {
               variant="ghost"
               style={{ height: 22, width: 22, padding: 0 }}
               onClick={() => zoomBy(1 / 1.2)}
-              title="缩小"
+              title={t("wfx_zoomOut")}
             >
               −
             </Btn>
@@ -620,7 +660,7 @@ export function WorkflowContent() {
               variant="ghost"
               style={{ height: 22, width: 22, padding: 0 }}
               onClick={() => zoomBy(1.2)}
-              title="放大"
+              title={t("wfx_zoomIn")}
             >
               +
             </Btn>
@@ -630,16 +670,16 @@ export function WorkflowContent() {
               onClick={fitView}
               className="bg-transparent border-0 cursor-pointer text-ink-3 hover:text-ink-1"
               style={{ fontFamily: "inherit", fontSize: "inherit", padding: 0 }}
-              title="重置视图"
+              title={t("wfx_resetView")}
             >
               fit
             </button>
           </div>
           <div className="absolute bottom-3 right-3 bg-surface border border-line rounded-md text-[11px] text-ink-3 shadow-sh-1 flex gap-2.5 items-center" style={{ padding: "6px 10px" }}>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent-bg border border-accent-line" /> 触发</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-white border border-line-strong" /> 智能体</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:var(--c-warn-bg)] border border-[color:color-mix(in_oklab,var(--c-warn)_40%,transparent)]" /> 人工</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:var(--c-ok-bg)] border border-[color:color-mix(in_oklab,var(--c-ok)_30%,transparent)]" /> 护栏</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent-bg border border-accent-line" /> {t("wfx_legendTrigger")}</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-white border border-line-strong" /> {t("wfx_legendAgent")}</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:var(--c-warn-bg)] border border-[color:color-mix(in_oklab,var(--c-warn)_40%,transparent)]" /> {t("wfx_legendHuman")}</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:var(--c-ok-bg)] border border-[color:color-mix(in_oklab,var(--c-ok)_30%,transparent)]" /> {t("wfx_legendGuard")}</span>
           </div>
         </div>
 
@@ -758,6 +798,7 @@ function WFNode({
   dragging: boolean;
   onPointerDown: (e: React.PointerEvent<SVGGElement>) => void;
 }) {
+  const { t } = useApp();
   const w = width;
   const h = NODE_HEIGHT;
   const selected = highlight === "selected";
@@ -911,7 +952,7 @@ function WFNode({
           style={{ fontFamily: "var(--f-sans)" }}
           pointerEvents="none"
         >
-          蓝图
+          {t("wfx_blueprint")}
         </text>
       )}
 
@@ -935,18 +976,19 @@ function WFNode({
 // to each stage's role (intake / build / process / match / interview /
 // package / submit). Soft colors — should be felt, not seen.
 
-const STAGE_BANDS: Array<{ x: number; w: number; label: string; tint: string }> = [
-  { x: 0,    w: 200,  label: "触发",   tint: "color-mix(in oklab, var(--c-accent) 4%, transparent)" },
-  { x: 200,  w: 280,  label: "需求",   tint: "color-mix(in oklab, var(--c-ink-3) 3%, transparent)" },
-  { x: 480,  w: 320,  label: "JD",     tint: "color-mix(in oklab, oklch(0.7 0.12 80) 5%, transparent)" },
-  { x: 800,  w: 320,  label: "简历",   tint: "color-mix(in oklab, var(--c-info) 4%, transparent)" },
-  { x: 1120, w: 280,  label: "匹配",   tint: "color-mix(in oklab, var(--c-ok) 5%, transparent)" },
-  { x: 1400, w: 320,  label: "面试评估", tint: "color-mix(in oklab, var(--c-warn) 4%, transparent)" },
-  { x: 1720, w: 320,  label: "推荐包", tint: "color-mix(in oklab, var(--c-ink-3) 3%, transparent)" },
-  { x: 2040, w: 160,  label: "提交",   tint: "color-mix(in oklab, var(--c-accent) 4%, transparent)" },
+const STAGE_BANDS: Array<{ x: number; w: number; labelKey: string; tint: string }> = [
+  { x: 0,    w: 200,  labelKey: "wfx_stageTrigger",   tint: "color-mix(in oklab, var(--c-accent) 4%, transparent)" },
+  { x: 200,  w: 280,  labelKey: "wfx_stageRequirement",   tint: "color-mix(in oklab, var(--c-ink-3) 3%, transparent)" },
+  { x: 480,  w: 320,  labelKey: "wfx_stageJd",     tint: "color-mix(in oklab, oklch(0.7 0.12 80) 5%, transparent)" },
+  { x: 800,  w: 320,  labelKey: "wfx_stageResume",   tint: "color-mix(in oklab, var(--c-info) 4%, transparent)" },
+  { x: 1120, w: 280,  labelKey: "wfx_stageMatch",   tint: "color-mix(in oklab, var(--c-ok) 5%, transparent)" },
+  { x: 1400, w: 320,  labelKey: "wfx_stageInterview", tint: "color-mix(in oklab, var(--c-warn) 4%, transparent)" },
+  { x: 1720, w: 320,  labelKey: "wfx_stagePackage", tint: "color-mix(in oklab, var(--c-ink-3) 3%, transparent)" },
+  { x: 2040, w: 160,  labelKey: "wfx_stageSubmit",   tint: "color-mix(in oklab, var(--c-accent) 4%, transparent)" },
 ];
 
 function StageBands({ width: _width, height }: { width: number; height: number }) {
+  const { t } = useApp();
   // pointer-events="none" — bands are pure decoration; they must NOT capture
   // clicks intended for the node groups behind them in the DOM (SVG renders
   // bands before nodes, but a rect spanning the whole canvas would otherwise
@@ -962,7 +1004,7 @@ function StageBands({ width: _width, height }: { width: number; height: number }
             fill="var(--c-ink-4)"
             style={{ fontFamily: "var(--f-sans)", letterSpacing: "0.04em" }}
           >
-            {b.label}
+            {t(b.labelKey)}
           </text>
           {i > 0 && (
             <line
@@ -1012,7 +1054,7 @@ function Inspector({
                 <span className="text-[9px] mono font-bold px-1.5 py-0.5 rounded bg-warn-bg text-warn">⏸ PAUSED</span>
               )}
               {isBlueprintStub && (
-                <span className="text-[9px] mono font-medium px-1.5 py-0.5 rounded border border-line text-ink-4">蓝图(未部署)</span>
+                <span className="text-[9px] mono font-medium px-1.5 py-0.5 rounded border border-line text-ink-4">{t("wfx_blueprintNotDeployed")}</span>
               )}
             </div>
             <div className="text-ink-3 text-[11px]">{node.sub}</div>
@@ -1028,14 +1070,14 @@ function Inspector({
       {isBlueprintStub && (
         <div className="border-b border-line mx-3 my-3 p-3 rounded-md bg-panel">
           <div className="text-[11px] text-ink-3 leading-relaxed">
-            ⚠ 此节点是 <strong>蓝图设计</strong> — 实际 Inngest 上 <strong>未部署</strong>。
+            ⚠ {t("wfx_bpWarn1")} <strong>{t("wfx_bpWarnBlueprint")}</strong> {t("wfx_bpWarn2")} <strong>{t("wfx_bpWarnNotDeployed")}</strong>{t("wfx_bpWarnPeriod")}
             <br />
-            它定义了完整工作流的位置 / 触发事件 / 下游连接,作为 v0_1_010 实施路线图的参考。
+            {t("wfx_bpWarnDefines")}
             <br />
             <br />
-            当前部署的实际 agent:Create JD Agent · Resume Parser Agent · Match Resume Agent · Rule Check Agent。
+            {t("wfx_bpWarnDeployedLabel")}Create JD Agent · Resume Parser Agent · Match Resume Agent · Rule Check Agent。
             <Link href="/workflow-agents" className="text-accent hover:underline ml-1">
-              → 完整 list 视图
+              → {t("wfx_bpWarnFullList")}
             </Link>
           </div>
         </div>
@@ -1061,6 +1103,7 @@ function Inspector({
 // canonical workflow JSON. Falls back gracefully when the node is the
 // synthetic trigger (wsId='trig').
 function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
+  const { t } = useApp();
   const canonical = CANONICAL_WORKFLOW.find((n) => n.id === node.wsId);
 
   // Trigger node — no canonical entry; render a friendly summary so the panel
@@ -1068,9 +1111,9 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
   if (!canonical) {
     return (
       <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-        <SectionLabel>说明</SectionLabel>
+        <SectionLabel>{t("wfx_secNote")}</SectionLabel>
         <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.6 }}>
-          {node.sub || "外部触发点 · 工作流的入口"}
+          {node.sub || t("wfx_externalTriggerEntry")}
         </div>
       </div>
     );
@@ -1080,7 +1123,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
     <>
       {/* Description */}
       <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-        <SectionLabel>描述</SectionLabel>
+        <SectionLabel>{t("wfx_secDescription")}</SectionLabel>
         <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.6 }}>
           {canonical.description}
         </div>
@@ -1089,7 +1132,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
       {/* Actor */}
       {canonical.actor && canonical.actor.length > 0 && (
         <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-          <SectionLabel>执行者</SectionLabel>
+          <SectionLabel>{t("wfx_secActor")}</SectionLabel>
           <div className="flex flex-wrap gap-1.5">
             {canonical.actor.map((a) => (
               <span
@@ -1097,7 +1140,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
                 className="inline-flex items-center rounded border border-line bg-surface text-ink-2"
                 style={{ padding: "2px 8px", fontSize: 11.5 }}
               >
-                {a === "Agent" ? "Agent 自动" : a === "Human" ? "Human 人工" : a}
+                {a === "Agent" ? t("wfx_actorAgent") : a === "Human" ? t("wfx_actorHuman") : a}
               </span>
             ))}
           </div>
@@ -1107,7 +1150,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
       {/* Trigger events (what fires this step) */}
       {canonical.trigger && canonical.trigger.length > 0 && (
         <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-          <SectionLabel>触发事件 ({canonical.trigger.length})</SectionLabel>
+          <SectionLabel>{t("wfx_secTriggerEvents")} ({canonical.trigger.length})</SectionLabel>
           <div className="flex flex-col gap-1">
             {canonical.trigger.map((ev) => (
               <Link
@@ -1132,7 +1175,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
       {/* Actions (ordered step actions) */}
       {canonical.actions && canonical.actions.length > 0 && (
         <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-          <SectionLabel>步骤动作 ({canonical.actions.length})</SectionLabel>
+          <SectionLabel>{t("wfx_secStepActions")} ({canonical.actions.length})</SectionLabel>
           <div className="flex flex-col gap-2.5">
             {canonical.actions.map((act) => (
               <div key={act.order} className="flex gap-2.5">
@@ -1160,7 +1203,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
                   </div>
                   {act.condition && (
                     <div className="text-ink-3 mt-1" style={{ fontSize: 11, lineHeight: 1.5 }}>
-                      <span className="text-ink-4">条件:</span> {act.condition}
+                      <span className="text-ink-4">{t("wfx_conditionLabel")}</span> {act.condition}
                     </div>
                   )}
                   <div className="text-ink-2 mt-1" style={{ fontSize: 11.5, lineHeight: 1.55 }}>
@@ -1176,7 +1219,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
       {/* Triggered events (emitted) */}
       {canonical.triggered_event && canonical.triggered_event.length > 0 && (
         <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-          <SectionLabel>发出事件 ({canonical.triggered_event.length})</SectionLabel>
+          <SectionLabel>{t("wfx_secEmittedEvents")} ({canonical.triggered_event.length})</SectionLabel>
           <div className="flex flex-col gap-1">
             {canonical.triggered_event.map((ev) => (
               <Link
@@ -1226,6 +1269,7 @@ function AgentHealthPanel({
   short: string;
   health: AgentHealth | null;
 }) {
+  const { t } = useApp();
   const tone = health ? HEALTH_TONE[health.status] : null;
   const last = health?.lastActivityAt
     ? new Date(health.lastActivityAt).toLocaleTimeString(undefined, { hour12: false })
@@ -1235,7 +1279,7 @@ function AgentHealthPanel({
     <div className="border-b border-line" style={{ padding: "10px 16px" }}>
       <div className="flex items-center mb-2 gap-2">
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold flex-1">
-          实时健康
+          {t("wfx_liveHealth")}
         </div>
         {tone && (
           <span
@@ -1255,12 +1299,12 @@ function AgentHealthPanel({
       </div>
 
       {!health ? (
-        <div className="text-[11px] text-ink-3">加载 health 中…</div>
+        <div className="text-[11px] text-ink-3">{t("wfx_loadingHealth")}</div>
       ) : (
         <>
           <div className="text-[10.5px] text-ink-3 mb-2">
-            过去 {Math.round((health.windowMs ?? 300_000) / 60_000)} 分钟窗口 ·
-            {last ? ` 最近 ${last}` : " 无活动"}
+            {t("wfx_pastWindowPrefix")} {Math.round((health.windowMs ?? 300_000) / 60_000)} {t("wfx_minuteWindow")} ·
+            {last ? ` ${t("wfx_recentLabel")} ${last}` : ` ${t("wfx_noActivity")}`}
           </div>
           <div className="grid gap-1.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <HealthStat label="started" value={health.counts.started} />
@@ -1280,7 +1324,7 @@ function AgentHealthPanel({
           </div>
           <div className="mono text-[10.5px] text-ink-3 mt-2">
             error rate · {(health.errorRate * 100).toFixed(1)}%
-            {health.hasRunningStep && " · 有进行中的 step"}
+            {health.hasRunningStep && ` · ${t("wfx_hasRunningStep")}`}
           </div>
         </>
       )}
@@ -1329,11 +1373,12 @@ function HeaderHealthSummary({
 }: {
   summary: { running: number; healthy: number; degraded: number; failed: number; idle: number };
 }) {
+  const { t } = useApp();
   const total = summary.running + summary.healthy + summary.degraded + summary.failed + summary.idle;
   if (total === 0) {
     return (
       <Badge variant="info" dot>
-        加载 agent health…
+        {t("wfx_loadingAgentHealth")}
       </Badge>
     );
   }
@@ -1367,6 +1412,7 @@ function HeaderHealthSummary({
 }
 
 function AgentExplainPanel({ short }: { short: string }) {
+  const { t } = useApp();
   const fn = byShortFunction(short);
   const [resp, setResp] = React.useState<ExplainResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -1399,11 +1445,11 @@ function AgentExplainPanel({ short }: { short: string }) {
     <div className="border-b border-line" style={{ padding: "10px 16px" }}>
       <div className="flex items-center mb-2">
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold flex-1">
-          AI 解读
+          {t("wfx_aiExplain")}
         </div>
         {resp && (
           <Badge variant={resp.source === "llm" ? "ok" : "info"}>
-            {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : "fallback (无网关)"}
+            {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : t("wfx_fallbackNoGateway")}
           </Badge>
         )}
       </div>
@@ -1412,20 +1458,20 @@ function AgentExplainPanel({ short }: { short: string }) {
           UI even before the LLM call returns. */}
       <div className="text-[12.5px] text-ink-1 leading-relaxed mb-2">{fn.summary}</div>
       <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "1fr" }}>
-        <ExplainBlock title="典型操作" items={fn.operations} />
-        <ExplainBlock title="调用工具" items={fn.tools} />
+        <ExplainBlock title={t("wfx_typicalOps")} items={fn.operations} />
+        <ExplainBlock title={t("wfx_calledTools")} items={fn.tools} />
         {fn.failureModes && fn.failureModes.length > 0 && (
-          <ExplainBlock title="常见失败模式" items={fn.failureModes} muted />
+          <ExplainBlock title={t("wfx_commonFailures")} items={fn.failureModes} muted />
         )}
       </div>
 
       {!resp && !loading && (
         <Btn size="sm" onClick={fetchExplain} variant="default">
-          <Ic.sparkle /> 让 AI 详细解读
+          <Ic.sparkle /> {t("wfx_letAiExplain")}
         </Btn>
       )}
       {loading && (
-        <div className="text-[11px] text-ink-3">AI 正在生成解读…</div>
+        <div className="text-[11px] text-ink-3">{t("wfx_aiGenerating")}</div>
       )}
       {err && (
         <div className="text-[11px]" style={{ color: "var(--c-warn)" }}>
@@ -1448,6 +1494,7 @@ function AgentExplainPanel({ short }: { short: string }) {
 // Inspector — `compact` mode keeps it usable in the narrow right rail.
 // Auto-polls every 4s; toolbar lets the user pause and search.
 function AgentLogsPanel({ short }: { short: string }) {
+  const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   return (
     <div className="border-b border-line" style={{ padding: "10px 16px" }}>
@@ -1457,7 +1504,7 @@ function AgentLogsPanel({ short }: { short: string }) {
         style={{ padding: 0 }}
       >
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold flex-1 text-left">
-          运行日志 · 跨 run
+          {t("wfx_runLogsAcrossRun")}
         </div>
         <span className="mono text-[10px] text-ink-3">{open ? "▾" : "▸"}</span>
       </button>
@@ -1472,7 +1519,7 @@ function AgentLogsPanel({ short }: { short: string }) {
             hideAgent
             compact
             pollIntervalMs={4000}
-            emptyHint={`${short} 还没有写入 AgentActivity 行。日志契约：每个 agent 在做有意义的事时（开始/完成 step、调用工具、决策、异常）应写一条 AgentActivity，rumtime 才能在这里看到。`}
+            emptyHint={`${short} ${t("wfx_logEmptyHint")}`}
           />
         </div>
       )}

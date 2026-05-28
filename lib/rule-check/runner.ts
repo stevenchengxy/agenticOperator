@@ -517,6 +517,8 @@ export async function runRuleCheck(
       llm_completion_tokens: llmResult.usage?.completionTokens,
       rule_source: sourceResult.source,
       llm_finish_reason: llmResult.finishReason,
+      // 解析好的可读客户名 — 透传给 agent 持久化进 audit 行(读时不再实时查 partner-pg)。
+      client_name_resolved: sourceResult.client_name_resolved,
       // 2026-05-20: surface the prompts + raw response so the /rule-check
       // audit UI's User Prompt / LLM Response / Rule Flags tabs have data.
       user_prompt: userPrompt,

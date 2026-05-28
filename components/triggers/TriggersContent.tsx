@@ -41,8 +41,8 @@ export function TriggersContent() {
             {partial && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
           </div>
           <div className="text-ink-3 text-[12px] mt-px">
-            Cron {counts.cron} · Webhook {counts.webhook} · Upstream {counts.upstream} · 24h 触发{" "}
-            {fire24h.toLocaleString()} · 错 {err24h}
+            Cron {counts.cron} · Webhook {counts.webhook} · Upstream {counts.upstream} · {t("trx_24h_fires")}{" "}
+            {fire24h.toLocaleString()} · {t("trx_24h_errors")} {err24h}
           </div>
         </div>
       </div>
@@ -73,7 +73,7 @@ export function TriggersContent() {
               <tr>
                 <th>name</th>
                 <th>{t("triggers_col_emits")}</th>
-                <th>{tab === "cron" ? t("triggers_col_schedule") : tab === "webhook" ? t("triggers_col_endpoint") : "上游事件"}</th>
+                <th>{tab === "cron" ? t("triggers_col_schedule") : tab === "webhook" ? t("triggers_col_endpoint") : t("trx_col_upstream")}</th>
                 <th>{t("triggers_col_last")}</th>
                 {tab === "cron" && <th>{t("triggers_col_next")}</th>}
                 <th>{t("triggers_col_errors")}</th>
@@ -83,7 +83,7 @@ export function TriggersContent() {
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="text-ink-3 text-[12px] text-center" style={{ padding: 24 }}>
-                    {triggers === null ? "加载中…" : "无数据"}
+                    {triggers === null ? t("trx_loading") : t("trx_no_data")}
                   </td>
                 </tr>
               ) : (

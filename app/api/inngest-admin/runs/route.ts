@@ -2,7 +2,7 @@
 // → list recent runs (optionally filtered to one function slug).
 
 import { NextResponse } from 'next/server';
-import { listRecentRuns } from '@/lib/inngest-admin-client';
+import { listRecentRuns } from '@/lib/inngest-source';
 import { getRunTokenUsage } from '@/lib/monitor/run-token-usage';
 
 export const dynamic = 'force-dynamic';

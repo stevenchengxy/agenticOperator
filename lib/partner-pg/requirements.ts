@@ -57,3 +57,33 @@ export async function getRequirementDetail(
     specification,
   };
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// requirement_clarification_record — HSM 录入的需求澄清内容
+// ──────────────────────────────────────────────────────────────────────
+
+/** 一条已录入的需求澄清记录(partner 表 requirement_clarification_record)。 */
+export type RequirementClarificationRecord = {
+  clarified_at: Date | string | null;
+  content: string;
+  clarifier_name: string | null;
+  client_clarifier_name: string | null;
+  clarification_type: string | null;
+};
+
+/**
+ * 取某需求已录入的全部澄清记录,按澄清时间正序。
+ * 澄清是 JD 生成的增强信息(非关键路径),调用方应容错处理(失败回退空数组)。
+ */
+export async function getClarificationRecords(
+  jobRequisitionId: string,
+): Promise<RequirementClarificationRecord[]> {
+  const sql = `
+    SELECT clarified_at, content, clarifier_name, client_clarifier_name, clarification_type
+    FROM requirement_clarification_record
+    WHERE job_requisition_id = $1
+    ORDER BY clarified_at ASC
+  `;
+  const result = await query<RequirementClarificationRecord>(sql, [jobRequisitionId]);
+  return result.rows.filter((r) => typeof r.content === 'string' && r.content.trim().length > 0);
+}

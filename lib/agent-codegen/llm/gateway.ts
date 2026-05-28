@@ -41,7 +41,7 @@ export function pickCodegenGateway(): GatewayConfig {
 }
 
 export function makeClient(g: GatewayConfig): OpenAI {
-  return new OpenAI({ baseURL: g.baseURL, apiKey: g.apiKey });
+  return new OpenAI({ baseURL: g.baseURL, apiKey: g.apiKey, timeout: 300_000 });
 }
 
 // PromptGen prefers a stronger model than codegen (synthesis benefits from

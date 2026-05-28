@@ -125,7 +125,7 @@ export async function chatComplete(opts: {
   extraBody?: Record<string, unknown>;
 }): Promise<ChatCompleteResult> {
   const cfg = pickGateway();
-  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
   const modelUsed = opts.model || cfg.model;
   const toolLabel = opts.toolName ?? `LLM.${modelUsed}`;
   const started = Date.now();

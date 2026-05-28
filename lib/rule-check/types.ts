@@ -149,6 +149,9 @@ export type MatchResumeCheckResult = {
     llm_prompt_tokens?: number;
     llm_completion_tokens?: number;
     rule_source: 'ontology-api' | 'json-fallback';
+    /** Readable client name resolved during rule fetch (partner-pg / ontology).
+     *  Persisted into the audit row so reads don't re-query partner-pg. */
+    client_name_resolved?: string | null;
     fail_reason?:
       | 'llm-call-error'
       | 'ontology-graph-unavailable'

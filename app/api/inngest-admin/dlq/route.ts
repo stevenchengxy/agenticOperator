@@ -6,7 +6,7 @@
 // so an operator can inspect + retry.
 
 import { NextResponse } from 'next/server';
-import { listRecentRuns } from '@/lib/inngest-admin-client';
+import { listRecentRuns } from '@/lib/inngest-source';
 
 export const dynamic = 'force-dynamic';
 

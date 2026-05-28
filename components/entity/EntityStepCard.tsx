@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Badge } from "@/components/shared/atoms";
 import type { EntityType } from "@/lib/entity-types";
 import type { JourneyActivity } from "@/app/api/entities/[type]/[id]/journey/route";
@@ -22,6 +23,7 @@ export function EntityStepCard({
   density: Density;
   highlightEntity: { type: EntityType; id: string };
 }) {
+  const { t } = useApp();
   const variant = classify(activity.type);
   const [open, setOpen] = React.useState(density === "full");
 
@@ -86,7 +88,7 @@ export function EntityStepCard({
           <span className="mono text-[10px] text-ink-4 flex-shrink-0">{dur}</span>
         )}
         {isThisEntity && (
-          <Badge variant="info" className="text-[9.5px]">关联</Badge>
+          <Badge variant="info" className="text-[9.5px]">{t("enx_related")}</Badge>
         )}
         <span className="mono text-[10px] text-ink-4 w-3 text-center">
           {open ? "▾" : "▸"}

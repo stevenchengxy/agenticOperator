@@ -8,7 +8,7 @@ import {
   listFunctions,
   listRunsWithEvents,
   groupRunsByFlow,
-} from '@/lib/inngest-admin-client';
+} from '@/lib/inngest-source';
 import { prisma } from '@/server/db';
 
 export const dynamic = 'force-dynamic';

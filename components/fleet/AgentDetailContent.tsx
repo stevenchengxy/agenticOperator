@@ -54,26 +54,31 @@ const TAB_DEFS = [
 ] as const;
 type TabId = typeof TAB_DEFS[number]["id"];
 
-const STAGE_ZH: Record<string, string> = {
-  system: "系统",
-  requirement: "需求",
-  jd: "JD",
-  resume: "简历",
-  match: "匹配",
-  interview: "面试",
-  eval: "评估",
-  package: "推荐包",
-  submit: "提交",
+const STAGE_KEYS: Record<string, string> = {
+  system: "flx_stage_system",
+  requirement: "flx_stage_requirement",
+  jd: "flx_stage_jd",
+  resume: "flx_stage_resume",
+  match: "flx_stage_match",
+  interview: "flx_stage_interview",
+  eval: "flx_stage_eval",
+  package: "flx_stage_package",
+  submit: "flx_stage_submit",
 };
+
+function stageLabel(stage: string, t: (k: string) => string): string {
+  const k = STAGE_KEYS[stage];
+  return k ? t(k) : stage;
+}
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-function relTime(iso: string | null | undefined): string {
+function relTime(iso: string | null | undefined, t: (k: string) => string): string {
   if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diffSec = Math.max(0, (Date.now() - t) / 1000);
-  if (diffSec < 60) return "刚刚";
+  const ms = new Date(iso).getTime();
+  if (Number.isNaN(ms)) return "—";
+  const diffSec = Math.max(0, (Date.now() - ms) / 1000);
+  if (diffSec < 60) return t("flx_just_now");
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
   return `${Math.floor(diffSec / 86400)}d`;
@@ -168,11 +173,11 @@ export function AgentDetailContent({ short }: { short: string }) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-16">
         <EmptyState
-          title="找不到这个智能体"
-          hint={`Short code "${short}" 不在当前舰队列表里。`}
+          title={t("flx_agent_not_found")}
+          hint={`Short code "${short}" ${t("flx_agent_not_found_hint")}`}
           action={
             <Link href="/fleet">
-              <Btn size="sm" variant="primary">返回舰队</Btn>
+              <Btn size="sm" variant="primary">{t("flx_back_to_fleet")}</Btn>
             </Link>
           }
         />
@@ -183,7 +188,7 @@ export function AgentDetailContent({ short }: { short: string }) {
   if (!agent) {
     return (
       <div className="flex-1 flex items-center justify-center p-16 text-ink-3 text-[13px]">
-        加载中…
+        {t("flx_loading")}
       </div>
     );
   }
@@ -201,19 +206,19 @@ export function AgentDetailContent({ short }: { short: string }) {
   );
 }
 
-function LiveIndicator({ lastRefresh }: { lastRefresh: string | null }) {
+function LiveIndicator({ lastRefresh, t }: { lastRefresh: string | null; t: (k: string) => string }) {
   const live = !!lastRefresh;
   return (
     <span
       className="flex items-center gap-1.5 text-ink-3"
-      title={live ? `数据来自 Inngest · 最后刷新 ${lastRefresh}` : "正在连接 Inngest…"}
+      title={live ? `${t("flx_data_from_inngest")} · ${t("flx_last_refresh")} ${lastRefresh}` : t("flx_connecting_inngest")}
       style={{ fontSize: 11.5 }}
     >
       <span
         className={live ? "rounded-full anim-pulse" : "rounded-full"}
         style={{ width: 6, height: 6, background: live ? "var(--c-ok)" : "var(--c-ink-4)" }}
       />
-      {live ? "实时" : "连接中"}
+      {live ? t("flx_live") : t("flx_connecting")}
     </span>
   );
 }
@@ -251,10 +256,10 @@ function DetailHeader({ agent, t, onTogglePause, lastRefresh }: { agent: DetailR
           <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5 }}>{t(agent.displayName)}</div>
           <div className="mt-3 flex items-center gap-x-5 gap-y-1 flex-wrap text-ink-3" style={{ fontSize: 12.5 }}>
             <MetaItem label={t("ad_meta_owner")} value={agent.ownerTeam} />
-            <MetaItem label="阶段" value={STAGE_ZH[agent.stage] ?? agent.stage} />
+            <MetaItem label={t("flx_meta_stage")} value={stageLabel(agent.stage, t)} />
             <MetaItem label={t("ad_meta_version")} value={agent.version} />
             {!stub && agent.latestStartedAt && (
-              <MetaItem label="最近活动" value={relTime(agent.latestStartedAt)} />
+              <MetaItem label={t("flx_meta_last_active")} value={relTime(agent.latestStartedAt, t)} />
             )}
           </div>
           {stub && (
@@ -268,14 +273,14 @@ function DetailHeader({ agent, t, onTogglePause, lastRefresh }: { agent: DetailR
                 borderRadius: 8,
               }}
             >
-              这个 agent 尚未上线——工作流蓝图里有占位,但还没注册为 Inngest function。所以没有运行历史 · 告警 · 审计等数据。
+              {t("flx_stub_banner")}
             </div>
           )}
         </div>
         <div className="flex items-center gap-3 shrink-0 mt-2">
-          {!stub && <LiveIndicator lastRefresh={lastRefresh} />}
+          {!stub && <LiveIndicator lastRefresh={lastRefresh} t={t} />}
           {!stub && agent.slug && (
-            <PauseResumeButton paused={agent.paused} onClick={onTogglePause} />
+            <PauseResumeButton paused={agent.paused} onClick={onTogglePause} t={t} />
           )}
           <ManageMenu t={t} stub={stub} />
         </div>
@@ -284,7 +289,7 @@ function DetailHeader({ agent, t, onTogglePause, lastRefresh }: { agent: DetailR
   );
 }
 
-function PauseResumeButton({ paused, onClick }: { paused: boolean; onClick: () => void }) {
+function PauseResumeButton({ paused, onClick, t }: { paused: boolean; onClick: () => void; t: (k: string) => string }) {
   return (
     <button
       onClick={onClick}
@@ -299,7 +304,7 @@ function PauseResumeButton({ paused, onClick }: { paused: boolean; onClick: () =
       }}
     >
       {paused ? <Ic.play /> : <Ic.pause />}
-      {paused ? "恢复运行" : "暂停"}
+      {paused ? t("flx_resume") : t("flx_pause")}
     </button>
   );
 }
@@ -319,7 +324,7 @@ function RealnessTag({ realness, paused, t }: { realness: Realness; paused?: boo
       return (
         <span className="inline-flex items-center gap-1.5 text-ink-3" style={{ fontSize: 12 }}>
           <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-ink-4)" }} />
-          已暂停
+          {t("flx_status_paused")}
         </span>
       );
     }
@@ -333,7 +338,7 @@ function RealnessTag({ realness, paused, t }: { realness: Realness; paused?: boo
           className="rounded-full anim-pulse"
           style={{ width: 6, height: 6, background: "var(--c-ok)" }}
         />
-        已上线
+        {t("flx_status_deployed")}
       </span>
     );
   }
@@ -344,7 +349,7 @@ function RealnessTag({ realness, paused, t }: { realness: Realness; paused?: boo
       style={{ fontSize: 12, color: "var(--c-err)" }}
     >
       <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-err)" }} />
-      未上线
+      {t("flx_status_not_deployed")}
     </span>
   );
 }
@@ -361,7 +366,7 @@ function ManageMenu({ t, stub }: { t: (k: string) => string; stub: boolean }) {
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  const tip = stub ? "蓝图 agent 没有可治理的运行实例" : t("f2_manage_disabled_tooltip");
+  const tip = stub ? t("flx_manage_stub_tip") : t("f2_manage_disabled_tooltip");
   // Pause/Resume is now its own primary action (see PauseResumeButton).
   // The dropdown holds the remaining Manage actions that aren't wired yet.
   const items: [string, React.ReactNode][] = [
@@ -377,7 +382,7 @@ function ManageMenu({ t, stub }: { t: (k: string) => string; stub: boolean }) {
         className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 rounded border border-line bg-surface transition-colors"
         style={{ padding: "5px 10px", fontSize: 12.5 }}
       >
-        治理 <Ic.chevD style={{ width: 10, height: 10 }} />
+        {t("flx_govern")} <Ic.chevD style={{ width: 10, height: 10 }} />
       </button>
       {open && (
         <div className="absolute right-0 mt-2 bg-surface border border-line rounded-md shadow-sh-2 z-30" style={{ minWidth: 180 }}>
@@ -437,7 +442,7 @@ function OverviewTab({ agent, t }: { agent: DetailRow; t: (k: string) => string 
     <div className="grid gap-8" style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)" }}>
       <div className="flex flex-col gap-7">
         <Health30dSection agent={agent} stub={stub} t={t} />
-        {!stub && <MonitorLinkSection agent={agent} />}
+        {!stub && <MonitorLinkSection agent={agent} t={t} />}
       </div>
       <div className="flex flex-col gap-7">
         <IdentitySection agent={agent} t={t} />
@@ -450,7 +455,7 @@ function OverviewTab({ agent, t }: { agent: DetailRow; t: (k: string) => string 
 // Light "→ go look at this agent's runs in Monitor" section.
 // Replaces the in-Fleet RecentRunsSection per the 2026-05-19 IA carve-up:
 // run-level data is owned by /monitor, Fleet just links over.
-function MonitorLinkSection({ agent }: { agent: DetailRow }) {
+function MonitorLinkSection({ agent, t }: { agent: DetailRow; t: (k: string) => string }) {
   const total = agent.liveTotal ?? 0;
   const succ = agent.liveCompleted ?? 0;
   const fail = agent.liveFailed ?? 0;
@@ -458,7 +463,7 @@ function MonitorLinkSection({ agent }: { agent: DetailRow }) {
     <section>
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em" }}>
-          运行记录
+          {t("flx_run_records")}
         </h2>
       </div>
       <Link
@@ -478,10 +483,10 @@ function MonitorLinkSection({ agent }: { agent: DetailRow }) {
               </span>
             </div>
             <div className="text-ink-3 mt-1" style={{ fontSize: 12 }}>
-              近期运行 · 失败详情 / trace 时间轴 / step output 等在 Monitor 查看
+              {t("flx_run_records_hint")}
             </div>
           </div>
-          <span className="text-ink-2" style={{ fontSize: 12.5 }}>查看 →</span>
+          <span className="text-ink-2" style={{ fontSize: 12.5 }}>{t("flx_view")} →</span>
         </div>
       </Link>
     </section>
@@ -514,26 +519,26 @@ function Health30dSection({ agent, stub, t }: { agent: DetailRow; stub: boolean;
   return (
     <section>
       <SectionHead
-        title="运行概览"
-        hint={stub ? "蓝图 agent 无运行数据" : "实时 · 来自 Inngest"}
+        title={t("flx_run_overview")}
+        hint={stub ? t("flx_stub_no_run_data") : t("flx_live_from_inngest")}
       />
       <div className="grid grid-cols-4 gap-x-6 gap-y-1">
         <Stat
-          label="总运行"
+          label={t("flx_stat_total")}
           value={agent.liveTotal != null ? String(agent.liveTotal) : "—"}
         />
         <Stat
-          label="成功"
+          label={t("flx_stat_success")}
           value={agent.liveCompleted != null ? String(agent.liveCompleted) : "—"}
           valueColor={agent.liveCompleted ? "var(--c-ok)" : undefined}
         />
         <Stat
-          label="失败"
+          label={t("flx_stat_failed")}
           value={agent.liveFailed != null ? String(agent.liveFailed) : "—"}
           valueColor={(agent.liveFailed ?? 0) > 0 ? "var(--c-err)" : undefined}
         />
         <Stat
-          label="成功率"
+          label={t("flx_stat_success_rate")}
           value={pct}
           valueColor={pctColor}
         />
@@ -541,14 +546,14 @@ function Health30dSection({ agent, stub, t }: { agent: DetailRow; stub: boolean;
       {!stub && (agent.liveRunning ?? 0) > 0 && (
         <div className="mt-4 flex items-center gap-2 text-ink-2" style={{ fontSize: 12.5 }}>
           <span className="rounded-full anim-pulse" style={{ width: 6, height: 6, background: "var(--c-ok)" }} />
-          当前有 {agent.liveRunning} 个运行进行中
+          {t("flx_running_now_pre")}{agent.liveRunning}{t("flx_running_now_post")}
         </div>
       )}
       {!stub && agent.latestStartedAt && (
         <div className="mt-2 text-ink-3" style={{ fontSize: 12 }}>
-          最近一次运行 {relTime(agent.latestStartedAt)}
-          {agent.latestStatus && <> · 结果 {agent.latestStatus}</>}
-          {agent.latestDurationMs != null && <> · 耗时 {Math.round(agent.latestDurationMs / 100) / 10}s</>}
+          {t("flx_last_run")} {relTime(agent.latestStartedAt, t)}
+          {agent.latestStatus && <> · {t("flx_result")} {agent.latestStatus}</>}
+          {agent.latestDurationMs != null && <> · {t("flx_duration")} {Math.round(agent.latestDurationMs / 100) / 10}s</>}
         </div>
       )}
     </section>
@@ -583,10 +588,10 @@ function IdentitySection({ agent, t }: { agent: DetailRow; t: (k: string) => str
   const rows: Array<[string, React.ReactNode]> = [
     ["Short", <span key="s" className="tabular-nums">{agent.short}</span>],
     ["Display", t(agent.displayName)],
-    ["部署状态", <RealnessTag key="r" realness={agent.realness} paused={agent.paused} t={t} />],
+    [t("flx_deploy_status"), <RealnessTag key="r" realness={agent.realness} paused={agent.paused} t={t} />],
     ["Owner team", agent.ownerTeam],
     ["Version", <span key="v" className="tabular-nums">{agent.version}</span>],
-    ["Stage", STAGE_ZH[agent.stage] ?? agent.stage],
+    ["Stage", stageLabel(agent.stage, t)],
     ...(agent.slug ? [["Inngest slug", <span key="sl" className="tabular-nums text-ink-3" style={{ fontSize: 11.5 }}>{agent.slug}</span>] as [string, React.ReactNode]] : []),
   ];
   return (
@@ -615,15 +620,15 @@ function WorkflowPositionSection({ agent, t }: { agent: DetailRow; t: (k: string
         title={t("ad_card_workflow_position")}
         action={
           <Link href={`/workflow?node=${encodeURIComponent(agent.short)}`} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 12 }}>
-            在工作流图中查看 →
+            {t("flx_view_in_workflow")} →
           </Link>
         }
       />
       <div className="text-ink-2 leading-relaxed" style={{ fontSize: 12.5 }}>
-        参与阶段 <span className="text-ink-1">{STAGE_ZH[agent.stage] ?? agent.stage}</span>，
-        归属团队 <span className="text-ink-1">{agent.ownerTeam}</span>。
+        {t("flx_participates_stage")} <span className="text-ink-1">{stageLabel(agent.stage, t)}</span>{t("flx_comma")}
+        {t("flx_belongs_team")} <span className="text-ink-1">{agent.ownerTeam}</span>{t("flx_period")}
         <div className="text-ink-3 mt-2" style={{ fontSize: 12 }}>
-          完整上下游关系待 Workflow API 接通后实装。
+          {t("flx_workflow_relations_pending")}
         </div>
       </div>
     </section>

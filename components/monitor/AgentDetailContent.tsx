@@ -343,7 +343,7 @@ function EpisodeRow({
           type="button"
           onClick={rerun}
           disabled={rerunning}
-          title={`↺ 重新触发(run ${episode.runId.slice(0, 8)}…)`}
+          title={t('mox_rerun_run_title').replace('{run}', episode.runId.slice(0, 8) + '…')}
           className="text-[11px] px-1.5 py-0.5 rounded border border-claude-accent text-claude-accent hover:bg-claude-accent-bg disabled:opacity-40 disabled:cursor-not-allowed leading-none"
         >
           {rerunning ? '⏳' : '↺'}

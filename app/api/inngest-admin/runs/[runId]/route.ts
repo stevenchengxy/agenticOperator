@@ -6,7 +6,7 @@
 // which gives durationMs + real step output / input / error per step.
 
 import { NextResponse } from 'next/server';
-import { getRunHistory, getRunStepOutputs } from '@/lib/inngest-admin-client';
+import { getRunHistory, getRunStepOutputs } from '@/lib/inngest-source';
 import { getRunTokenUsage } from '@/lib/monitor/run-token-usage';
 
 export const dynamic = 'force-dynamic';

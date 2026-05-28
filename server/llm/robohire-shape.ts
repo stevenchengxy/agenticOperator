@@ -177,7 +177,7 @@ export async function llmExtractRoboHireShape(
   const client = new OpenAI({
     baseURL: gateway.baseURL,
     apiKey: gateway.apiKey,
-    timeout: 60_000,
+    timeout: 300_000,
   });
   const trimmed = resumeText.slice(0, 12_000);
   const { raw, parsed } = await withLlmTelemetry(
@@ -322,7 +322,7 @@ export async function llmMatchRoboHireShape(
   const client = new OpenAI({
     baseURL: gateway.baseURL,
     apiKey: gateway.apiKey,
-    timeout: 60_000,
+    timeout: 300_000,
   });
   const userMsg = `## Job Description\n\n${jdText.slice(0, 4_000)}\n\n## Candidate Resume\n\n${resumeText.slice(0, 8_000)}`;
   const { raw, match } = await withLlmTelemetry(

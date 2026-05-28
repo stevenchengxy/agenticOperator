@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import Link from "next/link";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { LogStream } from "@/components/shared/LogStream";
@@ -79,6 +80,7 @@ export function RealRunCenter({
   jobLabel: string;
   onClear: () => void;
 }) {
+  const { t } = useApp();
   const { run, error, refresh } = useRunDetail(runId);
   const [tab, setTab] = React.useState<Tab>("flow");
 
@@ -106,7 +108,7 @@ export function RealRunCenter({
             endpoint={`/api/runs/${encodeURIComponent(runId)}/activity?limit=300`}
             order="asc"
             pollIntervalMs={3000}
-            emptyHint="Run 还没有 AgentActivity 行。日志契约：每个 agent 在做有意义的事（开始/完成 step、调用工具、决策、异常）时都应写一条 AgentActivity，否则这条 run 在这里看起来就是空的。"
+            emptyHint={t("lvx_logs_empty_hint")}
           />
         )}
       </div>
@@ -129,6 +131,7 @@ function Header({
   onClear: () => void;
   onRefresh: () => void;
 }) {
+  const { t } = useApp();
   const start = run ? new Date(run.startedAt) : null;
   const end = run
     ? run.completedAt
@@ -172,28 +175,28 @@ function Header({
         )}
         {run?.suspendedReason && <Badge variant="warn">{run.suspendedReason}</Badge>}
         <div className="flex-1" />
-        <Btn size="sm" variant="ghost" onClick={onRefresh} title="刷新">
+        <Btn size="sm" variant="ghost" onClick={onRefresh} title={t("lvx_refresh")}>
           <Ic.bolt />
         </Btn>
-        <Btn size="sm" variant="ghost" onClick={onClear} title="返回总览">
-          <Ic.cross /> 关闭
+        <Btn size="sm" variant="ghost" onClick={onClear} title={t("lvx_back_to_overview")}>
+          <Ic.cross /> {t("lvx_close")}
         </Btn>
       </div>
       <div className="text-[15px] font-semibold tracking-tight">{jobLabel}</div>
       <div className="text-ink-3 text-[12px] mt-0.5 mono">
         {run ? (
           <>
-            trigger {run.triggerEvent} · 启动{" "}
+            trigger {run.triggerEvent} · {t("lvx_started")}{" "}
             {start!.toLocaleString(undefined, { hour12: false })}
-            {" · "}耗时 {formatDuration(durMs ?? 0)}
+            {" · "}{t("lvx_duration")} {formatDuration(durMs ?? 0)}
             {run.completedAt
               ? ""
-              : ` · 最近活动 ${end!.toLocaleTimeString(undefined, { hour12: false })}`}
+              : ` · ${t("lvx_last_activity")} ${end!.toLocaleTimeString(undefined, { hour12: false })}`}
           </>
         ) : error ? (
-          `加载 run 失败：${error}`
+          `${t("lvx_load_run_failed")}${error}`
         ) : (
-          "加载 run 信息中…"
+          t("lvx_loading_run_info")
         )}
       </div>
     </div>
@@ -201,10 +204,11 @@ function Header({
 }
 
 function Tabs({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
+  const { t } = useApp();
   const tabs: Array<{ id: Tab; label: string; hint: string }> = [
-    { id: "flow", label: "流程", hint: "看图：swimlane + KPI + 异常" },
-    { id: "ai", label: "AI 助手", hint: "听故事：总结 + 自由问答" },
-    { id: "logs", label: "日志", hint: "看细节：原始活动流" },
+    { id: "flow", label: t("lvx_tab_flow"), hint: t("lvx_tab_flow_hint") },
+    { id: "ai", label: t("lvx_tab_ai"), hint: t("lvx_tab_ai_hint") },
+    { id: "logs", label: t("lvx_tab_logs"), hint: t("lvx_tab_logs_hint") },
   ];
   return (
     <div className="border-b border-line bg-surface flex gap-0.5" style={{ padding: "0 14px" }}>
@@ -337,6 +341,7 @@ function FlowTab({
   runId: string;
   run: { startedAt: string; completedAt: string | null; lastActivityAt: string } | null;
 }) {
+  const { t } = useApp();
   const [trace, setTrace] = React.useState<TraceResponse | null>(null);
   const [stats, setStats] = React.useState<OverviewStats | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -381,14 +386,14 @@ function FlowTab({
 
       {/* KPI strip — all numbers姓"this run" */}
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-2">
-        这条 run 的指标
+        {t("lvx_run_metrics")}
       </div>
       <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-        <Kpi label="这条 run · token" value={stats ? formatNumber(stats.tokens) : "…"} muted={!stats || stats.tokens === 0} />
-        <Kpi label="这条 run · 决策" value={stats?.decisions.toString() ?? "…"} muted={!stats || stats.decisions === 0} />
-        <Kpi label="这条 run · 工具调用" value={stats?.toolCalls.toString() ?? "…"} muted={!stats || stats.toolCalls === 0} />
-        <Kpi label="这条 run · 异常" value={stats?.errors.toString() ?? "…"} tone={stats && stats.errors > 0 ? "err" : undefined} />
-        <Kpi label="这条 run · 耗时" value={run ? formatDuration(durationMs) : "…"} />
+        <Kpi label={t("lvx_kpi_token")} value={stats ? formatNumber(stats.tokens) : "…"} muted={!stats || stats.tokens === 0} />
+        <Kpi label={t("lvx_kpi_decisions")} value={stats?.decisions.toString() ?? "…"} muted={!stats || stats.decisions === 0} />
+        <Kpi label={t("lvx_kpi_tools")} value={stats?.toolCalls.toString() ?? "…"} muted={!stats || stats.toolCalls === 0} />
+        <Kpi label={t("lvx_kpi_errors")} value={stats?.errors.toString() ?? "…"} tone={stats && stats.errors > 0 ? "err" : undefined} />
+        <Kpi label={t("lvx_kpi_duration")} value={run ? formatDuration(durationMs) : "…"} />
       </div>
 
       {error && (
@@ -400,13 +405,13 @@ function FlowTab({
             color: "oklch(0.5 0.14 75)",
           }}
         >
-          ⚠ trace / activity 加载失败: {error}
+          {t("lvx_trace_load_failed")} {error}
         </div>
       )}
 
       {/* Swimlane — the canvas. Always visible on the default tab. */}
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-2">
-        实例追踪 · swimlane
+        {t("lvx_swimlane_title")}
       </div>
       <div className="mb-4">
         <RunTraceTimeline runId={runId} externalData={trace} />
@@ -414,7 +419,7 @@ function FlowTab({
 
       {/* Per-agent breakdown cards (was in 概览). */}
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-2">
-        参与 agent {stats && `· ${stats.agents.size}`}
+        {t("lvx_participating_agents")} {stats && `· ${stats.agents.size}`}
       </div>
       <div className="grid gap-2 mb-4" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
         {stats && stats.agents.size > 0 ? (
@@ -423,14 +428,14 @@ function FlowTab({
             .map((a) => <AgentCard key={a.name} stat={a} />)
         ) : (
           <div className="text-[11.5px] text-ink-3 col-span-2">
-            还没有 agent 活动写入。等待 AgentActivity 落表（或外部 runtime POST 推送）。
+            {t("lvx_no_agent_activity")}
           </div>
         )}
       </div>
 
       {/* Run-scoped anomalies. */}
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-2">
-        异常 · 仅这条 run
+        {t("lvx_anomalies_title")}
         {stats && stats.errors > 0 && ` · ${stats.errors}`}
       </div>
       {stats && stats.anomalies.length > 0 ? (
@@ -455,7 +460,7 @@ function FlowTab({
           ))}
         </div>
       ) : (
-        <div className="text-[11.5px] text-ink-3">未发现异常。</div>
+        <div className="text-[11.5px] text-ink-3">{t("lvx_no_anomalies")}</div>
       )}
     </div>
   );
@@ -543,6 +548,7 @@ function AiAssistantTab({ runId }: { runId: string }) {
 }
 
 function AiSummarySection({ runId }: { runId: string }) {
+  const { t } = useApp();
   const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -600,31 +606,31 @@ function AiSummarySection({ runId }: { runId: string }) {
       <div className="flex items-center mb-2 gap-2">
         {resp && !loading && (
           <Badge variant={resp.source === "llm" ? "ok" : "info"}>
-            {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : "fallback (无网关)"}
+            {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : t("lvx_fallback_no_gateway")}
           </Badge>
         )}
         {loading && (
           <Badge variant="info" dot pulse>
-            生成中 · {(elapsedMs / 1000).toFixed(1)}s
+            {t("lvx_generating")} · {(elapsedMs / 1000).toFixed(1)}s
           </Badge>
         )}
         {resp && resp.durationLLMms != null && !loading && (
           <span className="mono text-[10px] text-ink-4">
-            上次 {(resp.durationLLMms / 1000).toFixed(1)}s
+            {t("lvx_last_time")} {(resp.durationLLMms / 1000).toFixed(1)}s
           </span>
         )}
         <div className="flex-1" />
         <Btn size="sm" onClick={() => void fetchSummary()} disabled={loading}>
-          <Ic.sparkle /> {loading ? "生成中…" : "重新生成"}
+          <Ic.sparkle /> {loading ? t("lvx_generating_short") : t("lvx_regenerate")}
         </Btn>
         <Btn
           size="sm"
           variant="ghost"
           onClick={() => void fetchSummary({ bustCache: true })}
           disabled={loading}
-          title="清服务端缓存后重新调 LLM"
+          title={t("lvx_clear_cache_tip")}
         >
-          <Ic.bolt /> 清缓存
+          <Ic.bolt /> {t("lvx_clear_cache")}
         </Btn>
       </div>
       {/* During regeneration, keep the previous summary visible (faded)
@@ -635,7 +641,7 @@ function AiSummarySection({ runId }: { runId: string }) {
           className="border border-line border-dashed rounded-sm mb-2 mono text-[10.5px] text-ink-3"
           style={{ padding: "5px 10px" }}
         >
-          ⏳ AI 重新生成中（基于最新 activity）。下方显示的是上一次结果，会被覆盖。
+          {t("lvx_regen_banner")}
         </div>
       )}
       {err && (
@@ -646,15 +652,15 @@ function AiSummarySection({ runId }: { runId: string }) {
       {resp && (
         <>
           <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-            <Stat label="参与 agent" value={resp.agentBreakdown.length} />
-            <Stat label="活动条目" value={resp.activityCount} />
+            <Stat label={t("lvx_stat_agents")} value={resp.agentBreakdown.length} />
+            <Stat label={t("lvx_stat_activities")} value={resp.activityCount} />
             <Stat
-              label="错误"
+              label={t("lvx_stat_errors")}
               value={resp.errorCount}
               tone={resp.errorCount > 0 ? "err" : "muted"}
             />
             <Stat
-              label="耗时"
+              label={t("lvx_stat_duration")}
               value={resp.durationMs ? formatDuration(resp.durationMs) : "—"}
             />
           </div>
@@ -672,13 +678,12 @@ function AiSummarySection({ runId }: { runId: string }) {
               }}
             >
               <div className="font-semibold mb-1" style={{ color: "var(--c-info)" }}>
-                ⚠ 数据稀疏 · 跳过 LLM 调用
+                {t("lvx_sparse_title")}
               </div>
               <div className="leading-relaxed">
-                这条 run 在 AgentActivity / WorkflowStep 表里没有任何记录。
-                之前 LLM 在零数据下会编造 agent 名（如 <code className="mono">JD_Writer</code>、
-                <code className="mono">Recruiter_Agent</code> 等不在 AGENT_MAP 的虚构名）。
-                现在直接返回诚实的"无数据"通知，详见下方。
+                {t("lvx_sparse_body_1")}
+                <code className="mono">JD_Writer</code>、
+                <code className="mono">Recruiter_Agent</code>{t("lvx_sparse_body_2")}
               </div>
             </div>
           )}
@@ -728,6 +733,7 @@ export function RealRunRight({
   runId: string;
   onShowSummaryModal: () => void;
 }) {
+  const { t } = useApp();
   const { run } = useRunDetail(runId);
   const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
 
@@ -743,7 +749,7 @@ export function RealRunRight({
   return (
     <aside className="border-l border-line bg-surface flex flex-col min-h-0 overflow-auto">
       <div className="border-b border-line" style={{ padding: "12px 16px" }}>
-        <div className="text-[13px] font-semibold mb-2">关联对象 · Linked</div>
+        <div className="text-[13px] font-semibold mb-2">{t("lvx_linked_title")}</div>
         <LinkRow
           label="trigger"
           mono={run?.triggerEvent ?? "…"}
@@ -754,7 +760,7 @@ export function RealRunRight({
           }
         />
         <LinkRow
-          label="客户"
+          label={t("lvx_link_client")}
           mono={run?.triggerData.client ?? "…"}
           // Filter /live by client when we have that capability.
           href={undefined}
@@ -767,7 +773,7 @@ export function RealRunRight({
         {run?.pendingHumanTasks ? (
           <LinkRow
             label="HITL"
-            mono={`${run.pendingHumanTasks} 待办`}
+            mono={`${run.pendingHumanTasks} ${t("lvx_unit_todo")}`}
             href="/inbox"
           />
         ) : null}
@@ -775,7 +781,7 @@ export function RealRunRight({
 
       <div className="border-b border-line" style={{ padding: "12px 16px" }}>
         <div className="flex items-center mb-2">
-          <div className="text-[13px] font-semibold flex-1">运行摘要</div>
+          <div className="text-[13px] font-semibold flex-1">{t("lvx_run_summary")}</div>
           {resp && (
             <Badge variant={resp.source === "llm" ? "ok" : "info"}>
               {resp.source === "llm" ? "AI" : "stat"}
@@ -785,23 +791,23 @@ export function RealRunRight({
         {resp ? (
           <div className="grid gap-1.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <MiniStat label="agent" value={resp.agentBreakdown.length} />
-            <MiniStat label="活动" value={resp.activityCount} />
+            <MiniStat label={t("lvx_ministat_activity")} value={resp.activityCount} />
             <MiniStat
-              label="错误"
+              label={t("lvx_stat_errors")}
               value={resp.errorCount}
               tone={resp.errorCount > 0 ? "err" : undefined}
             />
             <MiniStat
-              label="耗时"
+              label={t("lvx_stat_duration")}
               value={resp.durationMs ? formatDuration(resp.durationMs) : "—"}
             />
           </div>
         ) : (
-          <div className="text-[11px] text-ink-3">加载中…</div>
+          <div className="text-[11px] text-ink-3">{t("lvx_loading")}</div>
         )}
         <div className="mt-2">
           <Btn size="sm" onClick={onShowSummaryModal} style={{ width: "100%" }}>
-            <Ic.sparkle /> AI 详细总结
+            <Ic.sparkle /> {t("lvx_ai_detail_summary")}
           </Btn>
         </div>
       </div>
@@ -809,7 +815,7 @@ export function RealRunRight({
       {resp && resp.agentBreakdown.length > 0 && (
         <div className="border-b border-line" style={{ padding: "12px 16px" }}>
           <div className="text-[13px] font-semibold mb-2">
-            参与 agent · {resp.agentBreakdown.length}
+            {t("lvx_participating_agents")} · {resp.agentBreakdown.length}
           </div>
           <div className="flex flex-col gap-1">
             {resp.agentBreakdown.map((row) => (

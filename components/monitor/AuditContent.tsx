@@ -74,7 +74,7 @@ function PayloadExpansion({ payload }: { payload: unknown }) {
   if (!parsed) {
     return (
       <div className="mt-1 mb-2 ml-[60px] pl-3 border-l-2 border-claude-accent/40 bg-claude-panel/30 rounded-r py-2 pr-3">
-        <pre className="text-[11.5px] text-claude-ink-2 whitespace-pre-wrap break-all">
+        <pre className="text-[11.5px] text-claude-ink-2 whitespace-pre-wrap break-words">
           {String(payload)}
         </pre>
       </div>
@@ -91,19 +91,19 @@ function PayloadExpansion({ payload }: { payload: unknown }) {
         <div className="flex gap-4">
           <div className="flex-1 min-w-0">
             <div className="text-[10.5px] uppercase tracking-wide text-claude-ink-4 font-medium mb-1">{t("monitor_detail_before")}</div>
-            <pre className="text-[11px] text-claude-ink-2 whitespace-pre-wrap break-all">
+            <pre className="text-[11px] text-claude-ink-2 whitespace-pre-wrap break-words">
               {JSON.stringify(before ?? null, null, 2)}
             </pre>
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[10.5px] uppercase tracking-wide text-claude-ink-4 font-medium mb-1">{t("monitor_detail_after")}</div>
-            <pre className="text-[11px] text-claude-ink-2 whitespace-pre-wrap break-all">
+            <pre className="text-[11px] text-claude-ink-2 whitespace-pre-wrap break-words">
               {JSON.stringify(after ?? null, null, 2)}
             </pre>
           </div>
         </div>
       ) : (
-        <pre className="text-[11.5px] text-claude-ink-2 whitespace-pre-wrap break-all">
+        <pre className="text-[11.5px] text-claude-ink-2 whitespace-pre-wrap break-words">
           {JSON.stringify(parsed, null, 2)}
         </pre>
       )}

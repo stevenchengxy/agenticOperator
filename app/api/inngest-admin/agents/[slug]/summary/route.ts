@@ -6,7 +6,7 @@ import {
   listFunctions,
   listRunsWithEvents,
   getRunHistory,
-} from '@/lib/inngest-admin-client';
+} from '@/lib/inngest-source';
 import {
   generateAgentSummary,
   staticSummaryFor,

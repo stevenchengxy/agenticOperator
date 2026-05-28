@@ -13,6 +13,7 @@ import {
 } from '@/lib/agent-pause-guard';
 import { invalidateHandlerCache } from '@/app/api/inngest/route';
 import { invalidateRegistryCache } from '@/lib/inngest-registry';
+import { writeManageAudit } from '@/lib/manage/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   try {
     const body = (await req.json()) as { paused?: boolean };
     const paused = Boolean(body.paused);
+    const prev = await prisma.agentConfig.findUnique({ where: { id: slug } });
     await prisma.agentConfig.upsert({
       where: { id: slug },
       update: { enabled: !paused },
@@ -29,6 +31,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
         enabled: !paused,
         description: `Inngest function ${slug}`,
       },
+    });
+    // 2026-05-27 — 启用/停用 agent 也是运维操作,写审计.
+    // 用专用 action(disable/enable)让审计页一眼看出"哪个 agent 上线/下线",
+    // 不再用泛化的 config/throttle. reason 带 agent slug 全名(不截断).
+    await writeManageAudit({
+      action: paused ? 'manage.agent.disable' : 'manage.agent.enable',
+      traceId: slug,
+      reason: paused ? `下线 agent: ${slug}` : `上线 agent: ${slug}`,
+      before: { agent: slug, enabled: prev?.enabled ?? null },
+      after: { agent: slug, enabled: !paused },
     });
     // ★ Invalidate caches so the next request reflects new state immediately:
     //   1. agent-pause-guard 5s cache(used by in-handler short-circuit fallback)

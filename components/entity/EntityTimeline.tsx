@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Badge } from "@/components/shared/atoms";
 import { ENTITY_LABELS, type EntityType } from "@/lib/entity-types";
 import type {
@@ -27,11 +28,12 @@ export function EntityTimeline({
   journey: JourneyResponse;
   density: Density;
 }) {
+  const { t } = useApp();
   if (journey.runs.length === 0) {
     return (
       <div className="p-6 text-ink-3 text-[13px]">
-        在过去 {journey.window.days} 天内没有任何 run 经手该 {ENTITY_LABELS[type]}：
-        <code className="mx-1">{id}</code>。可以扩大时间窗试试。
+        {t("enx_no_runs_pre").replace("{days}", String(journey.window.days)).replace("{entity}", ENTITY_LABELS[type])}
+        <code className="mx-1">{id}</code>{t("enx_no_runs_post")}
       </div>
     );
   }
@@ -66,7 +68,7 @@ export function EntityTimeline({
       )}
       {journey.meta.truncated && (
         <div className="mt-4 mono text-[11px]" style={{ color: "var(--c-warn)" }}>
-          ⚠ 扫描结果已截断，可能漏读早期数据。考虑用更小的时间窗。
+          {t("enx_truncated_warn")}
         </div>
       )}
     </div>
@@ -74,6 +76,7 @@ export function EntityTimeline({
 }
 
 function Stats({ journey }: { journey: JourneyResponse }) {
+  const { t } = useApp();
   const totalActivities = journey.activities.length;
   const emits = journey.activities.filter((a) => a.type === "event_emitted").length;
   const errors = journey.activities.filter(
@@ -82,10 +85,10 @@ function Stats({ journey }: { journey: JourneyResponse }) {
   return (
     <div className="flex items-center gap-2 flex-wrap text-[11px]">
       <Badge variant="info">{journey.runs.length} runs</Badge>
-      <Badge>{totalActivities} 操作</Badge>
+      <Badge>{totalActivities} {t("enx_unit_ops")}</Badge>
       <Badge variant="ok">{emits} emit</Badge>
       {errors > 0 && <Badge variant="err">{errors} error</Badge>}
-      <Badge variant="info">{journey.events.length} event 实例</Badge>
+      <Badge variant="info">{journey.events.length} {t("enx_unit_event_instances")}</Badge>
       <span className="mono text-ink-4 ml-auto">
         scan: {journey.meta.runScanCount} runs · {journey.meta.activityScanCount} activities
       </span>
@@ -106,6 +109,7 @@ function RunBlock({
   entityType: EntityType;
   entityId: string;
 }) {
+  const { t } = useApp();
   const start = new Date(run.startedAt).toLocaleString(undefined, { hour12: false });
   const dur = run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : "—";
   const statusVariant: "ok" | "err" | "warn" | "info" =
@@ -134,13 +138,13 @@ function RunBlock({
           href={`/live?run=${encodeURIComponent(run.id)}`}
           className="text-[11px] text-[color:var(--c-accent)] hover:underline"
         >
-          打开 run →
+          {t("enx_open_run")}
         </a>
       </div>
       <div style={{ padding: "10px 12px" }}>
         {activities.length === 0 ? (
           <div className="text-ink-3 text-[11px]">
-            此 run 在窗内没有 AgentActivity 行（agent 可能未接入 logger）。
+            {t("enx_run_no_activity")}
           </div>
         ) : (
           <div className="flex flex-col gap-1">
@@ -164,12 +168,13 @@ function DetachedEventsBlock({
 }: {
   events: JourneyResponse["events"];
 }) {
+  const { t } = useApp();
   return (
     <div className="mt-4 border border-line rounded-md bg-surface">
       <div className="border-b border-line bg-panel" style={{ padding: "8px 12px" }}>
-        <span className="text-[12px] font-semibold">独立 event 实例 (EM)</span>
+        <span className="text-[12px] font-semibold">{t("enx_detached_title")}</span>
         <span className="mono text-[10.5px] text-ink-3 ml-2">
-          来自 EventInstance · 含未关联 run 的事件
+          {t("enx_detached_sub")}
         </span>
       </div>
       <div style={{ padding: "8px 12px" }} className="flex flex-col gap-1">

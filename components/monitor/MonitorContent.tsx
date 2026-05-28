@@ -99,7 +99,7 @@ export function MonitorContent() {
         setLastRefresh(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
       } catch (e) {
         if (cancelled) return;
-        setRunsError((e as Error).message ?? "请求失败");
+        setRunsError((e as Error).message ?? t("mox_request_failed"));
         if (runs === null) setRuns([]);
       }
     }
@@ -140,10 +140,10 @@ export function MonitorContent() {
         <div className="flex items-start gap-6">
           <div className="flex-1 min-w-0">
             <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
-              运行监控
+              {t("mox_page_title")}
             </h1>
             <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-              基础设施健康 · 每一次 agent 运行的详情与 trace
+              {t("mox_page_subtitle")}
             </div>
           </div>
           <div className="flex items-center gap-3 mt-1">
@@ -152,23 +152,23 @@ export function MonitorContent() {
         </div>
 
         <div className="flex items-center gap-x-7 gap-y-1.5 mt-4 flex-wrap">
-          <CountChip label="总" value={String(filtered.length)} tone="muted" />
+          <CountChip label={t("mox_count_total")} value={String(filtered.length)} tone="muted" />
           <CountChip
-            label="运行中"
+            label={t("mox_count_running")}
             value={String(counts.running)}
             tone={counts.running > 0 ? "ok" : "muted"}
             active={statusFilter === "Running"}
             onClick={() => setUrl((p) => statusFilter === "Running" ? p.delete("status") : p.set("status", "Running"))}
           />
           <CountChip
-            label="已完成"
+            label={t("mox_count_completed")}
             value={String(counts.completed)}
             tone="muted"
             active={statusFilter === "Completed"}
             onClick={() => setUrl((p) => statusFilter === "Completed" ? p.delete("status") : p.set("status", "Completed"))}
           />
           <CountChip
-            label="失败"
+            label={t("mox_count_failed")}
             value={String(counts.failed)}
             tone={counts.failed > 0 ? "err" : "muted"}
             active={statusFilter === "Failed"}
@@ -205,14 +205,14 @@ export function MonitorContent() {
           {/* infrastructure status — preserved per user request 2026-05-19 */}
           <div style={{ padding: "16px 32px 0" }}>
             <div className="text-ink-3 mb-2 flex items-baseline gap-2" style={{ fontSize: 12 }}>
-              基础设施
+              {t("mox_infra")}
             </div>
             <SystemStatusCards />
           </div>
 
           {/* secondary filter toolbar */}
           <div className="flex items-center gap-3 mt-4 flex-wrap" style={{ padding: "10px 32px", fontSize: 12.5 }}>
-            <span className="text-ink-3">智能体</span>
+            <span className="text-ink-3">{t("mox_col_agent")}</span>
             <AgentFilter
               value={agentFilter}
               onChange={(v) => setUrl((p) => v ? p.set("agent", v) : p.delete("agent"))}
@@ -222,12 +222,12 @@ export function MonitorContent() {
                 onClick={() => setUrl((p) => { p.delete("agent"); p.delete("event"); p.delete("status"); })}
                 className="text-ink-3 hover:text-ink-1"
               >
-                清空筛选
+                {t("mox_clear_filters")}
               </button>
             )}
             {eventName && (
               <span className="inline-flex items-center gap-1.5 text-ink-2 rounded border border-line bg-surface" style={{ padding: "3px 9px", fontSize: 12 }}>
-                <span className="text-ink-3">事件</span> {eventName}
+                <span className="text-ink-3">{t("mox_filter_event")}</span> {eventName}
                 <button onClick={() => setUrl((p) => p.delete("event"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
               </span>
             )}
@@ -247,22 +247,22 @@ export function MonitorContent() {
               >
                 <span style={{ flexShrink: 0 }}>⚠</span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium">事件引擎暂时不可达 · 显示的是缓存数据</div>
+                  <div className="font-medium">{t("mox_event_engine_unreachable")}</div>
                   <div className="mono text-[11px] opacity-80 mt-0.5 truncate" title={runsError}>{runsError}</div>
                 </div>
               </div>
             )}
             {runs === null && !runsError && (
-              <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
+              <div className="text-ink-3 text-[13px] text-center py-16">{t("mox_loading")}</div>
             )}
             {runs !== null && filtered.length === 0 && !runsError && (
               <div className="text-ink-3 text-[13px] text-center py-16">
-                没有匹配当前筛选的运行记录
+                {t("mox_no_matching_runs")}
               </div>
             )}
             {runs !== null && filtered.length === 0 && runsError && (
               <div className="text-ink-3 text-[13px] text-center py-8">
-                等待 Inngest dev server 恢复…
+                {t("mox_waiting_inngest")}
               </div>
             )}
             {runs !== null && filtered.length > 0 && (
@@ -284,6 +284,7 @@ export function MonitorContent() {
 // ── runs list with expandable trace ─────────────────────────────
 
 function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpandedId: string | null }) {
+  const { t } = useApp();
   const [expandedId, setExpandedId] = React.useState<string | null>(initialExpandedId);
   const [details, setDetails] = React.useState<Record<string, RunDetail | "loading" | "error">>({});
 
@@ -294,6 +295,13 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
     setDetails((m) => ({ ...m, [runId]: result ?? "error" }));
   }, [details]);
 
+  // Force re-fetch (no cache check, no loading flicker) — used by the live poll
+  // so an in-progress run's steps / in-out / logs update in place.
+  const refreshDetail = React.useCallback(async (runId: string) => {
+    const result = await fetchRunDetail(runId);
+    if (result) setDetails((m) => ({ ...m, [runId]: result }));
+  }, []);
+
   // If a runId came in via URL, prefetch its detail
   React.useEffect(() => {
     if (initialExpandedId && !details[initialExpandedId]) {
@@ -301,6 +309,23 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialExpandedId]);
+
+  // Live-refresh the expanded run's detail while it is Running. The status
+  // string (not the whole runs array) is the dep, so completed runs don't
+  // re-poll. The cleanup also pulls once more when the run leaves "Running",
+  // capturing the final output/steps.
+  const expandedRunStatus = expandedId
+    ? runs.find((r) => r.id === expandedId)?.status
+    : undefined;
+  React.useEffect(() => {
+    if (!expandedId || expandedRunStatus !== "Running") return;
+    refreshDetail(expandedId);
+    const timer = setInterval(() => refreshDetail(expandedId), 4000);
+    return () => {
+      clearInterval(timer);
+      refreshDetail(expandedId);
+    };
+  }, [expandedId, expandedRunStatus, refreshDetail]);
 
   const toggle = (run: RunRow) => {
     const next = expandedId === run.id ? null : run.id;
@@ -312,14 +337,14 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
     <>
       <div
         className="grid gap-4 text-ink-3 border-b border-line"
-        style={{ gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5 }}
+        style={{ gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5, minWidth: 760 }}
       >
-        <span>智能体</span>
-        <span>触发事件</span>
-        <span>状态</span>
-        <span style={{ textAlign: "right" }}>开始</span>
-        <span style={{ textAlign: "right" }}>耗时</span>
-        <span style={{ textAlign: "center" }}>重新触发</span>
+        <span>{t("mox_col_agent")}</span>
+        <span>{t("mox_col_trigger_event")}</span>
+        <span>{t("mox_col_status")}</span>
+        <span style={{ textAlign: "right" }}>{t("mox_col_started")}</span>
+        <span style={{ textAlign: "right" }}>{t("mox_col_duration")}</span>
+        <span style={{ textAlign: "center" }}>{t("mox_col_rerun")}</span>
         <span />
       </div>
       {runs.map((r) => {
@@ -329,7 +354,7 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
           <div key={r.id} className="border-b border-line">
             <div
               className="w-full grid items-center gap-4 hover:bg-panel transition-colors"
-              style={{ padding: "12px 12px", gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px" }}
+              style={{ padding: "12px 12px", gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px", minWidth: 760 }}
             >
               <button
                 onClick={() => toggle(r)}
@@ -381,13 +406,14 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
 
 // ── Replay button (per-row, calls /api/inngest-admin/replay) ─────
 function ReplayRunButton({ run }: { run: RunRow }) {
+  const { t } = useApp();
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
   async function handle(e: React.MouseEvent) {
     e.stopPropagation();
     if (!run.eventId) {
-      setMsg('无 eventId');
+      setMsg(t('mox_no_event_id'));
       setTimeout(() => setMsg(null), 2000);
       return;
     }
@@ -399,7 +425,7 @@ function ReplayRunButton({ run }: { run: RunRow }) {
         body: JSON.stringify({ eventId: run.eventId }),
       });
       const b = await r.json();
-      setMsg(b.ok ? '✓ 已触发' : `✗ ${b.message ?? b.error ?? 'failed'}`);
+      setMsg(b.ok ? `✓ ${t('mox_replay_triggered')}` : `✗ ${b.message ?? b.error ?? 'failed'}`);
     } catch (err) {
       setMsg(`✗ ${(err as Error).message}`);
     } finally {
@@ -413,11 +439,11 @@ function ReplayRunButton({ run }: { run: RunRow }) {
       type="button"
       onClick={handle}
       disabled={busy || !run.eventId}
-      title={run.eventId ? `重新触发(replay 原事件 ${run.eventId})` : '无 eventId,无法重跑'}
+      title={run.eventId ? t('mox_replay_title').replace('{event}', run.eventId) : t('mox_rerun_no_event_id')}
       className="text-[11px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium whitespace-nowrap"
       style={{ justifySelf: "center" }}
     >
-      {busy ? '…' : msg ?? '↺ 重跑'}
+      {busy ? '…' : msg ?? `↺ ${t('mox_rerun_short')}`}
     </button>
   );
 }
@@ -484,10 +510,11 @@ function CountChip({
 }
 
 function WindowSelector({ value, onChange }: { value: WindowId; onChange: (v: WindowId) => void }) {
+  const { t } = useApp();
   const opts: { id: WindowId; label: string }[] = [
-    { id: "1h", label: "近 1h" },
-    { id: "24h", label: "近 24h" },
-    { id: "7d", label: "近 7d" },
+    { id: "1h", label: t("mox_window_1h") },
+    { id: "24h", label: t("mox_window_24h") },
+    { id: "7d", label: t("mox_window_7d") },
   ];
   return (
     <div className="flex items-center gap-1">
@@ -512,6 +539,7 @@ function WindowSelector({ value, onChange }: { value: WindowId; onChange: (v: Wi
 }
 
 function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const { t } = useApp();
   const { realness: realnessMap } = useDeploymentMap();
   const deployedShorts = React.useMemo(
     () => ALL_AGENT_SHORTS.filter((s) => (realnessMap.get(s) ?? "unbuilt") !== "unbuilt"),
@@ -529,7 +557,7 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
           fontWeight: value === null ? 500 : 400,
         }}
       >
-        全部
+        {t("mox_all")}
       </button>
       {deployedShorts.map((short) => (
         <button
@@ -552,18 +580,19 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
 }
 
 function LiveDot({ lastRefresh }: { lastRefresh: string | null }) {
+  const { t } = useApp();
   const live = !!lastRefresh;
   return (
     <span
       className="flex items-center gap-1.5 text-ink-3"
-      title={live ? `最后刷新 ${lastRefresh}` : "正在连接 Inngest…"}
+      title={live ? t("mox_last_refresh").replace("{time}", lastRefresh) : t("mox_connecting_inngest")}
       style={{ fontSize: 11.5 }}
     >
       <span
         className={live ? "rounded-full anim-pulse" : "rounded-full"}
         style={{ width: 6, height: 6, background: live ? "var(--c-ok)" : "var(--c-ink-4)" }}
       />
-      {live ? "实时" : "连接中"}
+      {live ? t("mox_live") : t("mox_connecting")}
     </span>
   );
 }

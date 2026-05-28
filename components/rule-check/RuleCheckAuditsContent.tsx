@@ -188,7 +188,7 @@ function ValueAnchorBanner({ stats, t }: { stats: RuleCheckStatsResponse; t: (k:
         <Kpi
           label={t("rc_stat_blocked")}
           value={`${stats.blocked_robohire_calls}`}
-          sub={`${pct}% 拦截率`}
+          sub={`${pct}% ${t("rc_stat_block_rate")}`}
           tone="err"
         />
         <Kpi

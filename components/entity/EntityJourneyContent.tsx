@@ -64,7 +64,7 @@ export function EntityJourneyContent({
       })
       .catch((e) => {
         if (!alive) return;
-        setErr((e as Error).message ?? "请求失败");
+        setErr((e as Error).message ?? t("enx_request_failed"));
       })
       .finally(() => alive && setLoading(false));
     return () => {
@@ -142,11 +142,11 @@ export function EntityJourneyContent({
                 color: "oklch(0.45 0.14 75)",
               }}
             >
-              加载失败：{err}
+              {t("enx_load_failed")}{err}
             </div>
           )}
           {loading && !journey && (
-            <div className="p-6 text-ink-3 text-sm">加载历程数据中…</div>
+            <div className="p-6 text-ink-3 text-sm">{t("enx_loading_journey")}</div>
           )}
           {journey && (
             <EntityTimeline
@@ -169,20 +169,21 @@ function AgentSidebar({
   agents: JourneyAgentRollup[];
   loading: boolean;
 }) {
+  const { t } = useApp();
   if (loading && agents.length === 0) {
     return <div className="p-3 text-ink-3 text-[12px]">…</div>;
   }
   if (agents.length === 0) {
     return (
       <div className="p-3 text-ink-3 text-[12px]">
-        此实体在选定时间窗内无任何 agent 经手记录。
+        {t("enx_sidebar_empty")}
       </div>
     );
   }
   return (
     <div style={{ padding: "12px 10px" }}>
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-2 px-1">
-        经手 agent
+        {t("enx_handled_agents")}
       </div>
       <div className="flex flex-col gap-1">
         {agents.map((a) => (
@@ -202,7 +203,7 @@ function AgentSidebar({
               )}
             </div>
             <div className="mono text-[10px] text-ink-3 flex items-center gap-1.5">
-              <span>{a.activityCount} 行</span>
+              <span>{a.activityCount} {t("enx_unit_rows")}</span>
               <span>·</span>
               <span>{a.eventEmittedCount} emit</span>
             </div>

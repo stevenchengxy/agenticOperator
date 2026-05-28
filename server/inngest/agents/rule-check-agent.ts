@@ -19,7 +19,7 @@
 
 import { NonRetriableError } from 'inngest';
 import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
-import { extractDims } from '@/lib/rule-check/ontology';
+import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { getRequirementsAgentView } from '@/lib/partner-pg/agent-view';
@@ -376,6 +376,9 @@ export async function ruleCheckAgentHandler({
             resume_id: resumeId || '',
             job_requisition_id: jrid,
             client_name: dims.client_id || null,
+            // 写时持久化可读客户名(解析自 partner-pg/ontology);读时直接读,
+            // 不再实时查 partner-pg → 干掉 detail/总览 的 ETIMEDOUT。
+            client_display_name: result.audit.client_name_resolved ?? null,
             business_group: dims.business_group ?? null,
             studio: dims.studio ?? null,
             // Policy 2026-05-20: 信息缺失/REVIEW 都放行,只有真违反才 FAIL。
@@ -417,7 +420,44 @@ export async function ruleCheckAgentHandler({
               : null,
           },
         });
-        logger.info(`[${AGENT_NAME}] ✓ wrote RuleCheckAudit ${auditId} decision=${result.decision}`);
+
+        // Persist every evaluated rule as a RuleCheckFlag row so 总览
+        // (matrix/coverage) reads the same data as 审计 — straight from
+        // Postgres, no read-time recovery from llm_raw_text needed.
+        const flagRows = result.rule_results.map((rr) => {
+          const s = rr.status.toLowerCase();
+          const resultUpper =
+            s === 'pass'
+              ? 'PASS'
+              : s === 'fail'
+                ? 'FAIL'
+                : s === 'insufficient_info'
+                  ? 'INSUFFICIENT_INFO'
+                  : s === 'not_triggered'
+                    ? 'NOT_TRIGGERED'
+                    : s === 'review' || s === 'pending'
+                      ? 'REVIEW'
+                      : rr.status.toUpperCase();
+          return {
+            flag_id: `${auditId}::${rr.rule_id}`,
+            audit_id: auditId,
+            rule_id: rr.rule_id,
+            rule_name_snapshot: '',
+            severity: severityForRuleId(rr.rule_id),
+            applicable_client: dims.client_id || null,
+            applicable: s !== 'not_triggered',
+            result: resultUpper,
+            evidence: rr.reason ?? null,
+            next_action: rr.next_action ?? null,
+          };
+        });
+        if (flagRows.length > 0) {
+          await prisma.ruleCheckFlag.createMany({ data: flagRows });
+        }
+
+        logger.info(
+          `[${AGENT_NAME}] ✓ wrote RuleCheckAudit ${auditId} decision=${result.decision} flags=${flagRows.length}`,
+        );
         return { ok: true, auditId };
       } catch (e) {
         const msg = (e as Error).message ?? String(e);

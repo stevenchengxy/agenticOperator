@@ -45,6 +45,7 @@ export function AppBar({
       </div>
       <div className="flex-1" />
 
+      {/* ── Search ───────────────────────────────────────────────── */}
       <button
         onClick={onOpenCmdK}
         className="flex items-center gap-2 h-7 px-2.5 bg-panel border border-line rounded-md text-ink-3 text-[12px] min-w-[240px] cursor-pointer hover:border-line-strong"
@@ -54,58 +55,74 @@ export function AppBar({
         <kbd className="ml-auto font-mono text-[10px] bg-surface border border-line rounded-sm px-[5px] py-[1px] text-ink-3">⌘K</kbd>
       </button>
 
-      <div className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] bg-panel border border-line text-ink-2 whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--c-ok)] anim-pulse" style={{ boxShadow: "0 0 0 3px color-mix(in oklab, var(--c-ok) 20%, transparent)" }} />
-        {t("realtime")}
+      {/* ── System status (passive indicators, clustered) ─────────── */}
+      <Sep />
+      <div className="flex items-center gap-1.5">
+        <div className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] bg-panel border border-line text-ink-2 whitespace-nowrap">
+          <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--c-ok)] anim-pulse" style={{ boxShadow: "0 0 0 3px color-mix(in oklab, var(--c-ok) 20%, transparent)" }} />
+          {t("realtime")}
+        </div>
+        <EmStatusPill health={emHealth.data} loading={emHealth.loading} onSync={emHealth.syncNow} />
       </div>
 
-      <EmStatusPill health={emHealth.data} loading={emHealth.loading} onSync={emHealth.syncNow} />
-
+      {/* ── Workspace context ─────────────────────────────────────── */}
+      <Sep />
       <DomainSwitcher />
 
-      {/* Language segmented */}
-      <div className="flex items-center h-6 p-[2px] bg-panel border border-line rounded-md">
+      {/* ── User controls ─────────────────────────────────────────── */}
+      <Sep />
+      <div className="flex items-center gap-1.5">
+        {/* Language segmented */}
+        <div className="flex items-center h-6 p-[2px] bg-panel border border-line rounded-md">
+          <button
+            onClick={() => setLang("zh")}
+            className={clsx(
+              "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
+              lang === "zh" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
+            )}
+          >
+            中文
+          </button>
+          <button
+            onClick={() => setLang("en")}
+            className={clsx(
+              "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
+              lang === "en" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
+            )}
+          >
+            EN
+          </button>
+        </div>
+
+        {/* Theme toggle */}
         <button
-          onClick={() => setLang("zh")}
-          className={clsx(
-            "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
-            lang === "zh" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
-          )}
+          className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line"
+          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+          title={theme === "light" ? t("theme_dark") : t("theme_light")}
         >
-          中文
+          {theme === "light" ? <Ic.moon /> : <Ic.sun />}
         </button>
-        <button
-          onClick={() => setLang("en")}
-          className={clsx(
-            "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
-            lang === "en" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
-          )}
+
+        <button className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line" title="alerts">
+          <Ic.bell />
+        </button>
+
+        <div
+          className="w-[26px] h-[26px] rounded-full grid place-items-center text-white text-[11px] font-semibold"
+          style={{ background: "linear-gradient(135deg, oklch(0.72 0.08 25), oklch(0.58 0.13 320))" }}
         >
-          EN
-        </button>
-      </div>
-
-      {/* Theme toggle */}
-      <button
-        className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line"
-        onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-        title={theme === "light" ? t("theme_dark") : t("theme_light")}
-      >
-        {theme === "light" ? <Ic.moon /> : <Ic.sun />}
-      </button>
-
-      <button className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line" title="alerts">
-        <Ic.bell />
-      </button>
-
-      <div
-        className="w-[26px] h-[26px] rounded-full grid place-items-center text-white text-[11px] font-semibold"
-        style={{ background: "linear-gradient(135deg, oklch(0.72 0.08 25), oklch(0.58 0.13 320))" }}
-      >
-        Z
+          Z
+        </div>
       </div>
     </div>
   );
+}
+
+// Hairline zone separator for the AppBar. Splits search · status · context ·
+// controls into visually distinct groups so passive indicators (realtime, EM)
+// stop reading as buttons sitting in one undifferentiated pill row.
+function Sep() {
+  return <div className="w-px h-5 bg-line" aria-hidden />;
 }
 
 // EM dot — three states: healthy (green) / degraded (orange) / down or

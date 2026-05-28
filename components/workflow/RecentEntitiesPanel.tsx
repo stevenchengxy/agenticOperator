@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import Link from "next/link";
+import { useApp } from "@/lib/i18n";
 import { Badge } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import type {
@@ -16,6 +17,7 @@ import type {
 const POLL_MS = 30_000;
 
 export function RecentEntitiesPanel({ short }: { short: string }) {
+  const { t } = useApp();
   const [data, setData] = React.useState<RecentEntitiesResponse | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -34,22 +36,22 @@ export function RecentEntitiesPanel({ short }: { short: string }) {
           setErr(null);
         }
       } catch (e) {
-        if (alive) setErr((e as Error).message ?? "失败");
+        if (alive) setErr((e as Error).message ?? t("wfx_failed"));
       }
     };
     void load();
-    const t = setInterval(() => void load(), POLL_MS);
+    const timer = setInterval(() => void load(), POLL_MS);
     return () => {
       alive = false;
-      clearInterval(t);
+      clearInterval(timer);
     };
-  }, [short]);
+  }, [short, t]);
 
   if (err && !data) {
     return (
       <div className="border-b border-line" style={{ padding: "10px 16px" }}>
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-1">
-          最近实例 · RECENT
+          {t("wfx_recentInstances")}
         </div>
         <div className="text-[11px]" style={{ color: "var(--c-warn)" }}>
           ⚠ {err}
@@ -62,18 +64,18 @@ export function RecentEntitiesPanel({ short }: { short: string }) {
     <div className="border-b border-line" style={{ padding: "10px 16px" }}>
       <div className="flex items-center mb-2">
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold flex-1">
-          最近实例 · RECENT
+          {t("wfx_recentInstances")}
         </div>
         {data && (
           <span className="mono text-[10px] text-ink-4">
-            {data.windowHours}h · 扫 {data.scanned}
+            {data.windowHours}h · {t("wfx_scanned")} {data.scanned}
           </span>
         )}
       </div>
-      {!data && <div className="text-[11px] text-ink-3">加载中…</div>}
+      {!data && <div className="text-[11px] text-ink-3">{t("wfx_loading")}</div>}
       {data && data.entities.length === 0 && (
         <div className="text-[11px] text-ink-3">
-          过去 {data.windowHours}h 内此 agent 没有触碰任何已知实体。
+          {t("wfx_recentEmptyPrefix")} {data.windowHours}h {t("wfx_recentEmptySuffix")}
         </div>
       )}
       {data && data.entities.length > 0 && (

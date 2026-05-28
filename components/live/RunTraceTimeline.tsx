@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
@@ -32,6 +33,7 @@ const ROW_HEIGHT = 36;
 const LANE_LABEL_WIDTH = 130;
 
 export function RunTraceTimeline({ runId, externalData, pollIntervalMs = 4000 }: Props) {
+  const { t } = useApp();
   const [data, setData] = React.useState<TraceResponse | null>(externalData ?? null);
   const [loading, setLoading] = React.useState(externalData == null);
   const [error, setError] = React.useState<string | null>(null);
@@ -72,7 +74,7 @@ export function RunTraceTimeline({ runId, externalData, pollIntervalMs = 4000 }:
   if (loading && !data) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <span className="text-ink-3 text-[12px]">加载 trace 中…</span>
+        <span className="text-ink-3 text-[12px]">{t("lvx_trace_loading")}</span>
       </div>
     );
   }
@@ -81,7 +83,7 @@ export function RunTraceTimeline({ runId, externalData, pollIntervalMs = 4000 }:
       <div style={{ padding: 22 }}>
         <EmptyState
           icon={<Ic.alert />}
-          title="加载 trace 失败"
+          title={t("lvx_trace_load_failed_title")}
           hint={error}
           variant="warn"
         />
@@ -101,8 +103,8 @@ export function RunTraceTimeline({ runId, externalData, pollIntervalMs = 4000 }:
         <div style={{ padding: 24 }}>
           <EmptyState
             icon={<Ic.search />}
-            title="这条 run 暂无可绘制的时间线"
-            hint="还没有 AgentActivity / WorkflowStep 数据落表。Agent 在做事时应写 AgentActivity 行（参考契约），swimlane 才有内容可画。"
+            title={t("lvx_trace_empty_title")}
+            hint={t("lvx_trace_empty_hint")}
           />
         </div>
       ) : (
@@ -115,23 +117,24 @@ export function RunTraceTimeline({ runId, externalData, pollIntervalMs = 4000 }:
 // ── Header stats ─────────────────────────────────────────────────────
 
 function Stats({ data }: { data: TraceResponse }) {
+  const { t } = useApp();
   const totalRuns = data.eventLane.reduce((acc, e) => acc + e.inngestRuns.length, 0);
   const totalBlocks = data.agentLanes.reduce((acc, l) => acc + l.blocks.length, 0);
   const totalErrors = data.agentLanes.reduce((acc, l) => acc + l.errorCount, 0);
   return (
     <div className="flex items-center gap-3 mb-3 flex-wrap">
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mr-2">
-        实例追踪
+        {t("lvx_trace_instance_label")}
       </div>
       <Badge variant="info">{data.agentLanes.length} agent lanes</Badge>
       <Badge variant="info">{data.eventLane.length} events</Badge>
       <Badge variant="info">{totalRuns} inngest runs</Badge>
       <Badge variant="default">{totalBlocks} blocks</Badge>
-      {totalErrors > 0 && <Badge variant="err">{totalErrors} 异常</Badge>}
-      <span className="mono text-[10.5px] text-ink-4">跨度 {formatDuration(data.span.durationMs)}</span>
+      {totalErrors > 0 && <Badge variant="err">{totalErrors} {t("lvx_trace_errors")}</Badge>}
+      <span className="mono text-[10.5px] text-ink-4">{t("lvx_trace_span")} {formatDuration(data.span.durationMs)}</span>
       {data.meta.eventLookupError && (
         <span className="mono text-[10.5px]" style={{ color: "oklch(0.5 0.14 75)" }}>
-          ⚠ Inngest 查询部分失败：{data.meta.eventLookupError}
+          {t("lvx_trace_inngest_partial")}{data.meta.eventLookupError}
         </span>
       )}
       {data.meta.raasError && (
@@ -146,6 +149,7 @@ function Stats({ data }: { data: TraceResponse }) {
 // ── Swimlane ─────────────────────────────────────────────────────────
 
 function Swimlane({ data }: { data: TraceResponse }) {
+  const { t } = useApp();
   const span = data.span;
   // Make the trace position computation safe even when start == end (single
   // moment). Use a 1ms floor so percentages don't NaN out.
@@ -197,7 +201,7 @@ function Swimlane({ data }: { data: TraceResponse }) {
       {data.eventLane.length > 0 && (
         <LaneRow
           key="events"
-          label="事件总线"
+          label={t("lvx_trace_event_bus")}
           sub={`${data.eventLane.length} events`}
           tone="event"
         >
@@ -212,14 +216,14 @@ function Swimlane({ data }: { data: TraceResponse }) {
       {data.raasLanes.length === 0 && (
         <LaneRow
           label="RAAS partner"
-          sub={data.meta.raasError ? "暂未接通" : "未启用 ?includeRaas=1"}
+          sub={data.meta.raasError ? t("lvx_trace_raas_not_connected") : t("lvx_trace_raas_disabled")}
           tone="raas"
         >
           <div
             className="absolute text-[10.5px] text-ink-4 mono"
             style={{ left: 8, top: 9 }}
           >
-            P2 接通后这里展示 RAAS 端 functions 的执行
+            {t("lvx_trace_raas_placeholder")}
           </div>
         </LaneRow>
       )}

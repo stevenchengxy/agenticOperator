@@ -20,7 +20,7 @@ import { tlog } from '@/lib/terminal-log';
 
 const ROBOHIRE_BASE_URL = process.env.ROBOHIRE_BASE_URL ?? 'https://api.robohire.io';
 const ROBOHIRE_API_KEY = process.env.ROBOHIRE_API_KEY ?? '';
-const ROBOHIRE_TIMEOUT_MS = Number(process.env.ROBOHIRE_TIMEOUT_MS ?? 120_000);
+const ROBOHIRE_TIMEOUT_MS = Number(process.env.ROBOHIRE_TIMEOUT_MS ?? 300_000);
 
 type Params = { params: Promise<{ path: string[] }> };
 

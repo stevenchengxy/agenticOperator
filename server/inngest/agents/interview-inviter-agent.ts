@@ -202,7 +202,12 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
           `email=${payload.candidate_email ?? 'inferred'} lang=${payload.interview_language ?? 'default'}`,
       );
       try {
-        const r = await inviteCandidateDirect(inviteInput, { traceId: traceId ?? undefined });
+        // 显式传 fileLogger → RoboHire invite-candidate 完整 in/out 进 per-run 审计
+        // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
+        const r = await inviteCandidateDirect(inviteInput, {
+          traceId: traceId ?? undefined,
+          logger: fileLogger,
+        });
         logger.info(
           `[${AGENT_NAME}] RoboHire invite OK · requestId=${r.requestId} reused=${r.data?.reused ?? false}`,
         );

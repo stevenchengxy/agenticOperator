@@ -7,7 +7,7 @@
 //
 // Auth:    Authorization: Bearer ${AGENT_API_KEY}   (provided by raas team)
 // Base:    RAAS_API_BASE_URL (dev: http://localhost:3001; prod: https://aicoe.chinasoftinc.com/raas-api)
-// Latency: parse 3-8s, match 5-15s. Configurable timeout (default 120s).
+// Latency: parse 3-8s, match 5-15s. Configurable timeout (default 300s).
 //
 // IMPORTANT — return shape is RAW.
 // Per partner spec §4 ("payload.parsed.data 内的 schema 就是 RoboHire
@@ -21,7 +21,7 @@ import { fetchWithTelemetry } from "@/server/http/instrumented";
 
 const BASE = process.env.RAAS_API_BASE_URL ?? "http://localhost:3001";
 const KEY = process.env.AGENT_API_KEY ?? "";
-const TIMEOUT_MS = Number(process.env.ROBOHIRE_TIMEOUT_MS ?? 120_000);
+const TIMEOUT_MS = Number(process.env.ROBOHIRE_TIMEOUT_MS ?? 300_000);
 
 export class RoboHireError extends Error {
   constructor(

@@ -9,9 +9,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useApp } from '@/lib/i18n';
 import type { LiveAgentState } from '@/lib/api/inngest-live-overlay';
 
 export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
+  const { t } = useApp();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -23,10 +25,10 @@ export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paused: !liveAgent.paused }),
       });
-      setToast(liveAgent.paused ? '已恢复' : '已暂停');
+      setToast(liveAgent.paused ? t("wfx_toastResumed") : t("wfx_toastPaused"));
       setTimeout(() => setToast(null), 2000);
     } catch {
-      setToast('操作失败');
+      setToast(t("wfx_toastActionFailed"));
     }
     setBusy(false);
   }
@@ -87,17 +89,17 @@ export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: triggerName, data: samples[triggerName] }),
       });
-      setToast('已发送测试事件,刷新后可见 run');
+      setToast(t("wfx_toastTestSent"));
       setTimeout(() => setToast(null), 2500);
     } catch {
-      setToast('发送失败');
+      setToast(t("wfx_toastSendFailed"));
     }
     setBusy(false);
   }
 
   return (
     <div className="border-b border-line mx-3 my-3 p-3 rounded-md bg-panel">
-      <div className="text-[11px] text-ink-3 uppercase mb-2 tracking-wide">事件引擎实时</div>
+      <div className="text-[11px] text-ink-3 uppercase mb-2 tracking-wide">{t("wfx_eventEngineLive")}</div>
 
       {/* Trigger event */}
       <div className="mb-3">
@@ -128,7 +130,7 @@ export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
       {/* Latest run summary */}
       {liveAgent.latestRunId && (
         <div className="mb-3 p-2 border border-line rounded bg-surface">
-          <div className="text-[10px] text-ink-4 uppercase">最新 run</div>
+          <div className="text-[10px] text-ink-4 uppercase">{t("wfx_latestRun")}</div>
           <div className="text-[11px] mono text-ink-2 truncate">{liveAgent.latestRunId}</div>
           <div className="flex items-center gap-2 mt-1">
             <span
@@ -160,14 +162,14 @@ export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
               : 'border-warn text-warn hover:bg-warn-bg'
           } disabled:opacity-50`}
         >
-          {liveAgent.paused ? '▶ 恢复' : '⏸ 暂停'}
+          {liveAgent.paused ? `▶ ${t("wfx_btnResume")}` : `⏸ ${t("wfx_btnPause")}`}
         </button>
         <button
           onClick={sendTest}
           disabled={busy}
           className="flex-1 text-[11px] py-1 rounded border border-line text-ink-2 hover:bg-surface-hover disabled:opacity-50"
         >
-          ▷ 发测试事件
+          ▷ {t("wfx_btnSendTest")}
         </button>
       </div>
 
@@ -175,7 +177,7 @@ export function LiveAgentPanel({ liveAgent }: { liveAgent: LiveAgentState }) {
         href={`/monitor?tab=runs`}
         className="block mt-2 text-[10.5px] text-accent hover:underline text-center"
       >
-        → 完整运行 / DLQ / step trace
+        → {t("wfx_fullRunDlqTrace")}
       </Link>
 
       {toast && (

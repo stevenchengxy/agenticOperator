@@ -443,6 +443,48 @@ body {
 }
 .rc-fade-in { animation: rcFadeIn 200ms ease-out both; }
 
+/* ── Rule-selection cross-validation motion ──────────────────────────────
+   Gauge ring sweep + count-up + dimension-bar grow are driven by inline
+   transitions (target-aware); these keyframes add the entrance polish. */
+@keyframes rcVerifyReveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rc-verify-reveal {
+  animation: rcVerifyReveal 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--rc-i, 0) * 60ms);
+}
+
+@keyframes rcGaugeIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.rc-gauge-in { animation: rcGaugeIn 360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Moving sheen on the running progress track. */
+@keyframes rcVerifyShimmer {
+  from { background-position: -120% 0; }
+  to   { background-position: 220% 0; }
+}
+.rc-verify-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--c-accent) 55%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  animation: rcVerifyShimmer 1100ms ease-in-out infinite;
+}
+
+/* Gauge stroke + dimension bar transitions (target set after mount). */
+.rc-gauge-arc { transition: stroke-dashoffset 1000ms cubic-bezier(0.22, 1, 0.36, 1); }
+.rc-dim-bar { transition: width 760ms cubic-bezier(0.22, 1, 0.36, 1); }
+
 @media (prefers-reduced-motion: reduce) {
-  .rc-row-in, .rc-drawer-in, .rc-fade-in { animation: none; }
+  .rc-row-in, .rc-drawer-in, .rc-fade-in,
+  .rc-verify-reveal, .rc-gauge-in { animation: none; }
+  .rc-verify-shimmer { animation: none; }
+  .rc-gauge-arc, .rc-dim-bar { transition: none; }
 }

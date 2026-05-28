@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifySource } from "./event-direction";
+import { classifySource, classifyByPublishers } from "./event-direction";
 
 describe("classifySource", () => {
   it("raas-bridge → in", () => {
@@ -25,5 +25,31 @@ describe("classifySource", () => {
   it("case-insensitive", () => {
     expect(classifySource("RAAS-BRIDGE")).toBe("in");
     expect(classifySource("RPA.matchResumeAgent")).toBe("out");
+  });
+});
+
+describe("classifyByPublishers", () => {
+  it("external-intake publisher → in (manualEntry)", () => {
+    expect(classifyByPublishers(["manualEntry"])).toBe("in");
+  });
+  it("external-intake publisher → in (resumeCollection)", () => {
+    expect(classifyByPublishers(["resumeCollection"])).toBe("in");
+  });
+  it("external-intake publisher → in (syncFromClientSystem)", () => {
+    expect(classifyByPublishers(["syncFromClientSystem"])).toBe("in");
+  });
+  it("AO-internal agent publisher → out (matchResume)", () => {
+    expect(classifyByPublishers(["matchResume"])).toBe("out");
+  });
+  it("AO-internal agent publisher → out (processResume, resumeFix)", () => {
+    expect(classifyByPublishers(["processResume", "resumeFix"])).toBe("out");
+  });
+  it("any intake publisher in the list wins → in", () => {
+    // a hypothetical event published by both an intake and an internal agent
+    expect(classifyByPublishers(["processResume", "resumeCollection"])).toBe("in");
+  });
+  it("empty / undefined publishers → unknown", () => {
+    expect(classifyByPublishers([])).toBe("unknown");
+    expect(classifyByPublishers(undefined)).toBe("unknown");
   });
 });

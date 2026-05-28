@@ -207,7 +207,7 @@ function RunRow({
                     <summary className={`flex items-baseline gap-2 px-2 py-1 ${hasBody ? 'cursor-pointer hover:bg-panel/60' : 'cursor-default'}`}>
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
                       <span className="text-[10px] mono text-ink-4 shrink-0 tabular-nums">
-                        第 {i + 1} 步
+                        {t('mox_flow_step_n').replace('{n}', String(i + 1))}
                       </span>
                       <span className="text-ink-1 font-medium truncate">{desc.label}</span>
                       {desc.fromTo && (
@@ -234,7 +234,7 @@ function RunRow({
                         {s.input != null && (
                           <details open className="border-b border-line">
                             <summary className="cursor-pointer text-[10px] mono uppercase text-accent-1 px-2 py-1 bg-accent-bg/20">
-                              📥 INPUT (传入这一步的数据)
+                              📥 {t('mox_flow_step_input')}
                             </summary>
                             <pre className="mono text-[10px] px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[260px] overflow-y-auto">
                               {typeof s.input === 'string' ? s.input : JSON.stringify(s.input, null, 2)}
@@ -244,7 +244,7 @@ function RunRow({
                         {s.output != null && (
                           <details open>
                             <summary className="cursor-pointer text-[10px] mono uppercase text-ok px-2 py-1 bg-ok/10">
-                              📤 OUTPUT (这一步返回的数据)
+                              📤 {t('mox_flow_step_output')}
                             </summary>
                             <pre className="mono text-[10px] px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-[260px] overflow-y-auto">
                               {typeof s.output === 'string' ? s.output : JSON.stringify(s.output, null, 2)}

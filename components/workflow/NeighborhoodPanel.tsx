@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge } from "@/components/shared/atoms";
 import { upstreamOf, downstreamOf, type Neighbor } from "@/lib/agent-graph";
@@ -18,6 +19,7 @@ type Props = {
 };
 
 export function NeighborhoodPanel({ short, onJump }: Props) {
+  const { t } = useApp();
   if (!short) return null;
   const ups = upstreamOf(short);
   const downs = downstreamOf(short);
@@ -25,11 +27,10 @@ export function NeighborhoodPanel({ short, onJump }: Props) {
     return (
       <div className="border-b border-line" style={{ padding: "10px 16px" }}>
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-1.5">
-          上下游 · NEIGHBORHOOD
+          {t("wfx_neighborhood")}
         </div>
         <div className="text-[11px] text-ink-3">
-          此 agent 不与其他 agent 直接通过事件相连
-          （触发源或下游可能是外部系统）。
+          {t("wfx_neighborhoodEmpty")}
         </div>
       </div>
     );
@@ -37,11 +38,11 @@ export function NeighborhoodPanel({ short, onJump }: Props) {
   return (
     <div className="border-b border-line" style={{ padding: "10px 16px" }}>
       <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold mb-1.5">
-        上下游 · NEIGHBORHOOD
+        {t("wfx_neighborhood")}
       </div>
       {ups.length > 0 && (
         <NeighborGroup
-          title="上游 · 谁会触发我"
+          title={t("wfx_upstreamWhoTriggers")}
           neighbors={ups}
           direction="up"
           onJump={onJump}
@@ -49,7 +50,7 @@ export function NeighborhoodPanel({ short, onJump }: Props) {
       )}
       {downs.length > 0 && (
         <NeighborGroup
-          title="下游 · 我会触发谁"
+          title={t("wfx_downstreamWhoTriggered")}
           neighbors={downs}
           direction="down"
           onJump={onJump}

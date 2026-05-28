@@ -10,8 +10,8 @@
 //   2. Verify .env.local exists; if not, copy from .env.example with a banner.
 //   3. Load .env.local into process.env via dotenv.
 //   4. Run env preflight (warn on placeholders, fail on missing required).
-//   5. Ensure ./data and ./logs directories exist (Prisma + agent-logger).
-//   6. `prisma generate` + `prisma db push` to materialize SQLite schema.
+//   5. Ensure ./data and ./logs directories exist (agent-logger + migration src).
+//   6. Provision local Postgres (Docker), then `prisma generate` + `db push`.
 //
 // Idempotent — safe to re-run after editing .env.local.
 
@@ -91,7 +91,20 @@ for (const dir of ["data", "logs"]) {
   }
 }
 
-// 6. Prisma — generate client + push schema
+// 6. Local Postgres (Docker) — best-effort, then prisma generate + db push.
+const usingPostgres = (process.env.DATABASE_URL ?? "").startsWith("postgres");
+if (usingPostgres) {
+  try {
+    log(`Starting local Postgres (docker-compose.postgres.yml)…`);
+    execSync("docker compose -f docker-compose.postgres.yml up -d --wait", {
+      cwd: ROOT,
+      stdio: "inherit",
+    });
+  } catch (e) {
+    warn(`Couldn't start Postgres via Docker (${e.message}).`);
+    warn(`  → start Docker + run \`npm run pg:up\`, or point DATABASE_URL elsewhere.`);
+  }
+}
 log(`Running prisma generate + db push…`);
 try {
   execSync("npx prisma generate", {
@@ -108,7 +121,7 @@ try {
   fail(
     `Prisma setup failed: ${e.message}\n` +
       `  → if you see "Cannot find module 'dotenv/config'", run \`npm install\` first.\n` +
-      `  → if you see a SQLite path error, check DATABASE_URL in .env.local.`,
+      `  → if you see a Postgres connection error, run \`npm run pg:up\` (port 5433) and check DATABASE_URL.`,
   );
 }
 

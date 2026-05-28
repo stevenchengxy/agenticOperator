@@ -28,22 +28,22 @@ type Source = {
   desc: string;
 };
 
-const SOURCE_CATS: { id: string; label: string; n: number; ic: IcName }[] = [
-  { id: "all", label: "全部", n: 24, ic: "grid" },
-  { id: "ats", label: "客户 ATS / RMS", n: 6, ic: "plug" },
-  { id: "channel", label: "招聘渠道", n: 5, ic: "bolt" },
-  { id: "model", label: "模型与向量库", n: 4, ic: "cpu" },
-  { id: "messaging", label: "消息与协作", n: 3, ic: "bell" },
-  { id: "storage", label: "存储与数据库", n: 4, ic: "book" },
-  { id: "identity", label: "身份与权限", n: 2, ic: "key" },
+const SOURCE_CATS: { id: string; labelKey: string; n: number; ic: IcName }[] = [
+  { id: "all", labelKey: "dsx_cat_all", n: 24, ic: "grid" },
+  { id: "ats", labelKey: "dsx_cat_ats", n: 6, ic: "plug" },
+  { id: "channel", labelKey: "dsx_cat_channel", n: 5, ic: "bolt" },
+  { id: "model", labelKey: "dsx_cat_model", n: 4, ic: "cpu" },
+  { id: "messaging", labelKey: "dsx_cat_messaging", n: 3, ic: "bell" },
+  { id: "storage", labelKey: "dsx_cat_storage", n: 4, ic: "book" },
+  { id: "identity", labelKey: "dsx_cat_identity", n: 2, ic: "key" },
 ];
 
-const STATUS: Record<SourceStatus, { label: string; dot: string; variant: "ok" | "warn" | "err" | "info" | "default" }> = {
-  healthy: { label: "正常", dot: "var(--c-ok)", variant: "ok" },
-  degraded: { label: "降级", dot: "oklch(0.62 0.14 75)", variant: "warn" },
-  failing: { label: "异常", dot: "var(--c-err)", variant: "err" },
-  paused: { label: "暂停", dot: "var(--c-ink-3)", variant: "info" },
-  pending: { label: "待授权", dot: "var(--c-info)", variant: "info" },
+const STATUS: Record<SourceStatus, { labelKey: string; dot: string; variant: "ok" | "warn" | "err" | "info" | "default" }> = {
+  healthy: { labelKey: "dsx_status_healthy", dot: "var(--c-ok)", variant: "ok" },
+  degraded: { labelKey: "dsx_status_degraded", dot: "oklch(0.62 0.14 75)", variant: "warn" },
+  failing: { labelKey: "dsx_status_failing", dot: "var(--c-err)", variant: "err" },
+  paused: { labelKey: "dsx_status_paused", dot: "var(--c-ink-3)", variant: "info" },
+  pending: { labelKey: "dsx_status_pending", dot: "var(--c-info)", variant: "info" },
 };
 
 const SOURCES: Source[] = [
@@ -113,33 +113,33 @@ export function DataSourcesContent() {
 function DSSubHeader({ apiCount, partial }: { apiCount: number | null; partial: boolean }) {
   const { t } = useApp();
   const stats = [
-    { l: "已连接", v: "21 / 24", d: "1 待授权 · 2 异常", tone: "muted" },
-    { l: "事件 · 1d", v: "262.4k", d: "+8.4%", tone: "up" },
-    { l: "错误率", v: "0.06%", d: "目标 < 0.5%", tone: "up" },
-    { l: "p95 延迟", v: "184ms", d: "+22ms", tone: "down" },
-    { l: "本月支出", v: "¥38,210", d: "−4.1%", tone: "up" },
-    { l: "合规审核", v: "2 待处理", d: "Okta · Keycloak", tone: "muted" },
+    { l: t("dsx_kpi_connected"), v: "21 / 24", d: t("dsx_kpi_connected_d"), tone: "muted" },
+    { l: t("dsx_kpi_events_1d"), v: "262.4k", d: "+8.4%", tone: "up" },
+    { l: t("dsx_kpi_error_rate"), v: "0.06%", d: t("dsx_kpi_error_rate_d"), tone: "up" },
+    { l: t("dsx_kpi_p95"), v: "184ms", d: "+22ms", tone: "down" },
+    { l: t("dsx_kpi_spend"), v: "¥38,210", d: "−4.1%", tone: "up" },
+    { l: t("dsx_kpi_compliance"), v: t("dsx_kpi_compliance_v"), d: "Okta · Keycloak", tone: "muted" },
   ];
   return (
     <div className="border-b border-line bg-surface flex items-center" style={{ padding: "14px 22px", gap: 18 }}>
       <div>
         <div className="text-[15px] font-semibold tracking-tight flex items-center gap-2">
-          数据源 · 连接器
+          {t("dsx_title")}
           {apiCount != null && <Badge variant="info">{apiCount}</Badge>}
           {partial && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
         </div>
-        <div className="text-ink-3 text-[12px] mt-px">客户系统 · 渠道 · 模型 · 消息 · 存储 · 身份</div>
+        <div className="text-ink-3 text-[12px] mt-px">{t("dsx_subtitle")}</div>
       </div>
       <div
-        className="flex-1 grid border-l border-line"
+        className="flex-1 grid border-l border-line min-w-0"
         style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 14, paddingLeft: 18 }}
       >
         {stats.map((s, i) => (
-          <div key={i}>
-            <div className="hint">{s.l}</div>
+          <div key={i} className="min-w-0">
+            <div className="hint truncate">{s.l}</div>
             <div className="text-[16px] font-semibold tracking-tight tabular-nums">{s.v}</div>
             <div
-              className="mono text-[10.5px]"
+              className="mono text-[10.5px] truncate"
               style={{
                 color: s.tone === "up" ? "var(--c-ok)" : s.tone === "down" ? "var(--c-err)" : "var(--c-ink-4)",
               }}
@@ -149,17 +149,20 @@ function DSSubHeader({ apiCount, partial }: { apiCount: number | null; partial: 
           </div>
         ))}
       </div>
-      <Btn size="sm">导入 Manifest</Btn>
-      <Btn size="sm" variant="primary"><Ic.plus /> 新增连接器</Btn>
+      <div className="flex items-center gap-2 shrink-0">
+        <Btn size="sm" variant="ghost">{t("dsx_import_manifest")}</Btn>
+        <Btn size="sm" variant="primary"><Ic.plus /> {t("dsx_add_connector")}</Btn>
+      </div>
     </div>
   );
 }
 
 function DSCatRail({ cat, setCat }: { cat: string; setCat: (s: string) => void }) {
+  const { t } = useApp();
   return (
     <div className="border-r border-line bg-bg flex flex-col min-h-0">
       <div style={{ padding: "12px 14px 6px" }}>
-        <div className="hint mb-1.5">分类</div>
+        <div className="hint mb-1.5">{t("dsx_rail_categories")}</div>
         {SOURCE_CATS.map((c) => {
           const Icon = Ic[c.ic] || Ic.plug;
           const active = cat === c.id;
@@ -174,20 +177,20 @@ function DSCatRail({ cat, setCat }: { cat: string; setCat: (s: string) => void }
               }}
             >
               <Icon />
-              <span className="flex-1">{c.label}</span>
+              <span className="flex-1">{t(c.labelKey)}</span>
               <span className="mono text-[10.5px]" style={{ color: active ? "var(--c-accent)" : "var(--c-ink-4)" }}>{c.n}</span>
             </div>
           );
         })}
       </div>
       <div className="border-t border-line mt-1.5" style={{ padding: "10px 14px" }}>
-        <div className="hint mb-2">状态</div>
+        <div className="hint mb-2">{t("dsx_rail_status")}</div>
         {[
-          ["healthy", "正常", 19, "var(--c-ok)"],
-          ["degraded", "降级", 2, "oklch(0.62 0.14 75)"],
-          ["failing", "异常", 1, "var(--c-err)"],
-          ["paused", "暂停", 1, "var(--c-ink-3)"],
-          ["pending", "待授权", 1, "var(--c-info)"],
+          ["healthy", t("dsx_status_healthy"), 19, "var(--c-ok)"],
+          ["degraded", t("dsx_status_degraded"), 2, "oklch(0.62 0.14 75)"],
+          ["failing", t("dsx_status_failing"), 1, "var(--c-err)"],
+          ["paused", t("dsx_status_paused"), 1, "var(--c-ink-3)"],
+          ["pending", t("dsx_status_pending"), 1, "var(--c-info)"],
         ].map(([k, label, n, color]) => (
           <div key={k as string} className="flex items-center gap-2 py-1 text-[12px] text-ink-2">
             <span className="w-2 h-2 rounded-sm" style={{ background: color as string }} />
@@ -198,7 +201,7 @@ function DSCatRail({ cat, setCat }: { cat: string; setCat: (s: string) => void }
       </div>
       <div className="flex-1" />
       <div className="border-t border-line" style={{ padding: "12px 14px" }}>
-        <div className="hint mb-1">入站速率 · 1h</div>
+        <div className="hint mb-1">{t("dsx_inbound_rate_1h")}</div>
         <Spark values={[3, 4, 5, 4, 6, 7, 6, 8, 7, 9, 8, 9, 8]} h={36} stroke="var(--c-accent)" />
         <div className="mono text-[10.5px] text-ink-3 mt-1">1,240 evt / min</div>
       </div>
@@ -222,6 +225,7 @@ function DSGrid({ sources, onOpen }: { sources: Source[]; onOpen: (id: string) =
 }
 
 function ConnectorCard({ s, onOpen }: { s: Source; onOpen: () => void }) {
+  const { t } = useApp();
   const st = STATUS[s.status];
   return (
     <div
@@ -240,18 +244,18 @@ function ConnectorCard({ s, onOpen }: { s: Source; onOpen: () => void }) {
           <div className="text-[13px] font-semibold overflow-hidden text-ellipsis whitespace-nowrap">{s.name}</div>
           <div className="hint overflow-hidden text-ellipsis whitespace-nowrap">{s.vendor}</div>
         </div>
-        <Badge variant={st.variant} dot pulse={s.status === "failing"}>{st.label}</Badge>
+        <Badge variant={st.variant} dot pulse={s.status === "failing"}>{t(st.labelKey)}</Badge>
       </div>
       <div className="grid grid-cols-3 gap-2 mb-2.5">
-        <KV label="事件/日" value={s.events_1d === 0 ? "—" : s.events_1d.toLocaleString()} />
-        <KV label="错误" value={s.errs.toString()} tone={s.errs > 0 ? "err" : undefined} />
-        <KV label="延迟" value={s.latency} />
+        <KV label={t("dsx_kv_events_per_day")} value={s.events_1d === 0 ? "—" : s.events_1d.toLocaleString()} />
+        <KV label={t("dsx_kv_errors")} value={s.errs.toString()} tone={s.errs > 0 ? "err" : undefined} />
+        <KV label={t("dsx_kv_latency")} value={s.latency} />
       </div>
       <div className="mono text-[10.5px] text-ink-3 truncate">{s.syncMode}</div>
       <div className="flex items-center gap-2 mt-2 text-[10.5px] text-ink-4">
         <span className="mono">{s.lastSync}</span>
         <div className="flex-1" />
-        {s.fields > 0 && <span className="mono">{s.mapped}/{s.fields} 字段</span>}
+        {s.fields > 0 && <span className="mono">{s.mapped}/{s.fields} {t("dsx_fields_suffix")}</span>}
       </div>
       <div className="text-[11.5px] text-ink-3 mt-2 line-clamp-2">{s.desc}</div>
     </div>
@@ -273,21 +277,22 @@ function KV({ label, value, tone }: { label: string; value: string; tone?: "err"
 }
 
 function DSDetail({ s, onBack }: { s: Source; onBack: () => void }) {
+  const { t } = useApp();
   const [tab, setTab] = React.useState("overview");
   const tabs = [
-    ["overview", "概览"],
-    ["mapping", "字段映射"],
-    ["events", "事件流"],
-    ["credentials", "凭证与权限"],
+    ["overview", t("dsx_tab_overview")],
+    ["mapping", t("dsx_tab_mapping")],
+    ["events", t("dsx_tab_events")],
+    ["credentials", t("dsx_tab_credentials")],
     ["webhook", "Webhook"],
-    ["audit", "变更历史"],
+    ["audit", t("dsx_tab_audit")],
   ];
   const st = STATUS[s.status];
   return (
     <div className="flex flex-col min-h-0 bg-panel">
       <div className="border-b border-line bg-surface" style={{ padding: "14px 22px" }}>
         <div className="flex items-center gap-2.5">
-          <Btn size="sm" variant="ghost" onClick={onBack}>← 返回</Btn>
+          <Btn size="sm" variant="ghost" onClick={onBack}>← {t("dsx_back")}</Btn>
           <div
             className="w-[34px] h-[34px] rounded-md grid place-items-center text-white font-semibold text-[11px]"
             style={{ background: s.color }}
@@ -298,10 +303,11 @@ function DSDetail({ s, onBack }: { s: Source; onBack: () => void }) {
             <div className="text-[15px] font-semibold tracking-tight">{s.name}</div>
             <div className="text-ink-3 text-[12px]">{s.vendor} · {s.syncMode}</div>
           </div>
-          <Badge variant={st.variant} dot pulse={s.status === "failing"}>{st.label}</Badge>
-          <Btn size="sm"><Ic.play /> 重新同步</Btn>
-          <Btn size="sm"><Ic.pause /> 暂停</Btn>
-          <Btn size="sm" variant="primary">编辑配置</Btn>
+          <Badge variant={st.variant} dot pulse={s.status === "failing"}>{t(st.labelKey)}</Badge>
+          <Btn size="sm" variant="ghost"><Ic.play /> {t("dsx_resync")}</Btn>
+          <Btn size="sm" variant="ghost"><Ic.pause /> {t("dsx_pause")}</Btn>
+          <div className="w-px h-5 bg-line" />
+          <Btn size="sm" variant="primary">{t("dsx_edit_config")}</Btn>
         </div>
         <div className="flex mt-3 -mb-2.5">
           {tabs.map(([id, label]) => (
@@ -345,9 +351,10 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 function DSOverview({ s }: { s: Source }) {
+  const { t } = useApp();
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-      <SectionCard title="连接元数据">
+      <SectionCard title={t("dsx_sec_conn_meta")}>
         <div className="grid gap-2 text-[12px]" style={{ gridTemplateColumns: "auto 1fr", columnGap: 14, rowGap: 8 }}>
           <div className="mono text-ink-4 text-[11px]">vendor</div>
           <div className="mono">{s.vendor}</div>
@@ -361,25 +368,25 @@ function DSOverview({ s }: { s: Source }) {
           <div className="mono">{s.contractEnd}</div>
         </div>
       </SectionCard>
-      <SectionCard title="24h 吞吐">
+      <SectionCard title={t("dsx_sec_24h_throughput")}>
         <div className="grid grid-cols-3 gap-3">
           <KV label="events" value={s.events_1d === 0 ? "—" : s.events_1d.toLocaleString()} />
           <KV label="errors" value={s.errs.toString()} tone={s.errs > 0 ? "err" : undefined} />
-          <KV label="P95 延迟" value={s.latency} />
+          <KV label={t("dsx_kv_p95_latency")} value={s.latency} />
         </div>
         <Spark data={[3, 4, 5, 6, 5, 7, 6, 8, 7, 8, 9, 7, 8, 9, 8, 9]} h={60} accent="var(--c-accent)" />
       </SectionCard>
-      <SectionCard title="描述">
+      <SectionCard title={t("dsx_sec_description")}>
         <div className="text-[12.5px] text-ink-1 leading-relaxed">{s.desc}</div>
       </SectionCard>
-      <SectionCard title="字段映射完成度">
+      <SectionCard title={t("dsx_sec_mapping_completion")}>
         {s.fields === 0 ? (
-          <div className="text-ink-3 text-[12.5px]">— 无字段需映射 —</div>
+          <div className="text-ink-3 text-[12.5px]">{t("dsx_no_fields_to_map")}</div>
         ) : (
           <>
             <div className="flex items-baseline gap-2 mb-1.5">
               <span className="mono text-[18px] font-semibold">{s.mapped}</span>
-              <span className="mono text-[12px] text-ink-3">/ {s.fields} 字段</span>
+              <span className="mono text-[12px] text-ink-3">/ {s.fields} {t("dsx_fields_suffix")}</span>
               <div className="flex-1" />
               <span
                 className="mono text-[11px]"
@@ -405,6 +412,7 @@ function DSOverview({ s }: { s: Source }) {
 }
 
 function DSMapping({ s }: { s: Source }) {
+  const { t } = useApp();
   const rows = [
     ["external.requirement_id", "Job_Requisition.id", "String", "direct"],
     ["external.jd_content", "Job_Posting.description", "Text", "direct"],
@@ -413,14 +421,14 @@ function DSMapping({ s }: { s: Source }) {
     ["external.salary_range", "Job_Requisition.comp_band", "Object", "transform"],
   ];
   return (
-    <SectionCard title={`字段映射 · ${s.mapped}/${s.fields || "—"}`}>
+    <SectionCard title={`${t("dsx_sec_field_mapping")} · ${s.mapped}/${s.fields || "—"}`}>
       <table className="tbl">
         <thead>
           <tr>
-            <th>外部字段</th>
-            <th>内部字段</th>
-            <th>类型</th>
-            <th>模式</th>
+            <th>{t("dsx_th_external_field")}</th>
+            <th>{t("dsx_th_internal_field")}</th>
+            <th>{t("dsx_th_type")}</th>
+            <th>{t("dsx_th_mode")}</th>
           </tr>
         </thead>
         <tbody>
@@ -439,6 +447,7 @@ function DSMapping({ s }: { s: Source }) {
 }
 
 function DSEventsStream({ s }: { s: Source }) {
+  const { t } = useApp();
   const events = [
     { t: "14:06:04.812", name: "REQUIREMENT_SYNCED", tenant: "icbc", payload: "job=JD-2041" },
     { t: "14:06:02.190", name: "REQUIREMENT_LOGGED", tenant: "icbc", payload: "job=JD-2041" },
@@ -446,7 +455,7 @@ function DSEventsStream({ s }: { s: Source }) {
     { t: "14:05:44.102", name: "REQUIREMENT_SYNCED", tenant: "icbc", payload: "job=JD-2038" },
   ];
   return (
-    <SectionCard title={`来自 ${s.name} 的最近事件`}>
+    <SectionCard title={`${t("dsx_recent_events_from")} ${s.name}`}>
       <div>
         {events.map((e, i) => (
           <div key={i} className="flex items-center gap-2.5 py-2 border-b border-line last:border-0">
@@ -462,8 +471,9 @@ function DSEventsStream({ s }: { s: Source }) {
 }
 
 function DSCredentials({ s }: { s: Source }) {
+  const { t } = useApp();
   return (
-    <SectionCard title="凭证与权限">
+    <SectionCard title={t("dsx_sec_credentials")}>
       <div className="grid gap-2.5 text-[12px]" style={{ gridTemplateColumns: "auto 1fr", columnGap: 14, rowGap: 8 }}>
         <div className="mono text-ink-4 text-[11px]">auth_type</div>
         <div className="mono">{s.syncMode.includes("OAuth") ? "OAuth 2.0" : s.syncMode.includes("SAML") ? "SAML / SCIM" : "API Token"}</div>
@@ -483,8 +493,9 @@ function DSCredentials({ s }: { s: Source }) {
 }
 
 function DSWebhook({ s }: { s: Source }) {
+  const { t } = useApp();
   return (
-    <SectionCard title="Webhook 端点">
+    <SectionCard title={t("dsx_sec_webhook_endpoint")}>
       <div className="grid gap-2.5 text-[12px]" style={{ gridTemplateColumns: "auto 1fr", columnGap: 14, rowGap: 8 }}>
         <div className="mono text-ink-4 text-[11px]">endpoint</div>
         <div className="mono text-ink-1 overflow-hidden text-ellipsis">https://hook.ao.internal/v1/{s.id}/ingest</div>
@@ -502,13 +513,14 @@ function DSWebhook({ s }: { s: Source }) {
 }
 
 function DSAudit({ s }: { s: Source }) {
+  const { t } = useApp();
   const events = [
     { t: "3d 前", by: s.owner, what: "rotated API token · scopes unchanged" },
     { t: "14d 前", by: "compliance", what: "approved GDPR data residency · EU-West" },
     { t: "1m 前", by: s.owner, what: "added field mapping · external.seniority_level" },
   ];
   return (
-    <SectionCard title="变更历史 · Audit">
+    <SectionCard title={t("dsx_sec_audit")}>
       <div className="flex flex-col gap-2.5">
         {events.map((e, i) => (
           <div key={i} className="flex items-start gap-2.5">
@@ -524,11 +536,12 @@ function DSAudit({ s }: { s: Source }) {
 }
 
 function DSRightRail() {
+  const { t } = useApp();
   return (
     <div className="border-l border-line bg-bg flex flex-col min-h-0">
       <div className="border-b border-line bg-surface" style={{ padding: "12px 14px" }}>
-        <div className="text-[13px] font-semibold">跨源活动</div>
-        <div className="hint mt-0.5">实时事件 + 健康指标</div>
+        <div className="text-[13px] font-semibold">{t("dsx_rr_cross_source")}</div>
+        <div className="hint mt-0.5">{t("dsx_rr_cross_source_sub")}</div>
       </div>
       <div className="flex-1 overflow-auto">
         {[
@@ -560,7 +573,7 @@ function DSRightRail() {
         })}
       </div>
       <div className="border-t border-line bg-surface" style={{ padding: "10px 14px" }}>
-        <div className="text-[12.5px] font-semibold mb-2">Webhook 健康</div>
+        <div className="text-[12.5px] font-semibold mb-2">{t("dsx_rr_webhook_health")}</div>
         <div className="flex flex-col gap-1.5 text-[11px] text-ink-2">
           {[
             ["ByteDance", 98],

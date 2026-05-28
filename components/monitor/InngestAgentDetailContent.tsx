@@ -115,10 +115,10 @@ export function InngestAgentDetailContent({ slug }: { slug: string }) {
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6">
-        <div>
+        <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-4">{t('monitor_inngest_agent')}</div>
           <div className="flex items-center gap-2 mt-1">
-            <h1 className="text-[28px] font-medium leading-tight">{agent.name}</h1>
+            <h1 className="text-[28px] font-medium leading-tight truncate">{agent.name}</h1>
             {agent.paused ? (
               <span className="text-[10px] mono font-bold px-2 py-0.5 rounded bg-warn-bg text-warn">
                 ⏸ {t('monitor_agent_card_paused')}
@@ -140,7 +140,7 @@ export function InngestAgentDetailContent({ slug }: { slug: string }) {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <button
             onClick={togglePause}
             disabled={toggleBusy}
@@ -265,8 +265,8 @@ function StatCard({
     accent === 'ok' ? 'text-ok' : accent === 'err' ? 'text-err' : accent === 'warn' ? 'text-warn' : 'text-ink-1';
   return (
     <div className="border border-line rounded p-3 bg-surface">
-      <div className="text-[10px] text-ink-4 uppercase">{label}</div>
-      <div className={`text-[22px] mono font-medium mt-1 ${color}`}>{value}</div>
+      <div className="text-[10px] text-ink-4 uppercase tracking-[0.08em]">{label}</div>
+      <div className={`text-[22px] tabular-nums font-medium mt-1 ${color}`}>{value}</div>
     </div>
   );
 }
@@ -363,10 +363,10 @@ function FlowCard({
             type="button"
             onClick={rerun}
             disabled={rerunning || !flow.eventId}
-            title={flow.eventId ? `↺ 重新触发(event ${flow.eventId})` : '无 eventId,无法重跑'}
+            title={flow.eventId ? t('mox_rerun_event_title').replace('{event}', flow.eventId) : t('mox_rerun_no_event_id')}
             className="text-[10px] px-1.5 py-0.5 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed leading-none"
           >
-            {rerunning ? '⏳' : '↺ 重跑'}
+            {rerunning ? '⏳' : `↺ ${t('mox_rerun_short')}`}
           </button>
         </div>
       </div>

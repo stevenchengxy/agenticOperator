@@ -45,7 +45,7 @@ async function tryUpload(label: string, buf: Buffer, filename: string, mimeType?
       method: "POST",
       headers: { Authorization: `Bearer ${RH_KEY}` },
       body: form,
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(300_000),
     });
     const ms = Date.now() - t0;
     const txt = await res.text();

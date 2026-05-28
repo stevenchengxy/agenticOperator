@@ -19,6 +19,59 @@ export type StepDescriptor = {
   group?: string;
 };
 
+// ── Agent file-log event kind → 中文标签(2026-05-27) ──────────────────────
+//
+// 审计页"运行完整日志" + 监控页 RunTrace 的「智能体完整日志」共用. 把 fileLogger
+// 写的 kind(handler.start / llm.request / api.RoboHire.parseResume / ...)翻译成
+// 业务语义中文名. 覆盖所有已知 kind + api.* / rule-fetch.* 前缀兜底 + 友好 fallback.
+
+const LOG_KIND_LABEL: Record<string, string> = {
+  "handler.start": "▶ 开始处理",
+  "handler.raw_input": "📥 完整入参 (上游 → 智能体)",
+  "handler.done": "✅ 处理完成",
+  "handler.error": "❌ 处理出错",
+  "backfill.resume.ok": "🔄 回查简历正文",
+  "backfill.jd.ok": "🔄 回查 JD 文本",
+  "emit.invitation-sent": "📡 回发「邀约已送达」",
+  "emit.invitation-failed": "📡 回发「邀约失败」",
+  "emit.resume-processed": "📡 回发「简历已解析」",
+  "emit.match-event": "📡 回发「匹配结果」",
+  "save-candidate.ok": "💾 保存候选人 + 简历",
+  "save-candidate.failed": "❌ 保存候选人失败",
+  "step.start": "▶ 步骤开始",
+  "step.end": "■ 步骤结束(含判定结果)",
+  "diag.invite-input.preview": "🔎 邀约入参预览",
+  "llm.request": "🧠 大模型入参 (prompt)",
+  "llm.response": "🧠 大模型出参 (回复)",
+  "llm.failed": "❌ 大模型调用失败",
+  "runRuleCheck.start": "▶ 规则检查开始",
+  "rule-fetch.failed": "❌ 规则拉取失败",
+  "rule-fetch.result": "📋 规则拉取结果",
+  "rule-fetch.client-resolution": "🔎 解析客户名",
+  "rule-fetch.department-resolution": "🔎 解析事业群",
+  "match.input": "📥 匹配入参",
+};
+
+/**
+ * fileLogger event kind → 友好中文标签. 未知 kind 走前缀兜底:
+ *   api.RoboHire.X  → 🌐 调用外部面试服务
+ *   api.lookup-*    → 🔎 查询实例库
+ *   api.fetch-*     → 📋 拉取数据
+ *   pg.* / partner  → 💾 数据库
+ *   其它 api.*      → 🌐 外部调用
+ */
+export function describeLogKind(kind: string): string {
+  if (LOG_KIND_LABEL[kind]) return LOG_KIND_LABEL[kind];
+  const k = kind.toLowerCase();
+  if (k.startsWith('api.robohire')) return '🌐 调用外部面试/解析服务';
+  if (k.startsWith('api.lookup')) return '🔎 查询实例库';
+  if (k.startsWith('api.fetch')) return '📋 拉取规则/数据';
+  if (k.startsWith('api.allmeta') || k.includes('ontology')) return '💾 写/读实例库';
+  if (k.startsWith('api.')) return '🌐 外部调用';
+  if (k.startsWith('pg.') || k.includes('partner-pg')) return '💾 数据库操作';
+  return kind;
+}
+
 export function describeStep(name: string): StepDescriptor {
   const n = name.toLowerCase();
 

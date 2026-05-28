@@ -2,6 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
@@ -11,6 +12,7 @@ import type {
 } from "@/app/api/correlations/[traceId]/route";
 
 export function CorrelationContent({ traceId }: { traceId: string }) {
+  const { t } = useApp();
   const router = useRouter();
   const [data, setData] = React.useState<CorrelationsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -56,24 +58,24 @@ export function CorrelationContent({ traceId }: { traceId: string }) {
       />
       {loading && !data ? (
         <div className="flex-1 flex items-center justify-center">
-          <span className="text-ink-3 text-[12px]">加载中…</span>
+          <span className="text-ink-3 text-[12px]">{t("cox_loading")}</span>
         </div>
       ) : error ? (
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.alert />}
-            title="加载失败"
+            title={t("cox_load_failed")}
             hint={error}
             variant="warn"
-            action={<Btn size="sm" onClick={() => refresh(traceId)}>重试</Btn>}
+            action={<Btn size="sm" onClick={() => refresh(traceId)}>{t("cox_retry")}</Btn>}
           />
         </div>
       ) : !data || data.timeline.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.search />}
-            title="无关联记录"
-            hint={`没有任何 AuditLog / EventInstance / WorkflowRun / HumanTask 与 trace_id "${traceId}" 关联。试试 external_event_id、run id 或 EventInstance id。`}
+            title={t("cox_no_correlation_title")}
+            hint={t("cox_no_correlation_hint").replace("{traceId}", traceId)}
           />
         </div>
       ) : (
@@ -98,15 +100,16 @@ function Header({
   onSubmit: (e: React.FormEvent) => void;
   onRefresh: () => void;
 }) {
+  const { t } = useApp();
   return (
     <div
       className="border-b border-line bg-surface flex items-center"
       style={{ padding: "14px 22px", gap: 18 }}
     >
       <div className="min-w-0">
-        <div className="text-[15px] font-semibold tracking-tight">跨系统时间线</div>
+        <div className="text-[15px] font-semibold tracking-tight">{t("cox_title")}</div>
         <div className="text-ink-3 text-[12px] mt-px">
-          AuditLog · EventInstance · WorkflowRun · HumanTask 按 trace_id 关联
+          {t("cox_subtitle")}
         </div>
       </div>
       <form onSubmit={onSubmit} className="flex items-center gap-2">
@@ -118,7 +121,7 @@ function Header({
           style={{ padding: "0 8px" }}
         />
         <Btn size="sm" type="submit">
-          <Ic.search /> 切换
+          <Ic.search /> {t("cox_switch")}
         </Btn>
       </form>
       <div className="flex-1" />
@@ -131,7 +134,7 @@ function Header({
         </div>
       )}
       <Btn size="sm" variant="ghost" onClick={onRefresh}>
-        <Ic.bolt /> 刷新
+        <Ic.bolt /> {t("cox_refresh")}
       </Btn>
     </div>
   );

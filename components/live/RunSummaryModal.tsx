@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
@@ -19,6 +20,7 @@ type Props = {
 };
 
 export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
+  const { t } = useApp();
   const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -98,7 +100,7 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
               </span>
               {resp && (
                 <Badge variant={resp.source === "llm" ? "ok" : "info"}>
-                  {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : "fallback (无网关)"}
+                  {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : t("lvx_fallback_no_gateway")}
                 </Badge>
               )}
               {resp && (
@@ -122,12 +124,11 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
               <div className="text-[12px] text-ink-2">{jobLabel}</div>
             )}
             <div className="text-[10.5px] text-ink-4 leading-relaxed mt-0.5">
-              基于 WorkflowRun + WorkflowStep + AgentActivity 的事实生成。LLM 网关未配置时
-              fallback 到统计渲染。Agent 自身的功能解读请在 /workflow 节点 Inspector 查看。
+              {t("lvx_modal_subtitle")}
             </div>
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
-            <Btn size="sm" variant="ghost" onClick={fetchSummary} disabled={loading} title="重新生成">
+            <Btn size="sm" variant="ghost" onClick={fetchSummary} disabled={loading} title={t("lvx_regenerate")}>
               <Ic.bolt />
             </Btn>
             <Btn
@@ -138,7 +139,7 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
                 await fetchSummary();
               }}
               disabled={loading}
-              title="清缓存重新调用"
+              title={t("lvx_modal_clear_cache_tip")}
             >
               <Ic.sparkle />
             </Btn>
@@ -150,17 +151,17 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
 
         <div className="flex-1 overflow-auto" style={{ padding: "14px 18px" }}>
           {loading && !resp && (
-            <div className="text-ink-3 text-[12px]">AI 正在生成总结…</div>
+            <div className="text-ink-3 text-[12px]">{t("lvx_modal_generating")}</div>
           )}
           {err && !resp && (
             <EmptyState
               icon={<Ic.alert />}
-              title="生成总结失败"
+              title={t("lvx_modal_gen_failed")}
               hint={err}
               variant="warn"
               action={
                 <Btn size="sm" onClick={fetchSummary}>
-                  重试
+                  {t("lvx_retry")}
                 </Btn>
               }
             />
@@ -168,15 +169,15 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
           {resp && (
             <>
               <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
-                <Stat label="参与 agent" value={resp.agentBreakdown.length} />
-                <Stat label="活动条目" value={resp.activityCount} />
+                <Stat label={t("lvx_stat_agents")} value={resp.agentBreakdown.length} />
+                <Stat label={t("lvx_stat_activities")} value={resp.activityCount} />
                 <Stat
-                  label="错误"
+                  label={t("lvx_stat_errors")}
                   value={resp.errorCount}
                   tone={resp.errorCount > 0 ? "err" : "muted"}
                 />
                 <Stat
-                  label="耗时"
+                  label={t("lvx_stat_duration")}
                   value={resp.durationMs ? formatDuration(resp.durationMs) : "—"}
                 />
               </div>
@@ -191,7 +192,7 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
               {resp.agentBreakdown.length > 0 && (
                 <div className="mt-3">
                   <div className="text-[10.5px] text-ink-4 font-semibold tracking-[0.06em] uppercase mb-1.5">
-                    Run-scoped agent 统计
+                    {t("lvx_modal_agent_stats")}
                   </div>
                   <table className="tbl">
                     <thead>
@@ -199,8 +200,8 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
                         <th style={{ width: 160 }}>agent</th>
                         <th style={{ width: 60 }}>steps</th>
                         <th style={{ width: 60 }}>failed</th>
-                        <th style={{ width: 100 }}>耗时</th>
-                        <th>最近 narrative</th>
+                        <th style={{ width: 100 }}>{t("lvx_modal_col_duration")}</th>
+                        <th>{t("lvx_modal_col_narrative")}</th>
                       </tr>
                     </thead>
                     <tbody>

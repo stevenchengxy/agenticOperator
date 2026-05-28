@@ -39,6 +39,9 @@ export type RuleCheckAuditDetail = {
   job_requisition_id: string;
   trace_id: string | null;
   client_name: string;
+  /** Readable client name resolved at read-time from partner-pg `client`
+   *  (the audit only persists the raw client_id). null when unresolved. */
+  client_display_name: string | null;
   business_group: string | null;
   studio: string | null;
   llm_model: string;
@@ -228,7 +231,7 @@ function statusToNextAction(status: string): string {
   }
 }
 
-function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag> {
+export function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag> {
   const out = new Map<string, RawFlag>();
   if (!llmRawText || !llmRawText.trim()) return out;
   let parsed: unknown;
@@ -292,7 +295,7 @@ function extractRawFlagsByRuleId(llmRawText: string | null): Map<string, RawFlag
  *   - DB 里已有的 rule_id 优先(权威)
  *   - DB 里缺的(早期被过滤掉的 NOT_APPLICABLE)从 raw 抠出来补,标 from_raw_fallback=true
  */
-function mergeFlagsWithRawFallback(
+export function mergeFlagsWithRawFallback(
   dbFlags: RuleCheckFlagRow[],
   rawFlagsByRuleId: Map<string, RawFlag>,
   auditId: string,
@@ -337,7 +340,7 @@ export async function GET(
       });
     }
 
-    // 并行查 Neo4j 实体 + 子 audit
+    // 并行查 Neo4j 实体 + 子 audit + 客户可读名(partner-pg)
     const [entities, children] = await Promise.all([
       fetchEntitySnapshots(audit.candidate_id, audit.resume_id, audit.job_requisition_id),
       prisma.ruleCheckAudit.findMany({
@@ -375,6 +378,8 @@ export async function GET(
       job_requisition_id: audit.job_requisition_id,
       trace_id: audit.trace_id,
       client_name: audit.client_name ?? '',
+      // Persisted at write-time (no live partner-pg query → no ETIMEDOUT on read).
+      client_display_name: audit.client_display_name ?? null,
       business_group: audit.business_group,
       studio: audit.studio,
       llm_model: audit.llm_model,

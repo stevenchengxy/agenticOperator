@@ -63,12 +63,12 @@ function deriveStatus(realness: Realness, paused: boolean, live: LiveAgentState 
   return "deployed";
 }
 
-function relTime(iso: string | null | undefined): string {
+function relTime(iso: string | null | undefined, t: (k: string) => string): string {
   if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diffSec = Math.max(0, (Date.now() - t) / 1000);
-  if (diffSec < 60) return "刚刚";
+  const ms = new Date(iso).getTime();
+  if (Number.isNaN(ms)) return "—";
+  const diffSec = Math.max(0, (Date.now() - ms) / 1000);
+  if (diffSec < 60) return t("flx_just_now");
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
   return `${Math.floor(diffSec / 86400)}d`;
@@ -142,17 +142,22 @@ const STAGE_ORDER = [
   "submit",
 ] as const;
 
-const STAGE_ZH: Record<string, string> = {
-  system: "系统",
-  requirement: "需求",
-  jd: "JD",
-  resume: "简历",
-  match: "匹配",
-  interview: "面试",
-  eval: "评估",
-  package: "推荐包",
-  submit: "提交",
+const STAGE_KEYS: Record<string, string> = {
+  system: "flx_stage_system",
+  requirement: "flx_stage_requirement",
+  jd: "flx_stage_jd",
+  resume: "flx_stage_resume",
+  match: "flx_stage_match",
+  interview: "flx_stage_interview",
+  eval: "flx_stage_eval",
+  package: "flx_stage_package",
+  submit: "flx_stage_submit",
 };
+
+function stageLabel(stage: string, t: (k: string) => string): string {
+  const k = STAGE_KEYS[stage];
+  return k ? t(k) : stage;
+}
 
 export function FleetContent() {
   const { t } = useApp();
@@ -305,6 +310,9 @@ export function FleetContent() {
       <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
         <div className="flex items-start gap-6">
           <div className="flex-1 min-w-0">
+            <div className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2">
+              {t("nav_fleet")}
+            </div>
             <h1
               className="m-0 text-ink-1"
               style={{
@@ -321,13 +329,13 @@ export function FleetContent() {
               {t("fleet_sub")}
             </div>
           </div>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex items-center gap-3 mt-1 shrink-0">
             <InngestPill />
-            <LiveIndicator lastRefresh={lastRefresh} />
+            <LiveIndicator lastRefresh={lastRefresh} t={t} />
             {partial && (
               <span className="text-[11.5px] text-ink-3 flex items-center gap-1.5">
                 <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-warn)" }} />
-                部分数据未到
+                {t("flx_partial_data")}
               </span>
             )}
             <Btn variant="primary" size="sm" onClick={() => setBehaviorModal(true)}>
@@ -353,7 +361,7 @@ export function FleetContent() {
           tone={aggSuccessRate == null ? "muted" : aggSuccessRate >= 95 ? "ok" : aggSuccessRate >= 90 ? "warn" : "err"}
         />
         <SummaryChip
-          label="需关注"
+          label={t("flx_need_attention")}
           value={String(anomalies)}
           tone={anomalies === 0 ? "muted" : "err"}
           active={statusFilter === "anomalies"}
@@ -379,7 +387,7 @@ export function FleetContent() {
             className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 rounded border border-line bg-surface"
             style={{ padding: "3px 9px", fontSize: 12 }}
           >
-            <span className="text-ink-3">筛选:</span>
+            <span className="text-ink-3">{t("flx_filter_label")}</span>
             <span className="font-medium">{filterLabel(statusFilter, t)}</span>
             <span className="text-ink-3 ml-1">×</span>
           </button>
@@ -390,23 +398,23 @@ export function FleetContent() {
       {/* list */}
       <div className="flex-1 min-h-0" style={{ padding: "4px 32px 48px" }}>
         {agentsRes === null && (
-          <div className="text-ink-3 text-[13px] text-center py-16">加载中…</div>
+          <div className="text-ink-3 text-[13px] text-center py-16">{t("flx_loading")}</div>
         )}
         {agentsRes !== null && grouped.length > 0 && (
           <div
             className="grid gap-4 text-ink-3 border-b border-line"
             style={{ gridTemplateColumns: GRID, padding: "8px 12px", fontSize: 11.5 }}
           >
-            <span>智能体</span>
-            <span>部署状态</span>
-            <span>近期运行</span>
-            <span style={{ textAlign: "right" }}>最近活动</span>
-            <span style={{ textAlign: "right" }}>版本</span>
+            <span>{t("flx_col_agent")}</span>
+            <span>{t("flx_col_deploy_status")}</span>
+            <span>{t("flx_col_recent_runs")}</span>
+            <span style={{ textAlign: "right" }}>{t("flx_col_last_active")}</span>
+            <span style={{ textAlign: "right" }}>{t("flx_col_version")}</span>
           </div>
         )}
         {agentsRes !== null && grouped.map((g) => (
           <section key={g.key}>
-            {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} />}
+            {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} t={t} />}
             {g.rows.map((r) => (
               <AgentListRow key={r.short} row={r} t={t} onTogglePause={togglePause} />
             ))}
@@ -414,12 +422,12 @@ export function FleetContent() {
         ))}
         {agentsRes !== null && grouped.length === 0 && (
           <div className="text-ink-3 text-[13px] text-center py-16">
-            没有匹配当前筛选的智能体。
+            {t("flx_no_match")}
           </div>
         )}
         {agentsRes !== null && filtered.length > 0 && (
           <div className="flex items-center gap-2 text-[12px] text-ink-3 mt-6">
-            <span>显示 {filtered.length} / {total}</span>
+            <span>{t("flx_showing")} {filtered.length} / {total}</span>
           </div>
         )}
       </div>
@@ -488,8 +496,8 @@ function groupRows(rows: FleetRow[], group: "team" | "status" | "stage" | "flat"
   return entries.map(([k, rs]) => ({ key: k, title: k, rows: sortWithinGroup(rs) }));
 }
 
-function groupTitle(title: string, group: string, _t: (k: string) => string): string {
-  if (group === "stage") return STAGE_ZH[title] ?? title;
+function groupTitle(title: string, group: string, t: (k: string) => string): string {
+  if (group === "stage") return stageLabel(title, t);
   return title;
 }
 
@@ -577,7 +585,7 @@ function PeriodDropdown({ value, onChange, t }: { value: "7d" | "30d" | "90d"; o
         className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 transition-colors"
         style={{ fontSize: 12.5 }}
       >
-        <span className="text-ink-3">区间</span>
+        <span className="text-ink-3">{t("flx_period_label")}</span>
         <span className="font-medium">{label}</span>
         <Ic.chevD style={{ width: 10, height: 10 }} />
       </button>
@@ -626,7 +634,7 @@ function FilterMenu({ value, onChange, t }: { value: FilterId; onChange: (v: Fil
         style={{ fontSize: 12.5 }}
       >
         <Ic.search style={{ width: 12, height: 12 }} />
-        <span>筛选</span>
+        <span>{t("flx_filter")}</span>
         <Ic.chevD style={{ width: 10, height: 10 }} />
       </button>
       {open && (
@@ -654,7 +662,7 @@ function FilterMenu({ value, onChange, t }: { value: FilterId; onChange: (v: Fil
 // always-visible "上线"/"下线" button (was icon-only on hover before).
 const GRID = "minmax(280px, 1fr) 120px 140px 100px 150px";
 
-function GroupHeader({ title, rows }: { title: string; rows: FleetRow[] }) {
+function GroupHeader({ title, rows, t }: { title: string; rows: FleetRow[]; t: (k: string) => string }) {
   const deployed = rows.filter((r) => r.status === "deployed").length;
   const paused = rows.filter((r) => r.status === "paused").length;
   const notDeployed = rows.filter((r) => r.status === "not_deployed").length;
@@ -665,10 +673,10 @@ function GroupHeader({ title, rows }: { title: string; rows: FleetRow[] }) {
         {title}
       </h3>
       <span className="text-ink-3" style={{ fontSize: 12 }}>
-        {deployed > 0 && <><span style={{ color: "var(--c-ok)" }}>{deployed}</span> 已上线</>}
-        {paused > 0 && <>{deployed > 0 && " · "}{paused} 已暂停</>}
-        {notDeployed > 0 && <>{(deployed > 0 || paused > 0) && " · "}<span style={{ color: "var(--c-err)" }}>{notDeployed}</span> 未上线</>}
-        {anomalous > 0 && <> · <span style={{ color: "var(--c-err)" }}>{anomalous} 需关注</span></>}
+        {deployed > 0 && <><span style={{ color: "var(--c-ok)" }}>{deployed}</span> {t("flx_status_deployed")}</>}
+        {paused > 0 && <>{deployed > 0 && " · "}{paused} {t("flx_status_paused")}</>}
+        {notDeployed > 0 && <>{(deployed > 0 || paused > 0) && " · "}<span style={{ color: "var(--c-err)" }}>{notDeployed}</span> {t("flx_status_not_deployed")}</>}
+        {anomalous > 0 && <> · <span style={{ color: "var(--c-err)" }}>{anomalous} {t("flx_need_attention")}</span></>}
       </span>
     </div>
   );
@@ -726,12 +734,12 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
 
       {/* runs: total + breakdown (real data) */}
       <div className="relative">
-        {stub ? <span /> : <RunsCell row={row} />}
+        {stub ? <span /> : <RunsCell row={row} t={t} />}
       </div>
 
       {/* last active */}
       <div className="relative text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
-        {stub ? "" : relTime(row.lastActiveAt)}
+        {stub ? "" : relTime(row.lastActiveAt, t)}
       </div>
 
       {/* version + hover action — fixed column width (see GRID const).
@@ -741,6 +749,7 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
         {!stub && row.slug && (
           <PauseToggleButton
             paused={row.paused}
+            t={t}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -754,14 +763,14 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
   );
 }
 
-function PauseToggleButton({ paused, onClick }: { paused: boolean; onClick: (e: React.MouseEvent) => void }) {
+function PauseToggleButton({ paused, onClick, t }: { paused: boolean; onClick: (e: React.MouseEvent) => void; t: (k: string) => string }) {
   // Paused agents: button always visible (resume is the affordance the user
   // is looking for). Running agents: button hover-only to keep the row calm.
   const visibility = paused ? "opacity-100" : "opacity-0 group-hover:opacity-100";
   return (
     <button
       onClick={onClick}
-      title={paused ? "上线 (恢复运行)" : "下线 (暂停)"}
+      title={paused ? t("flx_bring_online_tip") : t("flx_take_offline_tip")}
       className={`${visibility} rounded transition-all hover:bg-surface inline-flex items-center gap-1 leading-none whitespace-nowrap shrink-0`}
       style={{
         padding: "2px 6px",
@@ -772,16 +781,16 @@ function PauseToggleButton({ paused, onClick }: { paused: boolean; onClick: (e: 
       }}
     >
       {paused ? <Ic.play /> : <Ic.pause />}
-      <span>{paused ? "上线" : "下线"}</span>
+      <span>{paused ? t("flx_bring_online") : t("flx_take_offline")}</span>
     </button>
   );
 }
 
-function RunsCell({ row }: { row: FleetRow }) {
+function RunsCell({ row, t }: { row: FleetRow; t: (k: string) => string }) {
   const total = row.liveTotal;
   if (total == null) return <span className="text-ink-4" style={{ fontSize: 13 }}>—</span>;
   if (total === 0) {
-    return <span className="text-ink-4" style={{ fontSize: 13 }}>无运行</span>;
+    return <span className="text-ink-4" style={{ fontSize: 13 }}>{t("flx_no_runs")}</span>;
   }
   const succ = row.liveCompleted ?? 0;
   const fail = row.liveFailed ?? 0;
@@ -814,11 +823,11 @@ function RowStatusDot({ status }: { status: FleetStatus }) {
   );
 }
 
-function StatusCell({ status }: { status: FleetStatus; t: (k: string) => string }) {
+function StatusCell({ status, t }: { status: FleetStatus; t: (k: string) => string }) {
   const label =
-    status === "deployed"     ? "已上线" :
-    status === "paused"       ? "已暂停" :
-    status === "not_deployed" ? "未上线" :
+    status === "deployed"     ? t("flx_status_deployed") :
+    status === "paused"       ? t("flx_status_paused") :
+    status === "not_deployed" ? t("flx_status_not_deployed") :
     "";
   const color =
     status === "not_deployed" ? "var(--c-err)" :
@@ -831,12 +840,12 @@ function StatusCell({ status }: { status: FleetStatus; t: (k: string) => string 
 
 // ── live indicator ───────────────────────────────────────────────
 
-function LiveIndicator({ lastRefresh }: { lastRefresh: string | null }) {
+function LiveIndicator({ lastRefresh, t }: { lastRefresh: string | null; t: (k: string) => string }) {
   const live = !!lastRefresh;
   return (
     <span
       className="flex items-center gap-1.5 text-ink-3"
-      title={live ? `数据来自 Inngest · 最后刷新 ${lastRefresh}` : "正在连接 Inngest…"}
+      title={live ? `${t("flx_data_from_inngest")} · ${t("flx_last_refresh")} ${lastRefresh}` : t("flx_connecting_inngest")}
       style={{ fontSize: 11.5 }}
     >
       <span
@@ -846,7 +855,7 @@ function LiveIndicator({ lastRefresh }: { lastRefresh: string | null }) {
           background: live ? "var(--c-ok)" : "var(--c-ink-4)",
         }}
       />
-      {live ? "实时" : "连接中"}
+      {live ? t("flx_live") : t("flx_connecting")}
     </span>
   );
 }
@@ -872,7 +881,7 @@ function BehaviorPlaceholderModal({ onClose, t }: { onClose: () => void; t: (k: 
           {t("f2_behavior_not_live_body")}
         </p>
         <div className="flex justify-end mt-6">
-          <Btn variant="primary" size="sm" onClick={onClose}>关闭</Btn>
+          <Btn variant="primary" size="sm" onClick={onClose}>{t("flx_close")}</Btn>
         </div>
       </div>
     </div>

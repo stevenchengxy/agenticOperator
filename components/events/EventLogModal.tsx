@@ -2,6 +2,7 @@
 import React from "react";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn } from "@/components/shared/atoms";
+import { useApp } from "@/lib/i18n";
 import {
   classifyEvent,
   lifecycleBadgeVariant,
@@ -73,6 +74,7 @@ export function EventLogModal({ event, onClose }: Props) {
 }
 
 function Header({ event, onClose }: { event: InngestEventRow; onClose: () => void }) {
+  const { t } = useApp();
   const cls = classifyEvent(event);
   const { events } = useEventCatalog();
   const def = events.find((e) => e.name === event.name);
@@ -113,13 +115,13 @@ function Header({ event, onClose }: { event: InngestEventRow; onClose: () => voi
       </div>
       <div className="flex gap-2 flex-shrink-0">
         <Btn size="sm" variant="ghost" onClick={() => copyJson(event)}>
-          <Ic.book /> 复制 JSON
+          <Ic.book /> {t("evx_copy_json")}
         </Btn>
         <Btn size="sm" variant="ghost" onClick={() => downloadJson(event)}>
-          <Ic.bookmark /> 下载
+          <Ic.bookmark /> {t("evx_download")}
         </Btn>
         <Btn size="sm" onClick={onClose}>
-          <Ic.cross /> 关闭 (Esc)
+          <Ic.cross /> {t("evx_close_esc")}
         </Btn>
       </div>
     </div>
@@ -127,6 +129,7 @@ function Header({ event, onClose }: { event: InngestEventRow; onClose: () => voi
 }
 
 function Body({ event }: { event: InngestEventRow }) {
+  const { t } = useApp();
   const cls = classifyEvent(event);
   return (
     <div
@@ -134,14 +137,14 @@ function Body({ event }: { event: InngestEventRow }) {
       style={{ gridTemplateColumns: "1fr 380px" }}
     >
       <div className="overflow-auto" style={{ padding: "16px 22px" }}>
-        <Section label="结构化字段">
+        <Section label={t("evx_section_structured_fields")}>
           <ParsedFields event={event} />
         </Section>
-        <Section label="完整 payload (JSON)">
+        <Section label={t("evx_section_full_payload")}>
           <PayloadBlock value={event.data} />
         </Section>
         {cls.causedByEventId && (
-          <Section label="caused_by 链">
+          <Section label={t("evx_section_caused_by_chain")}>
             <a
               href={`/events?subtab=causality&causedByEventId=${encodeURIComponent(cls.causedByEventId)}`}
               className="mono text-[11px] text-ink-2 break-all no-underline hover:text-ink-1"
@@ -151,7 +154,7 @@ function Body({ event }: { event: InngestEventRow }) {
           </Section>
         )}
         {cls.referencedEventId && (
-          <Section label="run-end 引用的原事件">
+          <Section label={t("evx_section_runend_origin")}>
             <div className="flex flex-col gap-1">
               {cls.referencedEventName && (
                 <span className="mono text-[12px] text-ink-1">{cls.referencedEventName}</span>
@@ -183,6 +186,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 }
 
 function ParsedFields({ event }: { event: InngestEventRow }) {
+  const { t } = useApp();
   const data = (event.data ?? {}) as Record<string, unknown>;
   const payload = (data.payload as Record<string, unknown>) ?? {};
   const rows: Array<[string, unknown]> = [];
@@ -198,7 +202,7 @@ function ParsedFields({ event }: { event: InngestEventRow }) {
   for (const k of Object.keys(payload)) push(k, payload[k]);
 
   if (rows.length === 0) {
-    return <div className="text-ink-3 text-[11.5px]">— 无可解析字段 —</div>;
+    return <div className="text-ink-3 text-[11.5px]">{t("evx_no_parsable_fields")}</div>;
   }
   return (
     <table className="tbl mono text-[11px]">
@@ -239,6 +243,7 @@ function SubscriberRuns({
   event: InngestEventRow;
   cls: LifecycleClassification;
 }) {
+  const { t } = useApp();
   const [data, setData] = React.useState<EventRunsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
@@ -266,8 +271,8 @@ function SubscriberRuns({
   return (
     <div>
       <div className="flex items-center mb-2">
-        <div className="text-[12px] font-semibold text-ink-1 flex-1">订阅函数运行</div>
-        <Btn size="sm" variant="ghost" onClick={fetchRuns} title="刷新">
+        <div className="text-[12px] font-semibold text-ink-1 flex-1">{t("evx_subscriber_runs")}</div>
+        <Btn size="sm" variant="ghost" onClick={fetchRuns} title={t("evx_refresh")}>
           <Ic.bolt />
         </Btn>
       </div>
@@ -276,17 +281,17 @@ function SubscriberRuns({
       </div>
 
       {loading ? (
-        <div className="text-ink-3 text-[11.5px]">加载中…</div>
+        <div className="text-ink-3 text-[11.5px]">{t("evx_loading")}</div>
       ) : err ? (
         <div className="text-[11.5px]" style={{ color: "var(--c-warn)" }}>
           ⚠ {err}
         </div>
       ) : !data || data.runs.length === 0 ? (
         <div className="text-ink-3 text-[11.5px] leading-relaxed">
-          没有为这条事件记录的函数运行。可能原因：<br />
-          · 没有订阅者函数<br />
-          · Inngest 还没把 run 写入历史（短延迟，等 1-2s 重试）<br />
-          · 这是一条系统事件（inngest/*）
+          {t("evx_no_runs_title")}<br />
+          {t("evx_no_runs_reason_1")}<br />
+          {t("evx_no_runs_reason_2")}<br />
+          {t("evx_no_runs_reason_3")}
         </div>
       ) : (
         <div className="flex flex-col gap-2">

@@ -2,7 +2,7 @@
 import React from "react";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
-import { Badge, Btn } from "@/components/shared/atoms";
+import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson, ApiTimeoutError } from "@/lib/api/client";
 import type {
   HumanTasksResponse,
@@ -75,14 +75,17 @@ export function InboxContent() {
 function SubHeader({ total, partial }: { total: number; partial: boolean }) {
   const { t } = useApp();
   return (
-    <div className="border-b border-line bg-surface flex items-center" style={{ padding: "14px 22px", gap: 18 }}>
-      <div>
-        <div className="text-[15px] font-semibold tracking-tight flex items-center gap-2">
+    <div className="border-b border-line bg-surface flex items-center" style={{ padding: "18px 22px", gap: 18 }}>
+      <div className="min-w-0">
+        <div className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-1.5">
+          {t("nav_inbox")}
+        </div>
+        <div className="text-[17px] font-semibold tracking-tight flex items-center gap-2 text-ink-1">
           {t("inbox_title")}
           <Badge variant="info">{total}</Badge>
           {partial && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
         </div>
-        <div className="text-ink-3 text-[12px] mt-px">人工审批 · 多轮对话 · 升级客户</div>
+        <div className="text-ink-3 text-[12px] mt-1">{t("ibx_subtitle")}</div>
       </div>
     </div>
   );
@@ -142,11 +145,8 @@ function CardList({
   const { t } = useApp();
   if (items.length === 0) {
     return (
-      <div className="flex items-center justify-center text-ink-3 text-[13px]">
-        <div className="flex flex-col items-center gap-2">
-          <Ic.check />
-          <div>{t("inbox_empty")}</div>
-        </div>
+      <div className="flex items-center justify-center">
+        <EmptyState icon={<Ic.check />} title={t("inbox_empty")} />
       </div>
     );
   }
@@ -160,6 +160,7 @@ function CardList({
 }
 
 function Card({ card, active, onClick }: { card: HumanTaskCard; active: boolean; onClick: () => void }) {
+  const { t } = useApp();
   return (
     <button
       onClick={onClick}
@@ -174,9 +175,9 @@ function Card({ card, active, onClick }: { card: HumanTaskCard; active: boolean;
         <div className="flex-1" />
         <SlaBadge deadline={card.deadline} />
       </div>
-      <div className="text-[13px] font-medium text-ink-1 mb-1">{card.title}</div>
-      <div className="text-[11.5px] text-ink-3 flex items-center gap-2 flex-wrap">
-        <span>run {card.runId.slice(-8)} · {card.assignee ?? "未分配"}</span>
+      <div className="text-[13px] font-medium text-ink-1 mb-1 line-clamp-2">{card.title}</div>
+      <div className="text-[11.5px] text-ink-3 flex items-center gap-2 flex-wrap min-w-0">
+        <span>run {card.runId.slice(-8)} · {card.assignee ?? t("ibx_unassigned")}</span>
         {card.triggeringEventName && (
           <span
             className="mono text-[10px] px-1.5 py-px rounded-sm"
@@ -186,8 +187,10 @@ function Card({ card, active, onClick }: { card: HumanTaskCard; active: boolean;
             }}
             title={
               card.triggeringEventInstanceId
-                ? `由事件 ${card.triggeringEventName}（实例 ${card.triggeringEventInstanceId}）触发`
-                : `由事件 ${card.triggeringEventName} 触发`
+                ? t("ibx_triggered_by_event_instance")
+                    .replace("{event}", card.triggeringEventName)
+                    .replace("{instance}", card.triggeringEventInstanceId)
+                : t("ibx_triggered_by_event").replace("{event}", card.triggeringEventName)
             }
           >
             ← {card.triggeringEventName}
@@ -208,6 +211,7 @@ function Slabel({ agentShort }: { agentShort: string }) {
 }
 
 function SlaBadge({ deadline }: { deadline: string | null }) {
+  const { t } = useApp();
   const [, force] = React.useReducer((x) => x + 1, 0);
   React.useEffect(() => {
     const id = setInterval(force, 30_000);
@@ -217,15 +221,15 @@ function SlaBadge({ deadline }: { deadline: string | null }) {
   const left = new Date(deadline).getTime() - Date.now();
   const minutes = Math.round(left / 60_000);
   if (minutes < 0) {
-    return <Badge variant="err">已超时</Badge>;
+    return <Badge variant="err">{t("ibx_sla_overdue")}</Badge>;
   }
   if (minutes < 30) {
-    return <span style={{ color: "var(--c-timed-out)", fontSize: 11 }}>{minutes}m 截止</span>;
+    return <span style={{ color: "var(--c-timed-out)", fontSize: 11 }}>{minutes}m {t("ibx_sla_due")}</span>;
   }
   if (minutes < 120) {
-    return <span style={{ color: "var(--c-suspended)", fontSize: 11 }}>{Math.round(minutes / 60)}h 截止</span>;
+    return <span style={{ color: "var(--c-suspended)", fontSize: 11 }}>{Math.round(minutes / 60)}h {t("ibx_sla_due")}</span>;
   }
-  return <span className="text-ink-3" style={{ fontSize: 11 }}>{Math.round(minutes / 60)}h 截止</span>;
+  return <span className="text-ink-3" style={{ fontSize: 11 }}>{Math.round(minutes / 60)}h {t("ibx_sla_due")}</span>;
 }
 
 function DetailPane({
@@ -238,17 +242,17 @@ function DetailPane({
   const { t } = useApp();
   if (!detail) {
     return (
-      <aside className="border-l border-line bg-surface p-4 text-ink-3 text-[12px]">选中一个任务查看详情</aside>
+      <aside className="border-l border-line bg-surface p-4 text-ink-3 text-[12px]">{t("ibx_detail_select_hint")}</aside>
     );
   }
   return (
-    <aside className="border-l border-line bg-surface flex flex-col min-h-0">
+    <aside className="border-l border-line bg-surface flex flex-col min-h-0 min-w-0">
       <div className="border-b border-line p-3">
-        <div className="text-[13px] font-semibold mb-1">{detail.title}</div>
-        <div className="text-[11.5px] text-ink-3 font-mono">{detail.id}</div>
+        <div className="text-[13px] font-semibold mb-1 text-ink-1">{detail.title}</div>
+        <div className="text-[11.5px] text-ink-3 font-mono break-all">{detail.id}</div>
         {detail.triggeringEventName && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11.5px]">
-            <span className="text-ink-3">触发事件</span>
+            <span className="text-ink-3">{t("ibx_detail_triggering_event")}</span>
             <a
               href={`/events?event=${encodeURIComponent(detail.triggeringEventName)}`}
               className="mono px-1.5 py-px rounded-sm no-underline"
@@ -264,7 +268,7 @@ function DetailPane({
                 className="mono text-[10.5px] text-ink-3"
                 title={detail.triggeringEventInstanceId}
               >
-                · 实例 {detail.triggeringEventInstanceId.slice(0, 8)}…
+                · {t("ibx_detail_instance")} {detail.triggeringEventInstanceId.slice(0, 8)}…
               </span>
             )}
           </div>
@@ -272,7 +276,7 @@ function DetailPane({
       </div>
       {detail.aiOpinion != null && (
         <div className="border-b border-line p-3">
-          <div className="hint mb-1">AI 意见</div>
+          <div className="hint mb-1">{t("ibx_detail_ai_opinion")}</div>
           <div className="text-[12px] text-ink-2 whitespace-pre-wrap">
             {typeof detail.aiOpinion === "string"
               ? detail.aiOpinion
@@ -375,7 +379,7 @@ function ActionPanel({
 
   if (status !== "pending") {
     return (
-      <div className="p-3 border-t border-line text-[12px] text-ink-3">已 {status}</div>
+      <div className="p-3 border-t border-line text-[12px] text-ink-3">{t("ibx_action_resolved").replace("{status}", status)}</div>
     );
   }
 
@@ -385,7 +389,7 @@ function ActionPanel({
     try {
       let body: Record<string, unknown> = { action };
       if (action === "reject") {
-        const reason = window.prompt("退回原因？") ?? "";
+        const reason = window.prompt(t("ibx_prompt_reject_reason")) ?? "";
         if (!reason) {
           setBusy(false);
           return;
@@ -393,7 +397,7 @@ function ActionPanel({
         body.reason = reason;
       }
       if (action === "escalate") {
-        const targetClient = window.prompt("上报到哪个客户？") ?? "";
+        const targetClient = window.prompt(t("ibx_prompt_escalate_target")) ?? "";
         if (!targetClient) {
           setBusy(false);
           return;
@@ -407,12 +411,12 @@ function ActionPanel({
       });
       onResolved();
     } catch (e: any) {
-      if (e instanceof ApiTimeoutError) setError("超时");
+      if (e instanceof ApiTimeoutError) setError(t("ibx_error_timeout"));
       else if (e?.error === "BAD_REQUEST" && /stale/.test(e?.message ?? "")) {
-        setError("已被他人处理");
+        setError(t("ibx_error_stale"));
         onResolved();
       } else {
-        setError(e?.message ?? "失败");
+        setError(e?.message ?? t("ibx_error_failed"));
       }
     } finally {
       setBusy(false);

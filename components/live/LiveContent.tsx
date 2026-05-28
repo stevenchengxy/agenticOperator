@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
@@ -23,11 +24,11 @@ import { RealRunCenter, RealRunRight } from "./RealRunDetail";
 //     so a filtered view is bookmarkable and shareable.
 //   - When no run is selected, center+right show "select a run".
 
-const STATUS_GROUPS: Array<{ id: string; label: string; statuses: string[] }> = [
-  { id: "all", label: "全部", statuses: [] },
-  { id: "active", label: "运行中", statuses: ["running", "paused", "suspended"] },
-  { id: "completed", label: "已完成", statuses: ["completed"] },
-  { id: "failed", label: "失败", statuses: ["failed", "timed_out", "interrupted"] },
+const STATUS_GROUPS: Array<{ id: string; labelKey: string; statuses: string[] }> = [
+  { id: "all", labelKey: "lvx_status_all", statuses: [] },
+  { id: "active", labelKey: "lvx_status_active", statuses: ["running", "paused", "suspended"] },
+  { id: "completed", labelKey: "lvx_status_completed", statuses: ["completed"] },
+  { id: "failed", labelKey: "lvx_status_failed", statuses: ["failed", "timed_out", "interrupted"] },
 ];
 
 const TIME_OPTIONS: Array<{ id: string; label: string; sinceMs: number | null }> = [
@@ -255,17 +256,18 @@ function FilterBar({
   total: number | null;
   onRefresh: () => void;
 }) {
+  const { t: tr } = useApp();
   return (
     <div className="border-b border-line" style={{ padding: "10px 12px" }}>
       <div className="flex items-center gap-2 mb-2">
-        <div className="text-[13px] font-semibold flex-1">运行记录</div>
-        <Btn size="sm" variant="ghost" onClick={onRefresh} title="刷新" style={{ padding: "0 6px" }}>
+        <div className="text-[13px] font-semibold flex-1">{tr("lvx_runs_title")}</div>
+        <Btn size="sm" variant="ghost" onClick={onRefresh} title={tr("lvx_refresh")} style={{ padding: "0 6px" }}>
           <Ic.bolt />
         </Btn>
       </div>
 
       {/* Status group */}
-      <Row label="状态">
+      <Row label={tr("lvx_filter_status")}>
         {STATUS_GROUPS.map((g) => (
           <Chip
             key={g.id}
@@ -277,13 +279,13 @@ function FilterBar({
               })
             }
           >
-            {g.label}
+            {tr(g.labelKey)}
           </Chip>
         ))}
       </Row>
 
       {/* Time range */}
-      <Row label="时间">
+      <Row label={tr("lvx_filter_time")}>
         {TIME_OPTIONS.map((t) => (
           <Chip
             key={t.id}
@@ -295,13 +297,13 @@ function FilterBar({
               })
             }
           >
-            {t.label}
+            {t.id === "all" ? tr("lvx_time_all") : t.label}
           </Chip>
         ))}
       </Row>
 
       {/* Toggles */}
-      <Row label="标记">
+      <Row label={tr("lvx_filter_flags")}>
         <Chip
           active={hasErrorFilter}
           onClick={() =>
@@ -311,7 +313,7 @@ function FilterBar({
             })
           }
         >
-          有错误
+          {tr("lvx_flag_haserror")}
         </Chip>
         <Chip
           active={hasHitlFilter}
@@ -322,7 +324,7 @@ function FilterBar({
             })
           }
         >
-          待人工
+          {tr("lvx_flag_hashitl")}
         </Chip>
       </Row>
 
@@ -343,7 +345,7 @@ function FilterBar({
       />
 
       <div className="mono text-[10px] text-ink-4 mt-2 flex items-center">
-        <span>{shown} 条{total != null && total !== shown && ` / 总 ${total}`}</span>
+        <span>{shown} {tr("lvx_unit_rows")}{total != null && total !== shown && ` / ${tr("lvx_total")} ${total}`}</span>
       </div>
     </div>
   );
@@ -399,10 +401,11 @@ function AgentPicker({
   onToggle: (short: string) => void;
   onClear: () => void;
 }) {
+  const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   const label =
     selected.length === 0
-      ? "全部 agent"
+      ? t("lvx_all_agents")
       : selected.length === 1
         ? selected[0]
         : `${selected[0]} +${selected.length - 1}`;
@@ -429,7 +432,7 @@ function AgentPicker({
                 e.stopPropagation();
                 onClear();
               }}
-              title="清空 agent 过滤"
+              title={t("lvx_clear_agent_filter")}
             >
               ✕
             </span>
@@ -484,12 +487,13 @@ function RunList({
   onSelect: (id: string) => void;
   onShowSummary: (id: string, job: string) => void;
 }) {
+  const { t } = useApp();
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <EmptyState
           icon={<Ic.alert />}
-          title="加载失败"
+          title={t("lvx_load_failed")}
           hint={error}
           variant="warn"
         />
@@ -499,7 +503,7 @@ function RunList({
   if (!runs) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <span className="text-ink-3 text-[12px]">加载中…</span>
+        <span className="text-ink-3 text-[12px]">{t("lvx_loading")}</span>
       </div>
     );
   }
@@ -508,8 +512,8 @@ function RunList({
       <div className="flex-1 flex items-center justify-center">
         <EmptyState
           icon={<Ic.search />}
-          title="无匹配 run"
-          hint="尝试放宽过滤条件，或等下一条触发事件"
+          title={t("lvx_no_match_run")}
+          hint={t("lvx_no_match_hint")}
         />
       </div>
     );
@@ -549,6 +553,7 @@ function RunCard({
   onClick: () => void;
   onAi: () => void;
 }) {
+  const { t } = useApp();
   const tone =
     row.status === "completed"
       ? { color: "var(--c-ok)", label: "completed" }
@@ -586,7 +591,7 @@ function RunCard({
           {row.startedLabel} · {row.durLabel}
         </span>
         <div className="flex-1" />
-        {row.pendingHitl > 0 && <Badge variant="warn">{row.pendingHitl} 人工</Badge>}
+        {row.pendingHitl > 0 && <Badge variant="warn">{row.pendingHitl} {t("lvx_unit_hitl")}</Badge>}
       </div>
       <div className="text-[12.5px] font-medium text-ink-1 leading-snug mb-1">
         {client}
@@ -596,7 +601,7 @@ function RunCard({
           {jd && <EntityChip label={jd} kind="jd" />}
           {client && client !== "—" && <EntityChip label={client} kind="client" />}
           {!jd && !(client && client !== "—") && (
-            <span className="mono text-[10px] text-ink-4">无 entity 上下文</span>
+            <span className="mono text-[10px] text-ink-4">{t("lvx_no_entity_context")}</span>
           )}
         </div>
       )}
@@ -619,7 +624,7 @@ function RunCard({
             e.stopPropagation();
             onAi();
           }}
-          title="AI 总结这次运行"
+          title={t("lvx_ai_summarize_run")}
           className="bg-transparent border border-line rounded-sm cursor-pointer mono text-[10px] text-ink-2 hover:text-ink-1 hover:border-line-strong"
           style={{ padding: "1px 6px" }}
         >
@@ -631,11 +636,12 @@ function RunCard({
 }
 
 function EntityChip({ label, kind }: { label: string; kind: "jd" | "client" }) {
+  const { t } = useApp();
   // Profile pages don't exist yet — chips hint at the future link via tooltip
   // but don't actually navigate anywhere. Spec doc tags entity portals as P2.
   const tooltip = kind === "jd"
-    ? "JD profile 页 (P2)"
-    : "客户 profile 页 (P2)";
+    ? t("lvx_chip_jd_tooltip")
+    : t("lvx_chip_client_tooltip");
   const accent = kind === "jd" ? "var(--c-info)" : "var(--c-ink-3)";
   return (
     <span
@@ -668,33 +674,31 @@ function splitJobLabel(s: string): [string, string | null] {
 // ── Empty states ────────────────────────────────────────────────────
 
 function CenterEmpty({ hasRuns }: { hasRuns: boolean }) {
+  const { t } = useApp();
   return (
     <div className="flex-1 flex items-center justify-center bg-bg">
       <EmptyState
         icon={<Ic.play />}
-        title={hasRuns ? "👈 选一条 run 查看详情" : "暂无 run"}
-        hint={
-          hasRuns
-            ? "运行记录的核心问题：那次运行发生了什么。点击左侧任意一行看 step 时间线、实时日志、AI 总结。"
-            : "/api/runs 当前没返回任何 run。等真实事件触发或在 Inngest 控制台手动 send 一次。"
-        }
+        title={hasRuns ? t("lvx_center_pick_title") : t("lvx_center_norun_title")}
+        hint={hasRuns ? t("lvx_center_pick_hint") : t("lvx_center_norun_hint")}
       />
     </div>
   );
 }
 
 function RightEmpty() {
+  const { t } = useApp();
   return (
     <aside className="border-l border-line bg-surface flex flex-col min-h-0" style={{ padding: "16px 18px" }}>
-      <div className="text-[13px] font-semibold mb-2 text-ink-3">关联对象</div>
+      <div className="text-[13px] font-semibold mb-2 text-ink-3">{t("lvx_linked_objects")}</div>
       <div className="text-[11.5px] text-ink-4 leading-relaxed">
-        选中一条 run 后，这里会显示：
+        {t("lvx_right_empty_intro")}
         <ul className="mt-2 pl-4" style={{ listStyle: "disc" }}>
-          <li>触发事件（→ /events）</li>
-          <li>客户 / JD</li>
-          <li>命中的 agent（→ /workflow）</li>
-          <li>产生的 HITL 任务（→ /inbox）</li>
-          <li>AI 总结的 mini stats</li>
+          <li>{t("lvx_right_empty_li_trigger")}</li>
+          <li>{t("lvx_right_empty_li_clientjd")}</li>
+          <li>{t("lvx_right_empty_li_agent")}</li>
+          <li>{t("lvx_right_empty_li_hitl")}</li>
+          <li>{t("lvx_right_empty_li_stats")}</li>
         </ul>
       </div>
     </aside>

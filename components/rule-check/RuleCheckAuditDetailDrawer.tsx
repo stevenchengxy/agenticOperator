@@ -3,30 +3,20 @@ import React from "react";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import { MiniMarkdown } from "@/components/shared/MiniMarkdown";
+import {
+  RuleSelectionTab,
+  RuleJudgmentTab,
+  useVerifyRun,
+} from "@/components/rule-check/RuleSelectionVerifyTab";
+import { CandidateProfileCard } from "@/components/rule-check/CandidateProfileCard";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type {
   RuleCheckAuditDetailResponse,
   RuleCheckAuditDetail,
 } from "@/app/api/rule-check-audits/[auditId]/route";
-import type { Rule } from "@/lib/rule-check/types";
 
-// Inline minimal shape — the upstream /api/ontology/rules/[ruleId] endpoint
-// was retired in the post-merge cleanup; the drawer still consumes the
-// rule-detail fetch but uses the full Rule type from rule-check.
-type OntologyRuleResponse =
-  | {
-      ok: true;
-      rule: Rule;
-      source: "ontology-api" | "json-fallback";
-    }
-  | {
-      ok: false;
-      reason: string;
-      error?: string;
-    };
-
-type Tab = "prompt" | "rules" | "response" | "instances";
+type Tab = "select" | "prompt" | "verify" | "response" | "instances";
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
@@ -91,9 +81,12 @@ export function RuleCheckAuditDetailBody({
     null,
   );
   const [loading, setLoading] = React.useState(true);
-  const [tab, setTab] = React.useState<Tab>("prompt");
+  const [tab, setTab] = React.useState<Tab>("select");
   const [isReplaying, setIsReplaying] = React.useState(false);
   const [replayMsg, setReplayMsg] = React.useState<string | null>(null);
+  // Cross-validation lifecycle owned here so the 规则筛选 (selection-only) and
+  // 规则判断 (full) tabs share ONE LLM call. Auto-runs once the audit loads.
+  const verify = useVerifyRun(auditId, data?.ok === true);
 
   React.useEffect(() => {
     setLoading(true);
@@ -210,11 +203,14 @@ export function RuleCheckAuditDetailBody({
             className="border-b border-line flex"
             style={{ padding: "0 18px", gap: 16 }}
           >
+            <TabBtn active={tab === "select"} onClick={() => setTab("select")}>
+              ✦ {t("rc_tab_select")}
+            </TabBtn>
             <TabBtn active={tab === "prompt"} onClick={() => setTab("prompt")}>
               {t("rc_tab_prompt")}
             </TabBtn>
-            <TabBtn active={tab === "rules"} onClick={() => setTab("rules")}>
-              {t("rc_tab_flags")} ({data.detail.flags.length})
+            <TabBtn active={tab === "verify"} onClick={() => setTab("verify")}>
+              {t("rc_tab_judge")}
             </TabBtn>
             <TabBtn active={tab === "response"} onClick={() => setTab("response")}>
               {t("rc_tab_response")}
@@ -225,10 +221,12 @@ export function RuleCheckAuditDetailBody({
           </div>
           <div className="flex-1 overflow-auto" style={{ padding: "16px 18px" }}>
             <div key={tab} className="rc-fade-in">
-              {tab === "prompt" ? (
+              {tab === "select" ? (
+                <RuleSelectionTab detail={data.detail} verify={verify} />
+              ) : tab === "prompt" ? (
                 <PromptTab detail={data.detail} />
-              ) : tab === "rules" ? (
-                <RulesTab detail={data.detail} />
+              ) : tab === "verify" ? (
+                <RuleJudgmentTab detail={data.detail} verify={verify} />
               ) : tab === "response" ? (
                 <ResponseTab detail={data.detail} />
               ) : (
@@ -723,689 +721,6 @@ function ViewToggle({
   );
 }
 
-function RulesTab({ detail }: { detail: RuleCheckAuditDetail }) {
-  const { t } = useApp();
-  if (detail.flags.length === 0) {
-    return (
-      <>
-        <CandidateProfileCard detail={detail} />
-        <EmptyState
-          title={t("rc_no_rules_title")}
-          hint={t("rc_no_rules_hint")}
-          variant="info"
-        />
-      </>
-    );
-  }
-  // 候选人 + JD 上下文 — 让每条 flag 的"对决策影响"文案能引用具体姓名/岗位,
-  // 而不是冷冰冰的"无负面影响"。
-  const ctx = deriveCandidateContext(detail, t);
-
-  // 分两段:
-  //   ① applicable=true(规则被实际评估) — 按 FAIL→PASS→其他 排序,详情卡展开
-  //   ② applicable=false(规则不触发) — 折叠成一行 summary,证明这条规则被审视过
-  const applicable = detail.flags.filter((f) => f.applicable);
-  const notApplicable = detail.flags.filter((f) => !f.applicable);
-
-  // ① 有结论需要看的(FAIL / 待复核 / 信息不足)→ 展开成完整卡片,FAIL 优先
-  // ② PASS → 折叠成一行(大多数都 PASS,默认不占视觉空间)
-  // ③ 不触发(applicable=false)→ 原有折叠区
-  const consequential = applicable
-    .filter((f) => f.result !== "PASS")
-    .sort((a, b) => {
-      const ra = a.result === "FAIL" ? 0 : 1;
-      const rb = b.result === "FAIL" ? 0 : 1;
-      if (ra !== rb) return ra - rb;
-      const sa = a.severity === "terminal" || a.severity === "needs_human" ? 0 : 1;
-      const sb = b.severity === "terminal" || b.severity === "needs_human" ? 0 : 1;
-      if (sa !== sb) return sa - sb;
-      return a.rule_id.localeCompare(b.rule_id);
-    });
-  const passed = applicable
-    .filter((f) => f.result === "PASS")
-    .sort((a, b) => a.rule_id.localeCompare(b.rule_id));
-
-  // 每条规则的抓取证据(为何纳入)— 内联到每条 rule 卡片,替代原来的独立"抓取链路"卡片。
-  const provById = new Map(
-    (detail.rule_provenance ?? []).map((p) => [p.rule_id, p]),
-  );
-
-  const counts = {
-    fail: applicable.filter((f) => f.result === "FAIL").length,
-    pass: passed.length,
-    review: applicable.filter((f) => f.result === "REVIEW").length,
-    info: applicable.filter((f) => f.result === "INSUFFICIENT_INFO").length,
-    na: notApplicable.length,
-  };
-  const failingIds = consequential.filter((f) => f.result === "FAIL").map((f) => f.rule_id);
-
-  return (
-    <div className="flex flex-col gap-3">
-      <CandidateProfileCard detail={detail} />
-
-      {/* B — 结果概览条:计数 + 失败规则可点击直达卡片 */}
-      <ResultOverviewStrip total={detail.flags.length} counts={counts} failingIds={failingIds} t={t} />
-
-      {/* ① 有结论的规则(FAIL / 待复核 / 信息不足)— 默认展开,完整推理 + 规则定义 */}
-      {consequential.map((f, i) => (
-        <div
-          key={f.flag_id}
-          id={`rc-rule-${f.rule_id}`}
-          className="rc-row-in"
-          style={{ ["--rc-i"]: Math.min(i, 10) } as React.CSSProperties}
-        >
-          <InferenceChainCard
-            flag={f}
-            auditId={detail.audit_id}
-            ctx={ctx}
-            provenance={provById.get(f.rule_id) ?? null}
-            defaultOpen
-          />
-        </div>
-      ))}
-
-      {/* ② 已通过的规则 — 默认折叠(只显示头部一行),点开看完整推理/规则定义/为何抓取 */}
-      {passed.length > 0 ? (
-        <>
-          <div className="hint" style={{ marginTop: 4, marginBottom: 2 }}>
-            {t("rc_passed_section").replace("{count}", String(passed.length))}
-          </div>
-          {passed.map((f) => (
-            <div key={f.flag_id} id={`rc-rule-${f.rule_id}`}>
-              <InferenceChainCard
-                flag={f}
-                auditId={detail.audit_id}
-                ctx={ctx}
-                provenance={provById.get(f.rule_id) ?? null}
-                defaultOpen={false}
-              />
-            </div>
-          ))}
-        </>
-      ) : null}
-
-      {/* ③ 不触发的规则(applicable=false)— 折叠分区,证明被审视过 */}
-      {notApplicable.length > 0 ? (
-        <NotApplicableRulesSection
-          flags={notApplicable.sort((a, b) => a.rule_id.localeCompare(b.rule_id))}
-          ctx={ctx}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/** B — 结果概览条:总数 + 各 status 计数(图标),失败规则做成可点击 chip 直达卡片。 */
-function ResultOverviewStrip({
-  total,
-  counts,
-  failingIds,
-  t,
-}: {
-  total: number;
-  counts: { fail: number; pass: number; review: number; info: number; na: number };
-  failingIds: string[];
-  t: (k: string) => string;
-}) {
-  const seg = (icon: string, n: number, color: string) =>
-    n > 0 ? (
-      <span className="inline-flex items-center gap-1" style={{ color }}>
-        <span>{icon}</span>
-        <span className="mono font-semibold">{n}</span>
-      </span>
-    ) : null;
-  return (
-    <div
-      className="border border-line rounded-sm bg-panel flex items-center flex-wrap"
-      style={{ padding: "8px 14px", gap: "6px 16px", fontSize: 12 }}
-    >
-      <span className="hint">{t("rc_overview_total").replace("{n}", String(total))}</span>
-      {seg("✗", counts.fail, "var(--c-err)")}
-      {seg("✓", counts.pass, "var(--c-ok)")}
-      {seg("⏸", counts.review, "oklch(0.5 0.14 75)")}
-      {seg("?", counts.info, "oklch(0.5 0.14 75)")}
-      {seg("⊘", counts.na, "var(--c-ink-4)")}
-      {failingIds.length > 0 ? (
-        <span className="flex items-center gap-1.5" style={{ marginLeft: "auto" }}>
-          {failingIds.map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() =>
-                document
-                  .getElementById(`rc-rule-${id}`)
-                  ?.scrollIntoView({ behavior: "smooth", block: "center" })
-              }
-              className="mono rounded-sm transition-colors"
-              style={{
-                fontSize: 11,
-                padding: "1px 7px",
-                background: "var(--c-err-bg)",
-                color: "var(--c-err)",
-                cursor: "pointer",
-              }}
-            >
-              {id} →
-            </button>
-          ))}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-/** A — 已通过规则折叠区:默认一行"已通过 (N)",展开后每条一行(rule_id · 名称 · 部门 · 依据)。 */
-/**
- * 从 detail 派生候选人 + JD 上下文,供 InferenceChainCard / NotApplicableRulesSection
- * 在 step 3 / 不适用文案里引用具体姓名,而不是冷冰冰的"无负面影响"。
- */
-type CandidateContext = {
-  name: string;
-  jrTitle: string;
-  failureRuleIds: Set<string>; // 这次决策被 failure_reasons 命中的 rule_id (取 "<rule_id>:..." 前缀)
-};
-
-function deriveCandidateContext(
-  detail: RuleCheckAuditDetail,
-  t: (k: string) => string,
-): CandidateContext {
-  const r = (detail.parsed_resume_full ?? {}) as Record<string, unknown>;
-  const j = (detail.job_requisition_full ?? {}) as Record<string, unknown>;
-  const failureRuleIds = new Set<string>();
-  for (const reason of detail.failure_reasons) {
-    if (typeof reason !== "string") continue;
-    const colon = reason.indexOf(":");
-    const ruleId = colon > 0 ? reason.slice(0, colon) : reason;
-    if (ruleId) failureRuleIds.add(ruleId.trim());
-  }
-  return {
-    name: pickStr(r.name) || t("rc_candidate_no_name"),
-    jrTitle: pickStr(j.client_job_title) || t("rc_jr_no_title"),
-    failureRuleIds,
-  };
-}
-
-/**
- * NOT_APPLICABLE 规则折叠分区 — 一行一条,带 evidence(为什么不适用)
- *
- * 每行展示:rule_id · rule_name · LLM 判断该规则触发条件不满足的具体理由 ·
- * 候选人/岗位上下文 一句话。fallback 来源(DB 漏写,从 llm_raw_text 抠出来)
- * 单独打个角标,跟正常 DB row 区分。
- */
-function NotApplicableRulesSection({
-  flags,
-  ctx,
-}: {
-  flags: RuleCheckAuditDetail["flags"];
-  ctx: CandidateContext;
-}) {
-  const { t } = useApp();
-  const [open, setOpen] = React.useState(false);
-  const recoveredCount = flags.filter((f) => f.from_raw_fallback).length;
-  return (
-    <div className="border border-line rounded-sm">
-      <button
-        type="button"
-        className="w-full text-left flex items-center justify-between"
-        style={{ padding: "10px 14px", background: "var(--c-panel)" }}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <div className="min-w-0 flex-1">
-          <span className="hint">
-            {open ? "▾" : "▸"} {t("rc_na_rules_section").replace("{count}", String(flags.length))}
-          </span>
-          {recoveredCount > 0 ? (
-            <div
-              className="mono text-[10.5px] text-warn"
-              style={{ marginTop: 2 }}
-              title={t("rc_na_fallback_title")}
-            >
-              ⓘ {t("rc_na_rules_raw_fallback").replace("{count}", String(recoveredCount))}
-            </div>
-          ) : null}
-        </div>
-        <span className="mono text-[11px] text-ink-3">{open ? t("rc_show_less") : t("rc_show_more")}</span>
-      </button>
-      {open ? (
-        <div className="flex flex-col" style={{ padding: "4px 0 8px" }}>
-          {flags.map((f) => (
-            <div
-              key={f.flag_id}
-              style={{
-                borderTop: "1px solid var(--c-line)",
-              }}
-            >
-              <div className="flex items-start" style={{ padding: "8px 14px", gap: 10 }}>
-                <span className="mono text-[11px] text-ink-3" style={{ minWidth: 50 }}>
-                  {f.rule_id}
-                </span>
-                <div style={{ flex: 1 }}>
-                  <div className="text-[12px] text-ink-1 flex items-center gap-2">
-                    <span>{f.rule_name_snapshot}</span>
-                    {f.from_raw_fallback ? (
-                      <span
-                        className="mono text-[9.5px] text-warn border border-warn rounded-sm"
-                        style={{ padding: "1px 4px" }}
-                        title={t("rc_na_raw_fallback_tag_title")}
-                      >
-                        raw fallback
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-[11.5px] text-ink-2" style={{ marginTop: 2, lineHeight: 1.55 }}>
-                    <span className="text-ink-3">{t("rc_na_rule_llm_verdict")}</span>
-                    {f.evidence || t("rc_evidence_no_llm_short")}
-                  </div>
-                  <div className="text-[11px] text-ink-3" style={{ marginTop: 2, lineHeight: 1.5 }}>
-                    {t("rc_na_rule_not_triggered")
-                      .replace("{name}", ctx.name)
-                      .replace("{jr}", ctx.jrTitle)}
-                  </div>
-                </div>
-              </div>
-              {/* 可点击展开看 Neo4j 上的原规则定义 */}
-              <RuleDefinitionPanel ruleId={f.rule_id} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * 候选人画像面板 — 把 parsed_resume_full / job_requisition_full 关键字段抠出来
- * 一目了然显示"这是谁,跟岗位匹不匹"。
- */
-function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail }) {
-  const { t } = useApp();
-  const r = (detail.parsed_resume_full ?? {}) as Record<string, unknown>;
-  const j = (detail.job_requisition_full ?? {}) as Record<string, unknown>;
-
-  // 从 parsed_resume 抠候选人画像
-  const name = pickStr(r.name);
-  const gender = pickStr(r.gender);
-  const marital = pickStr(r.marital_status);
-  const nationality = pickStr(r.nationality);
-  const address = pickStr(r.address);
-  const phone = pickStr(r.phone);
-  const expectedSalary = pickStr(r.expected_salary_range);
-
-  // education
-  const edu = Array.isArray(r.education) ? (r.education as Array<Record<string, unknown>>) : [];
-  const edu0 = edu[0] ?? {};
-  const degree = pickStr(edu0.degree);
-  const school = pickStr(edu0.institution);
-  const major = pickStr(edu0.field);
-  const eduStart = pickStr(edu0.startDate);
-  const eduEnd = pickStr(edu0.endDate);
-
-  // experience
-  const exp = Array.isArray(r.experience) ? (r.experience as Array<Record<string, unknown>>) : [];
-  const totalYears = exp.length > 0 ? `${exp.length} (${exp.slice(0, 3).map((e) => `${pickStr(e.company) || '?'}/${pickStr(e.role) || pickStr(e.title) || '?'}`).join(' / ')})` : null;
-
-  // JR 画像
-  const jrTitle = pickStr(j.client_job_title);
-  const jrDept = pickStr(j.first_level_department);
-  const jrCity = pickStr(j.work_city) || pickStr(j.city);
-  const jrSalary = pickStr(j.salary_range);
-  const jrDegreeReq = pickStr(j.degree_requirement) || pickStr(j.education_requirement);
-
-  if (!detail.parsed_resume_full && !detail.job_requisition_full) {
-    return null;
-  }
-
-  return (
-    <div
-      className="border border-line rounded-sm grid"
-      style={{
-        padding: "12px 14px",
-        background: "color-mix(in oklab, var(--c-accent) 5%, var(--c-bg))",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "10px 18px",
-      }}
-    >
-      {/* Candidate profile */}
-      <div>
-        <div className="hint" style={{ marginBottom: 6 }}>
-          👤 {t("rc_candidate_profile_title")}
-        </div>
-        <div className="text-[13px] text-ink-1 font-semibold" style={{ marginBottom: 4 }}>
-          {name || t("rc_candidate_no_name")}
-          {gender ? ` · ${gender}` : ""}
-          {marital ? ` · ${marital}` : ""}
-          {nationality ? ` · ${nationality}` : ""}
-        </div>
-        <div className="text-[11.5px] text-ink-2" style={{ lineHeight: 1.6 }}>
-          {degree || school || major ? (
-            <div>
-              <span className="hint">{t("rc_edu_label")}</span> {degree}
-              {school ? ` · ${school}` : ""}
-              {major ? ` · ${major}` : ""}
-              {eduEnd ? ` · ${eduStart || "?"} → ${eduEnd}` : ""}
-            </div>
-          ) : null}
-          {totalYears ? (
-            <div>
-              <span className="hint">{t("rc_exp_label")}</span> {totalYears}
-            </div>
-          ) : null}
-          {address || phone ? (
-            <div className="text-ink-3">
-              {address ? `${address}` : ""}
-              {phone ? ` · 📞 ${phone.slice(0, 3)}****${phone.slice(-2)}` : ""}
-            </div>
-          ) : null}
-          {expectedSalary ? (
-            <div>
-              <span className="hint">{t("rc_salary_label")}</span> {expectedSalary}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Position profile */}
-      <div>
-        <div className="hint" style={{ marginBottom: 6 }}>
-          💼 {t("rc_jr_profile_title")}
-        </div>
-        <div className="text-[13px] text-ink-1 font-semibold" style={{ marginBottom: 4 }}>
-          {jrTitle || t("rc_jr_no_title")}
-          {jrDept ? ` · ${jrDept}` : ""}
-        </div>
-        <div className="text-[11.5px] text-ink-2" style={{ lineHeight: 1.6 }}>
-          {jrCity ? <div><span className="hint">{t("rc_city_label")}</span> {jrCity}</div> : null}
-          {jrSalary ? <div><span className="hint">{t("rc_salary_range_label")}</span> {jrSalary}</div> : null}
-          {jrDegreeReq ? <div><span className="hint">{t("rc_degree_req_label")}</span> {jrDegreeReq}</div> : null}
-          <div className="text-ink-3">
-            client_id: {detail.client_name || "?"}{detail.business_group ? ` × ${detail.business_group}` : ""}
-          </div>
-        </div>
-      </div>
-      {/* 2026-05-26: 移除重复的"命中底线规则"callout — 失败原因已在页头 + 概览条 + 失败卡里展示。 */}
-    </div>
-  );
-}
-
-function pickStr(v: unknown): string {
-  if (typeof v !== "string") return "";
-  return v.trim();
-}
-
-/**
- * A1 — Inference Chain 卡片
- * 把每条 flag 渲染成"因果链":LLM evidence → next_action → 对整体决策影响
- *
- * step 3 文案带候选人 / JD 上下文,让 leader / 客户能看到"是谁因为什么不通过/通过"。
- */
-/** 规则三层归属 → i18n 标签。 */
-function tierLabel(tier: string, t: (k: string) => string): string {
-  if (tier === "general") return t("rc_tier_general");
-  if (tier === "client") return t("rc_tier_client");
-  if (tier === "department") return t("rc_tier_department");
-  return tier;
-}
-
-/** next_action → 简短中英文标签(卡片头部小标签用)。 */
-function nextActionLabel(a: string, t: (k: string) => string): string {
-  if (a === "block") return t("rc_action_block");
-  if (a === "supplement") return t("rc_action_supplement");
-  if (a === "review") return t("rc_action_review");
-  return t("rc_action_continue");
-}
-
-function InferenceChainCard({
-  flag,
-  auditId,
-  ctx,
-  provenance,
-  defaultOpen = true,
-}: {
-  flag: {
-    flag_id: string;
-    rule_id: string;
-    rule_name_snapshot: string;
-    severity: string;
-    applicable: boolean;
-    result: string;
-    evidence: string;
-    next_action: string;
-  };
-  auditId: string;
-  ctx: CandidateContext;
-  provenance: { tier: string; reason: string } | null;
-  /** PASS 默认折叠、FAIL/待复核默认展开 — 折叠时只显示头部一行,详情(推理/规则定义/为何抓取)点开即见。 */
-  defaultOpen?: boolean;
-}) {
-  const { t } = useApp();
-  const [open, setOpen] = React.useState(defaultOpen);
-  const isBottomLine = flag.severity === "terminal" || flag.severity === "needs_human";
-  const isFail = flag.result === "FAIL";
-  const blocks = isBottomLine && isFail;
-  // 是否是整体 FAIL 的真正原因(命中 failure_reasons)— 用于 step 3 强调
-  const isFailureCause = ctx.failureRuleIds.has(flag.rule_id);
-
-  // 顶部颜色编码:阻断的 FAIL 红 / 提示 FAIL 黄 / PASS 绿 / NA 灰
-  const headerBg = blocks
-    ? "color-mix(in oklab, var(--c-err) 10%, var(--c-bg))"
-    : isFail
-      ? "color-mix(in oklab, var(--c-warn) 10%, var(--c-bg))"
-      : flag.result === "PASS"
-        ? "color-mix(in oklab, var(--c-ok) 8%, var(--c-bg))"
-        : "var(--c-panel)";
-
-  // step 3 — 一句话总结对整体决策的影响,引用候选人 + JD + evidence 摘要
-  const impactSentence = buildImpactSentence({
-    blocks,
-    isFail,
-    isBottomLine,
-    isFailureCause,
-    name: ctx.name,
-    jrTitle: ctx.jrTitle,
-    evidence: flag.evidence,
-    t,
-  });
-
-  // 左侧色条 — 跟列表行一致,FAIL/PASS 一眼可扫
-  const accentBar = blocks
-    ? "var(--c-err)"
-    : isFail
-      ? "oklch(0.5 0.14 75)"
-      : flag.result === "PASS"
-        ? "var(--c-ok)"
-        : "var(--c-line)";
-  return (
-    <div
-      className="border border-line rounded-sm overflow-hidden"
-      style={{ background: "var(--c-bg)", borderLeft: `3px solid ${accentBar}` }}
-    >
-      {/* 头部(可点击折叠/展开):chevron · rule_id · name · severity · result · next_action */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="w-full flex items-center gap-2 text-left transition-colors"
-        style={{ padding: "10px 14px", background: headerBg, cursor: "pointer" }}
-      >
-        <span
-          className="text-ink-3 select-none flex-shrink-0"
-          style={{ fontSize: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 160ms ease" }}
-        >
-          ▶
-        </span>
-        <span className="mono text-[12.5px] text-ink-1 font-semibold">
-          {flag.rule_id}
-        </span>
-        <span className="text-[12px] text-ink-1 flex-1 truncate">
-          {flag.rule_name_snapshot}
-        </span>
-        <span title={`ontology severity: ${flag.severity}`}>
-          <Badge variant={isBottomLine ? "err" : "default"}>
-            {flag.severity === "flag_only" ? t("rc_flag_severity_tip") : t("rc_flag_severity_bottomline")}
-          </Badge>
-        </span>
-        <Badge variant={flag.result === "PASS" ? "ok" : flag.result === "FAIL" ? "err" : "default"}>
-          {flag.result}
-        </Badge>
-        {/* next_action 缩成头部小标签 */}
-        <Badge variant={flag.next_action === "block" ? "err" : flag.next_action === "continue" ? "ok" : "default"}>
-          {nextActionLabel(flag.next_action, t)}
-        </Badge>
-      </button>
-
-      {/* 详情(折叠时隐藏)— 候选人/JD 上下文 + 为何抓取 + LLM 推理判定 + 原规则定义 */}
-      {open ? (
-        <div className="rc-fade-in">
-          {/* 为何抓取此规则 — 三层归属 + 纳入证据(含来自哪个客户/部门) */}
-          {provenance ? (
-            <div
-              className="flex items-center gap-2 flex-wrap"
-              style={{ padding: "10px 14px 0" }}
-            >
-              <span className="hint">🔗 {t("rc_why_fetched")}</span>
-              <Badge variant="default">{tierLabel(provenance.tier, t)}</Badge>
-              <span className="text-[11.5px] text-ink-3">{provenance.reason}</span>
-            </div>
-          ) : null}
-
-          {/* LLM 推理/判定依据(主体,含候选人+岗位上下文) + 仅 FAIL 显示"对整体决策影响" */}
-          <div className="flex flex-col" style={{ padding: "10px 14px", gap: 6 }}>
-            {flag.applicable ? (
-              <>
-                <ChainStep
-                  step="1"
-                  label={t("rc_chain_step1_evidence")}
-                  ok={flag.result === "PASS"}
-                  warn={flag.result === "FAIL"}
-                  content={flag.evidence || t("rc_evidence_no_llm")}
-                />
-                {isFail ? (
-                  <ChainStep
-                    step="2"
-                    label={t("rc_chain_step3_label")}
-                    ok={!blocks}
-                    warn={blocks}
-                    content={impactSentence}
-                  />
-                ) : null}
-              </>
-            ) : (
-              <ChainStep
-                step="—"
-                label={t("rc_chain_na_label")}
-                ok
-                content={t("rc_chain_na_content")
-                  .replace("{name}", ctx.name)
-                  .replace("{jr}", ctx.jrTitle)}
-              />
-            )}
-          </div>
-
-          {/* 原规则定义(submissionCriteria / 判定逻辑 / applicableClient / applicableDepartment 等)*/}
-          <RuleDefinitionPanel ruleId={flag.rule_id} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * step 3 一句话总结:把候选人 / JD / evidence 摘要 / 决策影响串起来,leader 一眼看懂。
- * 4 种分支:底线 FAIL(决定整体 FAIL)/ 底线 FAIL(被 failure_reasons 漏掉 — 罕见)/
- *          提示 FAIL(仅 augmentation 标注)/ PASS(本规则通过)
- */
-function buildImpactSentence(args: {
-  blocks: boolean;
-  isFail: boolean;
-  isBottomLine: boolean;
-  isFailureCause: boolean;
-  name: string;
-  jrTitle: string;
-  evidence: string;
-  t: (k: string) => string;
-}): string {
-  const { blocks, isFail, isBottomLine, isFailureCause, name, jrTitle, evidence, t } = args;
-  const ev = summarizeEvidence(evidence, t);
-  if (blocks) {
-    const key = isFailureCause ? "rc_impact_bottomline_fail_cause" : "rc_impact_bottomline_fail";
-    return t(key)
-      .replace("{name}", name)
-      .replace("{jr}", jrTitle)
-      .replace("{ev}", ev);
-  }
-  if (isFail) {
-    return t("rc_impact_flag_only_fail")
-      .replace("{name}", name)
-      .replace("{jr}", jrTitle)
-      .replace("{ev}", ev);
-  }
-  if (isBottomLine) {
-    return t("rc_impact_bottomline_pass")
-      .replace("{name}", name)
-      .replace("{jr}", jrTitle)
-      .replace("{ev}", ev);
-  }
-  return t("rc_impact_flag_only_pass")
-    .replace("{name}", name)
-    .replace("{jr}", jrTitle)
-    .replace("{ev}", ev || "");
-}
-
-/**
- * 把 LLM evidence 浓缩成一句"理由摘要",拼到 impact sentence 里:
- *   - 砍掉重复的"候选人 X..."前缀(impact sentence 已经写过姓名了)
- *   - 取头一句(到第一个句号 / 分号 / 换行)
- *   - 超长截到 80 字加 …
- */
-function summarizeEvidence(evidence: string, t: (k: string) => string): string {
-  if (!evidence) return t("rc_evidence_no_llm");
-  let s = evidence.trim().replace(/^候选人[^,。:]{1,6}[,。:]?\s*/, "");
-  const cut = s.search(/[。;\n]/);
-  if (cut > 0) s = s.slice(0, cut);
-  if (s.length > 80) s = s.slice(0, 80) + "…";
-  return s;
-}
-
-function ChainStep({
-  step,
-  label,
-  content,
-  ok = false,
-  warn = false,
-}: {
-  step: string;
-  label: string;
-  content: string;
-  ok?: boolean;
-  warn?: boolean;
-}) {
-  const color = warn ? "var(--c-err)" : ok ? "var(--c-ok)" : "var(--c-ink-3)";
-  return (
-    <div className="flex items-start" style={{ gap: 10, lineHeight: 1.55 }}>
-      <span
-        className="mono text-[10.5px] font-semibold flex-none"
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: 9,
-          background: color,
-          color: "var(--c-bg)",
-          textAlign: "center",
-          lineHeight: "18px",
-        }}
-      >
-        {step}
-      </span>
-      <div className="flex-1 min-w-0">
-        <span className="hint" style={{ marginRight: 6 }}>
-          {label}
-        </span>
-        <span className="text-[12px] text-ink-1">{content}</span>
-      </div>
-    </div>
-  );
-}
-
 function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
   return (
@@ -1604,7 +919,7 @@ function AllmetaInstanceCard({
         <span>{title}</span>
         {data?.ok ? (
           <>
-            <Badge variant="ok">Allmeta OK</Badge>
+            <Badge variant="ok">图引擎 OK</Badge>
             <span className="text-ink-3 text-[10px]">
               {t("rc_allmeta_fields").replace("{count}", String(Object.keys(data.instance).length))}
             </span>
@@ -1642,10 +957,10 @@ function AllmetaInstanceCard({
               borderRadius: 3,
             }}
           >
-            <div className="text-ink-3 mb-1">📋 验证 Cypher (开发用):</div>
+            <div className="text-ink-3 mb-1">📋 {t("rc_verify_cypher_dev")}</div>
             <CypherSnippet cypher={data.verify.cypher} />
             <div className="mt-2 text-ink-3 text-[9.5px]">
-              Allmeta API: {data.verify.api_path}
+              图引擎 API: {data.verify.api_path}
             </div>
           </div>
         </>
@@ -1663,7 +978,7 @@ function AllmetaInstanceCard({
               className="mono text-[10px] text-ink-3"
               style={{ marginTop: 6, padding: "6px 8px", background: "var(--c-bg)", borderRadius: 3 }}
             >
-              <div className="text-ink-3 mb-1">📋 直查 Cypher (开发用):</div>
+              <div className="text-ink-3 mb-1">📋 {t("rc_direct_cypher_dev")}</div>
               <CypherSnippet cypher={data.verify.cypher} />
             </div>
           ) : null}
@@ -1769,184 +1084,3 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-/**
- * 单条规则详情面板 — 懒加载,从 /api/ontology/rules/[ruleId] 拉 Neo4j 原始
- * Rule 节点字段。给 InferenceChainCard / NotApplicableRulesSection 嵌入用。
- *
- * 展开时 fetch,close 不释放(已加载的 rule 缓存在 state 里);切换不同 rule_id
- * 由 React key 重建组件,自然清缓存。
- */
-function RuleDefinitionPanel({ ruleId }: { ruleId: string }) {
-  const { t } = useApp();
-  const [open, setOpen] = React.useState(false);
-  const [data, setData] = React.useState<OntologyRuleResponse | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
-
-  // Lazy load: fetch on first expand, cache thereafter.
-  React.useEffect(() => {
-    if (!open || data || loading) return;
-    setLoading(true);
-    setErr(null);
-    fetchJson<OntologyRuleResponse>(
-      `/api/ontology/rules/${encodeURIComponent(ruleId)}`,
-    )
-      .then(setData)
-      .catch((e) => setErr((e as Error)?.message || t("rc_rule_def_load_failed")))
-      .finally(() => setLoading(false));
-  }, [open, ruleId, data, loading, t]);
-
-  return (
-    <div
-      className="border-t border-line"
-      style={{ background: "var(--c-panel)" }}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full text-left flex items-center justify-between cursor-pointer"
-        style={{ padding: "8px 14px", background: "transparent", border: 0 }}
-      >
-        <span className="hint">
-          {open ? "▾" : "▸"} {t("rc_rule_def_view")}
-        </span>
-        <span className="mono text-[10.5px] text-ink-3">
-          {open ? t("rc_rule_def_collapse") : t("rc_rule_def_expand")}
-        </span>
-      </button>
-      {open ? (
-        <div style={{ padding: "0 14px 12px" }}>
-          {loading ? (
-            <div className="mono text-[11px] text-ink-3">{t("rc_rule_def_loading")}</div>
-          ) : err ? (
-            <div className="mono text-[11px] text-err">{t("rc_rule_def_load_failed")}: {err}</div>
-          ) : !data ? null : !data.ok ? (
-            <div className="mono text-[11px] text-warn">
-              {data.reason === "not_found"
-                ? `${t("rc_rule_def_not_found")}: "${ruleId}" ${t("rc_rule_def_drift")}`
-                : `${t("rc_rule_def_load_err")}: ${data.error ?? "(no message)"}`}
-            </div>
-          ) : (
-            <RuleDefinitionBody rule={data.rule} source={data.source} />
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function RuleDefinitionBody({
-  rule,
-  source,
-}: {
-  rule: import("@/lib/rule-check/types").Rule;
-  source: "ontology-api" | "json-fallback";
-}) {
-  const { t } = useApp();
-  const enforcement = rule.enforcementLevel ?? "optional";
-  const failurePolicy = rule.failurePolicy ?? "warn";
-  return (
-    <div className="flex flex-col" style={{ gap: 10 }}>
-      <div className="flex items-center" style={{ gap: 6, flexWrap: "wrap" }}>
-        <Badge variant="default">{rule.id}</Badge>
-        <Badge
-          variant={
-            rule.severity === "terminal" || rule.severity === "needs_human"
-              ? "err"
-              : "default"
-          }
-        >
-          severity={rule.severity}
-        </Badge>
-        <Badge variant={enforcement === "mandatory" ? "err" : "default"}>
-          {t(`rc_enforcement_${enforcement}`)}
-        </Badge>
-        <Badge variant={failurePolicy === "block" ? "err" : "default"}>
-          {t(`rc_on_fail_${failurePolicy}`)}
-        </Badge>
-        <Badge variant="default">executor={rule.executor}</Badge>
-        <Badge variant="default">
-          applicableClient={rule.applicableClient}
-        </Badge>
-        <Badge variant="default">
-          applicableDepartment={rule.applicableDepartment || "N/A"}
-        </Badge>
-        <span
-          className="mono text-[10px] text-ink-3"
-          title={
-            source === "ontology-api"
-              ? t("rc_rule_source_api_detail")
-              : t("rc_rule_source_fallback_detail")
-          }
-        >
-          {t("rc_rule_source_label").replace("{source}", source)}
-        </span>
-      </div>
-      <div className="text-[12.5px] text-ink-1 font-semibold">
-        {rule.businessLogicRuleName || t("rc_rule_no_name")}
-      </div>
-      <RuleField label={t("rc_rule_field_trigger")} value={rule.submissionCriteria} />
-      <RuleField
-        label={t("rc_rule_field_logic")}
-        value={rule.standardizedLogicRule}
-        mono
-      />
-      {rule.businessBackgroundReason ? (
-        <RuleField
-          label={t("rc_rule_field_bg")}
-          value={rule.businessBackgroundReason}
-        />
-      ) : null}
-      {rule.specificScenarioStage ? (
-        <RuleField
-          label={t("rc_rule_field_stage")}
-          value={rule.specificScenarioStage}
-        />
-      ) : null}
-      {rule.ruleSource ? (
-        <RuleField label={t("rc_rule_field_source")} value={rule.ruleSource} />
-      ) : null}
-      {rule.relatedEntities && rule.relatedEntities.length > 0 ? (
-        <RuleField
-          label={t("rc_rule_field_entities")}
-          value={rule.relatedEntities.join(" · ")}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function RuleField({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  if (!value) return null;
-  return (
-    <div>
-      <div className="hint" style={{ marginBottom: 2 }}>
-        {label}
-      </div>
-      <pre
-        className={
-          (mono ? "mono " : "") +
-          "text-[11.5px] text-ink-1 whitespace-pre-wrap"
-        }
-        style={{
-          background: "var(--c-bg)",
-          border: "1px solid var(--c-line)",
-          borderRadius: 3,
-          padding: "8px 10px",
-          margin: 0,
-          lineHeight: 1.55,
-        }}
-      >
-        {value}
-      </pre>
-    </div>
-  );
-}

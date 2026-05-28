@@ -22,10 +22,10 @@
 //   每行 1 个 JSON: { ts, label, url, method, status, duration_ms, request, response/error }
 //   全字段 in/out — 不 truncate, 不 cherry-pick.
 
-import { currentLogger } from './agent-logger';
+import { currentLogger, type AgentLogger } from './agent-logger';
 import { logApiCall } from './external-api-log';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 /** Shared apiCall wrapper — logs request + response (or error) for every RoboHire op. */
 async function instrumentedFetch<T>(
@@ -36,9 +36,12 @@ async function instrumentedFetch<T>(
   fetchFn: () => Promise<Response>,
   parse: (res: Response) => Promise<T>,
   traceId?: string,
+  loggerOverride?: AgentLogger | null,
 ): Promise<T> {
-  // Agent logger 兜底(ALS context 在 → 一并写一份, 让现有 agent file log 也能看到)
-  const logger = currentLogger();
+  // 2026-05-27 — 优先用 agent 显式传入的 fileLogger(闭包,带 run_id,Inngest
+  // step.run 内部也稳定);ALS-based currentLogger() 在 step.run 里不可靠.
+  // 显式 logger → api.* 调用进 per-run 审计日志(/api/audit/runs 能 join).
+  const logger = loggerOverride ?? currentLogger();
   const start = Date.now();
   let res: Response;
   try {
@@ -135,7 +138,16 @@ function statusToCode(status: number): RobohireApiError['code'] {
   return 'SERVER';
 }
 
-export type CommonOpts = { traceId?: string; timeoutMs?: number };
+export type CommonOpts = {
+  traceId?: string;
+  timeoutMs?: number;
+  /**
+   * 2026-05-27 — agent 显式传入的 fileLogger. 让 RoboHire 调用的完整 in/out 进
+   * per-run 审计日志(带 run_id). Inngest step.run 内部 ALS 不可靠,不传则
+   * api.RoboHire.* 只落独立 sink(robohire-*.log,无 run_id),审计页 join 不到.
+   */
+  logger?: AgentLogger | null;
+};
 
 // ─── parse-resume ───────────────────────────────────────────────
 
@@ -201,6 +213,7 @@ export async function parseResumeDirect(
       }),
     (res) => handleJsonResponse<RobohireParseResumeResponse>(res, 'parse-resume'),
     opts.traceId,
+    opts.logger,
   );
 }
 
@@ -257,6 +270,7 @@ export async function matchResumeDirect(
       }),
     (res) => handleJsonResponse<RobohireMatchResumeResponse>(res, 'match-resume'),
     opts.traceId,
+    opts.logger,
   );
 }
 
@@ -333,6 +347,7 @@ export async function generateJdDirect(
       }),
     (res) => handleJsonResponse<RobohireGenerateJdResponse>(res, 'jobs/generate-jd'),
     opts.traceId,
+    opts.logger,
   );
 }
 
@@ -456,6 +471,7 @@ export async function inviteCandidateDirect(
       }),
     (res) => handleJsonResponse<RobohireInviteCandidateResponse>(res, 'invite-candidate'),
     opts.traceId,
+    opts.logger,
   );
 }
 

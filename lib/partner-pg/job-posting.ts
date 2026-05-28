@@ -245,9 +245,13 @@ export async function syncJdToPartnerPg(input: SyncJdInput): Promise<SyncJdResul
   return withTx<SyncJdResult>(async (c) => {
     // ── Step 1: patch job_requisition matching fields (only set non-null) ──
     const patchPairs: Array<[string, unknown]> = [];
-    if (must_have_skills != null) patchPairs.push(['must_have_skills', must_have_skills]);
+    // must_have_skills / nice_to_have_skills 在 partner 库是 jsonb 列:必须传 JSON 文本。
+    // 直接传 JS 数组会被 pg 转成 Postgres 数组字面量 {…},jsonb 解析报
+    // "invalid input syntax for type json"(其余 patch 字段都是 text 列,不受影响)。
+    if (must_have_skills != null)
+      patchPairs.push(['must_have_skills', JSON.stringify(must_have_skills)]);
     if (nice_to_have_skills != null)
-      patchPairs.push(['nice_to_have_skills', nice_to_have_skills]);
+      patchPairs.push(['nice_to_have_skills', JSON.stringify(nice_to_have_skills)]);
     if (negative_requirement != null)
       patchPairs.push(['negative_requirement', negative_requirement]);
     if (language_requirements != null)

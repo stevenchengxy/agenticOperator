@@ -59,7 +59,7 @@ type Tab = "spec" | "code" | "diff" | "evaluation";
 const STARTER_BUSINESS_LOGIC = `每一步该做的事(自然语言,LLM 看这部分):
 
 1. 收到事件后,从 partner Postgres 拉相关上下文
-2. 把上下文镜像写到 Allmeta 实例库
+2. 把上下文镜像写到图引擎实例库
 3. 调 RoboHire 完成主业务动作 (4xx 失败走 NonRetriableError)
 4. 把结果落回 partner Postgres
 5. emit 下游事件

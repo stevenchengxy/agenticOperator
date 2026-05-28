@@ -2,6 +2,7 @@
 import React from "react";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
+import { useApp } from "@/lib/i18n";
 import { fetchJson } from "@/lib/api/client";
 import type {
   EventInstanceRow,
@@ -29,6 +30,7 @@ export function EventInstancesTab({
   mode: Mode;
   query: InstancesQuery;
 }) {
+  const { t } = useApp();
   const [data, setData] = React.useState<EventInstancesResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
@@ -72,8 +74,8 @@ export function EventInstancesTab({
           onChange={(e) => setSearchText(e.target.value)}
           placeholder={
             mode === "instances"
-              ? "搜索事件名 / external_event_id…"
-              : "筛选事件名…"
+              ? t("evx_search_instances_placeholder")
+              : t("evx_filter_name_placeholder")
           }
           className="h-7 border border-line bg-panel rounded-sm mono text-[11.5px] text-ink-1 outline-none w-[280px]"
           style={{ padding: "0 8px" }}
@@ -83,32 +85,32 @@ export function EventInstancesTab({
           {data ? `${data.rows.length} / ${data.total.toLocaleString()}` : "—"}
         </span>
         <Btn size="sm" variant="ghost" onClick={refresh}>
-          <Ic.bolt /> 刷新
+          <Ic.bolt /> {t("evx_refresh")}
         </Btn>
       </div>
       {err ? (
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.alert />}
-            title="加载失败"
+            title={t("evx_load_failed")}
             hint={err}
             variant="warn"
-            action={<Btn size="sm" onClick={refresh}>重试</Btn>}
+            action={<Btn size="sm" onClick={refresh}>{t("evx_retry")}</Btn>}
           />
         </div>
       ) : isEmpty ? (
-        <EmptyForMode mode={mode} hasFilter={!!searchText} />
+        <EmptyForMode mode={mode} hasFilter={!!searchText} t={t} />
       ) : (
         <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: selected ? "1fr 380px" : "1fr" }}>
           <div className="overflow-auto" style={{ padding: "12px 22px" }}>
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 140 }}>时间</th>
-                  <th style={{ width: 200 }}>事件</th>
-                  <th style={{ width: 120 }}>来源</th>
-                  <th>{modeColumn(mode)}</th>
-                  <th style={{ width: 80 }}>状态</th>
+                  <th style={{ width: 140 }}>{t("evx_col_time")}</th>
+                  <th style={{ width: 200 }}>{t("evx_col_event")}</th>
+                  <th style={{ width: 120 }}>{t("evx_col_source")}</th>
+                  <th>{modeColumn(mode, t)}</th>
+                  <th style={{ width: 80 }}>{t("evx_col_status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -117,6 +119,7 @@ export function EventInstancesTab({
                     key={r.id}
                     row={r}
                     mode={mode}
+                    t={t}
                     active={selected?.id === r.id}
                     onClick={() => setSelected((s) => (s?.id === r.id ? null : r))}
                   />
@@ -125,7 +128,7 @@ export function EventInstancesTab({
             </table>
           </div>
           {selected && (
-            <DetailPane row={selected} onClose={() => setSelected(null)} mode={mode} onActioned={refresh} />
+            <DetailPane row={selected} onClose={() => setSelected(null)} mode={mode} onActioned={refresh} t={t} />
           )}
         </div>
       )}
@@ -133,24 +136,24 @@ export function EventInstancesTab({
   );
 }
 
-function modeColumn(mode: Mode): string {
+function modeColumn(mode: Mode, t: (k: string) => string): string {
   switch (mode) {
     case "dlq":
-      return "失败原因";
+      return t("evx_col_fail_reason");
     case "rejected":
-      return "拒绝原因";
+      return t("evx_col_reject_reason");
     case "causality":
-      return "上游事件";
+      return t("evx_col_upstream_event");
     default:
       return "external_event_id";
   }
 }
 
-function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
+function EmptyForMode({ mode, hasFilter, t }: { mode: Mode; hasFilter: boolean; t: (k: string) => string }) {
   if (hasFilter) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <EmptyState title="无匹配项" hint="尝试清空搜索条件" />
+        <EmptyState title={t("evx_empty_no_match")} hint={t("evx_empty_no_match_hint")} />
       </div>
     );
   }
@@ -160,8 +163,8 @@ function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.alert />}
-            title="暂无死信记录"
-            hint="DLQ 由 em.publish 在 schema 校验失败时写入。当前未捕获任何 schema 失败 — 这通常是好事。可用 POST /api/em/publish 故意发坏数据来验证通路。"
+            title={t("evx_empty_dlq_title")}
+            hint={t("evx_empty_dlq_hint")}
             variant="info"
           />
         </div>
@@ -171,8 +174,8 @@ function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.cross />}
-            title="暂无拒绝记录"
-            hint="网关拒绝由 em.publish 在 filter 校验失败时写入。Phase 1 filter 默认放行所有事件（spec v2 §1.2.3 / §15 Phase 3 启用真实规则）。"
+            title={t("evx_empty_rejected_title")}
+            hint={t("evx_empty_rejected_hint")}
           />
         </div>
       );
@@ -181,8 +184,8 @@ function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.search />}
-            title="暂无事件实例"
-            hint="EventInstance 行由 em.publish 写入。shared Inngest 上 RaaS 直接 send 事件即可路由到订阅 agent；离线时可用 POST /api/em/publish 发测试事件。"
+            title={t("evx_empty_instances_title")}
+            hint={t("evx_empty_instances_hint")}
             variant="info"
           />
         </div>
@@ -192,8 +195,8 @@ function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
         <div className="flex-1 flex items-center justify-center">
           <EmptyState
             icon={<Ic.branch />}
-            title="暂无因果链"
-            hint="cascade 关联（caused_by_event_id）由 em.publish 在 agent 内部 emit 时写入。需要至少两条相互关联的 EventInstance 才能形成链路。"
+            title={t("evx_empty_causality_title")}
+            hint={t("evx_empty_causality_hint")}
             variant="info"
           />
         </div>
@@ -204,11 +207,13 @@ function EmptyForMode({ mode, hasFilter }: { mode: Mode; hasFilter: boolean }) {
 function Row({
   row,
   mode,
+  t,
   active,
   onClick,
 }: {
   row: EventInstanceRow;
   mode: Mode;
+  t: (k: string) => string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -233,20 +238,20 @@ function Row({
       <td className="text-[11.5px] text-ink-3">{row.source}</td>
       <td className="text-[11.5px] mono text-ink-2 truncate">{colCell}</td>
       <td>
-        <StatusBadge status={row.status} />
+        <StatusBadge status={row.status} t={t} />
       </td>
     </tr>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, t }: { status: string; t: (k: string) => string }) {
   const map: Record<
     string,
     { variant: "ok" | "warn" | "err" | "info" | "default"; label: string }
   > = {
     accepted: { variant: "ok", label: "accepted" },
-    rejected_schema: { variant: "err", label: "schema 失败" },
-    rejected_filter: { variant: "warn", label: "filter 拒绝" },
+    rejected_schema: { variant: "err", label: t("evx_status_schema_fail") },
+    rejected_filter: { variant: "warn", label: t("evx_status_filter_reject") },
     duplicate: { variant: "info", label: "duplicate" },
     meta_rejection: { variant: "warn", label: "meta-rejection" },
     em_degraded: { variant: "warn", label: "em degraded" },
@@ -260,11 +265,13 @@ function DetailPane({
   onClose,
   mode,
   onActioned,
+  t,
 }: {
   row: EventInstanceRow;
   onClose: () => void;
   mode: Mode;
   onActioned: () => void;
+  t: (k: string) => string;
 }) {
   const [busy, setBusy] = React.useState<"replay" | "discard" | null>(null);
   const [actionMsg, setActionMsg] = React.useState<string | null>(null);
@@ -278,13 +285,13 @@ function DetailPane({
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok) {
-        setActionMsg("已重放");
+        setActionMsg(t("evx_replay_done"));
         onActioned();
       } else {
-        setActionMsg(`重放失败：${j.message ?? r.statusText}`);
+        setActionMsg(`${t("evx_replay_failed")}${j.message ?? r.statusText}`);
       }
     } catch (e) {
-      setActionMsg(`重放失败：${(e as Error).message}`);
+      setActionMsg(`${t("evx_replay_failed")}${(e as Error).message}`);
     } finally {
       setBusy(null);
     }
@@ -300,31 +307,31 @@ function DetailPane({
         <a
           href={`/events/${encodeURIComponent(row.name)}/instances/${encodeURIComponent(row.id)}`}
           className="text-ink-3 hover:text-ink-1 text-[10.5px] mr-1 no-underline"
-          title="打开完整 trail 页"
+          title={t("evx_open_full_trail")}
         >
           ↗
         </a>
         <button onClick={onClose} className="text-ink-3 hover:text-ink-1 bg-transparent border-0 cursor-pointer text-[14px]">×</button>
       </div>
 
-      <Section label="状态">
-        <StatusBadge status={row.status} />
+      <Section label={t("evx_section_status")}>
+        <StatusBadge status={row.status} t={t} />
         {row.schemaVersionUsed && (
           <span className="mono text-[10.5px] text-ink-3 ml-2">v{row.schemaVersionUsed}</span>
         )}
       </Section>
 
       {row.rejectionReason && (
-        <Section label="原因">
+        <Section label={t("evx_section_reason")}>
           <div className="text-[11.5px] text-ink-2 leading-relaxed">{row.rejectionReason}</div>
           {row.triedVersions && row.triedVersions.length > 0 && (
-            <div className="mono text-[10.5px] text-ink-4 mt-2">尝试版本：{row.triedVersions.join(", ")}</div>
+            <div className="mono text-[10.5px] text-ink-4 mt-2">{t("evx_tried_versions")}{row.triedVersions.join(", ")}</div>
           )}
         </Section>
       )}
 
       {Array.isArray(row.schemaErrors) && row.schemaErrors.length > 0 && (
-        <Section label="schema 错误">
+        <Section label={t("evx_section_schema_errors")}>
           <ul className="text-[10.5px] mono text-ink-2 leading-relaxed">
             {(row.schemaErrors as Array<{ path: string; code: string; message: string }>).slice(0, 10).map((e, i) => (
               <li key={i}>
@@ -342,18 +349,18 @@ function DetailPane({
       )}
 
       {row.causedByEventId && (
-        <Section label="上游事件">
+        <Section label={t("evx_section_upstream")}>
           <a
             href={`/events?subtab=causality&causedByEventId=${encodeURIComponent(row.causedByEventId)}`}
             className="mono text-[10.5px] text-ink-2 break-all no-underline hover:text-ink-1"
           >
-            {row.causedByName ?? "事件"} · {row.causedByEventId.slice(0, 8)}…
+            {row.causedByName ?? t("evx_event_fallback")} · {row.causedByEventId.slice(0, 8)}…
           </a>
         </Section>
       )}
 
       {row.payloadSummary && (
-        <Section label="payload 摘要">
+        <Section label={t("evx_section_payload_summary")}>
           <pre
             className="mono text-[10px] text-ink-2 bg-panel border border-line rounded-sm overflow-auto"
             style={{ padding: 8, margin: 0, maxHeight: 220 }}
@@ -366,7 +373,7 @@ function DetailPane({
       {mode === "dlq" && (
         <div className="border-t border-line p-3 flex flex-col gap-2 mt-auto">
           <Btn size="sm" disabled={busy === "replay"} onClick={replay}>
-            <Ic.play /> {busy === "replay" ? "重放中…" : "重放"}
+            <Ic.play /> {busy === "replay" ? t("evx_replaying") : t("evx_replay")}
           </Btn>
           {actionMsg && (
             <div className="text-[10.5px] text-ink-3">{actionMsg}</div>

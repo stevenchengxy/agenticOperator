@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn } from "@/components/shared/atoms";
 import { Markdown } from "@/components/shared/Markdown";
@@ -26,11 +27,11 @@ type ChatMessage = {
 const STORAGE_PREFIX = "ao:agent-chat:";
 const MAX_HISTORY = 30;
 
-const SUGGESTIONS = [
-  "最近 24h 经手了哪些实例？",
-  "失败 / 异常的 run 有哪些？",
-  "上一次跑的 JD / 候选人是哪个？",
-  "最近一周哪些失败和 RAAS 相关？",
+const SUGGESTION_KEYS = [
+  "wfx_chatSuggest1",
+  "wfx_chatSuggest2",
+  "wfx_chatSuggest3",
+  "wfx_chatSuggest4",
 ];
 
 function loadHistory(short: string): ChatMessage[] {
@@ -58,6 +59,7 @@ function saveHistory(short: string, history: ChatMessage[]): void {
 }
 
 export function AgentChatbot({ short }: { short: string }) {
+  const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   const [history, setHistory] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
@@ -115,12 +117,12 @@ export function AgentChatbot({ short }: { short: string }) {
           },
         ]);
       } catch (e) {
-        setErr((e as Error).message ?? "请求失败");
+        setErr((e as Error).message ?? t("wfx_chatRequestFailed"));
       } finally {
         setBusy(false);
       }
     },
-    [busy, history, short],
+    [busy, history, short, t],
   );
 
   const clear = (): void => {
@@ -137,10 +139,10 @@ export function AgentChatbot({ short }: { short: string }) {
         style={{ padding: 0 }}
       >
         <div className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold flex-1 text-left">
-          问 {short} · CHAT
+          {t("wfx_chatAsk")} {short} · CHAT
         </div>
         {history.length > 0 && (
-          <span className="mono text-[10px] text-ink-4 mr-2">{history.length} 条</span>
+          <span className="mono text-[10px] text-ink-4 mr-2">{history.length} {t("wfx_chatCountUnit")}</span>
         )}
         <span className="mono text-[10px] text-ink-3">{open ? "▾" : "▸"}</span>
       </button>
@@ -153,21 +155,23 @@ export function AgentChatbot({ short }: { short: string }) {
             {history.length === 0 && (
               <div>
                 <div className="text-[11px] text-ink-3 mb-2">
-                  问关于 <b>{short}</b> 经手的 run / entity / 失败的问题。
-                  AI 会用工具查实数据，不会编造。
+                  {t("wfx_chatHintPrefix")} <b>{short}</b> {t("wfx_chatHintSuffix")}
                 </div>
                 <div className="flex flex-col gap-1">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className="text-left bg-panel border border-line rounded-sm hover:bg-surface text-[11.5px] text-ink-2 cursor-pointer"
-                      style={{ padding: "5px 8px" }}
-                      onClick={() => void send(s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
+                  {SUGGESTION_KEYS.map((k) => {
+                    const s = t(k);
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        className="text-left bg-panel border border-line rounded-sm hover:bg-surface text-[11.5px] text-ink-2 cursor-pointer"
+                        style={{ padding: "5px 8px" }}
+                        onClick={() => void send(s)}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -176,7 +180,7 @@ export function AgentChatbot({ short }: { short: string }) {
             ))}
             {busy && (
               <div className="text-[11px] text-ink-3 mt-2 flex items-center gap-1.5">
-                <span className="animate-pulse">●</span> AI 思考中…
+                <span className="animate-pulse">●</span> {t("wfx_chatThinking")}
               </div>
             )}
             {err && (
@@ -198,7 +202,7 @@ export function AgentChatbot({ short }: { short: string }) {
             <div className="flex gap-1.5">
               <input
                 className="flex-1 bg-surface border border-line rounded-sm px-2 py-1 text-[12px] outline-none focus:border-[color:var(--c-accent)]"
-                placeholder={`问 ${short}…`}
+                placeholder={`${t("wfx_chatAsk")} ${short}…`}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -214,12 +218,12 @@ export function AgentChatbot({ short }: { short: string }) {
                 variant="primary"
                 onClick={() => void send(input)}
                 disabled={busy || !input.trim()}
-                title="发送"
+                title={t("wfx_chatSend")}
               >
                 <Ic.arrowR />
               </Btn>
               {history.length > 0 && (
-                <Btn size="sm" variant="ghost" onClick={clear} title="清空对话">
+                <Btn size="sm" variant="ghost" onClick={clear} title={t("wfx_chatClear")}>
                   ×
                 </Btn>
               )}
@@ -232,6 +236,7 @@ export function AgentChatbot({ short }: { short: string }) {
 }
 
 function MessageBubble({ message }: { message: ChatMessage }) {
+  const { t } = useApp();
   const isUser = message.role === "user";
   return (
     <div className="mb-2.5 last:mb-0">
@@ -239,7 +244,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         className="text-[10px] mono mb-0.5"
         style={{ color: isUser ? "var(--c-ink-3)" : "var(--c-accent)" }}
       >
-        {isUser ? "你" : `AI${message.modelUsed ? ` · ${message.modelUsed}` : ""}`}
+        {isUser ? t("wfx_chatYou") : `AI${message.modelUsed ? ` · ${message.modelUsed}` : ""}`}
       </div>
       <div
         className={`rounded-md text-[12px] leading-relaxed ${

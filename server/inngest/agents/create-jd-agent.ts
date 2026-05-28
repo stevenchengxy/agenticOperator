@@ -19,7 +19,11 @@
 import { randomUUID } from 'node:crypto';
 import { NonRetriableError } from 'inngest';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
-import { getRequirementDetail } from '@/lib/partner-pg/requirements';
+import {
+  getRequirementDetail,
+  getClarificationRecords,
+  type RequirementClarificationRecord,
+} from '@/lib/partner-pg/requirements';
 import {
   syncJdToPartnerPg,
   type SyncJdInput,
@@ -169,25 +173,34 @@ export const createJdAgent = inngest.createFunction(
     const specification = (detail as { specification: RaasRequirementSpecification | null }).specification;
     const clientId = requirement.client_id ?? specification?.client_id;
 
-    // ── 2b. 镜像 JR 到 Neo4j (via allmeta) ──
-    // 让 Rule Check Audit "实时读 Neo4j" 的 :Job_Requisition anchor 能查到.
-    // partner 数据库是真相源,Neo4j 镜像 idempotent upsert.
-    await step.run(`write-jr-neo4j-${sanitize(requisitionId)}`, async () => {
-      const r = await writeJobRequisitionInstance({
-        requirement: requirement as unknown as Record<string, unknown>,
-      });
-      if (r.ok) logger.info(`[${AGENT_NAME}] ✓ allmeta wrote Job_Requisition ${requisitionId}`);
-      else logger.warn(`[${AGENT_NAME}] allmeta JR write failed: ${r.error}`);
-      return r;
-    });
     if (!clientId) {
       throw new NonRetriableError(
         `[${AGENT_NAME}] requirement ${requisitionId} 缺 client_id — POST /jd/sync-generated 必填`,
       );
     }
 
+    // ── 2c. 取已录入的需求澄清记录(拼进 prompt 用)──
+    // 澄清是增强信息,非关键路径:取数失败只 warn + 回退空数组,不阻断 JD 生成。
+    const clarifications = await step.run(
+      `fetch-clarifications-${sanitize(requisitionId)}`,
+      async () => {
+        try {
+          const rows = await getClarificationRecords(requisitionId);
+          logger.info(
+            `[${AGENT_NAME}] partner-pg clarification records: ${rows.length} · jrid=${requisitionId}`,
+          );
+          return rows;
+        } catch (e) {
+          logger.warn(
+            `[${AGENT_NAME}] fetch clarification records failed (non-fatal): ${(e as Error).message}`,
+          );
+          return [] as RequirementClarificationRecord[];
+        }
+      },
+    );
+
     // ── 3. 从详情拼 prompt 给 RAAS /generate-jd ──
-    const prompt = buildPromptFromRequirement(requirement, specification);
+    const prompt = buildPromptFromRequirement(requirement, specification, clarifications);
     if (!prompt || prompt.length < 4) {
       throw new NonRetriableError(
         `[${AGENT_NAME}] 拼不出有效 prompt — requirement ${requisitionId} 关键字段几乎全空`,
@@ -211,7 +224,9 @@ export const createJdAgent = inngest.createFunction(
             companyName: pickStringField(requirement, ['sd_org_name', 'client_name']),
             department: pickStringField(requirement, ['client_department_id', 'department']),
           },
-          { traceId },
+          // 显式传 fileLogger → RoboHire generate-jd 完整 in/out 进 per-run 审计
+          // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
+          { traceId, logger: fileLogger },
         );
         logger.info(
           `[${AGENT_NAME}] RoboHire jobs/generate-jd OK · title="${r.data.title ?? '?'}" ` +
@@ -231,6 +246,37 @@ export const createJdAgent = inngest.createFunction(
 
     const jdData = generated.data;
 
+    // ── 4b. 从 RoboHire 自由文本派生结构化技能数组 ──
+    // RoboHire generate-jd 不返回 must_have_skills / nice_to_have_skills 数组,
+    // 只给散文 hardRequirements / niceToHave。把它们拆成 List<String> 存进
+    // Job_Requisition 的 must_have_skills / nice_to_have_skills(下游 matchResume /
+    // ruleCheck 读的就是这两个数组)。已有结构化值优先(upstream 录入更权威),
+    // 为空才用 RoboHire 派生。
+    const mustHaveSkills =
+      arrayOrUndefined(requirement.must_have_skills) ??
+      arrayOrUndefined(proseToSkillArray(jdData.hardRequirements));
+    const niceToHaveSkills =
+      arrayOrUndefined(requirement.nice_to_have_skills) ??
+      arrayOrUndefined(proseToSkillArray(jdData.niceToHave));
+
+    // 派生技能回填进 requirement,allmeta + partner-pg 两边写入都带上。
+    const enrichedRequirement: Record<string, unknown> = {
+      ...(requirement as unknown as Record<string, unknown>),
+      must_have_skills: mustHaveSkills ?? requirement.must_have_skills ?? [],
+      nice_to_have_skills: niceToHaveSkills ?? requirement.nice_to_have_skills ?? [],
+    };
+
+    // ── 4c. 镜像 JR 到 Neo4j (via allmeta) ──
+    // 让 Rule Check Audit "实时读 Neo4j" 的 :Job_Requisition anchor 能查到.
+    // partner 数据库是真相源,Neo4j 镜像 idempotent upsert.
+    // (放在 RoboHire 之后:镜像才能带上派生的 must/nice_to_have_skills。)
+    await step.run(`write-jr-neo4j-${sanitize(requisitionId)}`, async () => {
+      const r = await writeJobRequisitionInstance({ requirement: enrichedRequirement });
+      if (r.ok) logger.info(`[${AGENT_NAME}] ✓ allmeta wrote Job_Requisition ${requisitionId}`);
+      else logger.warn(`[${AGENT_NAME}] allmeta JR write failed: ${r.error}`);
+      return r;
+    });
+
     // ── 5. 写入 partner Postgres job_posting 表(state_mutations 主存储)──
     //
     // 实体数据(title / responsibility / requirement / key_words /
@@ -242,8 +288,8 @@ export const createJdAgent = inngest.createFunction(
         job_requisition_id: requisitionId,
         client_id: clientId,
         ...(jdData as Record<string, unknown>),
-        must_have_skills: arrayOrUndefined(requirement.must_have_skills),
-        nice_to_have_skills: arrayOrUndefined(requirement.nice_to_have_skills),
+        must_have_skills: mustHaveSkills,
+        nice_to_have_skills: niceToHaveSkills,
         negative_requirement: stringOrUndefined(requirement.negative_requirement),
         language_requirements: stringOrUndefined(requirement.language_requirements),
         expected_level: stringOrUndefined(requirement.expected_level),
@@ -422,6 +468,7 @@ function pickRequisitionIdFromEnvelope(
 function buildPromptFromRequirement(
   requirement: RaasRequirement,
   specification: RaasRequirementSpecification | null,
+  clarifications: RequirementClarificationRecord[] = [],
 ): string {
   const r = requirement as Record<string, any>;
   const s: Partial<RaasRequirementSpecification> = specification ?? {};
@@ -444,7 +491,9 @@ function buildPromptFromRequirement(
     if (!value) return null;
     const d = new Date(String(value));
     if (Number.isNaN(d.getTime())) return null;
-    return d.toISOString().slice(0, 10); // YYYY-MM-DD
+    // canonical schema 里这些是 Date(纯日历日),partner 以东八区零点序列化成 UTC
+    // (…T16:00:00.000Z)。用 toISOString() 取 UTC 日会早一天,必须按北京时区取日历日。
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(d); // YYYY-MM-DD(北京)
   };
   const formatWorkAddress = (value: unknown): string | null => {
     if (!value) return null;
@@ -539,6 +588,24 @@ function buildPromptFromRequirement(
   if (typeof r.negative_requirement === 'string' && r.negative_requirement.trim()) {
     lines.push(`\n排除条件: ${r.negative_requirement}`);
   }
+
+  // ── 需求澄清记录(HSM 已与客户确认录入的澄清内容)──
+  // 放在原始长文本之前,避免被尾部 4000 字截断;这是客户确认过的最权威补充。
+  if (clarifications.length) {
+    const items = clarifications.map((cr) => {
+      const meta = [
+        formatDate(cr.clarified_at),
+        cr.clarification_type,
+        cr.clarifier_name ?? cr.client_clarifier_name,
+      ]
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .join(' · ');
+      const content = cr.content.trim();
+      return meta ? `  - [${meta}] ${content}` : `  - ${content}`;
+    });
+    lines.push(`\n需求澄清记录(已与客户确认,JD 须据此调整):\n${items.join('\n')}`);
+  }
+
   if (typeof r.job_responsibility === 'string' && r.job_responsibility.trim()) {
     lines.push(`\n岗位职责(原始):\n${r.job_responsibility}`);
   }
@@ -581,6 +648,19 @@ function pickCityFromBoth(
     return [jdData.location.trim()];
   }
   return undefined;
+}
+
+/**
+ * RoboHire generate-jd 的 hardRequirements / niceToHave 是自由文本(编号或符号
+ * 列表),Job_Requisition 的 must_have_skills / nice_to_have_skills 是 List<String>。
+ * 按行拆,剥掉行首列表符号(- * • · / 1. / 1、 / 1)),trim 后丢弃空行。
+ */
+export function proseToSkillArray(s: unknown): string[] {
+  if (typeof s !== 'string') return [];
+  return s
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*•·]|\d+\s*[.．、)）])\s*/, '').trim())
+    .filter((line) => line.length > 0);
 }
 
 function arrayOrUndefined(v: unknown): string[] | undefined {

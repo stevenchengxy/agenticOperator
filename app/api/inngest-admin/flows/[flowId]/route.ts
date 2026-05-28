@@ -12,7 +12,7 @@ import {
   deriveFlowId,
   flowLabel,
   getRunHistory,
-} from '@/lib/inngest-admin-client';
+} from '@/lib/inngest-source';
 
 export const dynamic = 'force-dynamic';
 

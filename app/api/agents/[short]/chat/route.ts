@@ -501,7 +501,7 @@ async function runToolLoop(
   messages: ChatMessage[],
 ): Promise<AgentChatResponse> {
   const cfg = pickGateway();
-  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
   const sources: AgentChatSource[] = [];
 
   const convo: OpenAI.ChatCompletionMessageParam[] = [

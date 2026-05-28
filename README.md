@@ -156,7 +156,8 @@ For a more detailed working contract see [CLAUDE.md](CLAUDE.md).
 
 **Backend (in-process — same Next app)**
 - [Inngest](https://www.inngest.com) v4.3 — event-driven agent runtime; dev server runs as `inngest-cli` natively on the host
-- [Prisma](https://www.prisma.io) 6 + SQLite (default) or Postgres (prod) — `WorkflowRun`, `EventInstance`, `RuleCheckAudit`, `BehaviorAlert`, `AuditLog`, ~20 models total
+- [Prisma](https://www.prisma.io) 7 + **local Postgres** (driver adapter `@prisma/adapter-pg`; migrated from SQLite on 2026-05-28) — `WorkflowRun`, `EventInstance`, `RuleCheckAudit`, `BehaviorAlert`, `AuditLog`, the `inngest_*_archive` durability mirror, 36 models total
+- **Inngest archiver** (`scripts/inngest-archiver.ts`, `npm run archive`) — standalone poller that mirrors Inngest events/runs/step-traces into Postgres so monitoring survives an Inngest crash; reads go Postgres-first / live-fallback via `lib/inngest-source.ts`
 - [OpenAI SDK](https://github.com/openai/openai-node) routed via OpenAI-compatible gateway (new-api proxy in dev) → Gemini / GPT / etc.
 - [Neo4j JS driver](https://neo4j.com/developer/javascript/) — two instances (AO-local + RAAS-shared)
 - [MinIO client](https://github.com/minio/minio-js) — partner shared S3-compatible object store
@@ -230,9 +231,17 @@ npm run setup                      # env check + prisma generate + db push
 1. **Node ≥ 22 check** — refuses to continue on older Node (nvm install 22).
 2. **`.env.local` scaffold** — copies `.env.example` if missing.
 3. **Env preflight** — prints a `✓ / ✗` table of required + recommended vars; flags placeholder values like `<shared-inngest-host>`.
-4. **`data/` + `logs/` dirs** — auto-creates so SQLite + agent-logger don't error.
+4. **`data/` + `logs/` dirs** — auto-creates so the migration source + agent-logger don't error.
 5. **`prisma generate`** — emits the Prisma Client to `./node_modules/.prisma`.
-6. **`prisma db push`** — materializes `./data/ao.db` with all 31 tables straight from `prisma/schema.prisma`. **No migrations folder** — the schema is the source of truth.
+6. **`prisma db push`** — syncs all 36 tables to the local Postgres straight from `prisma/schema.prisma`. **No migrations folder** — the schema is the source of truth. Requires Postgres up first (`npm run pg:up`).
+
+> **Local Postgres + archiver.** `npm run dev` provisions all of this automatically (Postgres via Docker, schema push, archiver). Manual equivalent:
+> ```bash
+> npm run pg:up                    # local Postgres on :5433 (Docker, volume ao-pgdata)
+> npx prisma db push               # sync 36 tables
+> npm run db:migrate-from-sqlite   # optional: copy legacy data/ao.db → Postgres (idempotent)
+> npm run archive                  # Inngest durability mirror (or let `npm run dev` auto-start it)
+> ```
 
 Values you'll need from your team:
 - Shared Inngest URL + event/signing keys (`INNGEST_BASE_URL`, `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`)
@@ -242,16 +251,16 @@ Values you'll need from your team:
 - Partner Postgres connection string (`RAAS_POSTGRES_URL`)
 - MinIO endpoint + access keys (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`)
 
-#### Step 2 · Verify the SQLite DB
+#### Step 2 · Verify the Postgres DB
 
 ```bash
-ls -lh data/ao.db                  # should exist after Step 1, ~200KB empty
-npx prisma studio                  # GUI to browse the tables (optional)
+docker ps | grep ao-postgres       # container on host port 5433
+npx prisma studio                  # GUI to browse the 36 tables (optional)
 ```
 
 To wipe and start over (loses local data):
 ```bash
-npm run db:reset                   # rm data/ao.db && prisma db push
+npm run db:reset                   # prisma db push --force-reset
 ```
 
 > **Common error: `Cannot find module 'dotenv/config'` when running `npx prisma db push` manually.**

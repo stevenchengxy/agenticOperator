@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Badge, Btn } from "@/components/shared/atoms";
 import { ENTITY_LABELS, type EntityType } from "@/lib/entity-types";
 import type { EntitySummaryResponse } from "@/app/api/entities/[type]/[id]/route";
@@ -23,6 +24,7 @@ export function EntityHeader({
   onDaysChange: (d: number) => void;
   onDensityChange: (d: Density) => void;
 }) {
+  const { t } = useApp();
   const displayName = summary?.displayName ?? null;
   const lastSeen = summary?.lastSeenAt
     ? new Date(summary.lastSeenAt).toLocaleString(undefined, { hour12: false })
@@ -45,14 +47,14 @@ export function EntityHeader({
             <>
               {" · "}
               {summary.runCount} runs
-              {lastSeen && <> · 最近 {lastSeen}</>}
+              {lastSeen && <> · {t("enx_last_seen")} {lastSeen}</>}
             </>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-1.5">
-        <span className="text-ink-3 text-[11px]">时间窗</span>
+        <span className="text-ink-3 text-[11px]">{t("enx_time_window")}</span>
         {[1, 7, 30, 90].map((d) => (
           <Btn
             key={d}
@@ -69,14 +71,14 @@ export function EntityHeader({
       <div className="w-px h-5 bg-line" />
 
       <div className="flex items-center gap-1.5">
-        <span className="text-ink-3 text-[11px]">详细度</span>
+        <span className="text-ink-3 text-[11px]">{t("enx_density")}</span>
         <Btn
           size="sm"
           variant={density === "compact" ? "primary" : "ghost"}
           onClick={() => onDensityChange("compact")}
           style={{ padding: "0 8px" }}
         >
-          紧凑
+          {t("enx_density_compact")}
         </Btn>
         <Btn
           size="sm"
@@ -84,7 +86,7 @@ export function EntityHeader({
           onClick={() => onDensityChange("full")}
           style={{ padding: "0 8px" }}
         >
-          全展开
+          {t("enx_density_full")}
         </Btn>
       </div>
     </div>

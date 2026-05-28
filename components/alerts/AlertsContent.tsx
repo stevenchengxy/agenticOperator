@@ -117,13 +117,13 @@ const ALERTS: AlertRow[] = [
   },
 ];
 
-const RULE_CHANNELS: { id: string; label: string; n: number; ic: IcName }[] = [
-  { id: "all", label: "全部规则", n: 12, ic: "alert" },
-  { id: "event", label: "事件速率", n: 5, ic: "bolt" },
-  { id: "quality", label: "模型质量", n: 3, ic: "spark" },
-  { id: "sla", label: "SLA · 承诺", n: 2, ic: "clock" },
-  { id: "infra", label: "基础设施", n: 1, ic: "cpu" },
-  { id: "security", label: "权限与审计", n: 1, ic: "shield" },
+const RULE_CHANNELS: { id: string; labelKey: string; n: number; ic: IcName }[] = [
+  { id: "all", labelKey: "alx_ch_all", n: 12, ic: "alert" },
+  { id: "event", labelKey: "alx_ch_event", n: 5, ic: "bolt" },
+  { id: "quality", labelKey: "alx_ch_quality", n: 3, ic: "spark" },
+  { id: "sla", labelKey: "alx_ch_sla", n: 2, ic: "clock" },
+  { id: "infra", labelKey: "alx_ch_infra", n: 1, ic: "cpu" },
+  { id: "security", labelKey: "alx_ch_security", n: 1, ic: "shield" },
 ];
 
 const SEV_FACETS: { sev: "P1" | "P2" | "P3" | "P4"; n: number; color: string }[] = [
@@ -189,21 +189,21 @@ function AlertsSubHeader({ showResolved, setShowResolved, apiAlertCount, partial
   const { t } = useApp();
   const stats = [
     { l: "firing", v: "4", d: "+1 · 10m", tone: "down" },
-    { l: "ack 中", v: "2", d: "MTTA 47s", tone: "up" },
-    { l: "今日已解决", v: "9", d: "MTTR 18m", tone: "up" },
-    { l: "P1 · 上月", v: "3 → 1", d: "−66%", tone: "up" },
-    { l: "noise score", v: "0.12", d: "目标 < 0.2", tone: "up" },
-    { l: "on-call 响应率", v: "100%", d: "30 天", tone: "up" },
+    { l: t("alx_kpi_ack"), v: "2", d: "MTTA 47s", tone: "up" },
+    { l: t("alx_kpi_resolved_today"), v: "9", d: "MTTR 18m", tone: "up" },
+    { l: t("alx_kpi_p1_last_month"), v: "3 → 1", d: "−66%", tone: "up" },
+    { l: "noise score", v: "0.12", d: t("alx_kpi_target_lt_02"), tone: "up" },
+    { l: t("alx_kpi_oncall_response"), v: "100%", d: t("alx_kpi_30d"), tone: "up" },
   ];
   return (
     <div className="border-b border-line bg-surface flex items-center" style={{ padding: "14px 22px", gap: 18 }}>
       <div>
         <div className="text-[15px] font-semibold tracking-tight flex items-center gap-2">
-          异常与告警
+          {t("alx_title")}
           {apiAlertCount != null && <Badge variant="info">{apiAlertCount}</Badge>}
           {partial && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
         </div>
-        <div className="text-ink-3 text-[12px] mt-px">规则触发 · 自动通知 · 升级跟踪 · 静默与回放</div>
+        <div className="text-ink-3 text-[12px] mt-px">{t("alx_subtitle")}</div>
       </div>
       <div
         className="flex-1 grid border-l border-line"
@@ -226,10 +226,10 @@ function AlertsSubHeader({ showResolved, setShowResolved, apiAlertCount, partial
       </div>
       <label className="flex items-center gap-1.5 text-[12px] text-ink-2">
         <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
-        含已解决
+        {t("alx_include_resolved")}
       </label>
-      <Btn size="sm"><Ic.bell /> 静默规则</Btn>
-      <Btn size="sm" variant="primary"><Ic.plus /> 新建规则</Btn>
+      <Btn size="sm"><Ic.bell /> {t("alx_silence_rules")}</Btn>
+      <Btn size="sm" variant="primary"><Ic.plus /> {t("alx_new_rule")}</Btn>
     </div>
   );
 }
@@ -245,10 +245,11 @@ function AlertsLeftRail({
   sev: string | null;
   setSev: (s: string | null) => void;
 }) {
+  const { t } = useApp();
   return (
     <div className="border-r border-line bg-bg flex flex-col min-h-0">
       <div style={{ padding: "12px 14px 6px" }}>
-        <div className="hint mb-1.5">规则通道</div>
+        <div className="hint mb-1.5">{t("alx_rail_rule_channels")}</div>
         {RULE_CHANNELS.map((c) => {
           const Icon = Ic[c.ic] || Ic.alert;
           const active = channel === c.id;
@@ -263,14 +264,14 @@ function AlertsLeftRail({
               }}
             >
               <Icon />
-              <span className="flex-1">{c.label}</span>
+              <span className="flex-1">{t(c.labelKey)}</span>
               <span className="mono text-[10.5px]" style={{ color: active ? "var(--c-accent)" : "var(--c-ink-4)" }}>{c.n}</span>
             </div>
           );
         })}
       </div>
       <div className="border-t border-line mt-1.5" style={{ padding: "10px 14px" }}>
-        <div className="hint mb-2">严重度</div>
+        <div className="hint mb-2">{t("alx_rail_severity")}</div>
         <div className="flex flex-col gap-1.5">
           {SEV_FACETS.map((s) => {
             const active = sev === s.sev;
@@ -294,12 +295,12 @@ function AlertsLeftRail({
         </div>
       </div>
       <div className="border-t border-line mt-1.5" style={{ padding: "10px 14px" }}>
-        <div className="hint mb-2">视图</div>
+        <div className="hint mb-2">{t("alx_rail_views")}</div>
         {[
-          ["未指派", 1],
-          ["我负责", 0],
-          ["我订阅", 4],
-          ["近 24h", 11],
+          [t("alx_view_unassigned"), 1],
+          [t("alx_view_mine"), 0],
+          [t("alx_view_subscribed"), 4],
+          [t("alx_view_24h"), 11],
         ].map(([label, n]) => (
           <div key={label as string} className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-ink-2 hover:bg-panel">
             <Ic.bookmark />
@@ -310,9 +311,9 @@ function AlertsLeftRail({
       </div>
       <div className="flex-1" />
       <div className="border-t border-line flex flex-col gap-1.5" style={{ padding: "12px 14px" }}>
-        <div className="hint">每分钟噪声</div>
+        <div className="hint">{t("alx_noise_per_min")}</div>
         <Spark values={[0.12, 0.18, 0.10, 0.14, 0.08, 0.16, 0.12, 0.09, 0.11, 0.13, 0.10, 0.12]} h={28} />
-        <div className="mono text-[10.5px] text-ink-3">0.12 · 目标 {"<"} 0.2</div>
+        <div className="mono text-[10.5px] text-ink-3">0.12 · {t("alx_target")} {"<"} 0.2</div>
       </div>
     </div>
   );
@@ -383,20 +384,25 @@ function AlertsTable({
   selectedId: string;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useApp();
   return (
     <div className="border-b border-line bg-surface flex flex-col min-h-0">
       <div className="flex items-center gap-2 border-b border-line" style={{ padding: "10px 14px" }}>
-        <div className="text-[13px] font-semibold">当前告警</div>
+        <div className="text-[13px] font-semibold">{t("alx_current_alerts")}</div>
         <Badge variant="err" dot pulse className="ml-1">4 firing</Badge>
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 text-ink-3 text-[11.5px]">
           <Ic.search />
-          <span>搜索告警 / 规则 / 标签…</span>
+          <span>{t("alx_search_placeholder")}</span>
           <kbd className="ml-1 mono text-[10px] bg-surface border border-line rounded-sm px-1.5 py-[1px] text-ink-3">/</kbd>
         </div>
       </div>
       <div className="flex-1 overflow-auto min-h-0">
-        <table className="tbl" style={{ tableLayout: "fixed" }}>
+        {/* minWidth floor: 8 fixed cols (~780px) + a readable title column.
+            Without it the flexible 告警 column collapses to ~1ch on normal
+            widths and CJK titles wrap one char per line (the vertical-text bug).
+            Container above is overflow-auto, so narrow viewports scroll. */}
+        <table className="tbl" style={{ tableLayout: "fixed", minWidth: 960 }}>
           <colgroup>
             <col style={{ width: 56 }} />
             <col style={{ width: 86 }} />
@@ -410,8 +416,8 @@ function AlertsTable({
           </colgroup>
           <thead>
             <tr>
-              <th>sev</th><th>state</th><th>告警</th><th>规则源</th>
-              <th>持续</th><th>影响</th><th>负责人</th><th>趋势</th><th></th>
+              <th>sev</th><th>state</th><th>{t("alx_th_alert")}</th><th>{t("alx_th_rule_source")}</th>
+              <th>{t("alx_th_duration")}</th><th>{t("alx_th_impact")}</th><th>{t("alx_th_assignee")}</th><th>{t("alx_th_trend")}</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -426,7 +432,7 @@ function AlertsTable({
                   <td><SevPill sev={a.sev} /></td>
                   <td><StateBadge state={a.state} /></td>
                   <td>
-                    <div className="font-semibold text-[12.5px] text-ink-1">{a.title}</div>
+                    <div className="font-semibold text-[12.5px] text-ink-1 leading-tight line-clamp-2">{a.title}</div>
                     <div className="mono text-[10.5px] text-ink-3 overflow-hidden text-ellipsis whitespace-nowrap">{a.id} · {a.rule}</div>
                   </td>
                   <td>
@@ -445,7 +451,7 @@ function AlertsTable({
                   </td>
                   <td>
                     {a.assignee === "未指派" ? (
-                      <Badge variant="warn">{a.assignee}</Badge>
+                      <Badge variant="warn">{t("alx_unassigned")}</Badge>
                     ) : (
                       <span className="text-[11.5px]">{a.assignee}</span>
                     )}
@@ -474,11 +480,12 @@ function AlertsTable({
 }
 
 function AlertDetail({ a }: { a: AlertRow }) {
+  const { t } = useApp();
   const [tab, setTab] = React.useState("timeline");
   const tabs = [
-    ["timeline", "时间线"],
-    ["events", "关联事件"],
-    ["rule", "规则定义"],
+    ["timeline", t("alx_tab_timeline")],
+    ["events", t("alx_tab_events")],
+    ["rule", t("alx_tab_rule")],
     ["runbook", "Runbook"],
   ];
   return (
@@ -490,18 +497,18 @@ function AlertDetail({ a }: { a: AlertRow }) {
           <div className="text-[14px] font-semibold tracking-tight">{a.title}</div>
           <span className="mono text-ink-3 text-[11.5px]">{a.id}</span>
           <div className="flex-1" />
-          <Btn size="sm"><Ic.bell />通知</Btn>
-          <Btn size="sm">分配</Btn>
+          <Btn size="sm"><Ic.bell />{t("alx_act_notify")}</Btn>
+          <Btn size="sm">{t("alx_act_assign")}</Btn>
           <Btn size="sm">snooze</Btn>
           <Btn size="sm" variant="primary">resolve</Btn>
         </div>
         <div className="mono text-[11px] text-ink-3 mt-1.5">{a.rule}</div>
         <div className="flex gap-4.5 text-[11.5px] text-ink-2 mt-2" style={{ gap: 18 }}>
-          <span>开始 <span className="mono">{a.started}</span></span>
-          <span>持续 <span className="mono">{a.duration}</span></span>
-          <span>来源 <span className="mono">{a.source}</span></span>
-          <span>通道 <span className="mono">{a.channel}</span></span>
-          <span>负责 <b>{a.assignee}</b></span>
+          <span>{t("alx_meta_started")} <span className="mono">{a.started}</span></span>
+          <span>{t("alx_meta_duration")} <span className="mono">{a.duration}</span></span>
+          <span>{t("alx_meta_source")} <span className="mono">{a.source}</span></span>
+          <span>{t("alx_meta_channel")} <span className="mono">{a.channel}</span></span>
+          <span>{t("alx_meta_assignee")} <b>{a.assignee === "未指派" ? t("alx_unassigned") : a.assignee}</b></span>
         </div>
         <div className="flex mt-3 -mb-2.5" style={{ borderBottom: "1px solid transparent" }}>
           {tabs.map(([id, label]) => (
@@ -532,6 +539,7 @@ function AlertDetail({ a }: { a: AlertRow }) {
 }
 
 function AlertTimeline({ a }: { a: AlertRow }) {
+  const { t } = useApp();
   const kindMap: Record<string, { color: string; ic: IcName }> = {
     fired: { color: "var(--c-err)", ic: "alert" },
     notify: { color: "var(--c-info)", ic: "bell" },
@@ -547,7 +555,7 @@ function AlertTimeline({ a }: { a: AlertRow }) {
     <div>
       <div className="flex gap-3.5 mb-3.5">
         <div className="flex-1 p-3 border border-line rounded-lg bg-surface">
-          <div className="hint">影响范围</div>
+          <div className="hint">{t("alx_impact_scope")}</div>
           <div className="flex gap-[22px] mt-1.5">
             <div><div className="mono text-[18px] font-semibold tabular-nums">{a.affected.runs}</div><div className="hint">runs</div></div>
             <div><div className="mono text-[18px] font-semibold tabular-nums">{a.affected.jobs}</div><div className="hint">jobs</div></div>
@@ -556,7 +564,7 @@ function AlertTimeline({ a }: { a: AlertRow }) {
           <div className="mt-2 text-[11.5px] text-ink-2">{a.desc}</div>
         </div>
         <div className="w-[280px] p-3 border border-line rounded-lg bg-surface">
-          <div className="hint">触发频率 · 12m</div>
+          <div className="hint">{t("alx_trigger_freq_12m")}</div>
           <Spark values={a.spark} h={48} stroke="var(--c-err)" />
           <div className="mono text-[10.5px] text-ink-3 mt-1">peak 9 · last 12 buckets</div>
         </div>
@@ -600,11 +608,12 @@ function AlertTimeline({ a }: { a: AlertRow }) {
 }
 
 function AlertEvents({ a }: { a: AlertRow }) {
+  const { t } = useApp();
   return (
     <div>
-      <div className="hint mb-2">关联事件类型 ({a.related.length})</div>
+      <div className="hint mb-2">{t("alx_related_event_types")} ({a.related.length})</div>
       <div className="flex flex-col gap-2">
-        {a.related.length === 0 && <div className="text-ink-3 text-[12px]">无关联事件。规则基于系统度量触发。</div>}
+        {a.related.length === 0 && <div className="text-ink-3 text-[12px]">{t("alx_no_related_events")}</div>}
         {a.related.map((name, i) => (
           <div
             key={i}
@@ -614,14 +623,14 @@ function AlertEvents({ a }: { a: AlertRow }) {
             <Ic.bolt />
             <span className="mono font-semibold text-[12px]">{name}</span>
             <div className="flex-1" />
-            <Badge variant="info" dot>监听中</Badge>
-            <Btn size="sm" variant="ghost">查看 →</Btn>
+            <Badge variant="info" dot>{t("alx_listening")}</Badge>
+            <Btn size="sm" variant="ghost">{t("alx_view")} →</Btn>
           </div>
         ))}
       </div>
-      <div className="hint mt-4 mb-2">受影响最近 runs</div>
+      <div className="hint mt-4 mb-2">{t("alx_affected_recent_runs")}</div>
       <table className="tbl">
-        <thead><tr><th>run</th><th>workflow</th><th>状态</th><th>触发事件</th><th>用时</th></tr></thead>
+        <thead><tr><th>run</th><th>workflow</th><th>{t("alx_th_status")}</th><th>{t("alx_th_trigger_event")}</th><th>{t("alx_th_elapsed")}</th></tr></thead>
         <tbody>
           {[
             ["run_8e21", "client→submit/v4.2", "failed", "REQUIREMENT_SYNCED", "2.4s"],
@@ -650,9 +659,10 @@ function AlertEvents({ a }: { a: AlertRow }) {
 }
 
 function AlertRule({ a }: { a: AlertRow }) {
+  const { t } = useApp();
   return (
     <div>
-      <div className="hint mb-1.5">规则 (PromQL-like)</div>
+      <div className="hint mb-1.5">{t("alx_rule_promql")}</div>
       <pre
         className="m-0 rounded-lg mono text-[12px] text-ink-1 whitespace-pre-wrap bg-panel border border-line"
         style={{ padding: 12 }}
@@ -671,7 +681,7 @@ notifications:
   - escalate_after: 45m → manager`}</pre>
       <div className="grid grid-cols-2 gap-3 mt-3">
         <div className="p-2.5 border border-line rounded-lg bg-surface">
-          <div className="hint">最近 7 天触发</div>
+          <div className="hint">{t("alx_fired_7d")}</div>
           <div className="flex items-baseline gap-1.5 mt-1">
             <span className="mono text-[18px] font-semibold">14</span>
             <span className="text-[color:var(--c-ok)] text-[11px]">−21%</span>
@@ -679,12 +689,12 @@ notifications:
           <Spark values={[3, 2, 4, 1, 2, 1, 1]} h={28} />
         </div>
         <div className="p-2.5 border border-line rounded-lg bg-surface">
-          <div className="hint">误报率</div>
+          <div className="hint">{t("alx_false_positive_rate")}</div>
           <div className="flex items-baseline gap-1.5 mt-1">
             <span className="mono text-[18px] font-semibold">4.3%</span>
-            <span className="text-[color:var(--c-ok)] text-[11px]">正常</span>
+            <span className="text-[color:var(--c-ok)] text-[11px]">{t("alx_normal")}</span>
           </div>
-          <div className="hint mt-1">3 / 70 · 30 天</div>
+          <div className="hint mt-1">3 / 70 · 30 {t("alx_days")}</div>
         </div>
       </div>
     </div>
@@ -692,6 +702,7 @@ notifications:
 }
 
 function AlertRunbook({ a }: { a: AlertRow }) {
+  const { t } = useApp();
   const steps = [
     { done: true, text: "在 Inngest 控制台过滤 `event:ANALYSIS_BLOCKED`，确认错误集中类型。" },
     { done: true, text: "若错误为 schema 不匹配 → 进入「数据源 → 客户 ATS」查看字段映射变更日志。" },
@@ -730,18 +741,19 @@ function AlertRunbook({ a }: { a: AlertRow }) {
         ))}
       </div>
       <div className="mt-3.5 p-2.5 border-dashed border border-line-strong rounded-lg text-[11.5px] text-ink-3">
-        Runbook · <span className="mono">runbooks/{a.id.toLowerCase()}.md</span> · 维护人 平台运营 · 上次更新 3 天前
+        Runbook · <span className="mono">runbooks/{a.id.toLowerCase()}.md</span> · {t("alx_maintainer")} 平台运营 · {t("alx_last_updated")} 3 {t("alx_days_ago")}
       </div>
     </div>
   );
 }
 
 function AlertsRightRail() {
+  const { t } = useApp();
   return (
     <div className="border-l border-line bg-bg flex flex-col min-h-0">
       <div className="border-b border-line bg-surface" style={{ padding: "12px 14px" }}>
-        <div className="text-[13px] font-semibold">On-call · 当值</div>
-        <div className="hint mt-0.5">轮值表 / 升级路径 / 静默</div>
+        <div className="text-[13px] font-semibold">{t("alx_oncall_title")}</div>
+        <div className="hint mt-0.5">{t("alx_oncall_sub")}</div>
       </div>
       <div style={{ padding: "10px 12px" }}>
         {ON_CALL.map((p, i) => {
@@ -768,14 +780,14 @@ function AlertsRightRail() {
         })}
       </div>
       <div className="border-t border-line bg-surface" style={{ padding: "10px 14px" }}>
-        <div className="text-[12.5px] font-semibold">升级策略</div>
+        <div className="text-[12.5px] font-semibold">{t("alx_escalation_policy")}</div>
       </div>
       <div className="flex flex-col gap-2" style={{ padding: "10px 14px" }}>
         {[
-          ["0 min", "primary", "feishu · 电话"],
+          ["0 min", "primary", `feishu · ${t("alx_chan_phone")}`],
           ["+15 min", "secondary", "feishu"],
-          ["+45 min", "manager", "短信 · 电话"],
-          ["+90 min", "org-wide", "广播"],
+          ["+45 min", "manager", `${t("alx_chan_sms")} · ${t("alx_chan_phone")}`],
+          ["+90 min", "org-wide", t("alx_chan_broadcast")],
         ].map((r, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="mono text-[11px] text-ink-3" style={{ width: 56 }}>{r[0]}</span>
@@ -786,7 +798,7 @@ function AlertsRightRail() {
       </div>
       <div className="border-t border-line bg-surface" style={{ padding: "10px 14px" }}>
         <div className="flex items-center gap-1.5">
-          <span className="text-[12.5px] font-semibold">静默规则</span>
+          <span className="text-[12.5px] font-semibold">{t("alx_silenced_rules")}</span>
           <Badge variant="warn" dot>{SILENCED.length}</Badge>
         </div>
       </div>
@@ -804,8 +816,8 @@ function AlertsRightRail() {
       </div>
       <div className="flex-1" />
       <div className="border-t border-line flex gap-2" style={{ padding: "10px 14px" }}>
-        <Btn size="sm" variant="ghost" style={{ flex: 1 }}><Ic.bell /> 全部静音 1h</Btn>
-        <Btn size="sm" variant="ghost" style={{ flex: 1 }}>导出 RCA</Btn>
+        <Btn size="sm" variant="ghost" style={{ flex: 1 }}><Ic.bell /> {t("alx_mute_all_1h")}</Btn>
+        <Btn size="sm" variant="ghost" style={{ flex: 1 }}>{t("alx_export_rca")}</Btn>
       </div>
     </div>
   );

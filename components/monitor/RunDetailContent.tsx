@@ -164,7 +164,7 @@ function MetadataTable({ metadata }: { metadata: Record<string, unknown> }) {
           {Object.entries(metadata).map(([k, v]) => (
             <tr key={k}>
               <td className="text-claude-ink-4 pr-3 py-0.5 align-top whitespace-nowrap font-mono">{k}</td>
-              <td className="text-claude-ink-2 py-0.5 break-all">
+              <td className="text-claude-ink-2 py-0.5 break-words">
                 {typeof v === 'object' && v !== null
                   ? JSON.stringify(v, null, 0)
                   : String(v)}
@@ -528,7 +528,7 @@ export function RunDetailContent({ runId }: { runId: string }) {
       {/* Run header */}
       <div className="mb-4">
         <div className="flex items-start justify-between gap-2">
-          <h1 className="text-[24px] font-medium leading-tight">
+          <h1 className="text-[24px] font-medium leading-tight truncate min-w-0">
             {data?.run.triggerEvent ?? '—'}
           </h1>
           {data && (
@@ -626,6 +626,8 @@ export function RunDetailContent({ runId }: { runId: string }) {
                 </button>
               ))}
             </div>
+
+            <div className="w-px h-5 bg-claude-line" />
 
             {/* Reset */}
             <button

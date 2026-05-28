@@ -11,12 +11,15 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-const url = (process.env.DATABASE_URL ?? "file:./data/ao.db").replace(
-  /^file:/,
-  "",
-);
-const adapter = new PrismaBetterSqlite3({ url });
+// Engine-aware adapter (store migrated SQLite → Postgres on 2026-05-28).
+const dbUrl =
+  process.env.DATABASE_URL ?? "postgresql://ao:ao_local_pw@localhost:5433/ao";
+const adapter =
+  dbUrl.startsWith("postgresql://") || dbUrl.startsWith("postgres://")
+    ? new PrismaPg(dbUrl)
+    : new PrismaBetterSqlite3({ url: dbUrl.replace(/^file:/, "") });
 const prisma = new PrismaClient({ adapter });
 
 const WS = process.env.WS_BASE_URL ?? "http://localhost:5175";

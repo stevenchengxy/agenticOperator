@@ -4,20 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-- `npm run dev` — start the dev server on **port 3002** (not 3000; configured in `package.json`).
+- `npm run dev` — runs `scripts/dev-bootstrap.mjs` (provisions Postgres + Inngest, pushes schema, starts the archiver) then the dev server on **port 3002** (not 3000).
 - `npm run build` — production build. Use this to surface TypeScript errors; `next build` runs typecheck + lint.
 - `npm run start` — serve the production build on port 3002.
 - `npm run lint` — `next lint`.
+- `npm test` — vitest run. `npm run test:watch` for watch mode.
 
-There is no test suite configured.
+### Data layer (local Postgres) + Inngest archive
+
+- `npm run pg:up` / `pg:down` / `pg:logs` — local Postgres on **port 5433** (5432 is the partner `raas-postgres-dev`). Container `ao-postgres`, named volume `ao-pgdata` (durable). Conn string in `DATABASE_URL` (default `postgresql://ao:ao_local_pw@localhost:5433/ao`).
+- `npm run db:push` — sync `prisma/schema.prisma` to Postgres. `db:reset` — `prisma db push --force-reset`. `db:studio` — Prisma Studio.
+- `npm run db:migrate-from-sqlite` — one-time copy of the legacy SQLite `data/ao.db` into Postgres (idempotent).
+- `npm run archive` — standalone Inngest archiver (mirrors Inngest events/runs/step-traces into Postgres for durability). `dev` auto-starts it; gate with `ARCHIVE_ENABLED=0`.
+- See [docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md](docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md).
 
 ## Stack
 
-Next.js 16.2 (App Router · Turbopack default) · React 19.2 · Tailwind CSS v4.2 · TypeScript 5 · `engines.node: ">=22"`. No tests, no API routes.
+Next.js 16.2 (App Router · Turbopack default) · React 19.2 · Tailwind CSS v4.2 · TypeScript 5 · `engines.node: ">=22"`. Backend: Prisma 7 → **local Postgres** (driver adapter `@prisma/adapter-pg`), Inngest (event engine / agent runtime), Neo4j (via Allmeta), MinIO, OpenAI-compatible LLM gateway. Tests: vitest. API: App Router Route Handlers under `app/api/`.
 
 ## Architecture
 
-This is a frontend-only implementation of **Agentic Operator** — a control-plane UI for AI recruitment agents. All data is hard-coded mock data; there is no backend or fetch layer.
+**Agentic Operator** — a control-plane UI + runtime for AI recruitment agents. The UI chrome is still mock-data-driven in places, but there is a real backend: Route Handlers in `app/api/`, agent functions in `server/inngest/`, persistence in Postgres via Prisma (`server/db/index.ts`), and external integrations (RAAS partner Postgres, Allmeta/Neo4j, MinIO, RoboHire).
+
+### Monitoring data flow + durability
+
+The Inngest dev server (`:8288`) is the live source of truth for runs/events/traces. `lib/inngest-archive/` mirrors that into Postgres via the polling archiver; `lib/inngest-source.ts` resolves monitor reads **Postgres-first with live fallback** (`MONITOR_READ_SOURCE=auto|postgres|live`). Monitor route handlers under `app/api/inngest-admin/*` import from `inngest-source`, not `inngest-admin-client`, so they survive an Inngest outage.
 
 ### Top-level shape
 

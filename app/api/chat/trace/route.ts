@@ -85,7 +85,7 @@ async function runStreamingToolLoop(
   emit: (e: StreamEvent) => void,
 ): Promise<void> {
   const cfg = pickGateway();
-  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey });
+  const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
   const sources: ChatSource[] = [];
   let toolCallsExecuted = 0;
   let modelUsed: string | undefined;

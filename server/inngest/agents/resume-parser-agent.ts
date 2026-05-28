@@ -186,7 +186,9 @@ export const resumeParserAgent = inngest.createFunction(
         const pdfFilename = (filename as string | undefined) ?? 'resume.pdf';
         let parseRes;
         try {
-          parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId });
+          // 显式传 fileLogger → RoboHire parse-resume 完整 in/out 进 per-run 审计
+          // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
+          parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId, logger: fileLogger });
         } catch (e) {
           if (e instanceof RobohireApiError && e.isClientError) {
             throw new NonRetriableError(

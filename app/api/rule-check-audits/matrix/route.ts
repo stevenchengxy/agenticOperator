@@ -2,6 +2,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
+import { extractRawFlagsByRuleId } from '@/app/api/rule-check-audits/[auditId]/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,19 +44,65 @@ export async function GET(req: Request) {
       where: { created_at: { gte: cutoff } },
     });
 
-    // 拉所有最近的 flags + 关联 audit_id
-    const flags = await prisma.ruleCheckFlag.findMany({
-      where: { audit: { created_at: { gte: cutoff } } },
+    // Read flags the SAME way the audit detail does, so 总览 == 审计:prefer
+    // persisted RuleCheckFlag rows; for audits whose flags weren't persisted
+    // (legacy), recover them from llm_raw_text. Keeps coverage accurate even
+    // before the write-side persistence fills the table for old audits.
+    const auditRows = await prisma.ruleCheckAudit.findMany({
+      where: { created_at: { gte: cutoff } },
       select: {
-        rule_id: true,
-        rule_name_snapshot: true,
-        severity: true,
-        applicable_client: true,
-        result: true,
-        evidence: true,
         audit_id: true,
+        llm_raw_text: true,
+        flags: {
+          select: {
+            rule_id: true,
+            rule_name_snapshot: true,
+            severity: true,
+            applicable_client: true,
+            result: true,
+            evidence: true,
+          },
+        },
       },
     });
+
+    type FlagLite = {
+      rule_id: string;
+      rule_name: string;
+      severity: string;
+      applicable_client: string;
+      result: string;
+      evidence: string;
+      audit_id: string;
+    };
+    const flags: FlagLite[] = [];
+    for (const a of auditRows) {
+      if (a.flags.length > 0) {
+        for (const f of a.flags) {
+          flags.push({
+            rule_id: f.rule_id,
+            rule_name: f.rule_name_snapshot,
+            severity: f.severity,
+            applicable_client: f.applicable_client ?? '',
+            result: f.result,
+            evidence: f.evidence ?? '',
+            audit_id: a.audit_id,
+          });
+        }
+      } else {
+        for (const rf of extractRawFlagsByRuleId(a.llm_raw_text).values()) {
+          flags.push({
+            rule_id: rf.rule_id,
+            rule_name: rf.rule_name ?? '',
+            severity: typeof rf.severity === 'string' ? rf.severity : '',
+            applicable_client: '',
+            result: typeof rf.result === 'string' ? rf.result : 'NOT_APPLICABLE',
+            evidence: rf.evidence ?? '',
+            audit_id: a.audit_id,
+          });
+        }
+      }
+    }
 
     type Agg = {
       rule_id: string;
@@ -75,7 +122,7 @@ export async function GET(req: Request) {
       if (!r) {
         r = {
           rule_id: f.rule_id,
-          rule_name: f.rule_name_snapshot,
+          rule_name: f.rule_name,
           severity: f.severity,
           applicable_client: f.applicable_client ?? '',
           total: 0,

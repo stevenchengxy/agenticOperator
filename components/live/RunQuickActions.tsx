@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
@@ -33,32 +34,33 @@ type ActionId = "summary" | "slowness" | "failure" | "raas";
 
 const ACTIONS: Array<{
   id: ActionId;
-  label: string;
-  hint: string;
+  labelKey: string;
+  hintKey: string;
   llm: boolean;
 }> = [
-  { id: "summary", label: "总结", hint: "AI 生成（带 fallback）", llm: true },
-  { id: "slowness", label: "为什么慢", hint: "确定性 · 找最长 block", llm: false },
-  { id: "failure", label: "失败根因", hint: "确定性 · 列错误项", llm: false },
-  { id: "raas", label: "RAAS 干了什么", hint: "确定性 · 列 emit + Inngest run", llm: false },
+  { id: "summary", labelKey: "lvx_qa_summary", hintKey: "lvx_qa_summary_hint", llm: true },
+  { id: "slowness", labelKey: "lvx_qa_slowness", hintKey: "lvx_qa_slowness_hint", llm: false },
+  { id: "failure", labelKey: "lvx_qa_failure", hintKey: "lvx_qa_failure_hint", llm: false },
+  { id: "raas", labelKey: "lvx_qa_raas", hintKey: "lvx_qa_raas_hint", llm: false },
 ];
 
 export function RunQuickActions({ runId, trace }: Props) {
+  const { t } = useApp();
   const [active, setActive] = React.useState<ActionId | null>(null);
 
   return (
     <div className="border border-line rounded-md bg-surface mb-3" style={{ padding: "8px 10px" }}>
       <div className="flex items-center mb-2 gap-2 flex-wrap">
         <span className="text-[10.5px] tracking-[0.06em] uppercase text-ink-4 font-semibold">
-          快捷问题
+          {t("lvx_qa_title")}
         </span>
-        <span className="mono text-[10px] text-ink-4">作用域 · 仅这条 run</span>
+        <span className="mono text-[10px] text-ink-4">{t("lvx_qa_scope")}</span>
         <div className="flex-1" />
         {ACTIONS.map((a) => (
           <button
             key={a.id}
             onClick={() => setActive(active === a.id ? null : a.id)}
-            title={a.hint}
+            title={t(a.hintKey)}
             className="bg-transparent border cursor-pointer mono rounded-sm transition-colors"
             style={{
               padding: "3px 9px",
@@ -70,7 +72,7 @@ export function RunQuickActions({ runId, trace }: Props) {
             }}
           >
             {a.llm && <span className="mr-0.5" style={{ color: "var(--c-accent)" }}>✨</span>}
-            {a.label}
+            {t(a.labelKey)}
           </button>
         ))}
       </div>
@@ -102,6 +104,7 @@ function ActionBody({
 // ── 1. 总结 (LLM-backed, reuses /api/runs/:id/summary) ───────────────
 
 function SummaryBody({ runId }: { runId: string }) {
+  const { t } = useApp();
   const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -129,7 +132,7 @@ function SummaryBody({ runId }: { runId: string }) {
   }, [fetchSummary]);
 
   if (loading && !resp) {
-    return <div className="text-[11.5px] text-ink-3">AI 生成中…</div>;
+    return <div className="text-[11.5px] text-ink-3">{t("lvx_qa_summary_generating")}</div>;
   }
   if (err && !resp) {
     return <div className="text-[11.5px]" style={{ color: "var(--c-warn)" }}>⚠ {err}</div>;
@@ -142,7 +145,7 @@ function SummaryBody({ runId }: { runId: string }) {
           {resp.source === "llm" ? `via ${resp.modelUsed ?? "llm"}` : "fallback"}
         </Badge>
         <Btn size="sm" variant="ghost" onClick={fetchSummary} disabled={loading}>
-          <Ic.bolt /> 重新生成
+          <Ic.bolt /> {t("lvx_qa_regenerate")}
         </Btn>
       </div>
       <pre
@@ -158,6 +161,7 @@ function SummaryBody({ runId }: { runId: string }) {
 // ── 2. 为什么慢 (deterministic) ──────────────────────────────────────
 
 function SlownessBody({ trace }: { trace: TraceResponse | null }) {
+  const { t } = useApp();
   if (!trace) return <Loading />;
   const allBlocks = trace.agentLanes.flatMap((l) =>
     l.blocks.map((b) => ({ agent: l.agent, block: b })),
@@ -166,8 +170,8 @@ function SlownessBody({ trace }: { trace: TraceResponse | null }) {
   if (withDuration.length === 0) {
     return (
       <Reason
-        title="无可比较的耗时数据"
-        body="这条 run 还没有任何带 duration 的 step / 工具调用。"
+        title={t("lvx_qa_slow_none_title")}
+        body={t("lvx_qa_slow_none_body")}
       />
     );
   }
@@ -179,8 +183,8 @@ function SlownessBody({ trace }: { trace: TraceResponse | null }) {
   return (
     <>
       <Reason
-        title="耗时排名 · top 5 block"
-        body={`这条 run 跨度 ${formatDuration(total)}。耗时最长的 block：`}
+        title={t("lvx_qa_slow_title")}
+        body={t("lvx_qa_slow_body").replace("{span}", formatDuration(total))}
       />
       <table className="tbl mt-2">
         <thead>
@@ -189,7 +193,7 @@ function SlownessBody({ trace }: { trace: TraceResponse | null }) {
             <th style={{ width: 80 }}>kind</th>
             <th>label</th>
             <th style={{ width: 80 }}>duration</th>
-            <th style={{ width: 60 }}>占比</th>
+            <th style={{ width: 60 }}>{t("lvx_qa_col_pct")}</th>
           </tr>
         </thead>
         <tbody>
@@ -210,8 +214,11 @@ function SlownessBody({ trace }: { trace: TraceResponse | null }) {
       <Footnote
         text={
           ranked[0].block.durationMs && ranked[0].block.durationMs / total > 0.5
-            ? `主要瓶颈：${ranked[0].agent} · ${ranked[0].block.label}（占总耗时 ${(((ranked[0].block.durationMs ?? 0) / total) * 100).toFixed(1)}%）。`
-            : "耗时分布相对均匀；没有明显瓶颈。"
+            ? t("lvx_qa_slow_bottleneck")
+                .replace("{agent}", ranked[0].agent)
+                .replace("{label}", ranked[0].block.label)
+                .replace("{pct}", (((ranked[0].block.durationMs ?? 0) / total) * 100).toFixed(1))
+            : t("lvx_qa_slow_even")
         }
       />
     </>
@@ -221,6 +228,7 @@ function SlownessBody({ trace }: { trace: TraceResponse | null }) {
 // ── 3. 失败根因 (deterministic) ──────────────────────────────────────
 
 function FailureBody({ trace }: { trace: TraceResponse | null }) {
+  const { t } = useApp();
   if (!trace) return <Loading />;
   const failures = trace.agentLanes.flatMap((l) =>
     l.blocks
@@ -230,8 +238,8 @@ function FailureBody({ trace }: { trace: TraceResponse | null }) {
   if (failures.length === 0) {
     return (
       <Reason
-        title="未发现失败"
-        body={`run 状态: ${trace.run.status}. 没有 step.failed / error / anomaly block。`}
+        title={t("lvx_qa_fail_none_title")}
+        body={t("lvx_qa_fail_none_body").replace("{status}", trace.run.status)}
       />
     );
   }
@@ -241,8 +249,8 @@ function FailureBody({ trace }: { trace: TraceResponse | null }) {
   return (
     <>
       <Reason
-        title={`${failures.length} 处异常 · 最早异常发生在 ${root.agent}`}
-        body="按时间排序——根因通常是最早那个：后续异常往往是它的余波。"
+        title={t("lvx_qa_fail_title").replace("{count}", String(failures.length)).replace("{agent}", root.agent)}
+        body={t("lvx_qa_fail_body")}
       />
       <div className="flex flex-col gap-1.5 mt-2">
         {failures.map(({ agent, block }, i) => (
@@ -262,6 +270,7 @@ function FailureRow({
   block: TraceBlock;
   root: boolean;
 }) {
+  const { t } = useApp();
   return (
     <div
       className="border rounded-sm"
@@ -281,7 +290,7 @@ function FailureRow({
         <span className="mono text-[10px] text-ink-3">
           {new Date(block.ts).toLocaleTimeString(undefined, { hour12: false })}
         </span>
-        {root && <Badge variant="err">最早 / 候选根因</Badge>}
+        {root && <Badge variant="err">{t("lvx_qa_root_cause")}</Badge>}
       </div>
       <div className="text-[11.5px] text-ink-2 leading-snug">
         {block.message ?? block.label}
@@ -293,6 +302,7 @@ function FailureRow({
 // ── 4. RAAS 干了什么 (deterministic, P2 deepens) ─────────────────────
 
 function RaasBody({ trace }: { trace: TraceResponse | null }) {
+  const { t } = useApp();
   if (!trace) return <Loading />;
   // forwardToRaas writes a tool AgentActivity row with toolName "RAAS.forward"
   // — pull those out and pair with eventLane entries when possible.
@@ -308,20 +318,20 @@ function RaasBody({ trace }: { trace: TraceResponse | null }) {
   if (raasForwards.length === 0 && emittedEvents.length === 0) {
     return (
       <Reason
-        title="未观察到 RAAS 交互"
-        body="这条 run 没有调用 forwardToRaas，也没有产生进入 Inngest 总线的事件。"
+        title={t("lvx_qa_raas_none_title")}
+        body={t("lvx_qa_raas_none_body")}
       />
     );
   }
   return (
     <>
       <Reason
-        title={`${raasForwards.length} 次 forwardToRaas · ${emittedEvents.length} 个事件可被 RAAS 订阅`}
-        body="RAAS 端实查（/v1/events/{id}/runs on RAAS_INNGEST_URL）需要 VPN，本刀仅展示 AO 端可见的部分。完整的跨系统 trace 在 P2 接通。"
+        title={t("lvx_qa_raas_title").replace("{forwards}", String(raasForwards.length)).replace("{events}", String(emittedEvents.length))}
+        body={t("lvx_qa_raas_body")}
       />
       {raasForwards.length > 0 && (
         <div className="mt-2">
-          <div className="text-[10.5px] text-ink-4 font-semibold mb-1">forwardToRaas 调用</div>
+          <div className="text-[10.5px] text-ink-4 font-semibold mb-1">{t("lvx_qa_raas_forward_calls")}</div>
           <table className="tbl">
             <thead>
               <tr>
@@ -347,14 +357,14 @@ function RaasBody({ trace }: { trace: TraceResponse | null }) {
       {emittedEvents.length > 0 && (
         <div className="mt-3">
           <div className="text-[10.5px] text-ink-4 font-semibold mb-1">
-            可被 RAAS 订阅的事件 · 含本地 Inngest 实查
+            {t("lvx_qa_raas_events_title")}
           </div>
           <table className="tbl">
             <thead>
               <tr>
                 <th>event</th>
                 <th style={{ width: 90 }}>at</th>
-                <th style={{ width: 110 }}>本地 inngest runs</th>
+                <th style={{ width: 110 }}>{t("lvx_qa_col_local_runs")}</th>
               </tr>
             </thead>
             <tbody>
@@ -404,7 +414,8 @@ function Footnote({ text }: { text: string }) {
 }
 
 function Loading() {
-  return <div className="text-[11.5px] text-ink-3">trace 加载中…</div>;
+  const { t } = useApp();
+  return <div className="text-[11.5px] text-ink-3">{t("lvx_qa_trace_loading")}</div>;
 }
 
 function formatDuration(ms: number): string {

@@ -121,7 +121,9 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
     try {
       const r = await matchResumeDirect(
         { resume: resumeText, jd: jdText },
-        { traceId: traceId ?? undefined },
+        // 显式传 fileLogger → RoboHire match-resume 完整 in/out 进 per-run 审计
+        // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
+        { traceId: traceId ?? undefined, logger: fileLogger },
       );
       logger.info(
         `[${AGENT_NAME}] RoboHire match OK · score=${r.data.matchScore} rec=${r.data.recommendation} requestId=${r.requestId}`,

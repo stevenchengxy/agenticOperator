@@ -17,7 +17,9 @@ export default defineConfig({
     path: path.join("prisma", "migrations"),
   },
   // Direct connection from URL env var; works for both SQLite and Postgres.
+  // Default is local Postgres (2026-05-28 migration); the legacy SQLite path
+  // is only reachable by explicitly setting DATABASE_URL=file:... .
   datasource: {
-    url: process.env.DATABASE_URL ?? "file:./data/ao.db",
+    url: process.env.DATABASE_URL ?? "postgresql://ao:ao_local_pw@localhost:5433/ao",
   },
 });
