@@ -13,9 +13,10 @@
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { terminalLogEnabled } from '@/lib/terminal-log';
 
 const LOG_DIR = process.env.AO_LOG_DIR?.trim() || join(process.cwd(), 'logs');
-const TERMINAL_ENABLED = process.env.AO_TERMINAL_LOG !== '0';
+const TERMINAL_ENABLED = terminalLogEnabled;
 
 let dirEnsured = false;
 function ensureDir(): void {

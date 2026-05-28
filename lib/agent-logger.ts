@@ -14,6 +14,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { terminalLogEnabled } from '@/lib/terminal-log';
 
 const LOG_DIR = process.env.AO_LOG_DIR ?? path.join(process.cwd(), 'logs');
 
@@ -54,11 +55,11 @@ function jsonReplacer(_key: string, value: unknown): unknown {
 // Terminal echo — mirrors every event/apiCall line to stdout so the dev
 // sees full input / output / response JSON live in the dev server log,
 // not just buried in logs/*.log. The file write is the source of truth;
-// the terminal line is a convenience preview. Set AO_TERMINAL_LOG=0 to
-// disable (useful when running CI where stdout floods the build log).
+// the terminal line is a convenience preview. The AO_TERMINAL_LOG switch
+// (see lib/terminal-log.ts) gates this; it's off by default in production.
 // ──────────────────────────────────────────────────────────────────────
 
-const TERMINAL_LOG_ENABLED = process.env.AO_TERMINAL_LOG !== '0';
+const TERMINAL_LOG_ENABLED = terminalLogEnabled;
 
 const ANSI = {
   reset: '\x1b[0m',

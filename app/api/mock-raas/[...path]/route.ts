@@ -16,6 +16,7 @@
 //   RAAS_API_BASE_URL=http://localhost:3002/api/mock-raas npm run dev
 
 import { NextResponse } from 'next/server';
+import { tlog } from '@/lib/terminal-log';
 
 const ROBOHIRE_BASE_URL = process.env.ROBOHIRE_BASE_URL ?? 'https://api.robohire.io';
 const ROBOHIRE_API_KEY = process.env.ROBOHIRE_API_KEY ?? '';
@@ -71,7 +72,7 @@ async function handle(req: Request, params: Params, method: string) {
     }
   }
 
-  console.log(`[mock-raas] ${method} ${fullPath}`, url.searchParams.toString() || '(no query)');
+  tlog(`[mock-raas] ${method} ${fullPath}`, url.searchParams.toString() || '(no query)');
 
   // ────────────────────────────────────────────────────────────────
   //  AI endpoints: proxy to real RoboHire (so agents see real data)
@@ -84,7 +85,7 @@ async function handle(req: Request, params: Params, method: string) {
         { status: 500 },
       );
     }
-    console.log('[mock-raas] → RoboHire /api/v1/jobs/generate-jd');
+    tlog('[mock-raas] → RoboHire /api/v1/jobs/generate-jd');
     return proxyToRoboHire('/api/v1/jobs/generate-jd', body);
   }
 
@@ -150,7 +151,7 @@ async function handle(req: Request, params: Params, method: string) {
         requestId: `mock_match_${Date.now()}`,
       });
     }
-    console.log('[mock-raas] → RoboHire /api/v1/match-resume');
+    tlog('[mock-raas] → RoboHire /api/v1/match-resume');
     return proxyToRoboHire('/api/v1/match-resume', body);
   }
 

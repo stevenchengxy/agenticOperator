@@ -15,6 +15,7 @@ import {
   Neo4jUnconfiguredError,
 } from "../clients/neo4j";
 import { invalidateCache as invalidateRegistryCache } from "../registry";
+import { tlog } from "@/lib/terminal-log";
 
 export type SyncResult = {
   upserted: number;
@@ -529,7 +530,7 @@ async function runOnce(): Promise<void> {
         console.warn(`[em-sync] sync failed: ${r.error} (will retry)`);
       }
     } else if (r.upserted > 0) {
-      console.log(
+      tlog(
         `[em-sync] tick: upserted=${r.upserted} skipped=${r.skipped}`,
       );
       // Bust the registry cache so the new schemas are visible to the very

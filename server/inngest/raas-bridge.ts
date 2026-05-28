@@ -12,6 +12,7 @@
 import { prisma } from "../db";
 import { em } from "../em";
 import { getRaasInngestUrl } from "@/lib/inngest-url";
+import { tlog } from "@/lib/terminal-log";
 
 const SHARED_URL = getRaasInngestUrl();
 const POLL_INTERVAL = Number(process.env.RAAS_BRIDGE_POLL_INTERVAL_MS ?? 5000);
@@ -167,7 +168,7 @@ async function tick(): Promise<void> {
           });
 
         if (result.accepted) {
-          console.log(`[raas-bridge] bridged ${e.name} (${e.id}) v${result.schemaVersionUsed}`);
+          tlog(`[raas-bridge] bridged ${e.name} (${e.id}) v${result.schemaVersionUsed}`);
         } else {
           console.warn(
             `[raas-bridge] bridged ${e.name} (${e.id}) → ${result.reason}`,

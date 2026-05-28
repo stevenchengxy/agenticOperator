@@ -16,6 +16,7 @@ import { em } from '@/server/em';
 import { prisma } from '@/server/db';
 import { decide } from './manager-rules';
 import type { MonitorAlertData, ManagerActionData } from '@/lib/behavior/types';
+import { tlog } from '@/lib/terminal-log';
 
 // ── Step shim type (matches subset of Inngest StepTools used in the handler) ──
 
@@ -124,7 +125,7 @@ export async function managerAgentHandler({
                     resolvedAt: new Date(),
                   },
                 });
-                console.log(`[manager-agent] auto_restart succeeded for ${affectedRunId}`);
+                tlog(`[manager-agent] auto_restart succeeded for ${affectedRunId}`);
               } else {
                 console.warn(`[manager-agent] auto_restart failed: HTTP ${resp.status}`);
               }
@@ -146,7 +147,7 @@ export async function managerAgentHandler({
               signal: AbortSignal.timeout(5000),
             });
             if (resp.ok) {
-              console.log(`[manager-agent] throttle applied to ${agentName} for 60s`);
+              tlog(`[manager-agent] throttle applied to ${agentName} for 60s`);
             } else {
               console.warn(`[manager-agent] throttle failed: HTTP ${resp.status}`);
             }
