@@ -51,14 +51,97 @@ export type SynthesizeArgs = {
   terminalStatus?: string;
 };
 
+/** Normalized run + steps shape consumed by the prompt builder + breakdown
+ *  helper. Either pulled from the AO-native WorkflowRun table or adapted
+ *  from an InngestRunArchive row (with steps from InngestStepArchive). */
+export type NormalizedRun = {
+  id: string;
+  triggerEvent: string;
+  status: string;
+  startedAt: Date;
+  completedAt: Date | null;
+  lastActivityAt: Date;
+  suspendedReason: string | null;
+  triggerData: string;
+  steps: Array<{
+    nodeId: string;
+    status: string;
+    error: string | null;
+    durationMs: number | null;
+  }>;
+};
+
+/** Load a run snapshot from either WorkflowRun (AO-native, populated by the
+ *  workflow runtime in server/inngest/agents/*) or InngestRunArchive
+ *  (populated by lib/inngest-archive/, mirroring the Inngest dashboard).
+ *  Most /monitor runs are Inngest archive rows; AO-native WorkflowRun rows
+ *  are rarer and used by the legacy /workflow path. */
+export async function loadRunSnapshot(runId: string): Promise<NormalizedRun | null> {
+  const native = await prisma.workflowRun.findUnique({
+    where: { id: runId },
+    include: { steps: true },
+  });
+  if (native) {
+    return {
+      id: native.id,
+      triggerEvent: native.triggerEvent,
+      status: native.status,
+      startedAt: native.startedAt,
+      completedAt: native.completedAt,
+      lastActivityAt: native.lastActivityAt,
+      suspendedReason: native.suspendedReason,
+      triggerData: native.triggerData,
+      steps: native.steps.map((s) => ({
+        nodeId: s.nodeId,
+        status: s.status,
+        error: s.error,
+        durationMs: s.durationMs,
+      })),
+    };
+  }
+  // Fall back to Inngest archive.
+  const archive = await prisma.inngestRunArchive.findUnique({
+    where: { runId },
+    include: { steps: true },
+  });
+  if (!archive) return null;
+  // Best-effort triggerEvent — prefer the explicit eventName, fall back to
+  // the function name (display) or the function slug.
+  const triggerEvent =
+    archive.eventName ?? archive.functionName ?? archive.functionSlug ?? "(unknown)";
+  // Map archive status → WorkflowRun-style lowercase used by the prompt.
+  const status = archive.status.toLowerCase();
+  // Inngest archive doesn't track suspendedReason — leave null.
+  // triggerData → use the archived event payload JSON, or "{}".
+  const triggerData = archive.eventPayload ?? "{}";
+  return {
+    id: archive.runId,
+    triggerEvent,
+    status,
+    startedAt: archive.startedAt ?? archive.archivedAt,
+    completedAt: archive.endedAt,
+    // lastActivityAt drives the cache key — use lastSyncedAt so the cache
+    // invalidates as the archiver picks up more activity.
+    lastActivityAt: archive.lastSyncedAt,
+    suspendedReason: null,
+    triggerData,
+    steps: archive.steps.map((s) => ({
+      // Inngest steps don't have an AO wsId/nodeId; use the function slug
+      // so byShortFromWs has a stable key (won't match AGENT_MAP, but the
+      // breakdown helper still groups + counts correctly).
+      nodeId: archive.functionSlug,
+      status: s.status ?? "unknown",
+      error: s.error,
+      durationMs: s.durationMs,
+    })),
+  };
+}
+
 export async function synthesizeRunSummary(
   args: SynthesizeArgs,
 ): Promise<RunAiSummary> {
-  // (a) Load run
-  const run = await prisma.workflowRun.findUnique({
-    where: { id: args.runId },
-    include: { steps: true },
-  });
+  // (a) Load run — AO-native first, Inngest archive fallback.
+  const run = await loadRunSnapshot(args.runId);
   if (!run) throw new RunNotFoundError(args.runId);
 
   // (b) Recent activity — capped at 200; the prompt uses last 20.

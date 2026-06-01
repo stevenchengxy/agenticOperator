@@ -22,11 +22,13 @@ import { prisma } from "@/server/db";
 import {
   synthesizeRunSummary,
   RunNotFoundError,
+  loadRunSnapshot,
+  type NormalizedRun,
 } from "@/server/run-summary/synthesize";
 import { deterministicSummary } from "@/server/run-summary/fallback";
 import { computeAgentBreakdown } from "@/server/run-summary/synthesize";
 import type { AgentBreakdownRow } from "@/server/run-summary/prompt";
-import type { RunAiSummary, WorkflowRun } from "@prisma/client";
+import type { RunAiSummary } from "@prisma/client";
 
 type RouteCtx = { params: Promise<{ id: string }> };
 
@@ -74,24 +76,20 @@ export type RunSummaryResponse =
 
 async function toResponse(
   row: RunAiSummary,
-  run: WorkflowRun,
+  run: NormalizedRun,
 ): Promise<RunSummaryResponse> {
   const generatedAgainstActivityAt = row.last_activity_at;
   const isStale =
     generatedAgainstActivityAt !== null &&
     run.lastActivityAt.getTime() > generatedAgainstActivityAt.getTime();
   // Recompute live stats so the legacy /live UI sees current data even when
-  // the cached row is older. Cheap (~50ms total).
-  const [steps, activities] = await Promise.all([
-    prisma.workflowStep.findMany({
-      where: { runId: run.id },
-      orderBy: { startedAt: "asc" },
-    }),
-    prisma.agentActivity.findMany({
-      where: { runId: run.id },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
+  // the cached row is older. Cheap (~50ms — activities only; steps already on
+  // the snapshot).
+  const activities = await prisma.agentActivity.findMany({
+    where: { runId: run.id },
+    orderBy: { createdAt: "asc" },
+  });
+  const steps = run.steps;
   const agentBreakdown = computeAgentBreakdown(steps, activities);
   const errorCount = steps.filter((s) => s.status === "failed").length;
   const durationMs =
@@ -136,7 +134,9 @@ export async function GET(req: Request, ctx: RouteCtx): Promise<Response> {
   const url = new URL(req.url);
   const force = url.searchParams.get("fresh") === "1";
 
-  const run = await prisma.workflowRun.findUnique({ where: { id } });
+  // Snapshot loader checks WorkflowRun first, then InngestRunArchive — so
+  // runs visible on /monitor (which come from the Inngest archive) work too.
+  const run = await loadRunSnapshot(id);
   if (!run) {
     return NextResponse.json<RunSummaryResponse>(
       {
@@ -178,24 +178,20 @@ export async function GET(req: Request, ctx: RouteCtx): Promise<Response> {
         { status: 404 },
       );
     }
-    // Try to render a deterministic fallback for the UI to display.
+    // Try to render a deterministic fallback for the UI to display. `run` is
+    // the NormalizedRun snapshot loaded above; its `steps` field already has
+    // the data we need (works whether the run is AO-native or Inngest-archived).
     let fallbackText: string | undefined;
     try {
-      const [steps, activities] = await Promise.all([
-        prisma.workflowStep.findMany({
-          where: { runId: id },
-          orderBy: { startedAt: "asc" },
-        }),
-        prisma.agentActivity.findMany({
-          where: { runId: id },
-          orderBy: { createdAt: "asc" },
-        }),
-      ]);
+      const activities = await prisma.agentActivity.findMany({
+        where: { runId: id },
+        orderBy: { createdAt: "asc" },
+      });
       const breakdown: AgentBreakdownRow[] = computeAgentBreakdown(
-        steps,
+        run.steps,
         activities,
       );
-      fallbackText = deterministicSummary(run, breakdown, steps, activities);
+      fallbackText = deterministicSummary(run, breakdown, run.steps, activities);
     } catch {
       // ignore — we'll just omit the fallback field
     }
