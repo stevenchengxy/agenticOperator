@@ -42,7 +42,7 @@ const AGENT_NAME = 'interviewInviter';
 export const interviewInviterAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: '面试邀约智能体',
+    name: 'Interview Inviter',
     retries: 2,
     triggers: [{ event: 'INTERVIEW_INVITATION_REQUESTED' }],
   },

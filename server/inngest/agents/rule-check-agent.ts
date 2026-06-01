@@ -627,7 +627,7 @@ export async function ruleCheckAgentHandler({
 export const ruleCheckAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Rule Check Agent',
+    name: 'Rule Check',
     retries: 1,
     triggers: [{ event: 'RESUME_PROCESSED' }],
   },

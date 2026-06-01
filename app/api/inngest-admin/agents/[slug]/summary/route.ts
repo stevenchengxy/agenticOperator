@@ -1,5 +1,13 @@
 // GET /api/inngest-admin/agents/[slug]/summary   → returns cached summary OR generates
 // POST /api/inngest-admin/agents/[slug]/summary  → force regenerate
+//
+// Cache storage: prisma.runAiSummary with trigger_path='agent-tuning',
+// function_slug=<slug>, run_id=null, last_activity_at=null. Cache key is
+// time-based (30 min TTL) — we read the most recent row for this slug and
+// honor it if it's still fresh. We previously squatted on
+// AgentConfig.tuningNotes (a free-form JSON column) which conflated agent
+// configuration with cached LLM output; this route no longer touches that
+// column. The column itself is still in the schema for future config use.
 
 import { NextResponse } from 'next/server';
 import {
@@ -28,38 +36,37 @@ type CachedEntry = {
 
 async function loadCached(slug: string): Promise<CachedEntry | null> {
   try {
-    const cfg = await prisma.agentConfig.findUnique({
-      where: { id: slug },
-      select: { tuningNotes: true, lastAdvisedAt: true },
+    const row = await prisma.runAiSummary.findFirst({
+      where: { function_slug: slug, trigger_path: 'agent-tuning' },
+      orderBy: { generated_at: 'desc' },
     });
-    if (cfg?.tuningNotes) {
-      const parsed = JSON.parse(cfg.tuningNotes) as Partial<CachedEntry>;
-      return {
-        text: parsed.text ?? '',
-        model: parsed.model ?? 'unknown',
-        durationMs: parsed.durationMs ?? 0,
-        promptContextChars: parsed.promptContextChars ?? 0,
-        generatedAt: cfg.lastAdvisedAt?.toISOString() ?? new Date().toISOString(),
-      };
-    }
+    if (!row) return null;
+    return {
+      text: row.summary_text,
+      model: row.llm_model ?? 'unknown',
+      durationMs: row.llm_duration_ms ?? 0,
+      promptContextChars: row.prompt_context_chars ?? 0,
+      generatedAt: row.generated_at.toISOString(),
+    };
   } catch {
     /* soft fail */
+    return null;
   }
-  return null;
 }
 
 async function saveCached(slug: string, entry: Omit<CachedEntry, 'generatedAt'>): Promise<void> {
   try {
-    const payload = JSON.stringify(entry);
-    await prisma.agentConfig.upsert({
-      where: { id: slug },
-      update: { tuningNotes: payload, lastAdvisedAt: new Date() },
-      create: {
-        id: slug,
-        enabled: true,
-        description: `Inngest function ${slug}`,
-        tuningNotes: payload,
-        lastAdvisedAt: new Date(),
+    await prisma.runAiSummary.create({
+      data: {
+        run_id: null,
+        last_activity_at: null,
+        function_slug: slug,
+        trigger_path: 'agent-tuning',
+        summary_text: entry.text,
+        source: entry.model === 'static-fallback' ? 'static-fallback' : 'llm',
+        llm_model: entry.model,
+        llm_duration_ms: entry.durationMs,
+        prompt_context_chars: entry.promptContextChars,
       },
     });
   } catch {

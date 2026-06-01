@@ -45,7 +45,7 @@ type RaasParseResumeData = Record<string, unknown> & { name?: string | null };
 export const resumeParserAgent = inngest.createFunction(
   {
     id: 'resume-parser-agent',
-    name: 'Resume Parser Agent',
+    name: 'Resume Parser',
     retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
     triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },

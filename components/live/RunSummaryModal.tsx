@@ -19,9 +19,11 @@ type Props = {
   onClose: () => void;
 };
 
+type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
+
 export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
   const { t } = useApp();
-  const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
+  const [resp, setResp] = React.useState<RunSummarySuccess | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -34,7 +36,11 @@ export function RunSummaryModal({ runId, jobLabel, onClose }: Props) {
         `/api/runs/${encodeURIComponent(runId)}/summary`,
         { timeoutMs: 60_000 }, // LLM 6-15s; default 5s would always fail
       );
-      setResp(r);
+      if (r.ok) {
+        setResp(r);
+      } else {
+        setErr(r.message ?? r.reason);
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {

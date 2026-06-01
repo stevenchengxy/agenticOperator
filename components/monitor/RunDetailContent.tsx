@@ -9,6 +9,7 @@ import { useApp } from "@/lib/i18n";
 import { formatTime, statusLabel } from "./i18n-utils";
 import type { MonitorRunDetail } from "@/lib/monitor/types";
 import { RunActionsMenu } from "./RunActionsMenu";
+import { RunAiSummaryCard } from "./RunAiSummaryCard";
 
 const STATUS_TONE: Record<string, 'accent' | 'ok' | 'err' | 'warn' | 'neutral'> = {
   running:   'accent',
@@ -582,6 +583,15 @@ export function RunDetailContent({ runId }: { runId: string }) {
           value={data ? data.hitl.length : '—'}
         />
       </div>
+
+      {/* AI run summary — between KPI strip and trail graph */}
+      {data && (
+        <RunAiSummaryCard
+          runId={runId}
+          status={data.run.status}
+          lastActivityAt={data.run.lastActivityAt}
+        />
+      )}
 
       {/* Trail graph with playback controls */}
       <div className="mb-6">

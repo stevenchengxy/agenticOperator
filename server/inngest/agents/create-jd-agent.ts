@@ -102,7 +102,7 @@ type RequirementLoggedEnvelope = {
 export const createJdAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Create JD Agent',
+    name: 'JD Generator',
     retries: 1,
     triggers: [
       { event: 'REQUIREMENT_LOGGED' },

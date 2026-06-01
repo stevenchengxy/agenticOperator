@@ -547,9 +547,11 @@ function AiAssistantTab({ runId }: { runId: string }) {
   );
 }
 
+type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
+
 function AiSummarySection({ runId }: { runId: string }) {
   const { t } = useApp();
-  const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
+  const [resp, setResp] = React.useState<RunSummarySuccess | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   // Track ms elapsed during regeneration so the progress text is concrete
@@ -576,7 +578,11 @@ function AiSummarySection({ runId }: { runId: string }) {
         `/api/runs/${encodeURIComponent(runId)}/summary`,
         { timeoutMs: 60_000 }, // LLM 6-15s; default 5s would always fail
       );
-      setResp(r);
+      if (r.ok) {
+        setResp(r);
+      } else {
+        setErr(r.message ?? r.reason);
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -735,14 +741,16 @@ export function RealRunRight({
 }) {
   const { t } = useApp();
   const { run } = useRunDetail(runId);
-  const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
+  const [resp, setResp] = React.useState<RunSummarySuccess | null>(null);
 
   React.useEffect(() => {
     fetchJson<RunSummaryResponse>(
       `/api/runs/${encodeURIComponent(runId)}/summary`,
       { timeoutMs: 60_000 }, // LLM 6-15s; default 5s would always fail
     )
-      .then(setResp)
+      .then((r) => {
+        if (r.ok) setResp(r);
+      })
       .catch(() => {/* keep null */});
   }, [runId]);
 

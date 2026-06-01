@@ -36,7 +36,7 @@ const AGENT_NAME = 'matchResume';
 export const matchResumeAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Match Resume Agent',
+    name: 'Resume Matcher',
     retries: 2,
     triggers: [{ event: 'MATCH_RULE_CHECK_PASSED' }],
   },

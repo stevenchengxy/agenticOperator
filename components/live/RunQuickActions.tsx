@@ -103,9 +103,11 @@ function ActionBody({
 
 // ── 1. 总结 (LLM-backed, reuses /api/runs/:id/summary) ───────────────
 
+type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
+
 function SummaryBody({ runId }: { runId: string }) {
   const { t } = useApp();
-  const [resp, setResp] = React.useState<RunSummaryResponse | null>(null);
+  const [resp, setResp] = React.useState<RunSummarySuccess | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -119,7 +121,11 @@ function SummaryBody({ runId }: { runId: string }) {
         // which always times out on real summaries. 60s covers slow days.
         { timeoutMs: 60_000 },
       );
-      setResp(r);
+      if (r.ok) {
+        setResp(r);
+      } else {
+        setErr(r.message ?? r.reason);
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {

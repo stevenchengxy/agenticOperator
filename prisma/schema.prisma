@@ -923,3 +923,45 @@ model Domain {
 
   @@map("domain")
 }
+
+// =====================================================================
+// Run AI Summary — durable LLM-generated summary of a workflow run.
+// Supports both run-summary and agent-summary uses via nullable run_id +
+// function_slug. trigger_path = 'eager-on-fail' | 'lazy-on-view' |
+// 'agent-tuning'. Unique on (run_id, last_activity_at) so eager + lazy
+// callers can upsert idempotently.
+// =====================================================================
+model RunAiSummary {
+  id                    String   @id @default(cuid())
+  run_id                String?
+  trace_id              String?
+  function_slug         String?
+  trigger_event         String?
+  terminal_status       String?
+  last_activity_at      DateTime?
+  summary_text          String
+  source                String
+  trigger_path          String
+  llm_model             String?
+  llm_duration_ms       Int?
+  llm_prompt_tokens     Int?
+  llm_completion_tokens Int?
+  system_prompt         String?
+  user_prompt           String?
+  llm_raw_text          String?
+  prompt_context_chars  Int?
+  agents_touched        Int?
+  steps_total           Int?
+  steps_failed          Int?
+  activity_count        Int?
+  errors_excerpt        String?
+  parse_error           String?
+  generated_at          DateTime @default(now())
+
+  @@unique([run_id, last_activity_at])
+  @@index([run_id])
+  @@index([function_slug, generated_at])
+  @@index([terminal_status, generated_at])
+  @@index([generated_at])
+  @@map("run_ai_summary")
+}
