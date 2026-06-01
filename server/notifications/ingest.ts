@@ -13,6 +13,32 @@ import {
   type DeriveOptions,
   type NotificationDraft,
 } from './derive';
+import { dispatchExternal } from './channels';
+import { summarizeAlert } from './summarize';
+
+type NotifyRowLike = {
+  id: string;
+  severity?: string;
+  category?: string;
+  source?: string;
+  title?: string;
+  body?: string;
+  runId?: string | null;
+};
+
+// Fan a freshly-notified row out to external channels (no-op by default).
+function dispatchIfNotified(draft: NotificationDraft, row: NotifyRowLike): void {
+  if (!draft.shouldNotify) return;
+  void dispatchExternal({
+    id: row.id,
+    severity: draft.severity,
+    category: draft.category,
+    source: draft.source,
+    title: draft.title,
+    body: draft.body,
+    runId: draft.runId,
+  }).catch(() => {});
+}
 
 function toRow(draft: NotificationDraft) {
   const notified = draft.shouldNotify;
@@ -66,9 +92,18 @@ export async function recordNotification(
           shouldNotify: draft.shouldNotify,
         },
       });
+      // Eager-on-critical: the FIRST occurrence of a critical alert (count===1)
+      // gets an AI summary immediately, so the center shows a business-language
+      // line without waiting for the next view. Fire-and-forget; degrades to the
+      // deterministic fallback when the gateway is down (summarizeAlert handles it).
+      if (draft.severity === 'critical' && row.count === 1) {
+        void summarizeAlert(row.id).catch(() => {});
+      }
+      dispatchIfNotified(draft, row);
       return { id: row.id };
     }
     const row = await prisma.notification.create({ data });
+    dispatchIfNotified(draft, row);
     return { id: row.id };
   } catch (e) {
     console.warn(`[notifications] recordNotification failed: ${(e as Error).message}`);
