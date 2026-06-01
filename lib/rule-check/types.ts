@@ -152,6 +152,10 @@ export type MatchResumeCheckResult = {
     /** Readable client name resolved during rule fetch (partner-pg / ontology).
      *  Persisted into the audit row so reads don't re-query partner-pg. */
     client_name_resolved?: string | null;
+    /** Business group resolved during rule fetch (graph Client_Department lookup
+     *  + string fallbacks). Superset of the JR's own bg field — persist this so
+     *  audits whose JR lacks an explicit bg still record the resolved value. */
+    business_group_resolved?: string | null;
     fail_reason?:
       | 'llm-call-error'
       | 'ontology-graph-unavailable'

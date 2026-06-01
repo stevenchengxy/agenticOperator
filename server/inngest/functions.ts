@@ -17,16 +17,15 @@
 // 重派场景:partner 重发 RESUME_PROCESSED(带新 job_requisition_id)即触发
 // ruleCheck path-A,无新订阅。详见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
 //
-// 演示用 stub agent（19 个，可选）—— 给 fleet / workflow 可视化页面提供
+// 演示用 stub agent（可选，默认关）—— 给 fleet / workflow 可视化页面提供
 // 模拟数据流。Stub 收事件 → 写 AgentActivity → sleep → emit 下游事件 →
-// HITL 节点 5s 后自动 resolve。default OFF for v0_1_010；要开演示设
-// STUB_AGENTS=1。
+// HITL 节点 5s 后自动 resolve。要开演示设 STUB_AGENTS=1（npm run dev 已自动设）。
 //
 // Behavior 轴（2 个）—— Monitor Agent cron 检测异常 + Manager Agent 决策
 // 响应。default OFF for v0_1_010；要开设 BEHAVIOR_AGENTS=1。
 //
 // Env gates:
-//   STUB_AGENTS=1        — 开启 19 个 stub agents（默认 0，只跑 3 real）
+//   STUB_AGENTS=1        — 开启 demo stub agents（默认关：生产只跑 5 real）
 //   STUB_SUCCESS_RATE    — default 0.9（90% take happy path）
 //   STUB_HITL_DELAY_MS   — default 5000ms（HITL auto-resolve delay）
 //   STUB_RPA_OWNED=1     — 让 stub-factory 也为 wsId 4/9-1/10 生成 stub
@@ -55,11 +54,13 @@ const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10", "10-5", "11-1"]);
 // Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation).
 const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
 
-// v0_1_011: shells are now ON by default. Every business agent in AGENT_MAP
-// (except real ones + Chatbot) registers as an empty-shell Inngest function
-// so /fleet, /monitor, /workflow all show the full roster as "deployed".
-// To suppress shells for a production-clean event bus, set STUB_AGENTS=0.
-const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS !== "0";
+// Demo stubs are OFF by default so a production deployment has a clean event
+// bus — only the 5 real agents react, driven by real RAAS-emitted events.
+// Every business agent in AGENT_MAP (except real ones + Chatbot) CAN register
+// as an empty-shell Inngest function that fakes a downstream event cascade,
+// useful for /fleet · /monitor · /workflow visualisation demos. Opt in with
+// STUB_AGENTS=1 (npm run dev sets this; production `next start` leaves it off).
+const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS === "1";
 const BEHAVIOR_AGENTS_ENABLED = process.env.BEHAVIOR_AGENTS === "1";
 
 // Build a stub per business agent with at least one trigger event.

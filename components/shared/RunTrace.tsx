@@ -3,6 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { Ic } from "@/components/shared/Ic";
 import { describeStep, describeLogKind } from "@/lib/monitor-step-descriptor";
+import { useApp } from "@/lib/i18n";
 
 // Shared run-detail / trace components.
 // Used by /monitor (run inspection) and /fleet/[short] (light "today's stats"
@@ -296,6 +297,191 @@ export function TimelineRow({ seg, totalMs }: { seg: TimelineSeg; totalMs: numbe
   );
 }
 
+// ── AI summary banner ───────────────────────────────────────────
+// A one-line, template-generated natural-language read of the run, pulled
+// from the trigger payload + status. No LLM call — derived client-side from
+// data already in the detail response. The 追问 button hands off to the
+// single-run inspection station (/live) which hosts the run chatbot.
+
+const STATUS_PHRASE: Record<RunStatus, string> = {
+  Running: "处理中",
+  Completed: "已完成",
+  Failed: "执行失败",
+  Cancelled: "已取消",
+};
+
+function pick(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+export function summarizeRun(run: RunRow, detail: RunDetail, agentName?: string): string {
+  const status = run.status;
+  const phrase = STATUS_PHRASE[status] ?? "";
+  const agent = agentName ?? run.function?.name ?? "智能体";
+  // Try to read business context out of the trigger payload.
+  let ctx: Record<string, unknown> = {};
+  if (detail.event?.payload) {
+    try {
+      const parsed = JSON.parse(detail.event.payload);
+      ctx = (parsed?.data ?? parsed ?? {}) as Record<string, unknown>;
+    } catch { /* keep empty */ }
+  }
+  const candidate = pick(ctx, ["candidateName", "candidate", "name", "applicantName"]);
+  const client = pick(ctx, ["client", "clientName", "company", "customer"]);
+  const job = pick(ctx, ["jobTitle", "position", "jdTitle", "title", "role"]);
+
+  const target = [client, job].filter(Boolean).join(" · ");
+  if (candidate && target) return `${candidate} 匹配 ${target}，${phrase}。`;
+  if (target) return `${agent} · ${target}，${phrase}。`;
+  if (run.eventName) return `${agent}：${run.eventName} 触发，${phrase}。`;
+  return `${agent} ${phrase}。`;
+}
+
+function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: RunDetail; agentName?: string }) {
+  const { t } = useApp();
+  const text = summarizeRun(run, detail, agentName);
+  const failed = run.status === "Failed";
+  const tone = failed ? "var(--c-err)" : "var(--c-accent)";
+  return (
+    <div
+      className="ao-pop-in flex items-center gap-3 rounded-lg"
+      style={{
+        padding: "11px 14px",
+        background: `color-mix(in oklab, ${tone} 7%, var(--c-surface))`,
+        border: `1px solid color-mix(in oklab, ${tone} 30%, var(--c-line))`,
+      }}
+    >
+      <Ic.bolt style={{ width: 15, height: 15, color: tone, flexShrink: 0 }} />
+      <div className="flex-1 text-ink-1" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{text}</div>
+      <Link
+        href={`/live?run=${encodeURIComponent(run.id)}`}
+        className="inline-flex items-center gap-1 rounded-md no-underline whitespace-nowrap shrink-0 ao-hover-lift"
+        style={{
+          padding: "5px 11px",
+          border: "1px solid var(--c-line)",
+          color: "var(--c-ink-1)",
+          background: "var(--c-surface)",
+          fontSize: 11.5,
+        }}
+      >
+        <Ic.chat style={{ width: 12, height: 12 }} /> {t("mox_ask_followup")}
+      </Link>
+    </div>
+  );
+}
+
+// ── trace flow (labeled step list) ──────────────────────────────
+// Image-reference style: a vertical list of 触发 / 步骤 / 工具 / LLM rows with
+// a colored type marker, a human title, a from→to subline and a right-aligned
+// timestamp + duration. Classification is derived from the step name's
+// descriptor group + Inngest stepOp.
+
+type TraceType = "trigger" | "step" | "tool" | "llm";
+
+const TRACE_TONE: Record<TraceType, string> = {
+  trigger: "var(--c-ok)",
+  step:    "var(--c-ink-3)",
+  tool:    "var(--c-accent)",
+  llm:     "oklch(0.62 0.19 300)",
+};
+
+function classifyStep(name: string, group: string | undefined): TraceType {
+  const g = group ?? "";
+  const n = name.toLowerCase();
+  if (g.includes("AI") || /\b(llm|ai|gateway|infer|gpt|gemini|model)\b/.test(n)) return "llm";
+  if (g.includes("外部") || g.includes("回查") || g.includes("持久化") || g.includes("事件回发") ||
+      /(api|fetch|lookup|rule-check|match|pg\.|allmeta|robohire|send)/.test(n)) return "tool";
+  return "step";
+}
+
+function TraceFlow({ run, detail }: { run: RunRow; detail: RunDetail }) {
+  const { t } = useApp();
+  const t0 = run.startedAt ? new Date(run.startedAt).getTime() : null;
+  const segs = buildTimeline(detail, run.startedAt, run.finishedAt).filter((s) => !s.isFunction);
+
+  const typeLabel: Record<TraceType, string> = {
+    trigger: t("mox_trace_trigger"),
+    step: t("mox_trace_step"),
+    tool: t("mox_trace_tool"),
+    llm: t("mox_trace_llm"),
+  };
+
+  const rows: Array<{ type: TraceType; title: string; sub: string | null; atMs: number | null; durMs: number | null; running?: boolean }> = [];
+
+  // trigger row
+  if (detail.event) {
+    rows.push({
+      type: "trigger",
+      title: detail.event.name,
+      sub: run.id ? `trace · ${run.id.slice(0, 10)}` : null,
+      atMs: detail.event.createdAt ? new Date(detail.event.createdAt).getTime() : t0,
+      durMs: null,
+    });
+  }
+  for (const s of segs) {
+    const desc = describeStep(s.label);
+    const type = classifyStep(s.label, desc.group);
+    rows.push({
+      type,
+      title: desc.label,
+      sub: desc.fromTo ?? desc.group ?? null,
+      atMs: t0 != null ? t0 + s.startMs : null,
+      durMs: s.durationMs,
+      running: s.status === "running",
+    });
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div>
+      <div className="text-ink-3 mb-2.5" style={{ fontSize: 11.5, letterSpacing: "0.02em" }}>{t("mox_trace_label")}</div>
+      <div className="flex flex-col">
+        {rows.map((r, i) => {
+          const tone = TRACE_TONE[r.type];
+          const last = i === rows.length - 1;
+          return (
+            <div key={i} className="ao-fade-rise flex gap-3" style={{ ["--ao-i"]: i } as React.CSSProperties}>
+              {/* marker + connector rail */}
+              <div className="flex flex-col items-center" style={{ width: 16 }}>
+                <span
+                  className={r.running ? "rounded-full anim-pulse" : "rounded-full"}
+                  style={{ width: 9, height: 9, marginTop: 3, background: tone, boxShadow: `0 0 0 3px color-mix(in oklab, ${tone} 16%, transparent)` }}
+                />
+                {!last && <span style={{ flex: 1, width: 1.5, background: "var(--c-line)", marginTop: 2 }} />}
+              </div>
+              {/* body */}
+              <div className="flex-1 min-w-0" style={{ paddingBottom: last ? 0 : 14 }}>
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span
+                    className="rounded px-1.5 font-medium shrink-0"
+                    style={{ fontSize: 9.5, color: tone, background: `color-mix(in oklab, ${tone} 12%, transparent)`, lineHeight: "15px" }}
+                  >
+                    {typeLabel[r.type]}
+                  </span>
+                  <span className="text-ink-1 truncate" style={{ fontSize: 12.5, fontWeight: 500 }}>{r.title}</span>
+                  <div className="flex-1" />
+                  <span className="text-ink-4 tabular-nums shrink-0" style={{ fontSize: 10.5 }}>
+                    {r.atMs != null ? new Date(r.atMs).toLocaleTimeString("zh-CN", { hour12: false }) : ""}
+                    {r.durMs != null && <span className="ml-1.5">{formatDur(r.durMs)}</span>}
+                    {r.running && <span className="ml-1.5" style={{ color: "var(--c-ok)" }}>{t("mox_summary_running")}</span>}
+                  </span>
+                </div>
+                {r.sub && <div className="text-ink-3 truncate" style={{ fontSize: 11, marginTop: 1 }}>{r.sub}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── run detail body ─────────────────────────────────────────────
 
 export function RunDetailBody({
@@ -311,7 +497,6 @@ export function RunDetailBody({
   const isFailed = run.status === "Failed";
   const errMsg = isFailed ? extractErrorMessage(detail.output) : null;
   const fStepName = isFailed ? failedStepName(detail) : null;
-  const timeline = buildTimeline(detail, run.startedAt, run.finishedAt);
   const [showOutput, setShowOutput] = React.useState(false);
   const app = appFromSlug(run.function?.slug);
   const fnName = run.function?.name ?? null;
@@ -319,6 +504,9 @@ export function RunDetailBody({
 
   return (
     <div className="flex flex-col gap-3">
+      {/* AI summary banner — one-line read + 追问 hand-off */}
+      <RunSummaryBanner run={run} detail={detail} agentName={fnName ?? agentShortForLinks} />
+
       {/* meta + cross-link row */}
       <div className="flex items-baseline gap-x-5 gap-y-1 flex-wrap text-ink-3" style={{ fontSize: 11.5 }}>
         <MetaCell
@@ -407,18 +595,8 @@ export function RunDetailBody({
         </div>
       )}
 
-      {/* timeline */}
-      {timeline.length > 0 && (
-        <div>
-          <div className="text-ink-3 mb-2" style={{ fontSize: 11.5, letterSpacing: "0.02em" }}>Trace</div>
-          <div className="flex flex-col gap-1">
-            {(() => {
-              const totalMs = Math.max(...timeline.map((s) => s.startMs + s.durationMs), 1);
-              return timeline.map((seg, i) => <TimelineRow key={i} seg={seg} totalMs={totalMs} />);
-            })()}
-          </div>
-        </div>
-      )}
+      {/* trace — labeled flow (触发 / 步骤 / 工具 / LLM) */}
+      <TraceFlow run={run} detail={detail} />
 
       {/* event panel — trigger event (name / id / received-at) with
           Input / Error details / Metadata tabs, mirroring Inngest dev UI. */}
@@ -1338,6 +1516,7 @@ export function RunDetailExpansion({
   const accent = isFailed ? "var(--c-err)" : "var(--c-line-strong)";
   return (
     <div
+      className="ao-expand-reveal"
       style={{
         borderLeft: `2px solid ${accent}`,
         background: isFailed ? "color-mix(in oklab, var(--c-err) 3%, transparent)" : "var(--c-panel)",

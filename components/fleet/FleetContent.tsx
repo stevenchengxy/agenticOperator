@@ -48,6 +48,7 @@ type FleetRow = {
   liveFailed: number | null;
   liveRunning: number | null;
   successRate: number | null;   // computed: completed / total
+  p95Ms: number | null;         // P95 run duration over the sampled window
   lastActiveAt: string | null;  // ISO timestamp from latest run
   paused: boolean;
   // Inngest slug for pause/resume mutation
@@ -63,16 +64,6 @@ function deriveStatus(realness: Realness, paused: boolean, live: LiveAgentState 
   return "deployed";
 }
 
-function relTime(iso: string | null | undefined, t: (k: string) => string): string {
-  if (!iso) return "—";
-  const ms = new Date(iso).getTime();
-  if (Number.isNaN(ms)) return "—";
-  const diffSec = Math.max(0, (Date.now() - ms) / 1000);
-  if (diffSec < 60) return t("flx_just_now");
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
-  return `${Math.floor(diffSec / 86400)}d`;
-}
 
 // "Anomaly" = operational attention needed on a deployed agent. Paused is
 // intentional (not anomalous); stubs are a known gap (also not anomalous).
@@ -118,6 +109,7 @@ function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>)
       liveFailed: live?.failed ?? null,
       liveRunning: live?.running ?? null,
       successRate: live?.successRate ?? null,
+      p95Ms: live?.p95Ms ?? null,
       lastActiveAt: live?.latestStartedAt ?? null,
       paused,
       slug,
@@ -209,7 +201,9 @@ export function FleetContent() {
   const { domain } = useDomain();
   const scopedRes = React.useMemo(() => {
     if (!agentsRes) return null;
-    return { ...agentsRes, agents: agentsRes.agents.filter((a) => a.domain === domain) };
+    // Chatbot is the UI assistant (AO·UI), not a recruitment-pipeline agent —
+    // hide it from the fleet list / counts.
+    return { ...agentsRes, agents: agentsRes.agents.filter((a) => a.domain === domain && a.short !== "Chatbot") };
   }, [agentsRes, domain]);
 
   const rows: FleetRow[] | null = scopedRes ? buildRows(scopedRes, liveByWsId) : null;
@@ -287,15 +281,14 @@ export function FleetContent() {
   const grouped = React.useMemo(() => groupRows(filtered, group), [filtered, group]);
 
   const total = effectiveRows.length;
-  // "实装" = currently online (registered AND not paused). Includes real + shell.
-  // Moves up/down when user clicks 上线/下线.
-  const liveCount = effectiveRows.filter((r) => r.realness !== "unbuilt" && !r.paused).length;
+  // Tab counts. "在线" = deployed & not paused; "蓝图" = not yet built.
+  const onlineCount = effectiveRows.filter((r) => r.status === "deployed").length;
+  const blueprintCount = effectiveRows.filter((r) => r.status === "not_deployed").length;
   const realRowsWithRuns = effectiveRows.filter((r) => r.realness === "real" && r.successRate != null);
   const aggSuccessRate = realRowsWithRuns.length
     ? realRowsWithRuns.reduce((sum, r) => sum + (r.successRate as number), 0) / realRowsWithRuns.length
     : null;
   const anomalies = effectiveRows.filter((r) => r.realness === "real" && isAnomalous(r)).length;
-  const teams = new Set(effectiveRows.map((r) => r.ownerTeam)).size;
 
   const setStatusFilter = (next: FilterId) =>
     setUrl((p) => { if (next === "all") p.delete("status"); else p.set("status", next); });
@@ -311,19 +304,19 @@ export function FleetContent() {
         <div className="flex items-start gap-6">
           <div className="flex-1 min-w-0">
             <div className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2">
-              {t("nav_fleet")}
+              {t("fleet_title")} · AGENT FLEET
             </div>
             <h1
-              className="m-0 text-ink-1"
+              className="m-0 text-ink-1 tabular-nums"
               style={{
                 fontFamily: 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif',
                 fontWeight: 500,
-                fontSize: 26,
+                fontSize: 30,
                 letterSpacing: "-0.015em",
                 lineHeight: 1.15,
               }}
             >
-              {t("fleet_title")}
+              {agentsRes === null ? t("fleet_title") : `${total} ${t("flx_count_suffix")}`}
             </h1>
             <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
               {t("fleet_sub")}
@@ -345,54 +338,30 @@ export function FleetContent() {
         </div>
       </div>
 
-      {/* summary strip + period */}
-      <div className="border-b border-line flex items-center gap-x-8 gap-y-3 flex-wrap" style={{ padding: "16px 32px" }}>
-        <SummaryChip
-          label={t("f2_kind_real")}
-          value={`${liveCount}`}
-          sub={`/ ${total}`}
-          tone="ok"
-          active={statusFilter === "live"}
-          onClick={() => setStatusFilter(statusFilter === "live" ? "all" : "live")}
-        />
-        <SummaryChip
-          label={t("f2_chip_success_7d")}
-          value={aggSuccessRate == null ? "—" : `${aggSuccessRate.toFixed(1)}%`}
-          tone={aggSuccessRate == null ? "muted" : aggSuccessRate >= 95 ? "ok" : aggSuccessRate >= 90 ? "warn" : "err"}
-        />
-        <SummaryChip
-          label={t("flx_need_attention")}
-          value={String(anomalies)}
-          tone={anomalies === 0 ? "muted" : "err"}
-          active={statusFilter === "anomalies"}
-          onClick={() => setStatusFilter(anomalies > 0 ? (statusFilter === "anomalies" ? "all" : "anomalies") : "all")}
-        />
-        <SummaryChip
-          label={t("f2_chip_teams")}
-          value={String(teams)}
-          tone="muted"
+      {/* tabs — replaces the old chip strip + filter dropdown. The four
+          tabs map straight onto the existing status filters. */}
+      <div className="border-b border-line flex items-end gap-x-2 flex-wrap" style={{ padding: "0 32px" }}>
+        <FleetTabs
+          value={statusFilter}
+          onChange={setStatusFilter}
+          counts={{ all: total, live: onlineCount, anomalies, blueprint: blueprintCount }}
+          t={t}
         />
         <div className="flex-1" />
-        <PeriodDropdown value={windowId} onChange={setWindow} t={t} />
-      </div>
-
-      {/* secondary toolbar — active-filter pill only.
-          Grouping chooser removed per user request: not enough rows to
-          justify 4 grouping modes; flat list reads cleaner. */}
-      <div className="flex items-center gap-3 text-[12.5px]" style={{ padding: "10px 32px" }}>
-        <div className="flex-1" />
-        {statusFilter !== "all" && (
-          <button
-            onClick={() => setStatusFilter("all")}
-            className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 rounded border border-line bg-surface"
-            style={{ padding: "3px 9px", fontSize: 12 }}
-          >
-            <span className="text-ink-3">{t("flx_filter_label")}</span>
-            <span className="font-medium">{filterLabel(statusFilter, t)}</span>
-            <span className="text-ink-3 ml-1">×</span>
-          </button>
-        )}
-        <FilterMenu value={statusFilter} onChange={setStatusFilter} t={t} />
+        <div className="flex items-center gap-4 pb-2.5">
+          {aggSuccessRate != null && (
+            <span className="text-[12px] text-ink-3 tabular-nums">
+              {t("f2_chip_success_7d")}{" "}
+              <span
+                className="font-semibold"
+                style={{ color: aggSuccessRate >= 95 ? "var(--c-ok)" : aggSuccessRate >= 90 ? "oklch(0.5 0.14 75)" : "var(--c-err)" }}
+              >
+                {aggSuccessRate.toFixed(1)}%
+              </span>
+            </span>
+          )}
+          <PeriodDropdown value={windowId} onChange={setWindow} t={t} />
+        </div>
       </div>
 
       {/* list */}
@@ -408,15 +377,16 @@ export function FleetContent() {
             <span>{t("flx_col_agent")}</span>
             <span>{t("flx_col_deploy_status")}</span>
             <span>{t("flx_col_recent_runs")}</span>
-            <span style={{ textAlign: "right" }}>{t("flx_col_last_active")}</span>
-            <span style={{ textAlign: "right" }}>{t("flx_col_version")}</span>
+            <span>{t("flx_col_success_rate")}</span>
+            <span style={{ textAlign: "right" }}>{t("flx_col_p95")}</span>
+            <span style={{ textAlign: "right" }}>{t("flx_col_actions")}</span>
           </div>
         )}
         {agentsRes !== null && grouped.map((g) => (
           <section key={g.key}>
             {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} t={t} />}
-            {g.rows.map((r) => (
-              <AgentListRow key={r.short} row={r} t={t} onTogglePause={togglePause} />
+            {g.rows.map((r, i) => (
+              <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} />
             ))}
           </section>
         ))}
@@ -442,17 +412,6 @@ export function FleetContent() {
 // ────────────────────────────────────────────────────────────────────
 
 type FilterId = "all" | "live" | "blueprint" | "anomalies" | "paused" | "deprecated";
-
-function filterLabel(f: FilterId, t: (k: string) => string): string {
-  switch (f) {
-    case "all": return t("f2_filter_all");
-    case "live": return t("f2_kind_real");
-    case "blueprint": return t("f2_kind_stub");
-    case "anomalies": return t("f2_filter_anomalies");
-    case "paused": return t("f2_filter_paused");
-    case "deprecated": return t("f2_filter_deprecated");
-  }
-}
 
 function sortWithinGroup(rs: FleetRow[]): FleetRow[] {
   return [...rs].sort((a, b) => {
@@ -501,70 +460,130 @@ function groupTitle(title: string, group: string, t: (k: string) => string): str
   return title;
 }
 
-// ── chips ──────────────────────────────────────────────────────────
+// ── tabs ───────────────────────────────────────────────────────────
+// 全部 / 在线 / 需关注 / 蓝图 — map straight onto the status filters. The
+// active indicator is a sliding underline (ao-tab-underline) measured from
+// the active button's offset so it animates between tabs.
 
-function SummaryChip({
-  label, value, sub, tone, active, onClick,
+function FleetTabs({
+  value, onChange, counts, t,
 }: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "ok" | "warn" | "err" | "muted";
-  active?: boolean;
-  onClick?: () => void;
+  value: FilterId;
+  onChange: (v: FilterId) => void;
+  counts: { all: number; live: number; anomalies: number; blueprint: number };
+  t: (k: string) => string;
 }) {
-  const color =
-    tone === "ok" ? "var(--c-ok)" :
-    tone === "warn" ? "oklch(0.5 0.14 75)" :
-    tone === "err" ? "var(--c-err)" :
-    tone === "muted" ? "var(--c-ink-2)" :
-    "var(--c-ink-1)";
-  const Tag: React.ElementType = onClick ? "button" : "div";
+  const tabs: { id: FilterId; label: string; count: number; tone?: "err" }[] = [
+    { id: "all",       label: t("f2_filter_all"),     count: counts.all },
+    { id: "live",      label: t("flx_tab_online"),    count: counts.live },
+    { id: "anomalies", label: t("flx_need_attention"), count: counts.anomalies, tone: counts.anomalies > 0 ? "err" : undefined },
+    { id: "blueprint", label: t("f2_kind_stub"),      count: counts.blueprint },
+  ];
+  // "anomalies"/"blueprint" are valid filter ids; "live" maps to deployed.
+  const active = (["all", "live", "anomalies", "blueprint"] as FilterId[]).includes(value) ? value : "all";
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [ind, setInd] = React.useState<{ left: number; width: number } | null>(null);
+  React.useLayoutEffect(() => {
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-tab="${active}"]`);
+    if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth });
+  }, [active, counts.all, counts.live, counts.anomalies, counts.blueprint]);
   return (
-    <Tag
-      className={"flex items-baseline gap-2 transition-opacity " + (onClick ? "cursor-pointer hover:opacity-75" : "")}
-      onClick={onClick}
-      style={{
-        borderBottom: active ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
-        paddingBottom: 2,
-      }}
-    >
-      <span className="text-ink-3" style={{ fontSize: 12 }}>{label}</span>
-      <span className="font-semibold tabular-nums" style={{ fontSize: 18, color, letterSpacing: "-0.015em" }}>{value}</span>
-      {sub && <span className="text-ink-3 tabular-nums" style={{ fontSize: 12 }}>{sub}</span>}
-    </Tag>
+    <div ref={containerRef} className="relative flex items-end gap-1">
+      {tabs.map((tab) => {
+        const on = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            data-tab={tab.id}
+            onClick={() => onChange(tab.id)}
+            className="flex items-baseline gap-1.5 transition-colors"
+            style={{
+              padding: "12px 12px 11px",
+              color: on ? "var(--c-ink-1)" : "var(--c-ink-3)",
+              fontWeight: on ? 600 : 400,
+              fontSize: 13.5,
+            }}
+          >
+            <span>{tab.label}</span>
+            <span
+              className="tabular-nums"
+              style={{ fontSize: 12, color: tab.tone === "err" ? "var(--c-err)" : on ? "var(--c-ink-2)" : "var(--c-ink-4)" }}
+            >
+              {tab.count}
+            </span>
+          </button>
+        );
+      })}
+      {ind && (
+        <span
+          className="absolute ao-tab-underline"
+          style={{ bottom: 0, height: 2, background: "var(--c-ink-1)", left: ind.left, width: ind.width }}
+        />
+      )}
+    </div>
   );
 }
 
-// ── segmented links (quieter than SegGroup) ───────────────────────
+// ── agent identity tile ────────────────────────────────────────────
+// Colored rounded square + glyph (first char of the localized role name),
+// echoing the design reference. Color is a stable hash of the agent short
+// name → OKLCH hue, so the palette is varied but deterministic.
 
-function SegLinks({
-  options, value, onChange,
-}: {
-  options: { id: string; label: string }[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function tileHue(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  return h;
+}
+
+function AgentTile({ seed, label, dim }: { seed: string; label: string; dim?: boolean }) {
+  const hue = tileHue(seed);
+  const glyph = [...label.trim()][0] ?? "·";
   return (
-    <div className="flex items-center gap-1">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          onClick={() => onChange(o.id)}
-          className="transition-colors rounded"
-          style={{
-            padding: "3px 9px",
-            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
-            background: value === o.id ? "var(--c-panel)" : "transparent",
-            fontWeight: value === o.id ? 500 : 400,
-            fontSize: 12.5,
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
+    <span
+      className="rounded-[8px] grid place-items-center flex-shrink-0 font-semibold"
+      style={{
+        width: 30,
+        height: 30,
+        fontSize: 13,
+        color: `oklch(0.98 0.02 ${hue})`,
+        background: `linear-gradient(145deg, oklch(0.62 0.16 ${hue}), oklch(0.52 0.17 ${(hue + 28) % 360}))`,
+        opacity: dim ? 0.55 : 1,
+        letterSpacing: 0,
+      }}
+    >
+      {glyph}
+    </span>
+  );
+}
+
+// Success-rate bar — track + filled bar (grows on mount) colored by threshold.
+function SuccessBar({ rate }: { rate: number | null }) {
+  const [grown, setGrown] = React.useState(false);
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => setGrown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  if (rate == null) return <span className="text-ink-4" style={{ fontSize: 13 }}>—</span>;
+  const color = rate >= 95 ? "var(--c-ok)" : rate >= 90 ? "oklch(0.62 0.14 75)" : "var(--c-err)";
+  return (
+    <div className="flex items-center gap-2.5 min-w-0">
+      <span className="relative rounded-full overflow-hidden flex-1" style={{ height: 5, background: "color-mix(in oklab, var(--c-line) 70%, transparent)", maxWidth: 90 }}>
+        <span
+          className="absolute left-0 top-0 bottom-0 rounded-full ao-bar-grow"
+          style={{ width: grown ? `${Math.max(2, Math.min(100, rate))}%` : "0%", background: color }}
+        />
+      </span>
+      <span className="tabular-nums" style={{ fontSize: 12.5, color: rate < 90 ? "var(--c-err)" : "var(--c-ink-1)" }}>
+        {rate.toFixed(1)}%
+      </span>
     </div>
   );
+}
+
+function fmtP95(ms: number | null): string {
+  if (ms == null) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 // ── period dropdown ───────────────────────────────────────────────
@@ -608,59 +627,10 @@ function PeriodDropdown({ value, onChange, t }: { value: "7d" | "30d" | "90d"; o
   );
 }
 
-// ── filter menu (popover with all 6 filters) ──────────────────────
-
-function FilterMenu({ value, onChange, t }: { value: FilterId; onChange: (v: FilterId) => void; t: (k: string) => string }) {
-  const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-  const options: { id: FilterId; label: string }[] = [
-    { id: "all",        label: t("f2_filter_all") },
-    { id: "live",       label: t("f2_kind_real") },
-    { id: "blueprint",  label: t("f2_kind_stub") },
-    { id: "anomalies",  label: t("f2_filter_anomalies") },
-    { id: "paused",     label: t("f2_filter_paused") },
-    { id: "deprecated", label: t("f2_filter_deprecated") },
-  ];
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-ink-2 hover:text-ink-1 transition-colors"
-        style={{ fontSize: 12.5 }}
-      >
-        <Ic.search style={{ width: 12, height: 12 }} />
-        <span>{t("flx_filter")}</span>
-        <Ic.chevD style={{ width: 10, height: 10 }} />
-      </button>
-      {open && (
-        <div className="absolute right-0 mt-2 bg-surface border border-line rounded-md shadow-sh-2 z-30" style={{ minWidth: 160 }}>
-          {options.map((o) => (
-            <button
-              key={o.id}
-              onClick={() => { onChange(o.id); setOpen(false); }}
-              className="w-full text-left hover:bg-panel transition-colors flex items-center justify-between"
-              style={{ padding: "8px 12px", fontSize: 12.5, color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-2)" }}
-            >
-              {o.label}
-              {value === o.id && <Ic.check style={{ width: 12, height: 12 }} />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── list ──────────────────────────────────────────────────────────
 
-// Last column (button + version) widened from 70px → 150px to fit the
-// always-visible "上线"/"下线" button (was icon-only on hover before).
-const GRID = "minmax(280px, 1fr) 120px 140px 100px 150px";
+// 智能体 / 状态 / 近期运行 / 成功率 / P95 / 操作
+const GRID = "minmax(260px, 1fr) 110px 96px 160px 80px 96px";
 
 function GroupHeader({ title, rows, t }: { title: string; rows: FleetRow[]; t: (k: string) => string }) {
   const deployed = rows.filter((r) => r.status === "deployed").length;
@@ -682,18 +652,22 @@ function GroupHeader({ title, rows, t }: { title: string; rows: FleetRow[]; t: (
   );
 }
 
-function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void }) {
+function AgentListRow({ row, idx, t, onTogglePause }: { row: FleetRow; idx: number; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void }) {
   const stub = row.realness === "unbuilt";
   const dim = row.lifecycle === "deprecated";
+  const roleLabel = t(row.roleK);
   return (
     <div
-      className="group relative grid gap-4 border-b border-line transition-colors hover:bg-panel"
+      className="group relative grid gap-4 border-b border-line ao-fade-rise ao-hover-lift"
       style={{
         gridTemplateColumns: GRID,
-        padding: stub ? "8px 12px" : "16px 12px",
+        padding: "14px 12px",
         opacity: dim ? 0.55 : 1,
         alignItems: "center",
-      }}
+        border: "1px solid transparent",
+        borderBottom: "1px solid var(--c-line)",
+        ["--ao-i"]: Math.min(idx, 18),
+      } as React.CSSProperties}
     >
       {/* the row itself is a link; the action button is a sibling that
           captures clicks before the Link does */}
@@ -704,49 +678,54 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
         aria-label={`open ${row.name}`}
       />
 
-      {/* identity */}
-      <div className="relative flex items-baseline gap-2.5 min-w-0">
-        <RowStatusDot status={row.status} />
+      {/* identity — color tile + name + role/team */}
+      <div className="relative flex items-center gap-2.5 min-w-0">
+        <AgentTile seed={row.short} label={roleLabel || row.name} dim={stub} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 min-w-0">
-            <span
-              className="truncate text-ink-1"
-              style={{
-                fontSize: stub ? 13 : 14,
-                fontWeight: stub ? 400 : 500,
-                letterSpacing: "-0.005em",
-                textDecoration: row.lifecycle === "deprecated" ? "line-through" : "none",
-              }}
-            >
-              {row.name}
-            </span>
+          <div
+            className="truncate text-ink-1"
+            style={{
+              fontSize: 13.5,
+              fontWeight: 500,
+              letterSpacing: "-0.005em",
+              textDecoration: row.lifecycle === "deprecated" ? "line-through" : "none",
+            }}
+          >
+            {roleLabel || row.name}
           </div>
-          <div className="truncate text-ink-3" style={{ fontSize: 12, marginTop: stub ? 0 : 2 }}>
-            {t(row.roleK)} · {row.ownerTeam}
+          <div className="truncate text-ink-3" style={{ fontSize: 11.5, marginTop: 1 }}>
+            {row.short} · {row.ownerTeam}
           </div>
         </div>
       </div>
 
-      {/* status */}
+      {/* status pill */}
       <div className="relative">
-        <StatusCell status={row.status} t={t} />
+        <StatusPill row={row} t={t} />
       </div>
 
-      {/* runs: total + breakdown (real data) */}
+      {/* recent runs — total count */}
+      <div className="relative tabular-nums" style={{ fontSize: 13 }}>
+        {stub || row.liveTotal == null ? (
+          <span className="text-ink-4">—</span>
+        ) : (
+          <span className="text-ink-1">{row.liveTotal.toLocaleString()} <span className="text-ink-3" style={{ fontSize: 11.5 }}>次</span></span>
+        )}
+      </div>
+
+      {/* success rate bar */}
       <div className="relative">
-        {stub ? <span /> : <RunsCell row={row} t={t} />}
+        {stub ? <span className="text-ink-4" style={{ fontSize: 13 }}>—</span> : <SuccessBar rate={row.successRate} />}
       </div>
 
-      {/* last active */}
-      <div className="relative text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
-        {stub ? "" : relTime(row.lastActiveAt, t)}
+      {/* P95 */}
+      <div className="relative text-ink-2 tabular-nums" style={{ textAlign: "right", fontSize: 12.5 }}>
+        {stub ? <span className="text-ink-4">—</span> : fmtP95(row.p95Ms)}
       </div>
 
-      {/* version + hover action — fixed column width (see GRID const).
-          flex-nowrap + min-w-0 + whitespace-nowrap on button keeps the
-          "上线"/"下线" pill from overflowing into the 最近活动 column. */}
-      <div className="relative text-ink-3 tabular-nums flex items-center justify-end gap-2 min-w-0 flex-nowrap overflow-hidden" style={{ fontSize: 12 }}>
-        {!stub && row.slug && (
+      {/* action — always-visible 上线/下线 */}
+      <div className="relative flex items-center justify-end min-w-0 flex-nowrap overflow-hidden">
+        {!stub && row.slug ? (
           <PauseToggleButton
             paused={row.paused}
             t={t}
@@ -756,27 +735,27 @@ function AgentListRow({ row, t, onTogglePause }: { row: FleetRow; t: (k: string)
               if (row.slug) onTogglePause(row.slug, !row.paused);
             }}
           />
+        ) : (
+          <span className="text-ink-4 tabular-nums" style={{ fontSize: 12 }}>{row.version}</span>
         )}
-        <span>{stub ? "" : row.version}</span>
       </div>
     </div>
   );
 }
 
 function PauseToggleButton({ paused, onClick, t }: { paused: boolean; onClick: (e: React.MouseEvent) => void; t: (k: string) => string }) {
-  // Paused agents: button always visible (resume is the affordance the user
-  // is looking for). Running agents: button hover-only to keep the row calm.
-  const visibility = paused ? "opacity-100" : "opacity-0 group-hover:opacity-100";
+  // Always visible (matches the design reference) — outlined pill with an
+  // icon. Resume (上线) glows green; pause (下线) is neutral.
   return (
     <button
       onClick={onClick}
       title={paused ? t("flx_bring_online_tip") : t("flx_take_offline_tip")}
-      className={`${visibility} rounded transition-all hover:bg-surface inline-flex items-center gap-1 leading-none whitespace-nowrap shrink-0`}
+      className="rounded-md transition-all hover:bg-surface inline-flex items-center gap-1 leading-none whitespace-nowrap shrink-0"
       style={{
-        padding: "2px 6px",
+        padding: "4px 10px",
         border: `1px solid ${paused ? "var(--c-ok)" : "var(--c-line)"}`,
         color: paused ? "var(--c-ok)" : "var(--c-ink-2)",
-        fontSize: 11,
+        fontSize: 11.5,
         lineHeight: 1.2,
       }}
     >
@@ -786,55 +765,24 @@ function PauseToggleButton({ paused, onClick, t }: { paused: boolean; onClick: (
   );
 }
 
-function RunsCell({ row, t }: { row: FleetRow; t: (k: string) => string }) {
-  const total = row.liveTotal;
-  if (total == null) return <span className="text-ink-4" style={{ fontSize: 13 }}>—</span>;
-  if (total === 0) {
-    return <span className="text-ink-4" style={{ fontSize: 13 }}>{t("flx_no_runs")}</span>;
-  }
-  const succ = row.liveCompleted ?? 0;
-  const fail = row.liveFailed ?? 0;
+// Status pill — dot + label.
+function StatusPill({ row, t }: { row: FleetRow; t: (k: string) => string }) {
+  const { color, label } =
+    row.status === "not_deployed" ? { color: "var(--c-err)",  label: t("flx_status_not_deployed") } :
+    row.status === "paused"       ? { color: "var(--c-ink-4)", label: t("flx_status_paused") } :
+                                    { color: "var(--c-ok)",   label: t("flx_status_deployed") };
+  const online = row.status === "deployed";
   return (
-    <div className="flex items-baseline gap-2 tabular-nums">
-      <span className="text-ink-1" style={{ fontSize: 13 }}>{total}</span>
-      <span className="text-ink-3" style={{ fontSize: 11.5 }}>
-        <span style={{ color: "var(--c-ok)" }}>✓{succ}</span>
-        {fail > 0 && <> · <span style={{ color: "var(--c-err)" }}>✗{fail}</span></>}
-      </span>
-    </div>
-  );
-}
-
-function RowStatusDot({ status }: { status: FleetStatus }) {
-  const color =
-    status === "deployed"     ? "var(--c-ok)" :
-    status === "paused"       ? "var(--c-ink-4)" :
-    status === "not_deployed" ? "var(--c-err)" :
-    "var(--c-ink-4)";
-  return (
-    <span
-      className="rounded-full shrink-0"
-      style={{
-        width: 7, height: 7, background: color,
-        marginTop: 4,
-        boxShadow: status === "deployed" ? `0 0 0 3px color-mix(in oklab, ${color} 18%, transparent)` : "none",
-      }}
-    />
-  );
-}
-
-function StatusCell({ status, t }: { status: FleetStatus; t: (k: string) => string }) {
-  const label =
-    status === "deployed"     ? t("flx_status_deployed") :
-    status === "paused"       ? t("flx_status_paused") :
-    status === "not_deployed" ? t("flx_status_not_deployed") :
-    "";
-  const color =
-    status === "not_deployed" ? "var(--c-err)" :
-    status === "paused"       ? "var(--c-ink-3)" :
-    "var(--c-ink-1)";
-  return (
-    <span style={{ fontSize: 13, color }}>{label}</span>
+    <span className="inline-flex items-center gap-2" style={{ fontSize: 12.5 }}>
+      <span
+        className={online ? "rounded-full anim-pulse" : "rounded-full"}
+        style={{
+          width: 7, height: 7, background: color,
+          boxShadow: online ? `0 0 0 3px color-mix(in oklab, ${color} 18%, transparent)` : "none",
+        }}
+      />
+      <span style={{ color: row.status === "deployed" ? "var(--c-ink-1)" : color }}>{label}</span>
+    </span>
   );
 }
 

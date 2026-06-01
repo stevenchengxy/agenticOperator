@@ -271,9 +271,13 @@ function AdaptedRules({
           .replace("{selected}", String(selected.length))}
       </div>
       <div className="hint" style={{ marginBottom: 10 }}>
-        {t("rc_sel_dim")
-          .replace("{client}", detail.client_name || "?")
-          .replace("{bg}", detail.business_group || "?")}
+        {t("rc_sel_dim").replace(
+          "{client}",
+          detail.client_display_name || detail.client_name || "?",
+        )}
+        {detail.business_group
+          ? t("rc_sel_dim_bg").replace("{bg}", detail.business_group)
+          : null}
       </div>
 
       {/* 判定结果概览(PASS / FAIL / 不适用 计数)只在「规则判断」全量视图显示 */}
@@ -518,8 +522,9 @@ function AdaptedRuleCard({
                 </div>
                 <div className="flex items-center gap-2" style={{ marginBottom: 5, flexWrap: "wrap" }}>
                   <Badge variant={resultVariant}>{flag.result}</Badge>
-                  <span className="mono text-[10.5px] text-ink-3">severity={flag.severity}</span>
-                  <span className="mono text-[10.5px] text-ink-3">applicable={String(flag.applicable)}</span>
+                  <Badge variant={flag.severity === "flag_only" ? "default" : "err"}>
+                    {flag.severity === "flag_only" ? t("rc_flag_severity_tip") : t("rc_flag_severity_bottomline")}
+                  </Badge>
                 </div>
                 <div className="text-[12px] text-ink-1" style={{ lineHeight: 1.6 }}>
                   {flag.evidence || t("rc_evidence_no_llm_short")}

@@ -44,7 +44,17 @@ export type LiveAgentState = {
   latestRunId: string | null;
   latestStartedAt: string | null;
   latestDurationMs: number | null;
+  /** P95 of finished-run durations in the sampled window (last ≤100 runs). */
+  p95Ms: number | null;
 };
+
+// P95 of a list of durations (ms). Returns null when there's no sample.
+function percentile95(durations: number[]): number | null {
+  const xs = durations.filter((d) => Number.isFinite(d) && d > 0).sort((a, b) => a - b);
+  if (xs.length === 0) return null;
+  const idx = Math.min(xs.length - 1, Math.ceil(0.95 * xs.length) - 1);
+  return xs[Math.max(0, idx)];
+}
 
 const REFRESH_MS = 5000;
 
@@ -90,6 +100,9 @@ export function useInngestLiveOverlay(): {
           const running = fnRuns.filter((r: { status: string }) => r.status === 'Running').length;
           const total = fnRuns.length;
           const latest = fnRuns[0];
+          const p95Ms = percentile95(
+            fnRuns.map((r: { durationMs?: number | null }) => r.durationMs ?? 0),
+          );
 
           next.set(wsId, {
             wsId,
@@ -106,6 +119,7 @@ export function useInngestLiveOverlay(): {
             latestRunId: latest?.id ?? null,
             latestStartedAt: latest?.startedAt ?? null,
             latestDurationMs: latest?.durationMs ?? null,
+            p95Ms,
           });
         }
         setByWsId(next);

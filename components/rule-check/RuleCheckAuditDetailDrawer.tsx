@@ -295,7 +295,7 @@ function DetailHeader({
         >
           <Kv label={t("rc_kv_client_bg_studio")}>
             <span className="mono text-[11.5px]">
-              {detail.client_name || "—"}
+              {detail.client_display_name || detail.client_name || "—"}
               {detail.business_group ? ` × ${detail.business_group}` : ""}
               {detail.studio ? ` × ${detail.studio}` : ""}
             </span>
@@ -321,11 +321,17 @@ function DetailHeader({
             >
               {t("rc_rules_evaluated_label")
                 .replace("{total}", String(detail.rules_total_in_ontology))
-                .replace("{evaluated}", String(detail.rules_evaluated))}
-              {" → applicable="}{detail.flags.filter((f) => f.applicable).length}
-              {" · N/A="}{detail.flags.filter((f) => !f.applicable).length}
+                .replace("{evaluated}", String(detail.rules_evaluated))
+                .replace("{applicable}", String(detail.flags.filter((f) => f.applicable).length))
+                .replace("{na}", String(detail.flags.filter((f) => !f.applicable).length))}
             </span>
-            <Badge variant="default">{detail.rule_source}</Badge>
+            <Badge variant="default">
+              {detail.rule_source === "ontology-api"
+                ? t("rc_src_live")
+                : detail.rule_source === "json-fallback"
+                  ? t("rc_src_fallback")
+                  : detail.rule_source}
+            </Badge>
           </Kv>
         </div>
         <details className="mt-3">
@@ -403,29 +409,28 @@ function DecisionBanner({
   summary: string;
 }) {
   const pass = detail.decision === "PASS";
-  const bgColor = pass
-    ? "color-mix(in oklab, var(--c-ok) 12%, var(--c-bg))"
-    : "color-mix(in oklab, var(--c-err) 12%, var(--c-bg))";
-  const borderColor = pass ? "var(--c-ok)" : "var(--c-err)";
+  const accent = pass ? "var(--c-ok)" : "var(--c-err)";
   return (
     <div
-      className="border-b border-line flex items-center gap-5"
+      className="rc-banner-in border-b border-line flex items-center gap-5"
       style={{
         padding: "20px 22px",
-        background: bgColor,
-        borderLeft: `4px solid ${borderColor}`,
+        background: `linear-gradient(100deg, color-mix(in oklab, ${accent} 18%, var(--c-bg)) 0%, color-mix(in oklab, ${accent} 7%, var(--c-bg)) 55%, var(--c-bg) 100%)`,
+        borderLeft: `4px solid ${accent}`,
+        boxShadow: `inset 14px 0 24px -18px ${accent}`,
       }}
     >
       <div
-        className="tabular-nums"
+        className="rc-verdict-pop tabular-nums"
         style={{
           fontFamily: SERIF,
           fontSize: 36,
           fontWeight: 500,
-          color: borderColor,
+          color: accent,
           minWidth: 120,
           lineHeight: 1,
           letterSpacing: "-0.02em",
+          textShadow: `0 0 22px color-mix(in oklab, ${accent} 35%, transparent)`,
         }}
       >
         {detail.decision}
@@ -436,7 +441,9 @@ function DecisionBanner({
         </div>
         <div className="text-ink-3 mono text-[11px] mt-2 truncate">
           {detail.candidate_id?.slice(0, 8)} · {detail.job_requisition_id?.split("-").pop() || "?"}
-          {detail.client_name ? ` · ${detail.client_name}` : ""}
+          {detail.client_display_name || detail.client_name
+            ? ` · ${detail.client_display_name || detail.client_name}`
+            : ""}
           {detail.business_group ? ` × ${detail.business_group}` : ""}
         </div>
       </div>
@@ -505,122 +512,6 @@ function TabBtn({
   );
 }
 
-/**
- * 在 User Prompt 之前展示 — ontology 全部规则里,有哪些被 (client × business_group ×
- * executor) filter 过滤掉了。每条带 reason,让用户能验证"规则抓取链路完整,过滤逻辑合理"。
- *
- * 数据来源:`audit.filtered_out_rules`(由 applyClientFilterWithReasons 抓取)。
- */
-function FilteredOutRulesSection({ detail }: { detail: RuleCheckAuditDetail }) {
-  const { t } = useApp();
-  const [open, setOpen] = React.useState(false);
-  const filteredOut = detail.filtered_out_rules ?? [];
-
-  // 按过滤原因分类(executor / client / department)便于用户看清楚
-  const byCategory: Record<string, typeof filteredOut> = {
-    executor: [],
-    client: [],
-    department: [],
-    other: [],
-  };
-  for (const f of filteredOut) {
-    if (f.executor !== 'Agent') byCategory.executor!.push(f);
-    else if (f.reason.includes('applicableClient')) byCategory.client!.push(f);
-    else if (f.reason.includes('applicableDepartment')) byCategory.department!.push(f);
-    else byCategory.other!.push(f);
-  }
-  const ontologyTotal = detail.rules_total_in_ontology;
-  const evaluatedCount = detail.rules_evaluated;
-  const filteredCount = filteredOut.length;
-  const clientId = detail.client_name || "?";
-  const businessGroup = detail.business_group || "?";
-
-  return (
-    <div className="border border-line rounded-sm bg-panel">
-      <button
-        type="button"
-        className="w-full text-left flex items-center justify-between"
-        style={{ padding: "12px 14px" }}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <div>
-          <div className="hint" style={{ marginBottom: 4 }}>
-            🔍 {t("rc_filter_chain_title")}
-          </div>
-          <div className="mono text-[12px] text-ink-1">
-            {t("rc_filter_chain_summary")
-              .replace("{total}", String(ontologyTotal))
-              .replace("{filtered}", String(filteredCount))
-              .replace("{evaluated}", String(evaluatedCount))}
-            {' '}
-            <span className="text-ink-3">
-              {t("rc_filter_chain_dim")
-                .replace("{client}", clientId)
-                .replace("{bg}", businessGroup)}
-            </span>
-          </div>
-        </div>
-        <span className="mono text-[11px] text-ink-3">
-          {open ? t("rc_show_less") : t("rc_show_more")} {filteredCount > 0 ? `(${filteredCount})` : ''}
-        </span>
-      </button>
-      {open && filteredOut.length > 0 ? (
-        <div style={{ borderTop: "1px solid var(--c-line)" }}>
-          {Object.entries(byCategory)
-            .filter(([, rules]) => rules.length > 0)
-            .map(([category, rules]) => (
-              <div key={category} style={{ padding: "8px 14px", borderBottom: "1px solid var(--c-line)" }}>
-                <div className="hint" style={{ marginBottom: 6 }}>
-                  {category === 'executor'
-                    ? t("rc_filtered_executor_detail").replace("{count}", String(rules.length))
-                    : category === 'client'
-                      ? t("rc_filtered_client_detail").replace("{count}", String(rules.length))
-                      : category === 'department'
-                        ? t("rc_filtered_department_detail").replace("{count}", String(rules.length))
-                        : t("rc_filtered_other_detail").replace("{count}", String(rules.length))}
-                </div>
-                <div className="flex flex-col" style={{ gap: 6 }}>
-                  {rules.map((f) => (
-                    <div
-                      key={f.rule_id}
-                      className="flex items-start"
-                      style={{
-                        gap: 10,
-                        padding: "6px 8px",
-                        background: "var(--c-bg)",
-                        borderRadius: 3,
-                      }}
-                    >
-                      <span
-                        className="mono text-[11px] text-ink-3"
-                        style={{ minWidth: 50, paddingTop: 2 }}
-                      >
-                        {f.rule_id}
-                      </span>
-                      <div style={{ flex: 1 }}>
-                        <div className="text-[12px] text-ink-1">{f.rule_name}</div>
-                        <div className="mono text-[11px] text-ink-3" style={{ marginTop: 2 }}>
-                          {f.reason}
-                        </div>
-                        <div className="mono text-[10.5px] text-ink-4" style={{ marginTop: 2 }}>
-                          applicableClient="{f.applicable_client}" · applicableDepartment="{f.applicable_department}" · executor="{f.executor}"
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-        </div>
-      ) : open ? (
-        <div className="hint" style={{ padding: "10px 14px", borderTop: "1px solid var(--c-line)" }}>
-          {t("rc_filter_chain_empty").replace("{total}", String(ontologyTotal))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
   const [view, setView] = React.useState<"rendered" | "raw">("rendered");
@@ -636,8 +527,6 @@ function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
   }
   return (
     <div className="flex flex-col gap-4">
-      {/* Before the prompt — surface which rules were filtered out + why */}
-      <FilteredOutRulesSection detail={detail} />
       <div>
         <div className="hint flex items-center" style={{ gap: 8, marginBottom: 6 }}>
           <span>{t("rc_prompt_system")}</span>

@@ -2,10 +2,10 @@
 import React from "react";
 import Link from "next/link";
 import { Ic } from "@/components/shared/Ic";
-import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
+import { Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import type { RunSummary, RunsResponse } from "@/lib/api/types";
-import type { ActivityResponse, LogEntry } from "@/lib/api/activity-types";
+import type { ActivityResponse, LogEntry, LogKind } from "@/lib/api/activity-types";
 import { useAgentsHealth } from "@/lib/api/agents-health";
 import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/route";
 import { byShortFunction } from "@/lib/agent-functions";
@@ -65,6 +65,7 @@ export function OverviewContent() {
   const [activeRuns, setActiveRuns] = React.useState<RunSummary[] | null>(null);
   const [failed1h, setFailed1h] = React.useState<RunSummary[] | null>(null);
   const [anomalies, setAnomalies] = React.useState<LogEntry[] | null>(null);
+  const [streamEntries, setStreamEntries] = React.useState<LogEntry[] | null>(null);
   const [todayRuns, setTodayRuns] = React.useState<{ total: number; completed: number } | null>(null);
   const [hitlPending, setHitlPending] = React.useState<number | null>(null);
   const [dlqPending, setDlqPending] = React.useState<number | null>(null);
@@ -77,7 +78,7 @@ export function OverviewContent() {
     today0.setHours(0, 0, 0, 0);
     const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [active, failed, recent, todayFinished, hitl, dlq, events, alerts] = await Promise.all([
+      const [active, failed, recent, stream, todayFinished, hitl, dlq, events, alerts] = await Promise.all([
         fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=10"),
         fetchJson<RunsResponse>(
           `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
@@ -85,6 +86,8 @@ export function OverviewContent() {
         fetchJson<ActivityResponse>(
           "/api/activity/recent?kind=anomaly,error,step.failed&windowMs=3600000&limit=15",
         ),
+        // Live event stream — all activity kinds, newest first.
+        fetchJson<ActivityResponse>("/api/activity/recent?windowMs=3600000&limit=16"),
         // 今日完成数 — completed since 00:00. completed/total ratio drives 成功率 KPI.
         fetchJson<RunsResponse>(
           `/api/runs?status=completed,failed,timed_out,interrupted&since=${encodeURIComponent(today0.toISOString())}&limit=1000`,
@@ -102,6 +105,7 @@ export function OverviewContent() {
       setActiveRuns(active.runs);
       setFailed1h(failed.runs);
       setAnomalies(recent.entries);
+      setStreamEntries(stream.entries);
       setTodayRuns({
         total: todayFinished.runs.length,
         completed: todayFinished.runs.filter((r) => r.status === "completed").length,
@@ -135,7 +139,9 @@ export function OverviewContent() {
   // /fleet renders). Deployment status mirrors /fleet's FleetStatus exactly;
   // runtime health is overlaid as a secondary signal.
   const matrixRows: MatrixRow[] = React.useMemo(() => {
-    const rows: MatrixRow[] = AGENT_MAP.map((a) => {
+    // Chatbot is the UI assistant (AO·UI), not a recruitment-pipeline agent —
+    // hide it from the fleet matrix.
+    const rows: MatrixRow[] = AGENT_MAP.filter((a) => a.short !== "Chatbot").map((a) => {
       const kind = realnessMap.get(a.short) ?? "unbuilt";
       const live = liveByWsId.get(a.wsId);
       const deploy: DeployStatus =
@@ -203,7 +209,7 @@ export function OverviewContent() {
         <div className="mx-auto" style={{ padding: "32px 32px", maxWidth: 1280 }}>
           <SystemStatusStrip deployCounts={deployCounts} alertsActive={alertsActive} />
           <AgentMatrix rows={matrixRows} loading={health.loading} counts={deployCounts} />
-          <ActiveRunsSection runs={activeRuns} />
+          <RealtimeStream entries={streamEntries} activeCount={activeRuns?.length ?? null} />
           <div className="mt-8">
             <AnomaliesSection entries={anomalies} />
           </div>
@@ -661,6 +667,10 @@ function AgentCard({ row }: { row: MatrixRow }) {
   const tone = DEPLOY_TONE[row.deploy];
   const fn = byShortFunction(row.short);
   const meta = byShort(row.short);
+  // Prefer the localized "…智能体" display name; fall back to the technical
+  // name if the i18n key is somehow missing.
+  const zhName = t(`display_${row.short.toLowerCase()}`);
+  const agentName = zhName.startsWith("display_") ? (meta?.inngestName ?? row.short) : zhName;
   const runtimeStatus = row.deploy !== "not_deployed" ? row.health?.status : null;
   const runtimeBadge = runtimeStatus ? RUNTIME_BADGE_TONE[runtimeStatus] : undefined;
   const counts = row.health?.counts;
@@ -697,7 +707,7 @@ function AgentCard({ row }: { row: MatrixRow }) {
           }}
         />
         <span className="text-[13px] font-medium text-claude-ink-1 flex-1 truncate" style={{ letterSpacing: "-0.005em" }}>
-          {meta?.inngestName ?? row.short}
+          {agentName}
         </span>
       </div>
       {fn && (
@@ -708,16 +718,15 @@ function AgentCard({ row }: { row: MatrixRow }) {
       <div className="text-[10.5px] text-claude-ink-4 flex items-center gap-1.5 tabular-nums">
         {row.deploy === "not_deployed" ? (
           <span>{t("overview_card_unregistered")}</span>
-        ) : counts ? (
+        ) : counts && (errorCount > 0 || counts.tool > 0) ? (
           <>
-            <span>{counts.completed}/{counts.started} {t("overview_card_step_unit")}</span>
             {errorCount > 0 && (
-              <span style={{ color: "var(--c-err)" }}>· {errorCount} {t("overview_card_err_unit")}</span>
+              <span style={{ color: "var(--c-err)" }}>{errorCount} {t("overview_card_err_unit")}</span>
             )}
-            {counts.tool > 0 && <span>· {counts.tool} {t("overview_card_tool_unit")}</span>}
+            {counts.tool > 0 && <span>{errorCount > 0 ? "· " : ""}{counts.tool} {t("overview_card_tool_unit")}</span>}
           </>
         ) : (
-          <span>—</span>
+          <span />
         )}
         <div className="flex-1" />
         {runtimeBadge && (
@@ -739,81 +748,106 @@ function AgentCard({ row }: { row: MatrixRow }) {
   );
 }
 
-// ── Active runs ──────────────────────────────────────────────────────
+// ── Realtime event stream ────────────────────────────────────────────
+// Replaces the old active-runs table. A live, human-readable feed of system
+// activity (the real /api/activity/recent monitoring log), styled like a
+// message stream: colored dot + kind token + narrative + relative time.
+// Clicking a row jumps to that run on /live.
 
-function ActiveRunsSection({ runs }: { runs: RunSummary[] | null }) {
-  const { t } = useApp();
+const STREAM_KIND: Record<LogKind, { token: string; color: string }> = {
+  "step.started":   { token: "STEP_STARTED",   color: "var(--c-info)" },
+  "step.completed": { token: "STEP_DONE",       color: "var(--c-ok)" },
+  "step.failed":    { token: "STEP_FAILED",     color: "var(--c-err)" },
+  "step.retrying":  { token: "RETRY",           color: "oklch(0.62 0.14 75)" },
+  narrative:        { token: "NARRATIVE",       color: "var(--c-ink-3)" },
+  tool:             { token: "TOOL_CALL",       color: "var(--c-accent)" },
+  decision:         { token: "DECISION",        color: "oklch(0.62 0.19 300)" },
+  anomaly:          { token: "ANOMALY",         color: "oklch(0.62 0.14 75)" },
+  error:            { token: "ERROR",           color: "var(--c-err)" },
+  hitl:             { token: "HITL",            color: "oklch(0.62 0.14 75)" },
+  info:             { token: "INFO",            color: "var(--c-ink-3)" },
+};
+
+function streamRelTime(iso: string, zh: boolean): string {
+  const diffSec = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (diffSec < 45) return zh ? "刚刚" : "just now";
+  const m = Math.floor(diffSec / 60);
+  if (m < 60) return zh ? `${Math.max(1, m)} 分钟前` : `${Math.max(1, m)}m ago`;
+  const h = Math.floor(diffSec / 3600);
+  if (h < 24) return zh ? `${h} 小时前` : `${h}h ago`;
+  return zh ? `${Math.floor(diffSec / 86400)} 天前` : `${Math.floor(diffSec / 86400)}d ago`;
+}
+
+function RealtimeStream({ entries, activeCount }: { entries: LogEntry[] | null; activeCount: number | null }) {
+  const { t, lang } = useApp();
+  const zh = lang !== "en";
   return (
     <section>
-      <div className="flex items-baseline mb-3">
-        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4 flex-1">
-          {t("overview_active_title")}
+      <div className="flex items-center mb-3 gap-2">
+        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4">
+          {t("em_stream")}
         </div>
-        <Link
-          href="/live?status=active"
-          className="text-[11px] text-ink-3 no-underline hover:text-accent"
-        >
+        <span className="rounded-full anim-pulse" style={{ width: 6, height: 6, background: "var(--c-ok)" }} />
+        {activeCount != null && activeCount > 0 && (
+          <span className="text-[11px] text-ink-3 tabular-nums">
+            {activeCount} {t("overview_active_title")}
+          </span>
+        )}
+        <div className="flex-1" />
+        <Link href="/live?status=active" className="text-[11px] text-ink-3 no-underline hover:text-accent">
           {t("overview_active_view_all")}
         </Link>
       </div>
-      {!runs ? (
+      {!entries ? (
         <div className="text-[12px] text-ink-3 py-4">{t("overview_matrix_loading")}</div>
-      ) : runs.length === 0 ? (
+      ) : entries.length === 0 ? (
         <div className="text-[11.5px] text-ink-3 py-4">{t("overview_active_empty")}</div>
       ) : (
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ width: 130 }}>{t("overview_active_th_start")}</th>
-              <th style={{ width: 200 }}>{t("overview_active_th_event")}</th>
-              <th>{t("overview_active_th_target")}</th>
-              <th style={{ width: 100 }}>{t("overview_active_th_duration")}</th>
-              <th style={{ width: 90 }}>HITL</th>
-              <th style={{ width: 80 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((r) => (
-              <ActiveRunRow key={r.id} run={r} />
-            ))}
-          </tbody>
-        </table>
+        <div className="rounded-[10px] bg-claude-panel divide-y divide-claude-line/60 overflow-hidden">
+          {entries.map((e, i) => (
+            <StreamRow key={e.id} entry={e} idx={i} zh={zh} />
+          ))}
+        </div>
       )}
     </section>
   );
 }
 
-function ActiveRunRow({ run }: { run: RunSummary }) {
-  const { t } = useApp();
-  const start = new Date(run.startedAt);
-  const last = new Date(run.lastActivityAt);
-  const durMs = Math.max(0, last.getTime() - start.getTime());
-  return (
-    <tr>
-      <td className="mono text-[11px] text-ink-2">
-        {start.toLocaleTimeString(undefined, { hour12: false })}
-      </td>
-      <td className="mono text-[11.5px] text-ink-1 truncate">{run.triggerEvent}</td>
-      <td className="text-[11.5px] text-ink-2 truncate">
-        {run.triggerData.client} · {run.triggerData.jdId}
-      </td>
-      <td className="mono text-[11px] text-ink-2 tabular-nums">{formatDuration(durMs)}</td>
-      <td>
-        {run.pendingHumanTasks > 0 ? (
-          <Badge variant="warn">{run.pendingHumanTasks}</Badge>
-        ) : (
-          <span className="mono text-[10.5px] text-ink-4">—</span>
+function StreamRow({ entry, idx, zh }: { entry: LogEntry; idx: number; zh: boolean }) {
+  const meta = STREAM_KIND[entry.kind] ?? { token: entry.kind.toUpperCase(), color: "var(--c-ink-3)" };
+  const inner = (
+    <div
+      className="ao-stream-in cursor-pointer hover:bg-claude-surface transition-colors flex items-start gap-2.5"
+      style={{ padding: "11px 16px", ["--ao-i"]: Math.min(idx, 16) } as React.CSSProperties}
+    >
+      <span
+        className="rounded-full shrink-0"
+        style={{ width: 7, height: 7, marginTop: 4, background: meta.color, boxShadow: `0 0 0 3px color-mix(in oklab, ${meta.color} 16%, transparent)` }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="mono font-medium shrink-0" style={{ fontSize: 10.5, letterSpacing: "0.02em", color: meta.color }}>
+            {meta.token}
+          </span>
+          <span className="text-[12.5px] text-claude-ink-1 truncate flex-1" style={{ letterSpacing: "-0.005em" }}>
+            {entry.message}
+          </span>
+          <span className="text-[10.5px] text-claude-ink-4 tabular-nums shrink-0">
+            {streamRelTime(entry.ts, zh)}
+          </span>
+        </div>
+        {entry.agent && entry.agent !== "system" && (
+          <div className="text-[11px] text-claude-ink-3 truncate" style={{ marginTop: 1 }}>{entry.agent}</div>
         )}
-      </td>
-      <td>
-        <Link
-          href={`/live?run=${encodeURIComponent(run.id)}`}
-          className="mono text-[11px] text-ink-2 no-underline hover:text-ink-1"
-        >
-          {t("overview_active_open")}
-        </Link>
-      </td>
-    </tr>
+      </div>
+    </div>
+  );
+  return entry.runId ? (
+    <Link href={`/live?run=${encodeURIComponent(entry.runId)}`} className="no-underline block">
+      {inner}
+    </Link>
+  ) : (
+    inner
   );
 }
 
@@ -822,7 +856,7 @@ function ActiveRunRow({ run }: { run: RunSummary }) {
 function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
   const { t } = useApp();
   // Inline (post-Tier-C) — was a 360px right sidebar before. Header matches
-  // ActiveRunsSection (uppercase tracked + right-aligned audit jump).
+  // the realtime stream (uppercase tracked + right-aligned audit jump).
   return (
     <section>
       <div className="flex items-baseline mb-3">
@@ -902,12 +936,3 @@ function AnomalyRow({ entry }: { entry: LogEntry }) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—";
-  const s = Math.floor(ms / 1000);
-  const hh = String(Math.floor(s / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}

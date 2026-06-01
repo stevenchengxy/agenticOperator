@@ -348,7 +348,7 @@ export async function ruleCheckAgentHandler({
       rules_evaluated: result.audit.rules_evaluated,
       graph_calls: result.audit.graph_calls,
       client_id: dims.client_id,
-      business_group: dims.business_group,
+      business_group: result.audit.business_group_resolved ?? dims.business_group,
       studio: dims.studio,
       llm_model: result.audit.llm_model,
       llm_duration_ms: result.audit.llm_duration_ms,
@@ -379,7 +379,9 @@ export async function ruleCheckAgentHandler({
             // 写时持久化可读客户名(解析自 partner-pg/ontology);读时直接读,
             // 不再实时查 partner-pg → 干掉 detail/总览 的 ETIMEDOUT。
             client_display_name: result.audit.client_name_resolved ?? null,
-            business_group: dims.business_group ?? null,
+            // Prefer the fetch-time resolved bg (graph lookup ⊇ JR's own bg field);
+            // fall back to dims only when resolution returned nothing.
+            business_group: result.audit.business_group_resolved ?? dims.business_group ?? null,
             studio: dims.studio ?? null,
             // Policy 2026-05-20: 信息缺失/REVIEW 都放行,只有真违反才 FAIL。
             // foldDecision 已经把 insufficient_info 折成 PASS;REVIEW 表示需要

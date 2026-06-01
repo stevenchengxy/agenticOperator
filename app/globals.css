@@ -482,9 +482,82 @@ body {
 .rc-gauge-arc { transition: stroke-dashoffset 1000ms cubic-bezier(0.22, 1, 0.36, 1); }
 .rc-dim-bar { transition: width 760ms cubic-bezier(0.22, 1, 0.36, 1); }
 
+/* Decision banner (PASS/FAIL hero) — settle-in + verdict pop. */
+@keyframes rcBannerIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rc-banner-in { animation: rcBannerIn 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes rcVerdictPop {
+  0%   { opacity: 0; transform: scale(0.82); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+.rc-verdict-pop {
+  animation: rcVerdictPop 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: 90ms;
+  transform-origin: left center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rc-row-in, .rc-drawer-in, .rc-fade-in,
-  .rc-verify-reveal, .rc-gauge-in { animation: none; }
+  .rc-verify-reveal, .rc-gauge-in,
+  .rc-banner-in, .rc-verdict-pop { animation: none; }
   .rc-verify-shimmer { animation: none; }
   .rc-gauge-arc, .rc-dim-bar { transition: none; }
+}
+
+/* ── AO page polish kit (Fleet / Monitor / Overview) ─────────────────── */
+/* Restrained, control-board-appropriate motion. Every list/card uses
+   --ao-i (zero-based index) for a short stagger. */
+
+@keyframes aoFadeRise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ao-fade-rise {
+  animation: aoFadeRise 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--ao-i, 0) * 28ms);
+}
+
+@keyframes aoExpandReveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ao-expand-reveal { animation: aoExpandReveal 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes aoPopIn {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.ao-pop-in { animation: aoPopIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Success-rate / progress bars grow to their target width on mount. The
+   target width is set inline; the transition animates from the 0 start. */
+.ao-bar-grow { transition: width 720ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Hover lift for rows / cards — pairs with a transparent default border so
+   nothing shifts layout. */
+.ao-hover-lift { transition: background 140ms ease-out, box-shadow 160ms ease-out, transform 160ms ease-out; }
+.ao-hover-lift:hover { transform: translateY(-1px); box-shadow: 0 2px 10px color-mix(in oklab, var(--c-ink-1) 8%, transparent); }
+
+/* Sliding tab underline — the active indicator translates between tabs. */
+.ao-tab-underline { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), width 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Soft entrance flash for newly-arrived stream rows. */
+@keyframes aoStreamIn {
+  0%   { opacity: 0; transform: translateX(-4px); }
+  60%  { background: color-mix(in oklab, var(--c-accent) 8%, transparent); }
+  100% { opacity: 1; transform: translateX(0); background: transparent; }
+}
+.ao-stream-in {
+  animation: aoStreamIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--ao-i, 0) * 30ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ao-fade-rise, .ao-expand-reveal, .ao-pop-in, .ao-stream-in { animation: none; }
+  .ao-bar-grow, .ao-hover-lift, .ao-tab-underline { transition: none; }
+  .ao-hover-lift:hover { transform: none; }
 }

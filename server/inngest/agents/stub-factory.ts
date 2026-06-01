@@ -15,7 +15,7 @@
 //   8. For terminal agents: calls markRunComplete
 //
 // Env knobs:
-//   STUB_AGENTS=0          — disable all stubs (default: enabled)
+//   STUB_AGENTS=1          — enable all stubs (default: disabled, prod-clean)
 //   STUB_SUCCESS_RATE=0.9  — probability of picking the "success" emit path
 //   STUB_HITL_DELAY_MS=5000 — ms before a HITL task auto-resolves
 
@@ -41,7 +41,7 @@ const HITL_AUTO_RESOLVE_MS = parseInt(
 const STUB_SUCCESS_RATE = parseFloat(
   process.env.STUB_SUCCESS_RATE ?? "0.9",
 );
-const STUB_ENABLED = process.env.STUB_AGENTS !== "0"; // default ON
+const STUB_ENABLED = process.env.STUB_AGENTS === "1"; // default OFF (prod-clean)
 
 type EventData = Record<string, unknown> & { _runId?: string };
 

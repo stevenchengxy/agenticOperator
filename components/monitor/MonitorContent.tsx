@@ -151,31 +151,17 @@ export function MonitorContent() {
           </div>
         </div>
 
-        <div className="flex items-center gap-x-7 gap-y-1.5 mt-4 flex-wrap">
-          <CountChip label={t("mox_count_total")} value={String(filtered.length)} tone="muted" />
-          <CountChip
-            label={t("mox_count_running")}
-            value={String(counts.running)}
-            tone={counts.running > 0 ? "ok" : "muted"}
-            active={statusFilter === "Running"}
-            onClick={() => setUrl((p) => statusFilter === "Running" ? p.delete("status") : p.set("status", "Running"))}
-          />
-          <CountChip
-            label={t("mox_count_completed")}
-            value={String(counts.completed)}
-            tone="muted"
-            active={statusFilter === "Completed"}
-            onClick={() => setUrl((p) => statusFilter === "Completed" ? p.delete("status") : p.set("status", "Completed"))}
-          />
-          <CountChip
-            label={t("mox_count_failed")}
-            value={String(counts.failed)}
-            tone={counts.failed > 0 ? "err" : "muted"}
-            active={statusFilter === "Failed"}
-            onClick={() => setUrl((p) => statusFilter === "Failed" ? p.delete("status") : p.set("status", "Failed"))}
+        <div className="flex items-end gap-x-2 mt-3 flex-wrap">
+          <MonitorTabs
+            value={statusFilter}
+            counts={{ all: filtered.length, running: counts.running, completed: counts.completed, failed: counts.failed }}
+            onChange={(next) => setUrl((p) => next === "all" ? p.delete("status") : p.set("status", next))}
+            t={t}
           />
           <div className="flex-1" />
-          <WindowSelector value={windowId} onChange={(v) => setUrl((p) => v === "24h" ? p.delete("window") : p.set("window", v))} />
+          <div className="pb-2">
+            <WindowSelector value={windowId} onChange={(v) => setUrl((p) => v === "24h" ? p.delete("window") : p.set("window", v))} />
+          </div>
         </div>
       </div>
 
@@ -347,11 +333,11 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
         <span style={{ textAlign: "center" }}>{t("mox_col_rerun")}</span>
         <span />
       </div>
-      {runs.map((r) => {
+      {runs.map((r, i) => {
         const expanded = expandedId === r.id;
         const agentShort = slugToShort(r.function?.slug);
         return (
-          <div key={r.id} className="border-b border-line">
+          <div key={r.id} className="border-b border-line ao-fade-rise" style={{ ["--ao-i"]: Math.min(i, 18) } as React.CSSProperties}>
             <div
               className="w-full grid items-center gap-4 hover:bg-panel transition-colors"
               style={{ padding: "12px 12px", gridTemplateColumns: "200px minmax(0, 1fr) 110px 90px 80px 90px 18px", minWidth: 760 }}
@@ -479,33 +465,48 @@ function slugToShort(slug: string | undefined): string | null {
 
 // ── controls ────────────────────────────────────────────────────
 
-function CountChip({
-  label, value, tone, active, onClick,
+function MonitorTabs({
+  value, counts, onChange, t,
 }: {
-  label: string;
-  value: string;
-  tone?: "ok" | "err" | "muted";
-  active?: boolean;
-  onClick?: () => void;
+  value: StatusFilter;
+  counts: { all: number; running: number; completed: number; failed: number };
+  onChange: (v: StatusFilter) => void;
+  t: (k: string) => string;
 }) {
-  const color =
-    tone === "ok"    ? "var(--c-ok)" :
-    tone === "err"   ? "var(--c-err)" :
-    tone === "muted" ? "var(--c-ink-2)" :
-    "var(--c-ink-1)";
-  const Tag: React.ElementType = onClick ? "button" : "div";
+  const tabs: { id: StatusFilter; label: string; count: number; tone?: "ok" | "err" }[] = [
+    { id: "all",       label: t("mox_count_all"),       count: counts.all },
+    { id: "Running",   label: t("mox_count_running"),   count: counts.running, tone: counts.running > 0 ? "ok" : undefined },
+    { id: "Completed", label: t("mox_count_completed"), count: counts.completed },
+    { id: "Failed",    label: t("mox_count_failed"),    count: counts.failed, tone: counts.failed > 0 ? "err" : undefined },
+  ];
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [ind, setInd] = React.useState<{ left: number; width: number } | null>(null);
+  React.useLayoutEffect(() => {
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-tab="${value}"]`);
+    if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth });
+  }, [value, counts.all, counts.running, counts.completed, counts.failed]);
   return (
-    <Tag
-      onClick={onClick}
-      className={"flex items-baseline gap-2 transition-opacity " + (onClick ? "cursor-pointer hover:opacity-75" : "")}
-      style={{
-        borderBottom: active ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
-        paddingBottom: 2,
-      }}
-    >
-      <span className="text-ink-3" style={{ fontSize: 12 }}>{label}</span>
-      <span className="font-semibold tabular-nums" style={{ fontSize: 18, color, letterSpacing: "-0.015em" }}>{value}</span>
-    </Tag>
+    <div ref={containerRef} className="relative flex items-end gap-1">
+      {tabs.map((tab) => {
+        const on = value === tab.id;
+        const countColor = tab.tone === "err" ? "var(--c-err)" : tab.tone === "ok" ? "var(--c-ok)" : on ? "var(--c-ink-2)" : "var(--c-ink-4)";
+        return (
+          <button
+            key={tab.id}
+            data-tab={tab.id}
+            onClick={() => onChange(tab.id)}
+            className="flex items-baseline gap-1.5 transition-colors"
+            style={{ padding: "8px 12px 10px", color: on ? "var(--c-ink-1)" : "var(--c-ink-3)", fontWeight: on ? 600 : 400, fontSize: 13.5 }}
+          >
+            <span>{tab.label}</span>
+            <span className="tabular-nums" style={{ fontSize: 12, color: countColor }}>{tab.count}</span>
+          </button>
+        );
+      })}
+      {ind && (
+        <span className="absolute ao-tab-underline" style={{ bottom: 0, height: 2, background: "var(--c-ink-1)", left: ind.left, width: ind.width }} />
+      )}
+    </div>
   );
 }
 

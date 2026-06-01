@@ -519,6 +519,9 @@ export async function runRuleCheck(
       llm_finish_reason: llmResult.finishReason,
       // 解析好的可读客户名 — 透传给 agent 持久化进 audit 行(读时不再实时查 partner-pg)。
       client_name_resolved: sourceResult.client_name_resolved,
+      // 解析好的 business group(图查 Client_Department + 字符串兜底)— 比 JR 自带的
+      // bg 字段更全,透传给 agent 持久化,避免 JR 缺 bg 字段时 audit 落空(显示「?」)。
+      business_group_resolved: sourceResult.business_group_resolved,
       // 2026-05-20: surface the prompts + raw response so the /rule-check
       // audit UI's User Prompt / LLM Response / Rule Flags tabs have data.
       user_prompt: userPrompt,
