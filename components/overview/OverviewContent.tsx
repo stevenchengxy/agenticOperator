@@ -2,78 +2,52 @@
 import React from "react";
 import Link from "next/link";
 import { Ic } from "@/components/shared/Ic";
-import { Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
-import type { RunSummary, RunsResponse } from "@/lib/api/types";
+import type { RunsResponse, HumanTaskCard, HumanTasksResponse } from "@/lib/api/types";
 import type { ActivityResponse, LogEntry, LogKind } from "@/lib/api/activity-types";
 import { useAgentsHealth } from "@/lib/api/agents-health";
-import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/route";
-import { byShortFunction } from "@/lib/agent-functions";
-import { AGENT_MAP, byShort } from "@/lib/agent-mapping";
+import type { AgentHealth } from "@/app/api/agents/health/route";
+import { AGENT_MAP, displayName as agentDisplayName } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
-import { InngestPill } from "@/components/shared/InngestPill";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
 
-// /overview — system-at-a-glance dashboard.
+// /overview — operations dashboard.
 //
-// Job: "what's happening across the whole system right now?"
-// Scope:
-//   - everything姓"系统"; nothing scoped to a single run / agent / event
-//   - one screen, no tabs, no per-row drill-in (clicking jumps to the
-//     appropriate detail surface — /live, /workflow, /events, etc.)
+// Redesigned 2026-06-01 per user request: drop the recruitment-funnel +
+// 22-agent matrix in favor of a focused layout that generalizes across
+// business domains.
 //
 // Sections:
-//   A. 顶部 KPI 条 — active runs / 1h failed runs / 1h anomalies / total agents healthy
-//   B. Agent 矩阵 — AGENT_MAP 全量 agent，按部署 lifecycle 着色（绿/黄/红 = 已上线/暂停/未上线），
-//                  与 /fleet 状态点同源；runtime 异常作为次级标记叠加。
-//   C. 最近异常 — 跨 run 的 anomaly / error / step.failed 流; click → /live?run=...
-//   D. 当前 active run — top N; click → /live?run=...
+//   A. Hero — overline, time-of-day greeting, status sentence, refresh.
+//   B. KPI strip — 3 inline numbers (active runs / today's success rate
+//      / pending HITL). No cards.
+//   C. 2-column body — left: HITL list (待我处理); right: live event
+//      stream (实时事件流). Both filtered to the AppBar's active domain.
+//   D. Agent health grid — deployed agents in the active domain, one
+//      card each (invocations + success rate). Click → /fleet/<short>.
+//
+// All sections respect useDomain() — switching the AppBar domain re-scopes
+// the page in-place (no reload).
 
-// Deployment lifecycle = "is this agent online?" (mirrors /fleet FleetStatus):
-//   online       — real or shell Inngest function, not paused        → 绿
-//   paused       — registered Inngest function, paused               → 黄
-//   not_deployed — unbuilt (no Inngest function yet)                 → 红
-type DeployStatus = "online" | "paused" | "not_deployed";
+const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-const DEPLOY_TONE: Record<DeployStatus, { color: string; label: string }> = {
-  online:       { color: "var(--c-ok)",   label: "已上线" },
-  paused:       { color: "var(--c-warn)", label: "已暂停" },
-  not_deployed: { color: "var(--c-err)",  label: "未上线" },
-};
-
-// Runtime health overlay — only shown when deployed AND runtime signal is bad.
-// A deployed agent that's currently failing gets a small red ring on top of
-// the green/yellow headline dot so ops can spot it without losing the
-// "is it online?" answer.
-const RUNTIME_BADGE_TONE: Partial<Record<AgentHealthStatus, { color: string; label: string }>> = {
-  failed:   { color: "var(--c-err)",  label: "运行失败" },
-  degraded: { color: "var(--c-warn)", label: "运行降级" },
-  running:  { color: "var(--c-ok)",   label: "运行中" },
-};
-
-type MatrixRow = {
-  short: string;
-  deploy: DeployStatus;
-  health: AgentHealth | null;
-};
+type OverallTone = "calm" | "tense" | "alarm";
 
 export function OverviewContent() {
+  const { t } = useApp();
+  const { domain } = useDomain();
   const health = useAgentsHealth(4_000);
   const { byWsId: liveByWsId } = useInngestLiveOverlay();
   const { realness: realnessMap } = useDeploymentMap();
-  // Phase 0 (2026-06-01): Overview scopes to the AppBar's current domain.
-  // Matches /fleet's existing pattern — single source of truth is the AppBar.
-  const { domain } = useDomain();
-  const [activeRuns, setActiveRuns] = React.useState<RunSummary[] | null>(null);
-  const [failed1h, setFailed1h] = React.useState<RunSummary[] | null>(null);
-  const [anomalies, setAnomalies] = React.useState<LogEntry[] | null>(null);
-  const [streamEntries, setStreamEntries] = React.useState<LogEntry[] | null>(null);
+
+  const [activeCount, setActiveCount] = React.useState<number | null>(null);
+  const [failed1hCount, setFailed1hCount] = React.useState<number | null>(null);
   const [todayRuns, setTodayRuns] = React.useState<{ total: number; completed: number } | null>(null);
-  const [hitlPending, setHitlPending] = React.useState<number | null>(null);
+  const [hitlTasks, setHitlTasks] = React.useState<HumanTaskCard[] | null>(null);
+  const [stream, setStream] = React.useState<LogEntry[] | null>(null);
   const [dlqPending, setDlqPending] = React.useState<number | null>(null);
-  const [events1h, setEvents1h] = React.useState<number | null>(null);
   const [alertsActive, setAlertsActive] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -82,41 +56,28 @@ export function OverviewContent() {
     today0.setHours(0, 0, 0, 0);
     const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [active, failed, recent, stream, todayFinished, hitl, dlq, events, alerts] = await Promise.all([
-        fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=10"),
+      const [active, failed, streamRes, todayFinished, hitl, dlq, alerts] = await Promise.all([
+        fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=20"),
         fetchJson<RunsResponse>(
           `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
         ),
-        fetchJson<ActivityResponse>(
-          "/api/activity/recent?kind=anomaly,error,step.failed&windowMs=3600000&limit=15",
-        ),
-        // Live event stream — all activity kinds, newest first.
-        fetchJson<ActivityResponse>("/api/activity/recent?windowMs=3600000&limit=16"),
-        // 今日完成数 — completed since 00:00. completed/total ratio drives 成功率 KPI.
+        fetchJson<ActivityResponse>("/api/activity/recent?windowMs=3600000&limit=14"),
         fetchJson<RunsResponse>(
           `/api/runs?status=completed,failed,timed_out,interrupted&since=${encodeURIComponent(today0.toISOString())}&limit=1000`,
         ),
-        fetchJson<{ total?: number; tasks?: unknown[] }>("/api/human-tasks?status=pending"),
+        fetchJson<HumanTasksResponse>("/api/human-tasks?status=pending"),
         fetchJson<{ pending: number }>("/api/em/dlq/count"),
-        fetchJson<{ total?: number; events?: unknown[] }>(
-          `/api/inngest-events?since=${encodeURIComponent(since1h)}`,
-        ),
-        // Active alerts — those not yet acked. Endpoint already filters by
-        // resolved/unresolved at the source; we count unacked here for the
-        // operator-attention signal in the system-status strip.
         fetchJson<{ alerts: Array<{ acked: boolean }> }>("/api/alerts"),
       ]);
-      setActiveRuns(active.runs);
-      setFailed1h(failed.runs);
-      setAnomalies(recent.entries);
-      setStreamEntries(stream.entries);
+      setActiveCount(active.runs.length);
+      setFailed1hCount(failed.runs.length);
+      setStream(streamRes.entries);
       setTodayRuns({
         total: todayFinished.runs.length,
         completed: todayFinished.runs.filter((r) => r.status === "completed").length,
       });
-      setHitlPending(hitl.total ?? hitl.tasks?.length ?? 0);
-      setDlqPending(dlq.pending);
-      setEvents1h(events.total ?? events.events?.length ?? 0);
+      setHitlTasks(hitl.recent ?? []);
+      setDlqPending(dlq.pending ?? 0);
       setAlertsActive(alerts.alerts.filter((a) => !a.acked).length);
       setError(null);
     } catch (e) {
@@ -130,95 +91,83 @@ export function OverviewContent() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Diagnose "is the system actually emitting data?". When everything is
-  // empty, surface a concrete banner explaining WHY (so users don't assume
-  // the UI is broken when in fact no agents are running).
-  const isAllIdle =
-    health.agents.length > 0 &&
-    health.agents.every((a) => a.status === "idle") &&
-    (activeRuns?.length ?? 0) === 0 &&
-    (anomalies?.length ?? 0) === 0;
+  // Set of agent shorts in the current domain. Used to filter HITL list +
+  // event stream + agent grid. "system" agent passes through (cross-domain).
+  const shortsInDomain = React.useMemo(
+    () => new Set(AGENT_MAP.filter((a) => a.domain === domain).map((a) => a.short)),
+    [domain],
+  );
 
-  // Build matrix rows from AGENT_MAP (single source of truth — same set
-  // /fleet renders). Deployment status mirrors /fleet's FleetStatus exactly;
-  // runtime health is overlaid as a secondary signal.
-  const matrixRows: MatrixRow[] = React.useMemo(() => {
-    // Chatbot is the UI assistant (AO·UI), not a recruitment-pipeline agent —
-    // hide it from the fleet matrix. Also scope to the active domain so the
-    // matrix reflects whatever the AppBar is showing.
-    const rows: MatrixRow[] = AGENT_MAP
-      .filter((a) => a.short !== "Chatbot" && a.domain === domain)
-      .map((a) => {
-      const kind = realnessMap.get(a.short) ?? "unbuilt";
-      const live = liveByWsId.get(a.wsId);
-      const deploy: DeployStatus =
-        kind === "unbuilt" ? "not_deployed" :
-        live?.paused       ? "paused" :
-                             "online";
-      return { short: a.short, deploy, health: health.byShort.get(a.short) ?? null };
-    });
-    // Sort: not_deployed → paused → online, then by failing runtime first,
-    // then alpha. Puts attention-worthy gaps at the top of the matrix.
-    const deployOrder: Record<DeployStatus, number> = { not_deployed: 0, paused: 1, online: 2 };
-    const healthOrder: Record<AgentHealthStatus, number> = {
-      failed: 0, degraded: 1, running: 2, healthy: 3, idle: 4,
-    };
-    rows.sort((x, y) => {
-      if (deployOrder[x.deploy] !== deployOrder[y.deploy]) {
-        return deployOrder[x.deploy] - deployOrder[y.deploy];
-      }
-      const hx = x.health ? healthOrder[x.health.status] : 4;
-      const hy = y.health ? healthOrder[y.health.status] : 4;
-      if (hx !== hy) return hx - hy;
-      return x.short.localeCompare(y.short);
-    });
-    return rows;
-  }, [liveByWsId, health.byShort, realnessMap, domain]);
+  const hitlInDomain = React.useMemo<HumanTaskCard[] | null>(
+    () => hitlTasks?.filter((tk) => shortsInDomain.has(tk.agentShort)) ?? null,
+    [hitlTasks, shortsInDomain],
+  );
 
-  const deployCounts = React.useMemo(() => {
-    const out = { online: 0, paused: 0, not_deployed: 0 };
-    for (const r of matrixRows) out[r.deploy]++;
-    return out;
-  }, [matrixRows]);
+  const streamInDomain = React.useMemo<LogEntry[] | null>(
+    () => stream?.filter((e) => e.agent === "system" || shortsInDomain.has(e.agent)) ?? null,
+    [stream, shortsInDomain],
+  );
+
+  // Deployed agents in domain, sorted by recent activity (most active first).
+  const agentCards = React.useMemo(() => {
+    return AGENT_MAP
+      .filter((a) => a.domain === domain && a.short !== "Chatbot")
+      .map((a) => ({
+        agent: a,
+        kind: realnessMap.get(a.short) ?? ("unbuilt" as const),
+        paused: liveByWsId.get(a.wsId)?.paused ?? false,
+        health: health.byShort.get(a.short) ?? null,
+      }))
+      .filter((c) => c.kind !== "unbuilt")
+      .sort((x, y) => (y.health?.counts.started ?? 0) - (x.health?.counts.started ?? 0));
+  }, [domain, realnessMap, liveByWsId, health.byShort]);
+
+  const successRate =
+    todayRuns && todayRuns.total > 0
+      ? Math.round((todayRuns.completed / todayRuns.total) * 1000) / 10
+      : null;
+
+  const tone: OverallTone = computeTone(
+    failed1hCount ?? 0,
+    alertsActive ?? 0,
+    dlqPending ?? 0,
+  );
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-auto">
-      <Header onRefresh={refresh} fetchedAt={health.fetchedAt} />
-      {isAllIdle && <DataFlowDiagnostic />}
-      <KpiBar
-        agents={health.agents}
-        deployCounts={deployCounts}
-        activeCount={activeRuns?.length ?? null}
-        failed1hCount={failed1h?.length ?? null}
-        anomaly1hCount={anomalies?.length ?? null}
-        todayRuns={todayRuns}
-        hitlPending={hitlPending}
+      <HeroHeader
+        t={t}
+        activeCount={activeCount}
+        hitlCount={hitlInDomain?.length ?? null}
+        alertsActive={alertsActive}
         dlqPending={dlqPending}
-        events1h={events1h}
+        tone={tone}
+        fetchedAt={health.fetchedAt}
+        onRefresh={refresh}
       />
-      {error && (
-        <div
-          className="border-b border-line mono text-[11.5px]"
-          style={{
-            padding: "8px 22px",
-            background: "var(--c-warn-bg)",
-            color: "oklch(0.5 0.14 75)",
-          }}
-        >
-          ⚠ 加载部分失败：{error}
-        </div>
-      )}
-      {/* Single-column flow — anomalies moved out of the right rail and
-          into the main vertical sequence (per Tier C of design proposal).
-          Lose always-visible right-pane in trade for a calmer single-axis
-          read. Max-width constrained so lines don't sprawl on wide screens. */}
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto" style={{ padding: "32px 32px", maxWidth: 1280 }}>
-          <SystemStatusStrip deployCounts={deployCounts} alertsActive={alertsActive} />
-          <AgentMatrix rows={matrixRows} loading={health.loading} counts={deployCounts} />
-          <RealtimeStream entries={streamEntries} activeCount={activeRuns?.length ?? null} />
-          <div className="mt-8">
-            <AnomaliesSection entries={anomalies} />
+      {error && <ErrorBar message={error} />}
+      <div className="flex-1">
+        <div className="mx-auto" style={{ padding: "20px 32px 48px", maxWidth: 1280 }}>
+          <KpiStrip
+            t={t}
+            activeCount={activeCount}
+            successRate={successRate}
+            todayRuns={todayRuns}
+            hitlCount={hitlInDomain?.length ?? null}
+          />
+          <div
+            className="grid mt-6"
+            style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}
+          >
+            <TodoPanel t={t} tasks={hitlInDomain} />
+            <EventStreamPanel
+              t={t}
+              entries={streamInDomain}
+              activeCount={activeCount}
+            />
+          </div>
+          <div className="mt-6">
+            <AgentHealthGrid t={t} cards={agentCards} />
           </div>
         </div>
       </div>
@@ -226,79 +175,49 @@ export function OverviewContent() {
   );
 }
 
-// ── Data-flow diagnostic banner ──────────────────────────────────────
-//
-// Shows up when /overview can't find ANY signs of life — no active runs,
-// no anomalies, all agents idle. The intent is to distinguish "UI is broken"
-// from "system is registered but no one's emitting events". The latter is
-// normal between operations; the banner just gives the user a one-click
-// path to verify or trigger activity.
+// ── Hero header ─────────────────────────────────────────────────────────
 
-function DataFlowDiagnostic() {
-  const { t } = useApp();
-  const aoUrl = typeof window !== "undefined" ? window.location.origin : "<host>";
-  return (
-    <div
-      className="border-b flex items-start gap-3"
-      style={{
-        background: "color-mix(in oklab, var(--c-info) 8%, transparent)",
-        borderColor: "color-mix(in oklab, var(--c-info) 30%, var(--c-line))",
-        padding: "12px 22px",
-      }}
-    >
-      <Ic.alert />
-      <div className="flex-1 text-[12px] leading-relaxed">
-        <div className="font-semibold mb-1" style={{ color: "var(--c-info)" }}>
-          {t("overview_diag_title")}
-        </div>
-        <div className="text-ink-2">{t("overview_diag_intro")}</div>
-        <ul className="mt-2 text-ink-2" style={{ listStyle: "disc", paddingLeft: 18 }}>
-          <li>
-            {t("overview_diag_li_test")}{" "}
-            <code className="mono text-[11px]">POST /api/test/trigger-requirement</code>
-            {" "}{t("overview_diag_li_test_desc")}
-          </li>
-          <li>
-            {t("overview_diag_li_publish")}{" "}
-            <code className="mono text-[11px]">POST /api/inngest-events {`{name, data}`}</code>
-          </li>
-          <li>
-            {t("overview_diag_li_sync")} <strong>InngestPill</strong> {t("overview_diag_li_sync_2")}{" "}
-            <code className="mono text-[11px]">{aoUrl}/api/inngest</code>
-          </li>
-        </ul>
-        <div className="text-ink-3 text-[11.5px] mt-2">
-          {t("overview_diag_footer_runlog")}{" "}
-          <Link href="/live" className="text-accent hover:underline">/live</Link>，
-          {t("overview_diag_footer_config")}{" "}
-          <Link href="/fleet" className="text-accent hover:underline">/fleet</Link> {t("overview_diag_footer_config_2")} InngestPill。
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Header ───────────────────────────────────────────────────────────
-
-const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
-
-function Header({
-  onRefresh,
+function HeroHeader({
+  t,
+  activeCount,
+  hitlCount,
+  alertsActive,
+  dlqPending,
+  tone,
   fetchedAt,
+  onRefresh,
 }: {
-  onRefresh: () => void;
+  t: (k: string) => string;
+  activeCount: number | null;
+  hitlCount: number | null;
+  alertsActive: number | null;
+  dlqPending: number | null;
+  tone: OverallTone;
   fetchedAt: Date | null;
+  onRefresh: () => void;
 }) {
-  const { t } = useApp();
+  const greeting = greetingForHour(new Date().getHours(), t);
+  const toneKey =
+    tone === "calm"
+      ? "overview_status_calm"
+      : tone === "tense"
+        ? "overview_status_tense"
+        : "overview_status_alarm";
+  const sentence = t("overview_status_sentence")
+    .replace("{active}", activeCount === null ? "…" : String(activeCount))
+    .replace("{hitl}", hitlCount === null ? "…" : String(hitlCount))
+    .replace("{tone}", t(toneKey));
+  const statusStrip = t("overview_status_strip")
+    .replace("{alerts}", alertsActive === null ? "…" : String(alertsActive))
+    .replace("{dlq}", dlqPending === null ? "…" : String(dlqPending));
+
   return (
     <div
       className="border-b border-line bg-surface flex items-start"
-      style={{ padding: "32px 32px 24px", gap: 24 }}
+      style={{ padding: "28px 32px 20px", gap: 24 }}
     >
       <div className="flex-1 min-w-0">
-        <div
-          className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2"
-        >
+        <div className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2">
           {t("overview_overline")}
         </div>
         <h1
@@ -311,585 +230,446 @@ function Header({
             lineHeight: 1.1,
           }}
         >
-          {t("overview_title")}
+          {greeting}，{t("overview_team_label")}
         </h1>
-        <div className="text-ink-2 mt-2" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-          {t("overview_sub")}
+        <div
+          className="text-ink-2 mt-2"
+          style={{ fontSize: 13.5, lineHeight: 1.55, maxWidth: 720 }}
+        >
+          {sentence}
         </div>
       </div>
-      <div className="flex items-center gap-3 mt-1 shrink-0">
-        <InngestPill />
-        {fetchedAt && (
-          <span className="text-[11px] text-ink-4 tabular-nums">
-            {t("overview_updated_at")} {fetchedAt.toLocaleTimeString(undefined, { hour12: false })}
+      <div className="flex flex-col items-end gap-3" style={{ minWidth: 220 }}>
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block rounded-full"
+            style={{
+              width: 6,
+              height: 6,
+              background: "var(--c-ok)",
+              boxShadow: `0 0 0 3px color-mix(in oklab, var(--c-ok) 18%, transparent)`,
+            }}
+          />
+          <span className="mono text-[11.5px] text-ink-3">
+            {t("overview_realtime_label")} ·{" "}
+            {fetchedAt ? formatTime(fetchedAt) : "—"}
           </span>
-        )}
-        <Btn size="sm" variant="ghost" onClick={onRefresh}>
-          <Ic.bolt /> {t("overview_refresh")}
-        </Btn>
+          <button
+            onClick={onRefresh}
+            title="刷新"
+            className="inline-flex items-center gap-1 text-[11.5px] border border-line rounded-sm bg-panel text-ink-2 cursor-pointer hover:border-line-strong"
+            style={{ padding: "2px 8px" }}
+          >
+            <span style={{ fontSize: 10 }}>↻</span> 刷新
+          </button>
+        </div>
+        <div
+          className="text-ink-3 mono text-[11px] text-right"
+          style={{ lineHeight: 1.5 }}
+        >
+          {statusStrip}
+        </div>
       </div>
     </div>
   );
 }
 
-// ── KPI bar ──────────────────────────────────────────────────────────
-
-function KpiBar({
-  agents,
-  deployCounts,
-  activeCount,
-  failed1hCount,
-  anomaly1hCount,
-  todayRuns,
-  hitlPending,
-  dlqPending,
-  events1h,
-}: {
-  agents: AgentHealth[];
-  deployCounts: { online: number; paused: number; not_deployed: number };
-  activeCount: number | null;
-  failed1hCount: number | null;
-  anomaly1hCount: number | null;
-  todayRuns: { total: number; completed: number } | null;
-  hitlPending: number | null;
-  dlqPending: number | null;
-  events1h: number | null;
-}) {
-  // Runtime health (AgentActivity-driven) is folded into anomaly · 1h KPI's
-  // subtext so we don't double-count error signals. Deployment count is the
-  // single "agents" KPI (matches /fleet exactly).
-  const runtimeCounts = React.useMemo(() => {
-    const out = { running: 0, healthy: 0, degraded: 0, failed: 0, idle: 0 };
-    for (const a of agents) out[a.status] += 1;
-    return out;
-  }, [agents]);
-  const totalAgents = deployCounts.online + deployCounts.paused + deployCounts.not_deployed;
-  const runtimeUnhealthy = runtimeCounts.degraded + runtimeCounts.failed;
-
-  const successRatePct =
-    todayRuns && todayRuns.total > 0
-      ? Math.round((todayRuns.completed / todayRuns.total) * 100)
-      : null;
-
-  const { t } = useApp();
-  const tpl = (s: string, vars: Record<string, string | number>) =>
-    Object.entries(vars).reduce((acc, [k, v]) => acc.replace(`{${k}}`, String(v)), s);
-  const agentsSub = `${deployCounts.online} ${t("overview_kpi_agents_status_online")} · ${deployCounts.paused} ${t("overview_kpi_agents_status_paused")} · ${deployCounts.not_deployed} ${t("overview_kpi_agents_status_not_deployed")}`;
-  const anomalySub =
-    t("overview_kpi_anomaly_sub") +
-    (runtimeUnhealthy > 0 ? ` · ${t("overview_kpi_anomaly_runtime_label")} ${runtimeUnhealthy}` : "");
-  // Two rows of 4. Top row = operational state right now. Bottom row =
-  // queues / throughput. All labels i18n-driven so zh/en switch is global.
+function ErrorBar({ message }: { message: string }) {
   return (
-    <div className="border-b border-line bg-surface" style={{ padding: "24px 32px" }}>
-      <div className="grid mb-6" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 32 }}>
-        <Kpi
-          label={t("overview_kpi_active")}
-          value={activeCount ?? "…"}
-          sub={t("overview_kpi_active_sub")}
-          href="/live?status=active"
-        />
-        <Kpi
-          label={t("overview_kpi_failed")}
-          value={failed1hCount ?? "…"}
-          sub={t("overview_kpi_failed_sub")}
-          tone={failed1hCount && failed1hCount > 0 ? "err" : undefined}
-          href="/live?status=failed&time=1h"
-        />
-        <Kpi
-          label={t("overview_kpi_anomaly")}
-          value={anomaly1hCount ?? "…"}
-          sub={anomalySub}
-          tone={anomaly1hCount && anomaly1hCount > 0 ? "warn" : undefined}
-          href="/monitor"
-        />
-        <Kpi
-          label={t("overview_kpi_agents")}
-          value={`${deployCounts.online}/${totalAgents}`}
-          sub={agentsSub}
-          tone={deployCounts.online === 0 && totalAgents > 0 ? "err" : "ok"}
-          href="/fleet"
-        />
-      </div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 32 }}>
-        <Kpi
-          label={t("overview_kpi_today")}
-          value={successRatePct == null ? "—" : `${successRatePct}%`}
-          sub={
-            todayRuns
-              ? tpl(t("overview_kpi_today_sub"), {
-                  completed: todayRuns.completed,
-                  total: todayRuns.total,
-                })
-              : t("overview_kpi_today_loading")
-          }
-          tone={
-            successRatePct == null ? undefined
-              : successRatePct >= 95 ? "ok"
-              : successRatePct >= 80 ? "warn"
-              : "err"
-          }
-          href="/live"
-        />
-        <Kpi
-          label={t("overview_kpi_hitl")}
-          value={hitlPending ?? "…"}
-          sub={t("overview_kpi_hitl_sub")}
-          tone={hitlPending && hitlPending > 0 ? "warn" : undefined}
-          href="/inbox"
-        />
-        <Kpi
-          label={t("overview_kpi_dlq")}
-          value={dlqPending ?? "…"}
-          sub={t("overview_kpi_dlq_sub")}
-          tone={dlqPending && dlqPending > 0 ? "err" : undefined}
-          href="/events"
-        />
-        <Kpi
-          label={t("overview_kpi_events")}
-          value={events1h ?? "…"}
-          sub={t("overview_kpi_events_sub")}
-          href="/events"
-        />
-      </div>
+    <div
+      className="border-b mono text-[11.5px]"
+      style={{
+        padding: "8px 22px",
+        background: "var(--c-warn-bg)",
+        borderColor: "color-mix(in oklab, oklch(0.5 0.14 75) 25%, var(--c-line))",
+        color: "oklch(0.5 0.14 75)",
+      }}
+    >
+      ⚠ 加载部分失败:{message}
+    </div>
+  );
+}
+
+// ── KPI strip ───────────────────────────────────────────────────────────
+
+function KpiStrip({
+  t,
+  activeCount,
+  successRate,
+  todayRuns,
+  hitlCount,
+}: {
+  t: (k: string) => string;
+  activeCount: number | null;
+  successRate: number | null;
+  todayRuns: { total: number; completed: number } | null;
+  hitlCount: number | null;
+}) {
+  return (
+    <div className="flex items-baseline gap-10 flex-wrap" style={{ paddingTop: 4 }}>
+      <Kpi
+        valueColor="var(--c-accent)"
+        value={activeCount === null ? "…" : String(activeCount)}
+        label={t("overview_kpi_active")}
+      />
+      <Kpi
+        valueColor={
+          successRate === null
+            ? "var(--c-ink-3)"
+            : successRate >= 95
+              ? "var(--c-ok)"
+              : successRate >= 85
+                ? "oklch(0.6 0.14 75)"
+                : "var(--c-err)"
+        }
+        value={
+          successRate === null
+            ? "—"
+            : `${successRate}%`
+        }
+        label={t("overview_kpi_success_label")}
+        sub={
+          todayRuns
+            ? `${todayRuns.completed} / ${todayRuns.total} 次运行`
+            : undefined
+        }
+      />
+      <Kpi
+        valueColor={
+          hitlCount === null
+            ? "var(--c-ink-3)"
+            : hitlCount > 0
+              ? "oklch(0.6 0.14 75)"
+              : "var(--c-ink-2)"
+        }
+        value={hitlCount === null ? "…" : String(hitlCount)}
+        label={t("overview_kpi_hitl_label")}
+      />
     </div>
   );
 }
 
 function Kpi({
-  label,
   value,
+  label,
   sub,
-  tone,
-  href,
+  valueColor,
 }: {
+  value: string;
   label: string;
-  value: React.ReactNode;
-  sub: string;
-  tone?: "err" | "warn" | "ok";
-  href?: string;
+  sub?: string;
+  valueColor: string;
 }) {
-  // Claude metric styling — uppercase tracked label on top, big humanist
-  // tabular-nums value (no mono — mono makes numbers feel like log output,
-  // not a measurement), sub in muted ink. Color only flags problems;
-  // healthy/default numbers stay neutral ink-1 to keep the page calm.
-  const color =
-    tone === "err"
-      ? "var(--c-err)"
-      : tone === "warn"
-        ? "oklch(0.5 0.14 75)"
-        : tone === "ok"
-          ? "var(--c-ok)"
-          : "var(--c-ink-1)";
-  const inner = (
-    <div
-      className={href ? "cursor-pointer hover:opacity-70 transition-opacity" : ""}
-      style={{ minHeight: 80 }}
-    >
-      <div
-        className="text-[10px] uppercase tracking-[0.12em] font-medium text-ink-4 mb-2"
-      >
-        {label}
-      </div>
-      <div
-        className="font-medium tabular-nums"
-        style={{ fontSize: 30, color, lineHeight: 1.05, letterSpacing: "-0.01em" }}
+  return (
+    <div className="flex items-baseline gap-2.5">
+      <span
+        className="tabular-nums"
+        style={{
+          fontFamily: SERIF,
+          fontWeight: 500,
+          fontSize: 30,
+          letterSpacing: "-0.02em",
+          lineHeight: 1,
+          color: valueColor,
+        }}
       >
         {value}
-      </div>
-      <div className="text-[11px] text-ink-3 mt-1.5 leading-snug">{sub}</div>
-    </div>
-  );
-  return href ? (
-    <Link href={href} className="no-underline">
-      {inner}
-    </Link>
-  ) : (
-    inner
-  );
-}
-
-// ── System status strip ──────────────────────────────────────────────
-//
-// Replaces the 24-card AgentMatrix. Two reasons:
-//   1. The KPI bar already shows agents · 实装 X/Y — the per-card detail
-//      was redundant noise.
-//   2. /fleet exists for the per-agent view; Overview should aggregate,
-//      not duplicate.
-//
-// One compact horizontal strip showing 2 signal categories (deployment +
-// alerts) with jump links to the dedicated pages.
-
-function SystemStatusStrip({
-  deployCounts,
-  alertsActive,
-}: {
-  deployCounts: { online: number; paused: number; not_deployed: number };
-  alertsActive: number | null;
-}) {
-  const { t } = useApp();
-  const alertsLabel =
-    alertsActive == null
-      ? t("overview_status_loading")
-      : alertsActive === 0
-        ? t("overview_status_no_alerts")
-        : t("overview_status_active_alerts");
-  // Borderless chips with generous spacing — reads more like a status line
-  // than a form. Big tabular-nums per count, soft glow on the dots (consistent
-  // with Fleet's status indicator), uppercase tracked group labels.
-  return (
-    <section className="mb-8 flex items-center flex-wrap" style={{ gap: "8px 40px" }}>
-      <StatusGroup label={t("overview_status_deploy")}>
-        <StatusDot color="var(--c-ok)"   label={t("overview_kpi_agents_status_online")}       value={deployCounts.online} />
-        <StatusDot color="var(--c-warn)" label={t("overview_kpi_agents_status_paused")}       value={deployCounts.paused} />
-        <StatusDot color="var(--c-err)"  label={t("overview_kpi_agents_status_not_deployed")} value={deployCounts.not_deployed} />
-        <Link href="/fleet" className="ml-2 text-[11.5px] text-accent hover:underline no-underline">
-          {t("overview_jump_fleet")}
-        </Link>
-      </StatusGroup>
-      <StatusGroup label={t("overview_status_alerts")}>
-        <StatusDot
-          color={alertsActive && alertsActive > 0 ? "var(--c-err)" : "var(--c-ink-4)"}
-          label={alertsLabel}
-          value={alertsActive ?? null}
-        />
-        <Link href="/alerts" className="ml-2 text-[11.5px] text-accent hover:underline no-underline">
-          {t("overview_jump_alerts")}
-        </Link>
-      </StatusGroup>
-    </section>
-  );
-}
-
-function StatusGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="text-ink-4 text-[10px] uppercase tracking-[0.14em] font-medium">{label}</span>
-      <div className="flex items-center gap-4">{children}</div>
-    </div>
-  );
-}
-
-function StatusDot({ color, label, value }: { color: string; label: string; value: number | null }) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span
-        className="rounded-full"
-        style={{
-          width: 8,
-          height: 8,
-          background: color,
-          boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 16%, transparent)`,
-        }}
-      />
-      {value != null && (
-        <span className="tabular-nums font-medium text-ink-1" style={{ fontSize: 15 }}>
-          {value}
+      </span>
+      <div className="flex flex-col">
+        <span className="text-ink-1" style={{ fontSize: 13 }}>
+          {label}
         </span>
-      )}
-      <span className="text-ink-2 text-[12px]">{label}</span>
-    </span>
+        {sub && (
+          <span className="text-ink-3 mono" style={{ fontSize: 10.5 }}>
+            {sub}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
-// ── Agent matrix ─────────────────────────────────────────────────────
-// AGENT_MAP 全量 agent；着色与 /fleet 同源（已上线 / 已暂停 / 未上线）。
-// runtime health 作为副指示器叠加（部署正常但 runtime 失败的 agent 会带红
-// 环），这样 ops 既能一眼看出"哪些没上线"，也不会丢失"哪些跑挂了"的信号。
+// ── Todo panel ──────────────────────────────────────────────────────────
 
-function AgentMatrix({
-  rows,
-  loading,
-  counts,
+function TodoPanel({
+  t,
+  tasks,
 }: {
-  rows: MatrixRow[];
-  loading: boolean;
-  counts: { online: number; paused: number; not_deployed: number };
+  t: (k: string) => string;
+  tasks: HumanTaskCard[] | null;
 }) {
-  const { t } = useApp();
   return (
-    <section className="mb-8">
-      <div className="flex items-baseline gap-3 mb-4">
-        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4">
-          {t("overview_matrix_title")}
+    <section
+      className="border border-line rounded-md bg-surface flex flex-col"
+      style={{ padding: "16px 18px", minHeight: 320 }}
+    >
+      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+        <div className="flex items-center gap-2">
+          <span
+            className="text-ink-1"
+            style={{ fontSize: 14, fontWeight: 500 }}
+          >
+            {t("overview_todo_title")}
+          </span>
+          {tasks && tasks.length > 0 && (
+            <span
+              className="rounded-sm mono tabular-nums"
+              style={{
+                fontSize: 11,
+                padding: "1px 7px",
+                background: "color-mix(in oklab, oklch(0.6 0.14 75) 15%, var(--c-bg))",
+                color: "oklch(0.5 0.14 75)",
+                border: "1px solid color-mix(in oklab, oklch(0.6 0.14 75) 35%, var(--c-line))",
+              }}
+            >
+              {tasks.length}
+            </span>
+          )}
         </div>
-        <span className="text-[11px] text-ink-3">
-          {t("overview_matrix_source")}
-        </span>
-        <div className="flex-1" />
-        <DeployLegend counts={counts} />
-      </div>
-      {loading && rows.length === 0 ? (
-        <div className="text-[12px] text-ink-3 py-4">{t("overview_matrix_loading")}</div>
-      ) : rows.length === 0 ? (
-        <EmptyState title={t("overview_matrix_empty_title")} hint={t("overview_matrix_empty_hint")} />
-      ) : (
-        <div
-          className="grid"
-          style={{
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 12,
-          }}
+        <Link
+          href="/inbox"
+          className="text-ink-3 text-[11.5px] hover:text-ink-1"
+          style={{ textDecoration: "none" }}
         >
-          {rows.map((r) => (
-            <AgentCard key={r.short} row={r} />
-          ))}
-        </div>
-      )}
+          {t("overview_todo_inbox")} →
+        </Link>
+      </div>
+      <div className="flex-1 flex flex-col" style={{ gap: 8 }}>
+        {tasks === null ? (
+          <div className="text-ink-3 text-[12px]">加载中…</div>
+        ) : tasks.length === 0 ? (
+          <div className="text-ink-3 text-[12px]">{t("overview_todo_empty")}</div>
+        ) : (
+          tasks.slice(0, 6).map((tk) => <TodoRow key={tk.id} task={tk} />)
+        )}
+      </div>
     </section>
   );
 }
 
-function DeployLegend({ counts }: { counts: { online: number; paused: number; not_deployed: number } }) {
-  const { t } = useApp();
+function TodoRow({ task }: { task: HumanTaskCard }) {
+  const agentMeta = AGENT_MAP.find((a) => a.short === task.agentShort);
+  const stage = agentMeta?.stage ?? "system";
+  const glyph = stageGlyph(stage);
+  const subtitle = `${agentDisplayName(task.agentShort)}${task.assignee ? ` · ${task.assignee}` : ""}`;
   return (
-    <div className="flex items-center gap-4 text-[11px] text-ink-3">
-      <LegendDot color="var(--c-ok)"   label={t("overview_kpi_agents_status_online")}       value={counts.online} />
-      <LegendDot color="var(--c-warn)" label={t("overview_kpi_agents_status_paused")}       value={counts.paused} />
-      <LegendDot color="var(--c-err)"  label={t("overview_kpi_agents_status_not_deployed")} value={counts.not_deployed} />
-    </div>
-  );
-}
-
-function LegendDot({ color, label, value }: { color: string; label: string; value: number }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
+    <Link
+      href={`/inbox?task=${encodeURIComponent(task.id)}`}
+      className="flex items-start gap-3 rounded-sm cursor-pointer hover:bg-panel"
+      style={{
+        padding: "8px 6px",
+        textDecoration: "none",
+        color: "inherit",
+      }}
+    >
       <span
-        className="rounded-full"
+        className="flex-none flex items-center justify-center rounded-sm text-[11px] font-medium"
         style={{
-          width: 6,
-          height: 6,
-          background: color,
-          boxShadow: `0 0 0 2px color-mix(in oklab, ${color} 14%, transparent)`,
+          width: 28,
+          height: 28,
+          background: glyph.bg,
+          color: glyph.color,
         }}
-      />
-      <span className="tabular-nums font-medium text-ink-1">{value}</span>
-      <span>{label}</span>
-    </span>
+      >
+        {glyph.label}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-ink-1 truncate" style={{ fontSize: 12.5 }}>
+          {task.title}
+        </div>
+        <div className="text-ink-3 mono text-[10.5px] truncate" style={{ marginTop: 2 }}>
+          {subtitle}
+        </div>
+      </div>
+      <span
+        className="text-ink-4 mono text-[10.5px] flex-none"
+        style={{ paddingTop: 2 }}
+      >
+        {relativeTime(task.createdAt)}
+      </span>
+    </Link>
   );
 }
 
-function AgentCard({ row }: { row: MatrixRow }) {
-  const { t } = useApp();
-  const tone = DEPLOY_TONE[row.deploy];
-  const fn = byShortFunction(row.short);
-  const meta = byShort(row.short);
-  // Prefer the localized "…智能体" display name; fall back to the technical
-  // name if the i18n key is somehow missing.
-  const zhName = t(`display_${row.short.toLowerCase()}`);
-  const agentName = zhName.startsWith("display_") ? (meta?.inngestName ?? row.short) : zhName;
-  const runtimeStatus = row.deploy !== "not_deployed" ? row.health?.status : null;
-  const runtimeBadge = runtimeStatus ? RUNTIME_BADGE_TONE[runtimeStatus] : undefined;
-  const counts = row.health?.counts;
-  const errorCount = counts ? counts.failed + counts.error : 0;
-  const lastLabel = row.health?.lastActivityAt
-    ? new Date(row.health.lastActivityAt).toLocaleTimeString(undefined, { hour12: false })
-    : null;
-  const href = row.deploy === "not_deployed"
-    ? `/fleet/${encodeURIComponent(row.short)}`
-    : `/workflow?agent=${encodeURIComponent(row.short)}`;
-  // Claude-style soft card: panel bg, larger rounded, no border by default
-  // (border only on hover to keep page calm), generous padding, lowercase
-  // friendly name (not mono), status conveyed by dot color + ring (no
-  // redundant text label — that's noise once the dot is glowing).
+// ── Event stream ────────────────────────────────────────────────────────
+
+function EventStreamPanel({
+  t,
+  entries,
+  activeCount,
+}: {
+  t: (k: string) => string;
+  entries: LogEntry[] | null;
+  activeCount: number | null;
+}) {
+  return (
+    <section
+      className="border border-line rounded-md bg-surface flex flex-col"
+      style={{ padding: "16px 18px", minHeight: 320 }}
+    >
+      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+        <div className="flex items-center gap-2">
+          <span
+            className="text-ink-1"
+            style={{ fontSize: 14, fontWeight: 500 }}
+          >
+            {t("overview_stream_title")}
+          </span>
+          {activeCount !== null && activeCount > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-sm mono"
+              style={{
+                fontSize: 10.5,
+                padding: "1px 6px",
+                color: "var(--c-accent)",
+                background: "color-mix(in oklab, var(--c-accent) 12%, var(--c-bg))",
+                border:
+                  "1px solid color-mix(in oklab, var(--c-accent) 35%, var(--c-line))",
+              }}
+            >
+              <span
+                className="rounded-full"
+                style={{
+                  width: 5,
+                  height: 5,
+                  background: "var(--c-accent)",
+                }}
+              />
+              {activeCount} 活跃运行
+            </span>
+          )}
+        </div>
+        <Link
+          href="/events"
+          className="text-ink-3 text-[11.5px] hover:text-ink-1"
+          style={{ textDecoration: "none" }}
+        >
+          {t("overview_stream_all")} →
+        </Link>
+      </div>
+      <div className="flex-1 flex flex-col" style={{ gap: 6 }}>
+        {entries === null ? (
+          <div className="text-ink-3 text-[12px]">加载中…</div>
+        ) : entries.length === 0 ? (
+          <div className="text-ink-3 text-[12px]">{t("overview_stream_empty")}</div>
+        ) : (
+          entries.slice(0, 10).map((e) => <EventRow key={e.id} entry={e} />)
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EventRow({ entry }: { entry: LogEntry }) {
+  const tone = kindTone(entry.kind);
+  const eventName = pickEventName(entry);
+  const href = `/events/${encodeURIComponent(eventName)}`;
+  const agentName =
+    entry.agent === "system" ? null : agentDisplayName(entry.agent);
   return (
     <Link
       href={href}
-      className="no-underline rounded-[10px] bg-claude-panel hover:bg-surface hover:shadow-sm transition-all block"
+      className="flex items-start gap-3 rounded-sm cursor-pointer hover:bg-panel"
       style={{
-        padding: "12px 14px",
-        opacity: row.deploy === "not_deployed" ? 0.7 : 1,
-        border: "1px solid transparent",
+        padding: "6px 6px",
+        textDecoration: "none",
+        color: "inherit",
       }}
     >
-      <div className="flex items-center gap-2.5 mb-1">
-        <span
-          className="rounded-full flex-shrink-0"
-          title={tone.label}
-          style={{
-            width: 8,
-            height: 8,
-            background: tone.color,
-            boxShadow: `0 0 0 3px color-mix(in oklab, ${tone.color} 18%, transparent)`,
-          }}
-        />
-        <span className="text-[13px] font-medium text-claude-ink-1 flex-1 truncate" style={{ letterSpacing: "-0.005em" }}>
-          {agentName}
-        </span>
-      </div>
-      {fn && (
-        <div className="text-[11px] text-claude-ink-3 mb-1.5 truncate leading-snug">
-          {fn.summary}
-        </div>
-      )}
-      <div className="text-[10.5px] text-claude-ink-4 flex items-center gap-1.5 tabular-nums">
-        {row.deploy === "not_deployed" ? (
-          <span>{t("overview_card_unregistered")}</span>
-        ) : counts && (errorCount > 0 || counts.tool > 0) ? (
-          <>
-            {errorCount > 0 && (
-              <span style={{ color: "var(--c-err)" }}>{errorCount} {t("overview_card_err_unit")}</span>
-            )}
-            {counts.tool > 0 && <span>{errorCount > 0 ? "· " : ""}{counts.tool} {t("overview_card_tool_unit")}</span>}
-          </>
-        ) : (
-          <span />
-        )}
-        <div className="flex-1" />
-        {runtimeBadge && (
-          <span
-            className="px-1.5 rounded text-[9.5px]"
-            style={{
-              color: runtimeBadge.color,
-              background: `color-mix(in oklab, ${runtimeBadge.color} 12%, transparent)`,
-              fontWeight: 600,
-            }}
-            title={runtimeBadge.label}
-          >
-            {runtimeBadge.label}
-          </span>
-        )}
-        {lastLabel && <span title={row.health?.lastActivityAt ?? ""}>{lastLabel}</span>}
-      </div>
-    </Link>
-  );
-}
-
-// ── Realtime event stream ────────────────────────────────────────────
-// Replaces the old active-runs table. A live, human-readable feed of system
-// activity (the real /api/activity/recent monitoring log), styled like a
-// message stream: colored dot + kind token + narrative + relative time.
-// Clicking a row jumps to that run on /live.
-
-const STREAM_KIND: Record<LogKind, { token: string; color: string }> = {
-  "step.started":   { token: "STEP_STARTED",   color: "var(--c-info)" },
-  "step.completed": { token: "STEP_DONE",       color: "var(--c-ok)" },
-  "step.failed":    { token: "STEP_FAILED",     color: "var(--c-err)" },
-  "step.retrying":  { token: "RETRY",           color: "oklch(0.62 0.14 75)" },
-  narrative:        { token: "NARRATIVE",       color: "var(--c-ink-3)" },
-  tool:             { token: "TOOL_CALL",       color: "var(--c-accent)" },
-  decision:         { token: "DECISION",        color: "oklch(0.62 0.19 300)" },
-  anomaly:          { token: "ANOMALY",         color: "oklch(0.62 0.14 75)" },
-  error:            { token: "ERROR",           color: "var(--c-err)" },
-  hitl:             { token: "HITL",            color: "oklch(0.62 0.14 75)" },
-  info:             { token: "INFO",            color: "var(--c-ink-3)" },
-};
-
-function streamRelTime(iso: string, zh: boolean): string {
-  const diffSec = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (diffSec < 45) return zh ? "刚刚" : "just now";
-  const m = Math.floor(diffSec / 60);
-  if (m < 60) return zh ? `${Math.max(1, m)} 分钟前` : `${Math.max(1, m)}m ago`;
-  const h = Math.floor(diffSec / 3600);
-  if (h < 24) return zh ? `${h} 小时前` : `${h}h ago`;
-  return zh ? `${Math.floor(diffSec / 86400)} 天前` : `${Math.floor(diffSec / 86400)}d ago`;
-}
-
-function RealtimeStream({ entries, activeCount }: { entries: LogEntry[] | null; activeCount: number | null }) {
-  const { t, lang } = useApp();
-  const zh = lang !== "en";
-  return (
-    <section>
-      <div className="flex items-center mb-3 gap-2">
-        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4">
-          {t("em_stream")}
-        </div>
-        <span className="rounded-full anim-pulse" style={{ width: 6, height: 6, background: "var(--c-ok)" }} />
-        {activeCount != null && activeCount > 0 && (
-          <span className="text-[11px] text-ink-3 tabular-nums">
-            {activeCount} {t("overview_active_title")}
-          </span>
-        )}
-        <div className="flex-1" />
-        <Link href="/live?status=active" className="text-[11px] text-ink-3 no-underline hover:text-accent">
-          {t("overview_active_view_all")}
-        </Link>
-      </div>
-      {!entries ? (
-        <div className="text-[12px] text-ink-3 py-4">{t("overview_matrix_loading")}</div>
-      ) : entries.length === 0 ? (
-        <div className="text-[11.5px] text-ink-3 py-4">{t("overview_active_empty")}</div>
-      ) : (
-        <div className="rounded-[10px] bg-claude-panel divide-y divide-claude-line/60 overflow-hidden">
-          {entries.map((e, i) => (
-            <StreamRow key={e.id} entry={e} idx={i} zh={zh} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function StreamRow({ entry, idx, zh }: { entry: LogEntry; idx: number; zh: boolean }) {
-  const meta = STREAM_KIND[entry.kind] ?? { token: entry.kind.toUpperCase(), color: "var(--c-ink-3)" };
-  const inner = (
-    <div
-      className="ao-stream-in cursor-pointer hover:bg-claude-surface transition-colors flex items-start gap-2.5"
-      style={{ padding: "11px 16px", ["--ao-i"]: Math.min(idx, 16) } as React.CSSProperties}
-    >
       <span
-        className="rounded-full shrink-0"
-        style={{ width: 7, height: 7, marginTop: 4, background: meta.color, boxShadow: `0 0 0 3px color-mix(in oklab, ${meta.color} 16%, transparent)` }}
+        className="flex-none rounded-full"
+        style={{
+          width: 7,
+          height: 7,
+          background: tone.color,
+          marginTop: 7,
+          boxShadow:
+            tone.kind === "err"
+              ? `0 0 0 3px color-mix(in oklab, ${tone.color} 22%, transparent)`
+              : undefined,
+        }}
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className="mono font-medium shrink-0" style={{ fontSize: 10.5, letterSpacing: "0.02em", color: meta.color }}>
-            {meta.token}
-          </span>
-          <span className="text-[12.5px] text-claude-ink-1 truncate flex-1" style={{ letterSpacing: "-0.005em" }}>
-            {entry.message}
-          </span>
-          <span className="text-[10.5px] text-claude-ink-4 tabular-nums shrink-0">
-            {streamRelTime(entry.ts, zh)}
+          <span
+            className="mono"
+            style={{
+              fontSize: 11,
+              color: tone.color,
+              fontWeight: 500,
+              letterSpacing: "0.02em",
+            }}
+          >
+            {eventName}
           </span>
         </div>
-        {entry.agent && entry.agent !== "system" && (
-          <div className="text-[11px] text-claude-ink-3 truncate" style={{ marginTop: 1 }}>{entry.agent}</div>
-        )}
+        <div className="text-ink-2 truncate" style={{ fontSize: 12, marginTop: 2 }}>
+          {agentName ? `${agentName} · ` : ""}
+          {entry.message}
+        </div>
       </div>
-    </div>
-  );
-  return entry.runId ? (
-    <Link href={`/live?run=${encodeURIComponent(entry.runId)}`} className="no-underline block">
-      {inner}
+      <span
+        className="text-ink-4 mono text-[10.5px] flex-none"
+        style={{ paddingTop: 4 }}
+      >
+        {relativeTime(entry.ts)}
+      </span>
     </Link>
-  ) : (
-    inner
   );
 }
 
-// ── Anomalies feed ───────────────────────────────────────────────────
+// ── Agent health grid ───────────────────────────────────────────────────
 
-function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
-  const { t } = useApp();
-  // Inline (post-Tier-C) — was a 360px right sidebar before. Header matches
-  // the realtime stream (uppercase tracked + right-aligned audit jump).
+type AgentCard = {
+  agent: (typeof AGENT_MAP)[number];
+  kind: "real" | "shell" | "unbuilt";
+  paused: boolean;
+  health: AgentHealth | null;
+};
+
+function AgentHealthGrid({
+  t,
+  cards,
+}: {
+  t: (k: string) => string;
+  cards: AgentCard[];
+}) {
   return (
-    <section>
-      <div className="flex items-baseline mb-3">
-        <div className="text-[10px] uppercase tracking-[0.14em] font-medium text-ink-4 flex-1">
-          {t("overview_anomaly_title")}
+    <section
+      className="border border-line rounded-md bg-surface"
+      style={{ padding: "16px 18px" }}
+    >
+      <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
+        <div className="flex items-center gap-2">
+          <span className="text-ink-1" style={{ fontSize: 14, fontWeight: 500 }}>
+            {t("overview_health_title")}
+          </span>
+          <span className="text-ink-3 mono text-[11px]">
+            {t("overview_health_running").replace("{n}", String(cards.length))}
+          </span>
         </div>
         <Link
-          href="/audit"
-          className="text-[11px] text-ink-3 no-underline hover:text-accent flex items-center gap-1"
+          href="/fleet"
+          className="text-ink-3 text-[11.5px] hover:text-ink-1"
+          style={{ textDecoration: "none" }}
         >
-          <Ic.book /> {t("overview_anomaly_audit")}
+          {t("overview_health_link")} →
         </Link>
       </div>
-      {!entries ? (
-        <div className="text-[12px] text-ink-3 py-6">{t("overview_matrix_loading")}</div>
-      ) : entries.length === 0 ? (
-        <div className="py-6">
-          <EmptyState
-            title={t("overview_anomaly_empty_title")}
-            hint={t("overview_anomaly_empty_hint")}
-          />
+      {cards.length === 0 ? (
+        <div
+          className="text-ink-3 text-[12.5px] text-center"
+          style={{ padding: "32px 0" }}
+        >
+          {t("overview_health_empty")}
         </div>
       ) : (
-        <div className="rounded-[10px] bg-claude-panel divide-y divide-claude-line/60 overflow-hidden">
-          {entries.map((e) => (
-            <AnomalyRow key={e.id} entry={e} />
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}
+        >
+          {cards.map((c) => (
+            <AgentHealthCard key={c.agent.short} card={c} />
           ))}
         </div>
       )}
@@ -897,49 +677,159 @@ function AnomaliesSection({ entries }: { entries: LogEntry[] | null }) {
   );
 }
 
-function AnomalyRow({ entry }: { entry: LogEntry }) {
-  const { t } = useApp();
-  const ts = new Date(entry.ts);
-  const tone =
-    entry.kind === "step.failed" || entry.kind === "error"
+function AgentHealthCard({ card }: { card: AgentCard }) {
+  const { agent, paused, health } = card;
+  const name = agentDisplayName(agent.short);
+  const runs = health?.counts.started ?? 0;
+  const denom =
+    (health?.counts.started ?? 0) +
+    (health?.counts.completed ?? 0) +
+    (health?.counts.failed ?? 0) +
+    (health?.counts.error ?? 0);
+  const successPct =
+    denom > 0
+      ? Math.round((1 - (health?.errorRate ?? 0)) * 1000) / 10
+      : null;
+  const glyph = stageGlyph(agent.stage);
+  const dot = paused
+    ? "var(--c-ink-4)"
+    : health?.status === "failed"
       ? "var(--c-err)"
-      : "oklch(0.5 0.14 75)";
-  const kindLabel =
-    entry.kind === "step.failed"
-      ? t("overview_kind_step_failed")
-      : entry.kind === "error"
-        ? t("overview_kind_error")
-        : t("overview_kind_anomaly");
-  const inner = (
-    <div className="cursor-pointer hover:bg-claude-surface transition-colors" style={{ padding: "14px 18px" }}>
-      <div className="flex items-center gap-2 mb-1">
-        <span
-          className="rounded-full"
-          style={{
-            width: 6, height: 6, background: tone,
-            boxShadow: `0 0 0 2px color-mix(in oklab, ${tone} 16%, transparent)`,
-          }}
-        />
-        <span className="text-[10.5px] uppercase tracking-wide font-medium" style={{ color: tone }}>
-          {kindLabel}
-        </span>
-        <span className="text-[12.5px] text-claude-ink-1 font-medium truncate flex-1" style={{ letterSpacing: "-0.005em" }}>
-          {entry.agent}
-        </span>
-        <span className="text-[10.5px] text-claude-ink-4 tabular-nums shrink-0">
-          {ts.toLocaleTimeString(undefined, { hour12: false })}
-        </span>
+      : health?.status === "degraded"
+        ? "oklch(0.6 0.14 75)"
+        : "var(--c-ok)";
+  return (
+    <Link
+      href={`/fleet/${encodeURIComponent(agent.short)}`}
+      className="flex items-center gap-3 rounded-sm border border-line cursor-pointer hover:border-line-strong"
+      style={{
+        padding: "10px 12px",
+        background: "var(--c-bg)",
+        textDecoration: "none",
+        color: "inherit",
+      }}
+    >
+      <span
+        className="flex-none flex items-center justify-center rounded-sm text-[12px] font-medium"
+        style={{
+          width: 32,
+          height: 32,
+          background: glyph.bg,
+          color: glyph.color,
+        }}
+      >
+        {glyph.label}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span
+            className="text-ink-1 truncate"
+            style={{ fontSize: 13, fontWeight: 500 }}
+          >
+            {name}
+          </span>
+        </div>
+        <div className="mono text-ink-3" style={{ fontSize: 10.5, marginTop: 2 }}>
+          {runs} 次 ·{" "}
+          {successPct === null ? "—" : `${successPct}%`}
+        </div>
       </div>
-      <div className="text-[12px] text-claude-ink-2 leading-snug">{entry.message}</div>
-    </div>
-  );
-  return entry.runId ? (
-    <Link href={`/live?run=${encodeURIComponent(entry.runId)}`} className="no-underline block">
-      {inner}
+      <span
+        className="rounded-full flex-none"
+        style={{
+          width: 7,
+          height: 7,
+          background: dot,
+        }}
+      />
     </Link>
-  ) : (
-    inner
   );
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function greetingForHour(h: number, t: (k: string) => string): string {
+  if (h < 5) return t("overview_greeting_dawn");
+  if (h < 11) return t("overview_greeting_morning");
+  if (h < 13) return t("overview_greeting_noon");
+  if (h < 18) return t("overview_greeting_afternoon");
+  return t("overview_greeting_evening");
+}
+
+function computeTone(failed1h: number, alertsActive: number, dlqPending: number): OverallTone {
+  if (failed1h >= 10 || dlqPending > 5 || alertsActive >= 5) return "alarm";
+  if (failed1h >= 3 || alertsActive >= 2) return "tense";
+  return "calm";
+}
+
+function formatTime(d: Date): string {
+  return d.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function relativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  const diff = Date.now() - t;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 60 * 60_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 24 * 60 * 60_000) return `${Math.floor(diff / (60 * 60_000))} 小时前`;
+  return `${Math.floor(diff / (24 * 60 * 60_000))} 天前`;
+}
+
+const KIND_TONE: Record<LogKind, { color: string; kind: "ok" | "info" | "warn" | "err" }> = {
+  "step.started": { color: "var(--c-info)", kind: "info" },
+  "step.completed": { color: "var(--c-ok)", kind: "ok" },
+  "step.failed": { color: "var(--c-err)", kind: "err" },
+  "step.retrying": { color: "oklch(0.6 0.14 75)", kind: "warn" },
+  narrative: { color: "var(--c-ink-3)", kind: "info" },
+  tool: { color: "var(--c-info)", kind: "info" },
+  decision: { color: "var(--c-accent)", kind: "info" },
+  anomaly: { color: "oklch(0.6 0.14 75)", kind: "warn" },
+  error: { color: "var(--c-err)", kind: "err" },
+  hitl: { color: "oklch(0.6 0.14 75)", kind: "warn" },
+  info: { color: "var(--c-info)", kind: "info" },
+};
+
+function kindTone(kind: LogKind): { color: string; kind: "ok" | "info" | "warn" | "err" } {
+  return KIND_TONE[kind] ?? { color: "var(--c-ink-3)", kind: "info" };
+}
+
+/** Best-effort: pick a stable name to render in the EVENT_NAME slot.
+ *  - synthesized step rows: use the kind (STEP_FAILED etc)
+ *  - tool/decision/anomaly: use the kind verbatim uppercased
+ *  - otherwise: prefer agent.short if non-system, else fallback to kind */
+function pickEventName(entry: LogEntry): string {
+  // metadata may carry the originating event name when the row was synthesized
+  const meta = entry.metadata as { eventName?: unknown } | null;
+  if (meta && typeof meta.eventName === "string" && meta.eventName.trim()) {
+    return meta.eventName;
+  }
+  return entry.kind.replace(/\./g, "_").toUpperCase();
+}
+
+/** Small badge for a workflow stage — used in HITL rows + agent health cards. */
+function stageGlyph(stage: string): { label: string; bg: string; color: string } {
+  switch (stage) {
+    case "requirement":
+      return { label: "需", bg: "color-mix(in oklab, var(--c-info) 14%, var(--c-bg))", color: "var(--c-info)" };
+    case "jd":
+      return { label: "J", bg: "color-mix(in oklab, var(--c-accent) 14%, var(--c-bg))", color: "var(--c-accent)" };
+    case "resume":
+      return { label: "简", bg: "color-mix(in oklab, oklch(0.65 0.18 195) 14%, var(--c-bg))", color: "oklch(0.55 0.18 195)" };
+    case "match":
+      return { label: "岗", bg: "color-mix(in oklab, oklch(0.55 0.16 285) 16%, var(--c-bg))", color: "oklch(0.55 0.16 285)" };
+    case "interview":
+      return { label: "面", bg: "color-mix(in oklab, var(--c-ok) 14%, var(--c-bg))", color: "var(--c-ok)" };
+    case "eval":
+      return { label: "评", bg: "color-mix(in oklab, var(--c-ok) 14%, var(--c-bg))", color: "var(--c-ok)" };
+    case "package":
+      return { label: "包", bg: "color-mix(in oklab, oklch(0.6 0.14 75) 14%, var(--c-bg))", color: "oklch(0.5 0.14 75)" };
+    case "submit":
+      return { label: "投", bg: "color-mix(in oklab, var(--c-accent) 14%, var(--c-bg))", color: "var(--c-accent)" };
+    default:
+      return { label: "系", bg: "var(--c-panel)", color: "var(--c-ink-3)" };
+  }
+}
