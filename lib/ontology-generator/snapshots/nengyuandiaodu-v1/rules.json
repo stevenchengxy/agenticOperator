@@ -1,0 +1,1577 @@
+{
+  "metadata": {
+    "project_name": "Energy-Dispatch-v1",
+    "document_type": "规则对象",
+    "version": "v0_1_003",
+    "last_updated": "2026-06-01",
+    "description": "支配能源调度业务决策的规则 — 通用覆盖。在 v0_1_002(11条)基础上纠正六段流水线口径与硬约束红线表述,并依据七份调度源文档系统补全:约束规则库 CR-*(机组/水库/电网/安全/市场 19 条)、数据质控、数据解释、出力预测与模型管理、调度目标、异常识别与风险定级处置、分流与确认权限分级、逐级审批、计划定版回写执行、偏差复盘、权限/审计/调度纪律/运行稽核、测试与部署等规则;relatedEntities 全部对齐对象 v0_1_003。"
+  },
+  "rules": [
+    {
+      "id": "1",
+      "specificScenarioStage": "数据接入与质控",
+      "businessLogicRuleName": "数据接入边界:慧采唯一入口、能控EMS唯一出口",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "智调需要获取外部数据或向外部下发结果时",
+      "standardizedLogicRule": "所有 SCADA 实测、气象/水文、省调关口计划、市场出清一律经慧采接入业务系统 (Business_System);智调对外仅经能控 EMS 写出,不得直连省调、交易中心等外部系统。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "气象数据 (Weather_Data)",
+        "水文数据 (Hydrology_Data)",
+        "关口送出计划 (Grid_Interface_Plan)"
+      ],
+      "businessBackgroundReason": "用唯一入口/唯一出口收口数据流,故障定位清晰,避免智调越界直连外部系统造成数据与指令失控。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "2",
+      "specificScenarioStage": "数据接入与质控",
+      "businessLogicRuleName": "数据真相源边界(谁写谁读)",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "任一系统试图写入非本系统所属数据类别时",
+      "standardizedLogicRule": "每类数据只有唯一写入源(SCADA实测/气象水文/关口计划/市场出清/可用容量/出力预测/调度建议/风险事件/调度计划各有归属),其余系统一律只读,禁止在非真相源系统硬改他系统数据。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "气象数据 (Weather_Data)",
+        "水文数据 (Hydrology_Data)",
+        "关口送出计划 (Grid_Interface_Plan)",
+        "出力预测 (Output_Forecast)",
+        "调度计划 (Dispatch_Plan)"
+      ],
+      "businessBackgroundReason": "明确数据所有权边界,防止同一数据多源写入导致口径不一致、对账对不平。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "3",
+      "specificScenarioStage": "数据接入与质控",
+      "businessLogicRuleName": "气象数据质控六道关",
+      "applicableClient": "通用",
+      "applicableDepartment": "新能源预测专责",
+      "submissionCriteria": "气象批次(NWP/实测)接入并触发 DATA_INGESTED 后进入质控时",
+      "standardizedLogicRule": "气象数据 (Weather_Data) 须依次通过①时标与时效②缺测/中断③物理范围④多源一致性⑤时间连续性⑥完整性与置信度六道关:通过标合格进解释;存疑降置信度打标后进解释;不合格则拦截不进解释并知会预测组。",
+      "relatedEntities": [
+        "气象数据 (Weather_Data)",
+        "业务系统 (Business_System)",
+        "数据解释结果 (Interpretation_Result)"
+      ],
+      "businessBackgroundReason": "原始气象数据带病进入会使风光出力预测从源头偏差,质控是预测可信的前提。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "4",
+      "specificScenarioStage": "数据接入与质控",
+      "businessLogicRuleName": "水文数据质控七道关(含水量平衡)",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "水文批次接入并触发 DATA_INGESTED 后进入质控时",
+      "standardizedLogicRule": "水文数据 (Hydrology_Data) 须依次通过①时标时效②缺测中断③物理范围④水量平衡(入库=出库±蓄变)⑤梯级水力一致性(上级出库≈下级入库∓区间∓滞时)⑥时间连续性⑦完整性置信度七道关;水量平衡或梯级一致性配不平时标存疑并查表计/探头,严禁手工凑数做平,不合格拦截并知会预测组、水调专责与值班调度员。",
+      "relatedEntities": [
+        "水文数据 (Hydrology_Data)",
+        "电站 (Power_Station)",
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "水文直接连防洪,水量平衡是水文专属硬校验;凑平脏数据会把偏小来水洗白送入解释,危及防洪。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "5",
+      "specificScenarioStage": "数据接入与质控",
+      "businessLogicRuleName": "设备可用容量同步与状态一致性校验",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "设备通可用容量/状态同步超时,或 SCADA 实测状态与设备通台账不一致时",
+      "standardizedLogicRule": "设备通超过 30 分钟未更新可用容量即告警;机组故障/跳机等状态变更须第一时间回写设备通;慧采将 SCADA 实测机组状态与设备 (Equipment) 台账状态做一致性比对,不一致打“状态存疑”标记并提示核对。",
+      "relatedEntities": [
+        "设备 (Equipment)",
+        "检修计划 (Maintenance_Plan)",
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "CR-UNIT-04 等可用容量类校验完全依赖设备通数据,同步滞后会使约束校验带病放行。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "6",
+      "specificScenarioStage": "数据解释",
+      "businessLogicRuleName": "梯级来水滞时平移解释",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "数据解释引擎将水文数据解释为来水信号时",
+      "standardizedLogicRule": "数据解释结果 (Interpretation_Result) 须按各河段水流滞时把上级电站出库平移为下级入库(上级出库=下级入库含区间来水+滞时);汛期流速快滞时变短,须按实测动态校正滞时参数。",
+      "relatedEntities": [
+        "数据解释结果 (Interpretation_Result)",
+        "水文数据 (Hydrology_Data)",
+        "电站 (Power_Station)"
+      ],
+      "businessBackgroundReason": "滞时配错会使下级电站来水信号在时间轴上错位,导致下级凭空多发或白白弃水。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "7",
+      "specificScenarioStage": "数据解释",
+      "businessLogicRuleName": "来水/资源信号口径审定",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "数据解释引擎生成来水信号或资源信号时",
+      "standardizedLogicRule": "来水信号(水电)由水调专责审定口径,资源信号(风光)由新能源预测专责审定口径,系统角色 (Role) 对应专责的口径审定不可缺位。",
+      "relatedEntities": [
+        "数据解释结果 (Interpretation_Result)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "信号解释口径直接影响下游出力预测,须由对应专业专责把关。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "8",
+      "specificScenarioStage": "出力预测",
+      "businessLogicRuleName": "出力预测置信区间生成",
+      "applicableClient": "通用",
+      "applicableDepartment": "新能源预测专责",
+      "submissionCriteria": "预测引擎生成出力预测批次时",
+      "standardizedLogicRule": "出力预测 (Output_Forecast) 须按 96 点同时给出 P50 中值与 P90 保守区间,并记录所用预测模型版本与准确率/合格率回评。",
+      "relatedEntities": [
+        "出力预测 (Output_Forecast)",
+        "预测模型 (Forecast_Model)"
+      ],
+      "businessBackgroundReason": "预测不是一个数而是一个区间,P50/P90 与合格率是下游建议与直通判断的基础。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "9",
+      "specificScenarioStage": "出力预测",
+      "businessLogicRuleName": "预测模型上线管理(回评+影子运行+留痕)",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "预测模型(风电WIND/光伏SOLAR/水电HYDRO)拟上线或回退时",
+      "standardizedLogicRule": "预测模型 (Forecast_Model) 的上线/回退权限仅在智调系统组(系统角色 Role);上线须经离线回评与影子运行,影子期合格率不低于在线版方可切换,全过程(版本、上线人、时间、回评结果、影子数据)留痕。",
+      "relatedEntities": [
+        "预测模型 (Forecast_Model)",
+        "系统角色 (Role)",
+        "出力预测 (Output_Forecast)"
+      ],
+      "businessBackgroundReason": "模型版本影响全部预测质量,须经回评影子验证并留痕,确保可追溯、可回退。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "10",
+      "specificScenarioStage": "出力预测",
+      "businessLogicRuleName": "模型版本切换不追溯重算",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "预测模型版本发生切换时",
+      "standardizedLogicRule": "模型版本切换只对切换后新生成的出力预测 (Output_Forecast) 生效,已生成的历史 FC 仍记其当时版本,不被追溯重算;需用新版本重算须手动触发②段重跑生成新 FC,旧 FC 留档。",
+      "relatedEntities": [
+        "预测模型 (Forecast_Model)",
+        "出力预测 (Output_Forecast)"
+      ],
+      "businessBackgroundReason": "已确认/已定版/已下发计划背后的 FC 不能被悄悄换版,否则审计链断裂。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "11",
+      "specificScenarioStage": "出力预测",
+      "businessLogicRuleName": "出力预测人工修正留痕",
+      "applicableClient": "通用",
+      "applicableDepartment": "新能源预测专责",
+      "submissionCriteria": "人工修改解释/预测参数或直接修正 FC 96 点曲线时",
+      "standardizedLogicRule": "人工干预出力预测 (Output_Forecast) 须填前值/后值/理由(≥10字)并打“人工修正”标记,系统自动回退案件状态重走后续流水线;修正幅度大的在分流时更易转人工;已定版(PLANNED 及以后)案件背后的 FC 锁定只读,不得回改,须走 OP-11。",
+      "relatedEntities": [
+        "出力预测 (Output_Forecast)",
+        "数据解释结果 (Interpretation_Result)",
+        "调度辅助案件 (Dispatch_Case)",
+        "审计事件 (Audit_Event)"
+      ],
+      "businessBackgroundReason": "人工修正绕过了模型,须留痕、重走校验且不得篡改已下发计划依据,守住可追溯。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "12",
+      "specificScenarioStage": "调度建议生成",
+      "businessLogicRuleName": "三大目标优先级优化",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "建议引擎生成调度建议时",
+      "standardizedLogicRule": "调度建议 (Dispatch_Suggestion) 须按调度目标 (Dispatch_Objective) 当前口径的优先级优化:汛期 防洪安全>电网安全>清洁能源消纳>经济性,非汛期 电网安全>经济性/消纳>蓄能优化;高优先级先满足且防洪类为硬约束,口径随汛期/非汛期运行方式 (Operating_Context) 切换。",
+      "relatedEntities": [
+        "调度目标 (Dispatch_Objective)",
+        "调度建议 (Dispatch_Suggestion)",
+        "运行方式 (Operating_Context)"
+      ],
+      "businessBackgroundReason": "目标优先级是基线写死的口径,汛期经济性偏低往往是防洪/消纳更高优先级的正常让路。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "13",
+      "specificScenarioStage": "调度建议生成",
+      "businessLogicRuleName": "建议关口送出曲线对齐 GZL",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "建议引擎生成 96 点关口送出曲线时",
+      "standardizedLogicRule": "调度建议 (Dispatch_Suggestion) 的关口送出曲线须对齐省调下达的关口送出计划 (Grid_Interface_Plan),并据此计算关口偏差,作为直通条件①(偏差≤3%)的判据。",
+      "relatedEntities": [
+        "调度建议 (Dispatch_Suggestion)",
+        "关口送出计划 (Grid_Interface_Plan)",
+        "调度计划 (Dispatch_Plan)"
+      ],
+      "businessBackgroundReason": "关口送出须以省调 GZL 为基准,偏差是直通与否的关键判据。",
+      "ruleSource": "上级电网调度(省调)",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "14",
+      "specificScenarioStage": "调度建议生成",
+      "businessLogicRuleName": "风光优先消纳、水电调峰让路",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "出力分配与消纳安排时",
+      "standardizedLogicRule": "调度建议 (Dispatch_Suggestion) 须风光优先消纳、水电调峰让路;送出断面受限时按消纳优先级先压水电给风光腾空间,实在送不出再限风光(弃风弃光为下策)。",
+      "relatedEntities": [
+        "调度建议 (Dispatch_Suggestion)",
+        "出力预测 (Output_Forecast)",
+        "电网断面 (Grid_Section)"
+      ],
+      "businessBackgroundReason": "落实清洁能源消纳目标,减少被迫弃风弃光。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "15",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "五组约束校验顺序",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "约束校验引擎对调度建议执行校验时",
+      "standardizedLogicRule": "约束校验按 机组(CR-UNIT)→水库水调(CR-HYD)→电网(CR-GRID)→安全(CR-SAFE)→市场(CR-MKT) 五组固定顺序逐条跑;机组自动调整(如平滑爬坡)会在时间轴挪动出力,挪动后须重新过后续电网/水库约束。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "调度建议 (Dispatch_Suggestion)"
+      ],
+      "businessBackgroundReason": "物理可行性与安全在前、经济性在后;顺序固定且自动调整向下传导,保证校验自洽。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "16",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-UNIT-01 机组出力上下限",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "机组某时段计划出力超出[最小技术出力,额定/可用容量]区间时",
+      "standardizedLogicRule": "约束校验引擎将越限出力自动钳制到限内(上限优先取当前可用容量),并记前值/后值;调整量超原值2%升级为自动调整+越限告警。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "设备 (Equipment)",
+        "调度建议 (Dispatch_Suggestion)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "17",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-UNIT-02 振动区规避",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "机组计划出力落入振动区间时",
+      "standardizedLogicRule": "提示并尝试优化避让到振动区外就近可行点;避不开时允许保留但标注并计入累计,同一机组振动区累计运行超阈值升级为越限告警并通知设备组;采纳进振动区方案须写权衡理由。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "设备 (Equipment)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "18",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-UNIT-03 最小开停机时间/次数",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "机组开停机间隔小于最小开/停机时间,或单位时间开停机次数超上限时",
+      "standardizedLogicRule": "命中转人工,由调度员/值长裁量取消哪次开停机(机器不自动决定),不得为经济性违反。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "设备 (Equipment)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "19",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-UNIT-04 检修/受阻可用容量",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "检修/故障/受阻机组的计划出力超过当前可用容量时",
+      "standardizedLogicRule": "按可用容量上限钳制(检修=可用容量0则出力必须为0,受阻钳到降额值,故障等同0);可用容量大幅下降影响关口/消纳时关联 T4 设备风险升级处置。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "设备 (Equipment)",
+        "检修计划 (Maintenance_Plan)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "20",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-UNIT-05 AGC 调节速率/爬坡率",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "相邻时段出力变化速率超过机组 AGC 爬坡率上限时",
+      "standardizedLogicRule": "自动平滑爬坡(把陡变摊到多个时段)并发越限告警;平滑挪动出力后须重新过后续电网/水库约束。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "设备 (Equipment)",
+        "调度指令 (Dispatch_Instruction)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "21",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-HYD-01 水位上下限",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "按来水预报推算的水位轨迹有任一点高于上限(汛期1612m/非汛期1620m)或低于死水位1580m时",
+      "standardizedLogicRule": "命中升风险 T3 并转人工(水位为推算结果不可直接钳);汛期高于汛限须与防洪 CR-HYD-05 联动;须与 SCADA 实测水位对照,实测逼近汛限以实测为准。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)",
+        "水文数据 (Hydrology_Data)",
+        "风险事件 (Risk_Event)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "22",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-HYD-02 出库流量上下限",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "水库总出库流量(发电+弃水+闸门下泄)超出下游安全泄量上限或工程下限时",
+      "standardizedLogicRule": "钳制到限内并告警(超上限优先削弃水、削不动再提示减出力转人工);出库被钳常反噬水位,须与 CR-HYD-01 当作同一水量平衡问题整体处置。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "23",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-HYD-03 生态流量最小下泄",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "任一时段实际下泄低于生态流量(最小下泄)阈值时",
+      "standardizedLogicRule": "强制把下泄抬到生态流量、不允许低于,命中等级 L3 起、转人工;任何理由(多发电/腾库容/市场)都不得突破,任何人不得越权放行。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)",
+        "风险事件 (Risk_Event)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "硬约束红线,约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "24",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-HYD-04 梯级水力联系(平衡+滞时)",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "梯级上下级水量不平衡或滞时对不上(上级出库≠下级入库∓区间∓滞时)时",
+      "standardizedLogicRule": "命中转人工核平衡,排查数据问题或漏算区间来水/滞时。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)",
+        "水文数据 (Hydrology_Data)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "25",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-HYD-05 防洪调度",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "汛期水位逼近或超汛限水位、需预泄/拦蓄时",
+      "standardizedLogicRule": "升风险 T3:逼近汛限定 L3 转值长+暂缓;超汛限定 L4 转值长+总工+上报省调+案件 SUSPENDED 暂停;任何人不得越权放行。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)",
+        "风险事件 (Risk_Event)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "硬约束红线,约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "26",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-HYD-06 通航/供水保障",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "出库/水位安排危及下游通航或供水保障最低需要时",
+      "standardizedLogicRule": "命中升风险、转人工,优先保障民生通航供水。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "27",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-GRID-01 送出断面/通道稳定限额",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "送出断面/通道潮流超过稳定限额时",
+      "standardizedLogicRule": "越限升风险 T2 并限出力压回限额内(按消纳优先级先压水电给风光腾空间,实在压不动再限风光即 T1);校验须用当前运行方式(含检修方式)下的最新断面限额。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电网断面 (Grid_Section)",
+        "风险事件 (Risk_Event)",
+        "调度建议 (Dispatch_Suggestion)"
+      ],
+      "businessBackgroundReason": "硬约束红线,约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "28",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-GRID-02 母线电压/无功",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "并网点母线电压/无功越限时",
+      "standardizedLogicRule": "告警并由 AVC 自动调整;新能源大发时无功波动大,电压告警不得因有功正常而忽略。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电网断面 (Grid_Section)",
+        "调度指令 (Dispatch_Instruction)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "29",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-GRID-03 上级关口计划/调度指令",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "调度方案关口送出与省调关口计划(GZL)曲线冲突(超送或欠送)时",
+      "standardizedLogicRule": "冲突升风险 T8、转人工,一律以省调为准,机器绝不自动修改关口送出;欠送即使有正当理由(如防洪拦蓄)也须向省调报备,缺 GZL 数据时校验挂起不放行。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "关口送出计划 (Grid_Interface_Plan)",
+        "风险事件 (Risk_Event)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "硬约束红线,约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "30",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-GRID-04 N-1 安全校核",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "送出断面在 N-1 故障(任一元件退出)后潮流过载时",
+      "standardizedLogicRule": "N-1 不满足命中转人工;N 状态断面未越限不代表 N-1 通过,二者校的不是一回事。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电网断面 (Grid_Section)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "31",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-SAFE-01 设备温升/过载",
+      "applicableClient": "通用",
+      "applicableDepartment": "设备检修专责",
+      "submissionCriteria": "设备(主变等)温升或载流逼近/超过安全限值时",
+      "standardizedLogicRule": "降出力并告警;与 CR-UNIT-04(机组状态)不同,本条看设备热/载流安全,夏季高温为高发期,须接入环境温度数据。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "设备 (Equipment)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "32",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-SAFE-02 大坝/闸门启闭安全",
+      "applicableClient": "通用",
+      "applicableDepartment": "水调专责",
+      "submissionCriteria": "大坝或闸门启闭安全限值被触发时",
+      "standardizedLogicRule": "升风险、转值长处置,保障大坝闸门安全。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "电站 (Power_Station)",
+        "风险事件 (Risk_Event)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "硬约束红线,约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "33",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-MKT-01 申报量价上下限/合约电量",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "现货申报量价超出上下限或与中长期合约电量冲突时",
+      "standardizedLogicRule": "钳制到合规区间内。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "市场申报 (Market_Declaration)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "34",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "CR-MKT-02 偏差考核带",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "实际相对申报偏差超出偏差考核带时",
+      "standardizedLogicRule": "软约束,超带提示并优化,升风险 T7(市场偏差/经济损失),归因区分为安全让路与预测失误。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "约束校验命中 (Constraint_Hit)",
+        "市场申报 (Market_Declaration)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "约束校验引擎据此判定调度建议合规性。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "35",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "校验关键判据缺失则挂起不跳过",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "约束校验所需关键判据(如省调关口计划 GZL、断面限额)未到位时",
+      "standardizedLogicRule": "约束校验引擎宁可将案件挂起也不跳过该约束放行,关口送出计划 (Grid_Interface_Plan) 等红线判据缺失时整段校验不得放行。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "关口送出计划 (Grid_Interface_Plan)",
+        "调度辅助案件 (Dispatch_Case)"
+      ],
+      "businessBackgroundReason": "缺红线判据放行等于带病过关,关口缺失放行可能酿成 T8 越权事故。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "36",
+      "specificScenarioStage": "约束校验",
+      "businessLogicRuleName": "约束校验全程留痕",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "约束校验发生命中、自动调整或分流判断时",
+      "standardizedLogicRule": "每条约束校验命中 (Constraint_Hit)、每次机器自动调整(记前值/后值)、每次分流判断都须落审计事件 (Audit_Event) 留痕,自动调整的前值后值是偏差复盘的命根子。",
+      "relatedEntities": [
+        "约束校验命中 (Constraint_Hit)",
+        "审计事件 (Audit_Event)"
+      ],
+      "businessBackgroundReason": "留痕缺一环复盘就成猜测,自动调整记录是回归测试与稽核必查项。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "37",
+      "specificScenarioStage": "异常识别与风险定级",
+      "businessLogicRuleName": "约束命中归集→评分→定类定级",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "约束校验完成、异常识别引擎运行时",
+      "standardizedLogicRule": "异常识别引擎将多约束命中按同一隐患归集,再评分、按约束→类型映射定主类型(T1–T8,可标关联类型)、定等级(L1–L4),生成风险事件 (Risk_Event);避免一个隐患报一堆 RK。",
+      "relatedEntities": [
+        "约束校验命中 (Constraint_Hit)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "把零散约束命中收敛成有类型有等级的风险诊断,是风控与稽核的锚点。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "38",
+      "specificScenarioStage": "异常识别与风险定级",
+      "businessLogicRuleName": "硬约束红线一票拔高等级",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "命中硬约束红线(防洪/生态/送出断面/上级关口/大坝闸门)时",
+      "standardizedLogicRule": "风险事件 (Risk_Event) 等级取“评分+红线下限”二者取高:生态/防洪/大坝 L3 起、断面/关口 L2 起,红线不因越限幅度小而降级。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "防止以“越限幅度小”为由把红线降级处理。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "39",
+      "specificScenarioStage": "异常识别与风险定级",
+      "businessLogicRuleName": "约束命中不等于风险事件",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "约束校验出现命中时",
+      "standardizedLogicRule": "约束校验命中 (Constraint_Hit) 仅在过异常分阈值或命中硬升风险约束时才立项为风险事件 (Risk_Event);多数软约束命中只做提示/优化避让,不立 RK。",
+      "relatedEntities": [
+        "约束校验命中 (Constraint_Hit)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "区分“逐条命中”与“综合诊断”,避免风险事件泛滥稀释重点。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "40",
+      "specificScenarioStage": "异常识别与风险定级",
+      "businessLogicRuleName": "低置信度命中优先核实",
+      "applicableClient": "通用",
+      "applicableDepartment": "新能源预测专责",
+      "submissionCriteria": "命中建立在低置信度(<0.9)数据/预测字段上时",
+      "standardizedLogicRule": "低置信度命中标“存疑”并优先去核底层气象数据 (Weather_Data)/水文数据 (Hydrology_Data)/出力预测 (Output_Forecast),不得以“判据不牢”为由忽略命中;置信度<0.9 本身会把方案分流到人工。",
+      "relatedEntities": [
+        "风险事件 (Risk_Event)",
+        "出力预测 (Output_Forecast)",
+        "气象数据 (Weather_Data)",
+        "水文数据 (Hydrology_Data)"
+      ],
+      "businessBackgroundReason": "低置信恰说明判据要核实,把数据质量差当忽略命中的借口本末倒置。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "41",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "直通自动采纳五条件(AND)",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "方案比选与风险标注完成、进行分流判断时",
+      "standardizedLogicRule": "业务系统 (Business_System) 分流引擎判定:①关口偏差≤3% ②无 L2 及以上风险 ③出力预测置信度(P50合格率)≥0.9 ④无硬约束红线命中 ⑤方案明显占优,五条同时满足才自动采纳调度建议 (Dispatch_Suggestion)并置状态 AUTO_ADOPTED,任一不满足转人工。",
+      "relatedEntities": [
+        "调度建议 (Dispatch_Suggestion)",
+        "方案比选 (Scheme_Comparison)",
+        "风险事件 (Risk_Event)",
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "在全维度安全合规基线满足时实现调度闭环自动化,五条为与关系无灰度。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "42",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "关口偏差超阈转人工",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "调度方案关口送出偏差绝对值大于 3% 时",
+      "standardizedLogicRule": "业务系统 (Business_System) 分流引擎将该调度建议 (Dispatch_Suggestion) 置为待人工确认 (Manual_Approval) 并推送人工界面(偏差 3.2% 即转,无“差一点点”灰度)。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "调度建议 (Dispatch_Suggestion)",
+        "人工确认 (Manual_Approval)",
+        "关口送出计划 (Grid_Interface_Plan)"
+      ],
+      "businessBackgroundReason": "关口偏差是人工确认的主因,3% 为基线硬线。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "43",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "高等级风险转人工",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "方案命中 L2 及以上风险时",
+      "standardizedLogicRule": "业务系统 (Business_System) 分流引擎将该调度建议 (Dispatch_Suggestion) 转人工确认 (Manual_Approval);L3 自动改派值长、L4 改派值长+总工。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "风险事件 (Risk_Event)",
+        "调度建议 (Dispatch_Suggestion)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "中高等级风险须人核实,不得自动放行。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "44",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "低置信度预测转人工",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "出力预测置信度(P50合格率)小于 0.9 时",
+      "standardizedLogicRule": "业务系统 (Business_System) 分流引擎将该调度建议 (Dispatch_Suggestion) 转人工确认 (Manual_Approval)。",
+      "relatedEntities": [
+        "出力预测 (Output_Forecast)",
+        "业务系统 (Business_System)",
+        "调度建议 (Dispatch_Suggestion)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "预测不可信时自动决策基础丧失,须人工复核。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "45",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "命中硬约束红线转人工",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "方案命中任一硬约束红线(防洪 CR-HYD-05/生态流量 CR-HYD-03/送出断面 CR-GRID-01/上级关口 CR-GRID-03)时",
+      "standardizedLogicRule": "业务系统 (Business_System) 分流引擎判定不可直通,将调度建议 (Dispatch_Suggestion) 转人工确认 (Manual_Approval),由人按红线处置裁量。",
+      "relatedEntities": [
+        "约束规则 (Constraint_Rule)",
+        "业务系统 (Business_System)",
+        "调度建议 (Dispatch_Suggestion)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "违反物理/安全/纪律硬红线属极端情况,必须人工特批或重算。",
+      "ruleSource": "约束规则库 CR-*",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "46",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "需人工裁量场景转人工",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "方案比选多套方案得分接近、各有取舍,或识别到需人工判断的特定场景时",
+      "standardizedLogicRule": "业务系统 (Business_System) 分流引擎将调度建议 (Dispatch_Suggestion) 转人工确认 (Manual_Approval),由调度员/值长裁量(方案明显占优才算满足直通条件⑤)。",
+      "relatedEntities": [
+        "调度建议 (Dispatch_Suggestion)",
+        "方案比选 (Scheme_Comparison)",
+        "业务系统 (Business_System)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "复杂取舍无法以模型完全定义,设人工裁量点。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "47",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "确认权限分级、逐级不越级",
+      "applicableClient": "通用",
+      "applicableDepartment": "值班调度员",
+      "submissionCriteria": "案件转人工确认、确定由谁下结论时",
+      "standardizedLogicRule": "确认权限按风险等级卡死:L1/L2 值班调度员(采纳/退回/否决),L3 值长(增暂缓),L4 值长+总工(增上报省调);调度员不得采纳 L3/L4,值长不得独自采纳 L4,逐级上行不得跳级,人工确认 (Manual_Approval) 每级留本人签字。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "风险事件 (Risk_Event)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "确认级别与风险处置层级一一对应,防越权放行。",
+      "ruleSource": "统一设定基线",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "48",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "L3/L4 风险暂缓执行(SUSPENDED)",
+      "applicableClient": "通用",
+      "applicableDepartment": "值长",
+      "submissionCriteria": "风险事件定级为 L3 或 L4 时",
+      "standardizedLogicRule": "风险事件 (Risk_Event) 标暂缓,关联调度辅助案件 (Dispatch_Case) 转 SUSPENDED 暂停执行,待风险闭环或上级批复后才解除;解除权限 L3 在值长、L4 在值长+总工,须凭风险闭环依据或省调答复。",
+      "relatedEntities": [
+        "风险事件 (Risk_Event)",
+        "调度辅助案件 (Dispatch_Case)",
+        "人工确认 (Manual_Approval)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "高/严重风险先停下来等结论,防止带险下发执行。",
+      "ruleSource": "统一设定基线",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "49",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "L4 严重风险必须上报省调",
+      "applicableClient": "通用",
+      "applicableDepartment": "总调度师",
+      "submissionCriteria": "风险事件定级为 L4(防洪/电网安全/机组紧急)时",
+      "standardizedLogicRule": "L4 风险事件 (Risk_Event) 必须经值长+总工审定并上报上级调度(省调);系统标 reported_up=true 仅表示“需上报”,真正上报须由值长+总工走调度渠道完成。",
+      "relatedEntities": [
+        "风险事件 (Risk_Event)",
+        "人工确认 (Manual_Approval)",
+        "关口送出计划 (Grid_Interface_Plan)"
+      ],
+      "businessBackgroundReason": "L4 超出本地处置权限,须上报省调并留痕,标记不等于已上报。",
+      "ruleSource": "上级电网调度(省调)",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "50",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "退回与否决区分及留痕",
+      "applicableClient": "通用",
+      "applicableDepartment": "值班调度员",
+      "submissionCriteria": "人工确认下达退回或否决结论时",
+      "standardizedLogicRule": "退回(RETURNED_FOR_REVISION)使调度辅助案件 (Dispatch_Case) 回 DRAFT 改参数重算,否决(REJECTED)使建议引擎重新生成方案;两者下游动作不同,人工确认 (Manual_Approval) 须写清是退回重算还是否决重做。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "调度辅助案件 (Dispatch_Case)",
+        "调度建议 (Dispatch_Suggestion)"
+      ],
+      "businessBackgroundReason": "退回与否决工作量与下游事件不同,点错会徒增重算或误废方案。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "51",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "软约束命中采纳须写权衡理由",
+      "applicableClient": "通用",
+      "applicableDepartment": "值班调度员",
+      "submissionCriteria": "软约束(振动区 CR-UNIT-02/市场偏差 CR-MKT-02 等)命中但确认采纳时",
+      "standardizedLogicRule": "采纳软约束命中方案的人工确认 (Manual_Approval) 必须写明权衡理由,该类“软约束命中却采纳”案件列入关键控制点 (Key_Control_Point) 抽查,不得为图省事采纳。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "约束校验命中 (Constraint_Hit)",
+        "关键控制点 (Key_Control_Point)"
+      ],
+      "businessBackgroundReason": "软约束可权衡的前提是有正当理由,为省事采纳是确认环节最常见失职。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "52",
+      "specificScenarioStage": "分流与人工确认",
+      "businessLogicRuleName": "风险误报关闭留痕",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "判定某风险事件为误报时",
+      "standardizedLogicRule": "风险事件 (Risk_Event) 标“误报关闭”须记误报理由并留审计事件 (Audit_Event),供稽核回看;误报关闭是正式闭环之一,不得“放过去不管”。",
+      "relatedEntities": [
+        "风险事件 (Risk_Event)",
+        "审计事件 (Audit_Event)"
+      ],
+      "businessBackgroundReason": "误报也要如实闭环留痕,误报率反哺规则阈值与模型优化。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "53",
+      "specificScenarioStage": "逐级审批",
+      "businessLogicRuleName": "逐级审批不得断档",
+      "applicableClient": "通用",
+      "applicableDepartment": "值长",
+      "submissionCriteria": "案件进入逐级审批、每级审批人处置时",
+      "standardizedLogicRule": "逐级审批不得跳级,每一级须在人工确认 (Manual_Approval)/AP 实例留下本人工号+结论+意见;严禁审批链断档或伪造留痕,上级下沉复核不免除下级责任。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "审批链断档(留痕显示某级签了实际没看)比判断失误更严重,破坏“谁确认谁担责”。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "54",
+      "specificScenarioStage": "逐级审批",
+      "businessLogicRuleName": "加签增加把关不分摊责任",
+      "applicableClient": "通用",
+      "applicableDepartment": "值长",
+      "submissionCriteria": "L3/多软约束叠加、涉市场/涉水位/涉设备/重大方式等场景需加签时",
+      "standardizedLogicRule": "加签是额外增加一道把关,加签人对自己所签部分负责,人工确认 (Manual_Approval) 须记主审与各加签人及各自意见;加签不得作为法不责众的免责挡箭牌。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "加签为增加把关而非稀释担责。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "55",
+      "specificScenarioStage": "逐级审批",
+      "businessLogicRuleName": "涉网关口案件一律以省调为准",
+      "applicableClient": "通用",
+      "applicableDepartment": "总调度师",
+      "submissionCriteria": "涉网关口(CR-GRID-03,T8)案件审批时",
+      "standardizedLogicRule": "涉网关口案件即使总工、主任均已签字,只要与省调关口送出计划 (Grid_Interface_Plan) 冲突即不得执行;审批链顶端是省调,不是本单位主任。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "关口送出计划 (Grid_Interface_Plan)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "关口是省调权威指令,本地审批不能凌驾于省调之上。",
+      "ruleSource": "上级电网调度(省调)",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "56",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "OP-06 计划定版锁定 DP",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "人工确认采纳或自动采纳后",
+      "standardizedLogicRule": "业务系统 (Business_System) 执行 OP-06 把选定方案锁定为调度计划 (Dispatch_Plan) 并生成 DP 号,案件转 PLANNED;定版后 DP 智调侧只读,修改须走日内滚动 OP-11。",
+      "relatedEntities": [
+        "调度计划 (Dispatch_Plan)",
+        "调度辅助案件 (Dispatch_Case)",
+        "调度建议 (Dispatch_Suggestion)"
+      ],
+      "businessBackgroundReason": "定版保证回写 EMS、上报省调的计划与智调侧是同一份,防版本不一致。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "57",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "OP-07 回写 EMS(唯一出口)",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "调度计划定版后",
+      "standardizedLogicRule": "业务系统 (Business_System) 执行 OP-07 把定版调度计划 (Dispatch_Plan) 回写能控 EMS(智调对外唯一出口),案件转 POSTED,控制权移交能控 EMS。",
+      "relatedEntities": [
+        "调度计划 (Dispatch_Plan)",
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "智调只往能控 EMS 写,不直连省调/交易中心,边界清晰。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "58",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "OP-08 指令下发由能控 EMS 执行",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "计划回写 EMS 后下发执行时",
+      "standardizedLogicRule": "OP-08 下发 AGC/AVC/开停机调度指令 (Dispatch_Instruction) 由能控 EMS(业务系统)执行至电站 (Power_Station),智调不直接下令;智调“确认”后还须经定版、回写、下发三步机组才动作。",
+      "relatedEntities": [
+        "调度指令 (Dispatch_Instruction)",
+        "调度计划 (Dispatch_Plan)",
+        "业务系统 (Business_System)",
+        "电站 (Power_Station)"
+      ],
+      "businessBackgroundReason": "智调管想、能控 EMS 管做,职责分离防越界下令。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "59",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "OP-09 执行反馈经慧采回采",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "机组执行后回采实际出力时",
+      "standardizedLogicRule": "OP-09 实际出力等执行反馈 (Execution_Feedback) 由慧采/SCADA 回采喂回智调比对,智调不直接采数,是偏差复盘闭环的开始。",
+      "relatedEntities": [
+        "执行反馈 (Execution_Feedback)",
+        "调度计划 (Dispatch_Plan)",
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "回采统一走慧采,闭环数据来源唯一可信。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "60",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "OP-11 日内滚动只覆盖未来时段",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "来水/资源/负荷/电网方式变化需日内修正时",
+      "standardizedLogicRule": "OP-11 开新调度辅助案件 (Dispatch_Case)(日内滚动)重走六段流水线定新版调度计划 (Dispatch_Plan),只覆盖未来未执行时段,已下发执行的历史时段不得改动。",
+      "relatedEntities": [
+        "调度计划 (Dispatch_Plan)",
+        "调度辅助案件 (Dispatch_Case)"
+      ],
+      "businessBackgroundReason": "已下发执行的计划不可篡改,改未来时段须留新案/新计划/新留痕完整链条。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "61",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "OP-12 市场申报经能控 EMS 回写交易中心",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "市场申报量价回写时",
+      "standardizedLogicRule": "OP-12 把调度计划 (Dispatch_Plan) 中的市场申报量价以市场申报 (Market_Declaration) 经能控 EMS 回写电力交易中心,智调不直连交易中心。",
+      "relatedEntities": [
+        "市场申报 (Market_Declaration)",
+        "调度计划 (Dispatch_Plan)",
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "市场申报统一经能控 EMS 中转,守住对外唯一出口边界。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "62",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "指令执行纪律",
+      "applicableClient": "通用",
+      "applicableDepartment": "值班调度员",
+      "submissionCriteria": "电站接收并执行调度指令时",
+      "standardizedLogicRule": "电站收令须确认、执行并回执行反馈 (Execution_Feedback);对指令有疑应暂缓该条并反馈调度核实重发;严禁擅自改令、不执行或执行后不回反馈。",
+      "relatedEntities": [
+        "调度指令 (Dispatch_Instruction)",
+        "执行反馈 (Execution_Feedback)",
+        "电站 (Power_Station)"
+      ],
+      "businessBackgroundReason": "指令执行纪律是计划落地与闭环的底线。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "63",
+      "specificScenarioStage": "计划定版与回写执行",
+      "businessLogicRuleName": "理想路径全自动执行链",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "执行 Happy Path 且五条直通条件全部满足时",
+      "standardizedLogicRule": "业务系统 (Business_System) 依次自动:1.置 AUTO_ADOPTED;2.OP-06 锁定调度计划 (Dispatch_Plan) 版本;3.OP-07 回写能控 EMS;4.OP-08 下发调度指令 (Dispatch_Instruction);5.OP-09 采集记录执行反馈 (Execution_Feedback)。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "调度计划 (Dispatch_Plan)",
+        "调度指令 (Dispatch_Instruction)",
+        "执行反馈 (Execution_Feedback)",
+        "方案比选 (Scheme_Comparison)"
+      ],
+      "businessBackgroundReason": "定义全自动运行的最终交付链:锁定计划、下发指令、回采闭环。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "64",
+      "specificScenarioStage": "偏差复盘与运行分析",
+      "businessLogicRuleName": "OP-10 偏差复盘必须追因",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "执行反馈回采后做偏差复盘时",
+      "standardizedLogicRule": "OP-10 生成偏差报告 (Deviation_Report):按 96 点算逐点偏差与关口送出整体偏差,并按归因表(预测不准 T6/来水资源偏差 T5/执行走样/约束临时变化 T2/市场偏差 T7)追因,不得只算偏差值不追因。",
+      "relatedEntities": [
+        "偏差报告 (Deviation_Report)",
+        "执行反馈 (Execution_Feedback)",
+        "调度计划 (Dispatch_Plan)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "偏差分析的灵魂是追因,只算账会误判病灶、错调模型。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "65",
+      "specificScenarioStage": "偏差复盘与运行分析",
+      "businessLogicRuleName": "三弃分析区分该弃与被迫弃",
+      "applicableClient": "通用",
+      "applicableDepartment": "调度运行组",
+      "submissionCriteria": "出现弃水/弃风/弃光时",
+      "standardizedLogicRule": "三弃(对应 T1)由理论可发减实际发计算,偏差报告 (Deviation_Report) 须区分该弃(防洪预泄等正当)与被迫弃(断面受限 CR-GRID-01 等下策),量大或频繁的立 T1 风险事件 (Risk_Event) 专项复盘。",
+      "relatedEntities": [
+        "偏差报告 (Deviation_Report)",
+        "风险事件 (Risk_Event)",
+        "电网断面 (Grid_Section)"
+      ],
+      "businessBackgroundReason": "三弃直接关系清洁能源消纳目标,被迫弃要想办法减少。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "66",
+      "specificScenarioStage": "偏差复盘与运行分析",
+      "businessLogicRuleName": "预测准确率事后考核反哺模型",
+      "applicableClient": "通用",
+      "applicableDepartment": "新能源预测专责",
+      "submissionCriteria": "执行反馈回采后回评出力预测准确率时",
+      "standardizedLogicRule": "拿实际出力逐点比出力预测 (Output_Forecast) 算实际合格率,与发布时预期置信度对比,结论反哺预测模型 (Forecast_Model) 调优;偏差集中在某模型版本上线后则回退或调优。",
+      "relatedEntities": [
+        "出力预测 (Output_Forecast)",
+        "执行反馈 (Execution_Feedback)",
+        "预测模型 (Forecast_Model)"
+      ],
+      "businessBackgroundReason": "事后考核形成“运行→复盘→优化→再运行”闭环,让预测越做越准。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "67",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "数据修改留痕三件套",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "对方案确认、风险处置、解释/预测参数、系统配置、解除暂缓等任何数据做修改时",
+      "standardizedLogicRule": "任何修改都须记谁/何时/前值(trace_before)/后值(trace_after)/理由(trace_reason,≥10字,禁止“OK/重算”等废话)并入审计事件 (Audit_Event);理由空缺视为无源可溯,不予通过。",
+      "relatedEntities": [
+        "审计事件 (Audit_Event)",
+        "人工确认 (Manual_Approval)",
+        "调度辅助案件 (Dispatch_Case)"
+      ],
+      "businessBackgroundReason": "前值后值理由三件套是全链路可追溯、可问责的核心机制。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "68",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "配置权与业务确认权分离",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "系统组配置规则/阈值/模型/分流逻辑,或试图操作业务确认时",
+      "standardizedLogicRule": "智调系统组(系统角色 Role)可配规则/阈值/模型版本/运维,但绝不点任何调度辅助案件 (Dispatch_Case) 的采纳/确认;配置改动全留痕,基线硬阈值除外不可配。",
+      "relatedEntities": [
+        "系统角色 (Role)",
+        "业务系统 (Business_System)",
+        "调度辅助案件 (Dispatch_Case)"
+      ],
+      "businessBackgroundReason": "防止既当裁判又当运动员,配置权与执行确认权严格分离。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "69",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "稽核监督权与操作权分离(只看不批)",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "安全稽核查看案件/审计日志或试图参与方案确认时",
+      "standardizedLogicRule": "安全稽核(系统角色 Role)可只读查看全部调度辅助案件 (Dispatch_Case) 与审计日志、查留痕、出稽核发现 (Audit_Finding),但不参与方案确认;越权点确认即告警并记违规。",
+      "relatedEntities": [
+        "系统角色 (Role)",
+        "稽核发现 (Audit_Finding)",
+        "审计事件 (Audit_Event)"
+      ],
+      "businessBackgroundReason": "稽核独立监督,越权操作即破坏独立性。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "70",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "认账号不认脸、禁借账号伪造签字",
+      "applicableClient": "通用",
+      "applicableDepartment": "值班调度员",
+      "submissionCriteria": "登录、交接班、代值或任何操作留痕时",
+      "standardizedLogicRule": "审计事件 (Audit_Event) 记登录工号,交接班须退出重登,代值须用代值本人工号并在人工确认 (Manual_Approval) 标“代XX值”;严禁借用他人工作台账号审批或伪造签字。",
+      "relatedEntities": [
+        "审计事件 (Audit_Event)",
+        "系统角色 (Role)",
+        "人工确认 (Manual_Approval)"
+      ],
+      "businessBackgroundReason": "账号即责任主体,借账号会使“谁确认谁担责”失真。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "71",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "基线硬阈值不可改",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "任何人试图调整关口偏差 3% 或置信度 0.9 阈值时",
+      "standardizedLogicRule": "关口偏差≤3%、出力预测置信度≥0.9 两条基线硬阈值任何人不可改,业务系统 (Business_System) 不提供修改入口。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "约束规则 (Constraint_Rule)"
+      ],
+      "businessBackgroundReason": "两条基线硬阈值是分流安全线,开灰度则调度纪律崩塌。",
+      "ruleSource": "统一设定基线",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "72",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "不得擅自变更关口计划",
+      "applicableClient": "通用",
+      "applicableDepartment": "值长",
+      "submissionCriteria": "需要变更关口送出或实际送出偏离关口曲线时",
+      "standardizedLogicRule": "任何人不得擅自变更关口送出计划 (Grid_Interface_Plan)、不得使实际送出超关口曲线、不得私自调整申报、不得不以最新 GZL 编制计划(均为 T8 涉网红线);变更唯一合规路径是向省调申请→省调批复下发新 GZL→按新 GZL 编制。",
+      "relatedEntities": [
+        "关口送出计划 (Grid_Interface_Plan)",
+        "调度计划 (Dispatch_Plan)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "关口是省调权威硬指标,擅改超送是涉网纪律死罪,经济性永远在电网安全之后。",
+      "ruleSource": "上级电网调度(省调)",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "73",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "越权处置八条红线",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "出现越权处置苗头时",
+      "standardizedLogicRule": "禁止:①调度员采纳 L3/L4 案件 ②值长独自采纳 L4 ③任何人越权放行防洪红线(CR-HYD-05)④任何人越权放行生态流量红线(CR-HYD-03)⑤擅自变更/超关口送出 ⑥手动绕过分流把该转人工的强制直通 ⑦借账号审批/伪造签字 ⑧暂缓(SUSPENDED)风险未闭环擅自恢复执行;违反即记入稽核发现 (Audit_Finding) 并按情节上报追责。",
+      "relatedEntities": [
+        "人工确认 (Manual_Approval)",
+        "风险事件 (Risk_Event)",
+        "系统角色 (Role)",
+        "约束规则 (Constraint_Rule)",
+        "稽核发现 (Audit_Finding)"
+      ],
+      "businessBackgroundReason": "越权常伴“好心办坏事”,纪律用来防“万一判断错”,越权对了也是错。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "74",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "全链路审计留痕不可删",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "发生登录/操作/确认/退回/否决/暂缓/解除/改配置等任何动作时",
+      "standardizedLogicRule": "每个动作都进审计事件 (Audit_Event)/案件 trace_log,任何人(含系统组、主任)不可删,作为偏差复盘、调度纪律检查、运行分析的数据底座。",
+      "relatedEntities": [
+        "审计事件 (Audit_Event)",
+        "调度辅助案件 (Dispatch_Case)"
+      ],
+      "businessBackgroundReason": "不可删的全链路留痕是信任闭环与问责的最外层保障。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "75",
+      "specificScenarioStage": "权限/审计/调度纪律",
+      "businessLogicRuleName": "配置变更必留理由",
+      "applicableClient": "通用",
+      "applicableDepartment": "智调系统组",
+      "submissionCriteria": "修改约束阈值、模型版本或其他系统配置时",
+      "standardizedLogicRule": "配置类修改前值后值由系统自动记,理由必填并写透(改哪条规则/约束规则 (Constraint_Rule) 或预测模型 (Forecast_Model)、原值新值、依据);理由空缺的配置变更视为无源可溯,不予生效。",
+      "relatedEntities": [
+        "审计事件 (Audit_Event)",
+        "约束规则 (Constraint_Rule)",
+        "预测模型 (Forecast_Model)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "理由空缺的配置改动复盘时无从追溯,比不改更麻烦。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "76",
+      "specificScenarioStage": "运行稽核",
+      "businessLogicRuleName": "稽核底稿必留(可复核可追溯)",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "开展任一次运行稽核(无论是否查出问题)时",
+      "standardizedLogicRule": "每次稽核都须留稽核底稿 (Audit_Working_Paper),含稽核批次/编号、时间/稽核人、抽样范围与方法、稽核依据、稽核发现、无异常说明、整改要求;底稿须可复核、可追溯。",
+      "relatedEntities": [
+        "稽核底稿 (Audit_Working_Paper)",
+        "调度辅助案件 (Dispatch_Case)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "稽核员也要被监督,底稿是其工作的自证证据,只查不留底稿等于没查。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "77",
+      "specificScenarioStage": "运行稽核",
+      "businessLogicRuleName": "稽核发现整改闭环",
+      "applicableClient": "通用",
+      "applicableDepartment": "安全稽核组",
+      "submissionCriteria": "稽核查出问题、开整改要求后",
+      "standardizedLogicRule": "稽核发现 (Audit_Finding) 须按发现→整改要求(可执行可验证)→被稽核方整改→稽核组回访核实→闭环归档 推进;屡查屡犯升级上报主任,整改闭环率列入关键控制点 (Key_Control_Point) 抽查。",
+      "relatedEntities": [
+        "稽核发现 (Audit_Finding)",
+        "关键控制点 (Key_Control_Point)"
+      ],
+      "businessBackgroundReason": "稽核价值在让问题不再发生,查出不改等于白查。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "78",
+      "specificScenarioStage": "测试与部署",
+      "businessLogicRuleName": "系统变更须执行六段流水线走查",
+      "applicableClient": "通用",
+      "applicableDepartment": "测试组",
+      "submissionCriteria": "智调系统软件版本升级、业务规则变更、阈值参数调整、或接入新电站/新机组硬件时",
+      "standardizedLogicRule": "测试人员须依据《测试用例集》对该次变更完整执行六段流水线(①数据解释 ②出力预测 ③调度建议生成 ④约束校验 ⑤方案比选+风险标注 ⑥人工确认+回写)的端到端走查测试。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "电站 (Power_Station)",
+        "设备 (Equipment)",
+        "出力预测 (Output_Forecast)",
+        "方案比选 (Scheme_Comparison)"
+      ],
+      "businessBackgroundReason": "确保变更后各段流水线完整稳定,防止软硬件更替引入业务风险。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "79",
+      "specificScenarioStage": "测试与部署",
+      "businessLogicRuleName": "缺失测试覆盖禁止部署",
+      "applicableClient": "通用",
+      "applicableDepartment": "配置管理组",
+      "submissionCriteria": "任一流水线段缺乏对应测试用例覆盖时",
+      "standardizedLogicRule": "业务系统 (Business_System) 配置管理模块禁止将缺失测试覆盖的流水线段发布部署至生产环境。",
+      "relatedEntities": [
+        "业务系统 (Business_System)"
+      ],
+      "businessBackgroundReason": "从工程层面自动拦截未通过完整性校验的配置发布,守住上线安全红线。",
+      "ruleSource": "内部流程",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "80",
+      "specificScenarioStage": "测试与部署",
+      "businessLogicRuleName": "测试失败闭环退回",
+      "applicableClient": "通用",
+      "applicableDepartment": "测试组",
+      "submissionCriteria": "测试用例任一验收项实际结果与预期不一致时",
+      "standardizedLogicRule": "测试人员判定该项不通过,在协同系统中把测试任务退回业务系统 (Business_System) 开发组(系统角色 Role)修复,修复后回归。",
+      "relatedEntities": [
+        "业务系统 (Business_System)",
+        "系统角色 (Role)"
+      ],
+      "businessBackgroundReason": "建立测试异常发现与修复闭环,质量风险部署前清除。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "81",
+      "specificScenarioStage": "测试与部署",
+      "businessLogicRuleName": "测试用例同步更新",
+      "applicableClient": "通用",
+      "applicableDepartment": "配置管理组",
+      "submissionCriteria": "业务规则修改、阈值参数调整或新增电站机组设备时",
+      "standardizedLogicRule": "配置管理员(系统角色 Role)须同步修改关联测试用例,并按外部版本规范递增测试用例集版本号,涉及的电站 (Power_Station)/设备 (Equipment) 基线一并更新。",
+      "relatedEntities": [
+        "系统角色 (Role)",
+        "电站 (Power_Station)",
+        "设备 (Equipment)"
+      ],
+      "businessBackgroundReason": "确保测试准则与生产规则一致,防测试环境与生产脱节。",
+      "ruleSource": "内部流程",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    }
+  ]
+}
