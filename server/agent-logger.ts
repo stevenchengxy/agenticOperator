@@ -23,6 +23,7 @@
 
 import { prisma } from "./db";
 import { byWsId } from "@/lib/agent-mapping";
+import { recordNotification } from "./notifications/ingest";
 
 export type AgentLogContext = {
   /** Agent short name (e.g. "createJD"). Used as agentName + fallback nodeId. */
@@ -132,6 +133,22 @@ async function safeWrite(
         metadata: metadata ? safeStringify(metadata) : null,
       },
     });
+    // Mirror unrecoverable agent errors into the 消息通知 center (deduped per
+    // agent so a storm collapses to one alert + count). Transient anomalies are
+    // intentionally NOT surfaced here — they stay in the audit log only, per
+    // "only important". Fire-and-forget: recordNotification never throws.
+    if (type === "agent_error") {
+      const who = canonicalAgentName(ctx);
+      void recordNotification({
+        level: "error",
+        category: "agent_error",
+        source: who,
+        agent: who,
+        runId: ctx.runId ?? null,
+        message: narrative,
+        dedupeHint: `agent_error.${who}`,
+      }).catch(() => {});
+    }
   } catch (e) {
     // Still surface the failure — silently swallowing it would hide a
     // schema/connection bug. console.warn is fine; the agent run keeps going.
