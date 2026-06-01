@@ -24,6 +24,7 @@
 import { prisma } from "./db";
 import { byWsId } from "@/lib/agent-mapping";
 import { recordNotification } from "./notifications/ingest";
+import { recordLogEvent } from "./log/log-event";
 
 export type AgentLogContext = {
   /** Agent short name (e.g. "createJD"). Used as agentName + fallback nodeId. */
@@ -132,6 +133,15 @@ async function safeWrite(
         narrative,
         metadata: metadata ? safeStringify(metadata) : null,
       },
+    });
+    // Mirror every activity into the unified audit log (queryable via
+    // /api/log-events by run / agent / severity / time). Fire-and-forget.
+    void recordLogEvent({
+      type,
+      message: narrative,
+      agent: canonicalAgentName(ctx),
+      runId: ctx.runId ?? null,
+      payloadJson: metadata ? safeStringify(metadata) : null,
     });
     // Mirror unrecoverable agent errors into the 消息通知 center (deduped per
     // agent so a storm collapses to one alert + count). Transient anomalies are

@@ -1026,3 +1026,32 @@ model Notification {
   @@index([readAt])
   @@map("notification")
 }
+
+// ── 审计日志 (unified audit log) ────────────────────────────────────────
+// Single queryable record of every agent activity, mirrored fire-and-forget
+// from the central AgentLogger (server/agent-logger.ts) with a normalized
+// (level, category) + correlation keys. Powers /api/log-events ("show
+// everything for this run/agent/severity/time"). The everything-queryable substrate;
+// the Notification table is the curated, surfaced subset on top.
+model LogEvent {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  level       String // debug | info | notice | warn | error | critical
+  category    String // error | anomaly | tool | decision | event | lifecycle | step | hitl | info
+  source      String   @default("agent") // agent | system | em | manage | external
+  agent       String?
+  runId       String?
+  traceId     String?
+  eventName   String?
+  message     String
+  payloadJson String?
+  durationMs  Int?
+
+  @@index([ts])
+  @@index([runId, ts])
+  @@index([agent, ts])
+  @@index([traceId, ts])
+  @@index([level, ts])
+  @@index([category, ts])
+  @@map("log_event")
+}
