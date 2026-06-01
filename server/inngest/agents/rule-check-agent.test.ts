@@ -44,6 +44,10 @@ vi.mock('@/server/db', () => ({
   prisma: {
     ruleCheckAudit: { create: vi.fn(async () => ({})) },
     ruleCheckFlag: { createMany: vi.fn(async () => ({ count: 0 })) },
+    notification: {
+      upsert: vi.fn(async () => ({ id: 'n1' })),
+      create: vi.fn(async () => ({ id: 'n1' })),
+    },
   },
 }));
 

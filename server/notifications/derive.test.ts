@@ -110,12 +110,12 @@ describe('deriveNotification', () => {
 
   it('warning alert: notified in AI/normal mode, NOT notified in fallback mode', () => {
     const warn = base({ level: 'error', source: 'ruleCheck', message: 'low confidence', dedupeHint: 'agent_warn.ruleCheck' });
-    expect(deriveNotification(warn).shouldNotify).toBe(true); // normal
-    expect(deriveNotification(warn, { mode: 'fallback' }).shouldNotify).toBe(false); // fallback → only critical
+    expect(deriveNotification(warn)!.shouldNotify).toBe(true); // normal
+    expect(deriveNotification(warn, { mode: 'fallback' })!.shouldNotify).toBe(false); // fallback → only critical
   });
 
   it('critical alert is notified even in fallback mode', () => {
     const crit = base({ level: 'error', dedupeHint: 'em_degraded', source: 'EM', category: 'system', message: 'EM down' });
-    expect(deriveNotification(crit, { mode: 'fallback' }).shouldNotify).toBe(true);
+    expect(deriveNotification(crit, { mode: 'fallback' })!.shouldNotify).toBe(true);
   });
 });

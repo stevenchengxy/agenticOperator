@@ -21,6 +21,7 @@ import { NonRetriableError } from 'inngest';
 import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
 import { isInfraFailure } from '@/lib/rule-check/infra-failure';
+import { recordNotification } from '@/server/notifications/ingest';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { getRequirementsAgentView } from '@/lib/partner-pg/agent-view';
@@ -353,6 +354,20 @@ export async function ruleCheckAgentHandler({
         logger.error(
           `[${AGENT_NAME}] ✗ rule-check infra failure jr=${jrid} reason=${r.audit.fail_reason} — retry+park, candidate NOT rejected`,
         );
+        // Surface a critical alert into the 消息通知 center. Deduped by reason, so
+        // a gateway outage collapses every parked rule-check into ONE alert with a
+        // count — not N. Fire-and-forget: recordNotification never throws.
+        await recordNotification({
+          level: 'critical',
+          category: 'system',
+          source: 'rule-check',
+          agent: AGENT_NAME,
+          message: `规则校验因基础设施故障挂起(${r.audit.fail_reason})— 候选人未被拒绝,网关恢复后将自动重放`,
+          runId: runId ?? null,
+          traceId: traceId ?? null,
+          anchors: { candidate_id: candidateId, job_requisition_id: jrid, upload_id: uploadId },
+          dedupeHint: `rule_check_parked.${r.audit.fail_reason}`,
+        });
         throw new Error(
           `[${AGENT_NAME}] rule-check infra failure (jr=${jrid}, reason=${r.audit.fail_reason}) — retrying; candidate NOT rejected`,
         );

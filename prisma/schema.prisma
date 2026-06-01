@@ -965,3 +965,64 @@ model RunAiSummary {
   @@index([generated_at])
   @@map("run_ai_summary")
 }
+
+// ── 消息通知中心 (Notification center) ──────────────────────────────────
+// Unified "message + alert" surface. Curated DOWNSTREAM of the full log/trace
+// (everything queryable lives in the audit log); only signals worth a human's
+// attention are materialized here. Messages (business lifecycle / events) are
+// rendered deterministically; alerts (error/critical) are deduped by dedupeKey
+// and optionally enriched by the AI manager (aiSummary/aiSeverity/...), with a
+// deterministic fallback. See 2026-06-01-notification-center-and-audit-completeness-design.md.
+model Notification {
+  id       String   @id @default(cuid())
+  ts       DateTime @default(now())
+
+  kind     String // "message" | "alert"
+  severity String // message→"info"; alert→"warning"|"critical"
+  category String // "system" | "agent" | "event" | "candidate" | "job"
+  source   String // business source label: agent short name | "LLM 网关" | "EM" | ...
+  title    String
+  body     String
+
+  // correlation / deep-link
+  runId           String?
+  traceId         String?
+  eventInstanceId String?
+  agent           String?
+  anchorsJson     String? // JSON {candidate_id, job_requisition_id, upload_id, client_id}
+  linkKind        String? // "run" | "trace" | "rule_check" | "event" | "none"
+  linkId          String?
+
+  // alert-only (null for plain messages)
+  dedupeKey     String?
+  count         Int       @default(1)
+  firstSeenAt   DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  status        String? // "firing" | "ack" | "resolved" | "auto_handled"
+  disposition   String    @default("info_only") // "needs_human" | "auto_handled" | "info_only"
+  managerAction String? // mirrored from BehaviorAlert.managerActionTaken (display only)
+
+  // AI enrichment cache (mirrors RunAiSummary pattern)
+  aiSummary      String?
+  aiSeverity     String?
+  aiShouldNotify Boolean?
+  aiSource       String? // "llm" | "fallback" | "none"
+  llmModel       String?
+  aiGeneratedAt  DateTime?
+
+  // notify + read state
+  shouldNotify  Boolean   @default(false)
+  notifiedAt    DateTime?
+  notifyChannel String? // "in_app"
+  readAt        DateTime?
+
+  @@unique([dedupeKey, status]) // one firing alert per dedupeKey; messages have null key (distinct in PG)
+  @@index([ts])
+  @@index([kind, ts])
+  @@index([severity, ts])
+  @@index([category, ts])
+  @@index([status])
+  @@index([runId])
+  @@index([readAt])
+  @@map("notification")
+}
