@@ -1,35 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./instance-client', () => ({
-  getInstance: vi.fn(),
-  listInstances: vi.fn(),
-  listLinks: vi.fn(),
+// 2026-06-01: harness repaired. The runner now fetches rules via
+// api-rule-fetcher and pre-fetches graph context via graph-context (it no
+// longer calls the old ontology-source / instance-client directly). Mock those
+// two so the runner reaches the LLM eval path instead of failing early with
+// ontology-graph-unavailable.
+vi.mock('./api-rule-fetcher', () => ({
+  fetchRulesViaOntologyApi: vi.fn(),
+  RuleFetchApiError: class RuleFetchApiError extends Error {},
 }));
-vi.mock('./ontology-source', () => ({
-  fetchRulesForMatchResume: vi.fn(),
+vi.mock('./graph-context', () => ({
+  buildGraphContext: vi.fn(),
+  createDispatcher: vi.fn(() => async () => null),
 }));
 vi.mock('@/server/llm/gateway', () => ({
   chatComplete: vi.fn(),
 }));
 
-import { getInstance, listInstances, listLinks } from './instance-client';
-import { fetchRulesForMatchResume } from './ontology-source';
+import { fetchRulesViaOntologyApi } from './api-rule-fetcher';
+import { buildGraphContext } from './graph-context';
 import { chatComplete } from '@/server/llm/gateway';
 import { buildRuleCheckInput, runRuleCheck } from './runner';
 import type { RuleCheckInput } from './types';
 
-const mFetchRules = vi.mocked(fetchRulesForMatchResume);
+const mFetchRules = vi.mocked(fetchRulesViaOntologyApi);
 const mChat = vi.mocked(chatComplete);
-const mGetInst = vi.mocked(getInstance);
-const mListInst = vi.mocked(listInstances);
-const mListLinks = vi.mocked(listLinks);
+const mBuildGraph = vi.mocked(buildGraphContext);
 
 beforeEach(() => {
   mFetchRules.mockReset();
   mChat.mockReset();
-  mGetInst.mockReset();
-  mListInst.mockReset();
-  mListLinks.mockReset();
+  mBuildGraph.mockReset();
   process.env.ALLMETA_BASE_URL = 'http://localhost:3500';
   process.env.ALLMETA_API_KEY = 'tok';
 });
@@ -54,9 +55,15 @@ function fakeInput(): RuleCheckInput {
 }
 
 function mockGraphEmpty(): void {
-  mGetInst.mockResolvedValue(null);
-  mListInst.mockResolvedValue([]);
-  mListLinks.mockResolvedValue([]);
+  mBuildGraph.mockResolvedValue({
+    candidate: null,
+    resume: null,
+    job_requisition: null,
+    applications: [],
+    blacklist_hits: [],
+    employment_links: [],
+    fetch_count: 0,
+  });
 }
 
 function mockRulesFourRules(): void {
@@ -222,7 +229,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(out.explanations).toHaveLength(0);
   });
 
-  it('REVIEW: folds to REVIEW on pending', async () => {
+  it('PASS: pending no longer folds to REVIEW (policy 2026-05-26 — only真违反阻断)', async () => {
     mockRulesOneStepOneRule();
     mockGraphEmpty();
     mChat.mockResolvedValueOnce({
@@ -236,7 +243,9 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
       toolUseIterations: 0,
     });
     const out = await runRuleCheck(fakeInput());
-    expect(out.decision).toBe('REVIEW');
+    // foldDecision folds pending → PASS (no longer blocks); the pending rule is
+    // still recorded in stats/explanations for the HSM review surface.
+    expect(out.decision).toBe('PASS');
     expect(out.stats.pending).toBe(1);
   });
 
@@ -292,11 +301,9 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
 
   it('fail-safe FAIL with ontology-graph-unavailable when getInstance throws 401', async () => {
     mockRulesOneStepOneRule();
-    mGetInst.mockRejectedValueOnce(
+    mBuildGraph.mockRejectedValueOnce(
       new Error('Ontology API getInstance(Candidate, C-1) -> 401. Body: unauthorized'),
     );
-    mListInst.mockResolvedValue([]);
-    mListLinks.mockResolvedValue([]);
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.audit.fail_reason).toBe('ontology-graph-unavailable');
