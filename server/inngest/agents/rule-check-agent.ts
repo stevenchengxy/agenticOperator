@@ -20,6 +20,7 @@
 import { NonRetriableError } from 'inngest';
 import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
+import { isInfraFailure } from '@/lib/rule-check/infra-failure';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { getRequirementsAgentView } from '@/lib/partner-pg/agent-view';
@@ -340,6 +341,23 @@ export async function ruleCheckAgentHandler({
           `tool_rounds=${r.audit.llm_round_trips}` +
           (r.audit.fail_reason ? ` fail_reason=${r.audit.fail_reason}` : ''),
       );
+
+      // 2026-06-01 — Infrastructure failure (LLM gateway/401/timeout, unparseable
+      // LLM output, graph unavailable, tool loop exhausted) is NOT a candidate
+      // rejection. failSafe() returns decision='FAIL' with an infra fail_reason;
+      // throwing HERE (inside the step) makes Inngest retry the step — re-calling
+      // the LLM — and on retry exhaustion park the run for replay. It runs BEFORE
+      // the audit / Neo4j CMR / partner-pg writes + emit below, so an infra outage
+      // never writes 未通过 to the partner main table or emits MATCH_RULE_CHECK_FAILED.
+      if (r.decision === 'FAIL' && isInfraFailure(r.audit.fail_reason)) {
+        logger.error(
+          `[${AGENT_NAME}] ✗ rule-check infra failure jr=${jrid} reason=${r.audit.fail_reason} — retry+park, candidate NOT rejected`,
+        );
+        throw new Error(
+          `[${AGENT_NAME}] rule-check infra failure (jr=${jrid}, reason=${r.audit.fail_reason}) — retrying; candidate NOT rejected`,
+        );
+      }
+
       return r;
     });
 
