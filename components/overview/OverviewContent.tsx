@@ -451,12 +451,12 @@ function TodoPanel({
       </div>
       <div className="flex-1 flex flex-col" style={{ gap: 8 }}>
         {tasks === null ? (
-          <div className="text-ink-3 text-[12px]">加载中…</div>
+          <div className="text-ink-3 text-[12px]">{t("common_loading")}</div>
         ) : tasks.length === 0 ? (
           <div className="text-ink-3 text-[12px]">{t("overview_todo_empty")}</div>
         ) : (
           tasks.slice(0, 6).map((tk, i) => (
-            <TodoRow key={tk.id} task={tk} index={i} resolveName={resolveName} />
+            <TodoRow key={tk.id} task={tk} index={i} resolveName={resolveName} t={t} />
           ))
         )}
       </div>
@@ -468,10 +468,12 @@ function TodoRow({
   task,
   index,
   resolveName,
+  t,
 }: {
   task: HumanTaskCard;
   index: number;
   resolveName: (short: string) => string;
+  t: (k: string) => string;
 }) {
   const agentMeta = AGENT_MAP.find((a) => a.short === task.agentShort);
   const stage = agentMeta?.stage ?? "system";
@@ -505,7 +507,7 @@ function TodoRow({
         </div>
       </div>
       <span className="text-ink-4 mono text-[10.5px] flex-none" style={{ paddingTop: 2 }}>
-        {relativeTime(task.createdAt)}
+        {relativeTime(task.createdAt, t)}
       </span>
     </Link>
   );
@@ -552,7 +554,7 @@ function EventStreamPanel({
         {events.length === 0 ? (
           <div className="text-ink-3 text-[12px]">{t("overview_stream_empty")}</div>
         ) : (
-          events.slice(0, 10).map((e, i) => <EventRow key={e.id ?? e.internal_id ?? i} entry={e} index={i} />)
+          events.slice(0, 10).map((e, i) => <EventRow key={e.id ?? e.internal_id ?? i} entry={e} index={i} t={t} />)
         )}
       </div>
     </section>
@@ -598,7 +600,7 @@ function SseStatusPill({
   );
 }
 
-function EventRow({ entry, index }: { entry: InngestEventRow; index: number }) {
+function EventRow({ entry, index, t }: { entry: InngestEventRow; index: number; t: (k: string) => string }) {
   const tone = eventNameTone(entry.name);
   const ts =
     entry.received_at ??
@@ -606,7 +608,7 @@ function EventRow({ entry, index }: { entry: InngestEventRow; index: number }) {
   const description = pickEventDescription(entry);
   return (
     <Link
-      href={`/events/${encodeURIComponent(entry.name)}`}
+      href={`/events?name=${encodeURIComponent(entry.name)}`}
       className="ao-stream-in ao-hover-lift flex items-start gap-3 rounded-sm cursor-pointer"
       style={
         {
@@ -651,7 +653,7 @@ function EventRow({ entry, index }: { entry: InngestEventRow; index: number }) {
         )}
       </div>
       <span className="text-ink-4 mono text-[10.5px] flex-none" style={{ paddingTop: 4 }}>
-        {ts ? relativeTime(ts) : "—"}
+        {ts ? relativeTime(ts, t) : "—"}
       </span>
     </Link>
   );
@@ -705,11 +707,11 @@ function AgentRuntimePanel({
           className="text-ink-3 text-[11.5px] hover:text-ink-1"
           style={{ textDecoration: "none" }}
         >
-          {t("overview_health_link") === "智能体舰队" ? "监控" : "Monitor"} →
+          {t("nav_monitor")} →
         </Link>
       </div>
       {filtered === null ? (
-        <div className="text-ink-3 text-[12px]">加载中…</div>
+        <div className="text-ink-3 text-[12px]">{t("common_loading")}</div>
       ) : filtered.length === 0 ? (
         <div className="text-ink-3 text-[12px]" style={{ padding: "12px 0" }}>
           {t("overview_runtime_empty")}
@@ -782,7 +784,7 @@ function RuntimeRow({
         {entry.message}
       </span>
       <span className="text-ink-4 mono text-[10.5px] flex-none" style={{ paddingTop: 2 }}>
-        {relativeTime(entry.ts)}
+        {relativeTime(entry.ts, t)}
       </span>
     </>
   );
@@ -1017,13 +1019,13 @@ function formatTime(d: Date): string {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 60 * 60_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 24 * 60 * 60_000) return `${Math.floor(diff / (60 * 60_000))} 小时前`;
-  return `${Math.floor(diff / (24 * 60 * 60_000))} 天前`;
+function relativeTime(iso: string, t: (k: string) => string): string {
+  const ts = new Date(iso).getTime();
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return t("common_just_now");
+  if (diff < 60 * 60_000) return t("common_minutes_ago").replace("{n}", String(Math.floor(diff / 60_000)));
+  if (diff < 24 * 60 * 60_000) return t("common_hours_ago").replace("{n}", String(Math.floor(diff / (60 * 60_000))));
+  return t("common_days_ago").replace("{n}", String(Math.floor(diff / (24 * 60 * 60_000))));
 }
 
 const KIND_TONE: Record<LogKind, { color: string; kind: "ok" | "info" | "warn" | "err" }> = {

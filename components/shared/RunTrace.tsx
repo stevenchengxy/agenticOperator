@@ -63,6 +63,21 @@ export type RunDetail = {
   tokenUsage?: { prompt: number; completion: number; total: number };
 };
 
+/** Short run-status label (i18n-aware). Pass `t` from useApp().
+ *  Old name `STATUS_ZH` kept as a default-zh export below for any
+ *  un-migrated callers, but new callers should use this. */
+export function statusLabel(s: RunStatus, t: (k: string) => string): string {
+  switch (s) {
+    case "Running": return t("mox_status_running");
+    case "Completed": return t("mox_status_completed");
+    case "Failed": return t("mox_status_failed");
+    case "Cancelled": return t("mox_status_cancelled");
+    default: return s;
+  }
+}
+
+/** @deprecated use statusLabel(s, t) — kept for back-compat with callers
+ *  that don't have a `t` in scope yet. */
 export const STATUS_ZH: Record<RunStatus, string> = {
   Running:   "运行中",
   Completed: "已完成",
@@ -77,12 +92,18 @@ export function statusDotColor(s: RunStatus): string {
   return "var(--c-ink-4)";
 }
 
-export function relTime(iso: string | null | undefined): string {
+/**
+ * Compact relative-time formatter (e.g. "刚刚" / "5m" / "2h" / "3d" in zh;
+ * "just now" / "5m" / "2h" / "3d" in en). `t` is the i18n function from
+ * useApp(). Older callers that pass only the iso default to a lang-agnostic
+ * fallback that still drops the "刚刚" leak.
+ */
+export function relTime(iso: string | null | undefined, t?: (k: string) => string): string {
   if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diffSec = Math.max(0, (Date.now() - t) / 1000);
-  if (diffSec < 60) return "刚刚";
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return "—";
+  const diffSec = Math.max(0, (Date.now() - ts) / 1000);
+  if (diffSec < 60) return t ? t("common_just_now") : "—";
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
   return `${Math.floor(diffSec / 86400)}d`;
@@ -306,11 +327,11 @@ export function TimelineRow({ seg, totalMs }: { seg: TimelineSeg; totalMs: numbe
 // data already in the detail response. The 追问 button hands off to the
 // single-run inspection station (/live) which hosts the run chatbot.
 
-const STATUS_PHRASE: Record<RunStatus, string> = {
-  Running: "处理中",
-  Completed: "已完成",
-  Failed: "执行失败",
-  Cancelled: "已取消",
+const STATUS_KEY: Record<RunStatus, string> = {
+  Running: "mox_status_running",
+  Completed: "mox_status_completed",
+  Failed: "mox_status_failed",
+  Cancelled: "mox_status_cancelled",
 };
 
 function pick(obj: Record<string, unknown>, keys: string[]): string | null {
@@ -322,10 +343,15 @@ function pick(obj: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
-export function summarizeRun(run: RunRow, detail: RunDetail, agentName?: string): string {
+export function summarizeRun(
+  run: RunRow,
+  detail: RunDetail,
+  agentName?: string,
+  t?: (k: string) => string,
+): string {
   const status = run.status;
-  const phrase = STATUS_PHRASE[status] ?? "";
-  const agent = agentName ?? run.function?.name ?? "智能体";
+  const phrase = t ? t(STATUS_KEY[status] ?? "") : "";
+  const agent = agentName ?? run.function?.name ?? (t ? t("nav_agent_fleet") : "Agent");
   // Try to read business context out of the trigger payload.
   let ctx: Record<string, unknown> = {};
   if (detail.event?.payload) {
@@ -339,10 +365,10 @@ export function summarizeRun(run: RunRow, detail: RunDetail, agentName?: string)
   const job = pick(ctx, ["jobTitle", "position", "jdTitle", "title", "role"]);
 
   const target = [client, job].filter(Boolean).join(" · ");
-  if (candidate && target) return `${candidate} 匹配 ${target}，${phrase}。`;
-  if (target) return `${agent} · ${target}，${phrase}。`;
-  if (run.eventName) return `${agent}：${run.eventName} 触发，${phrase}。`;
-  return `${agent} ${phrase}。`;
+  if (candidate && target) return `${candidate} · ${target} · ${phrase}`;
+  if (target) return `${agent} · ${target} · ${phrase}`;
+  if (run.eventName) return `${agent} · ${run.eventName} · ${phrase}`;
+  return `${agent} · ${phrase}`;
 }
 
 type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
@@ -364,7 +390,7 @@ function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: Run
   const failed = run.status === "Failed";
   const running = run.status === "Running";
   const tone = failed ? "var(--c-err)" : "var(--c-accent)";
-  const heuristic = summarizeRun(run, detail, agentName);
+  const heuristic = summarizeRun(run, detail, agentName, t);
 
   const [data, setData] = React.useState<RunSummarySuccess | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -1660,6 +1686,7 @@ export function RunDetailExpansion({
   agentShortForLinks?: string;
   showAgentLink?: boolean;
 }) {
+  const { t } = useApp();
   const isFailed = run.status === "Failed";
   const accent = isFailed ? "var(--c-err)" : "var(--c-line-strong)";
   return (
@@ -1674,10 +1701,10 @@ export function RunDetailExpansion({
       }}
     >
       {(!detail || detail === "loading") && (
-        <div className="text-ink-3" style={{ fontSize: 12 }}>加载 trace…</div>
+        <div className="text-ink-3" style={{ fontSize: 12 }}>{t("mox_trace_loading")}</div>
       )}
       {detail === "error" && (
-        <div className="text-ink-3" style={{ fontSize: 12 }}>无法获取 trace(Inngest admin API 不可用)</div>
+        <div className="text-ink-3" style={{ fontSize: 12 }}>{t("mox_trace_unavailable")}</div>
       )}
       {detail && detail !== "loading" && detail !== "error" && (
         <RunDetailBody

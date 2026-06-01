@@ -38,7 +38,7 @@ import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import {
   RunDetailExpansion,
   fetchRunDetail,
-  STATUS_ZH,
+  statusLabel,
   statusDotColor,
   relTime,
   type RunRow,
@@ -352,11 +352,11 @@ function RunsList({ runs, initialExpandedId }: { runs: RunRow[]; initialExpanded
                 <span className="flex items-center gap-2">
                   <span className="rounded-full inline-block" style={{ width: 7, height: 7, background: statusDotColor(r.status) }} />
                   <span style={{ fontSize: 12.5, color: r.status === "Failed" ? "var(--c-err)" : "var(--c-ink-1)" }}>
-                    {STATUS_ZH[r.status]}
+                    {statusLabel(r.status, t)}
                   </span>
                 </span>
                 <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
-                  {relTime(r.startedAt)}
+                  {relTime(r.startedAt, t)}
                 </span>
                 <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
                   {r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : "—"}
