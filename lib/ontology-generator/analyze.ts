@@ -23,6 +23,8 @@ export type DerivedAgent = {
   short: string;
   nameZh: string;
   nameEn: string;
+  descZh: string;
+  descEn: string;
   kind: DerivedAgentKind;
   /** Consumed event names (no domain prefix). */
   triggerEvents: string[];
@@ -113,6 +115,8 @@ export function deriveAgents(onto: DomainOntology): DerivedAgent[] {
       short: `${pascal(action.name)}Agent`,
       nameZh: shortNameZh(action),
       nameEn: action.name,
+      descZh: (action.description ?? "").trim().slice(0, 80) || shortNameZh(action),
+      descEn: action.name,
       kind,
       triggerEvents: trigger,
       emitEvents: emit,
