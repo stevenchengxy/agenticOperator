@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import clsx from "clsx";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
@@ -188,7 +189,11 @@ export function MonitorContent() {
             t={t}
           />
           <div className="flex-1" />
-          <div className="pb-2">
+          <div className="pb-2 flex items-center gap-2">
+            <AgentFilter
+              value={agentFilter}
+              onChange={(v) => setUrl((p) => v ? p.set("agent", v) : p.delete("agent"))}
+            />
             <WindowSelector value={windowId} onChange={(v) => setUrl((p) => v === "24h" ? p.delete("window") : p.set("window", v))} />
           </div>
         </div>
@@ -225,28 +230,26 @@ export function MonitorContent() {
             <SystemStatusCards />
           </div>
 
-          {/* secondary filter toolbar */}
-          <div className="flex items-center gap-3 mt-4 flex-wrap" style={{ padding: "10px 32px", fontSize: 12.5 }}>
-            <span className="text-ink-3">{t("mox_col_agent")}</span>
-            <AgentFilter
-              value={agentFilter}
-              onChange={(v) => setUrl((p) => v ? p.set("agent", v) : p.delete("agent"))}
-            />
-            {(agentFilter || eventName || statusFilter !== "all") && (
+          {/* secondary filter chips — only shown when active. The 智能体 +
+              time-window controls moved into the top tab row; this strip
+              now only surfaces the event chip + a clear-all link when any
+              filter is active. */}
+          {(agentFilter || eventName || statusFilter !== "all") && (
+            <div className="flex items-center gap-3 mt-3 flex-wrap" style={{ padding: "0 32px", fontSize: 12.5 }}>
+              {eventName && (
+                <span className="inline-flex items-center gap-1.5 text-ink-2 rounded border border-line bg-surface" style={{ padding: "3px 9px", fontSize: 12 }}>
+                  <span className="text-ink-3">{t("mox_filter_event")}</span> {eventName}
+                  <button onClick={() => setUrl((p) => p.delete("event"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
+                </span>
+              )}
               <button
                 onClick={() => setUrl((p) => { p.delete("agent"); p.delete("event"); p.delete("status"); })}
                 className="text-ink-3 hover:text-ink-1"
               >
                 {t("mox_clear_filters")}
               </button>
-            )}
-            {eventName && (
-              <span className="inline-flex items-center gap-1.5 text-ink-2 rounded border border-line bg-surface" style={{ padding: "3px 9px", fontSize: 12 }}>
-                <span className="text-ink-3">{t("mox_filter_event")}</span> {eventName}
-                <button onClick={() => setUrl((p) => p.delete("event"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
-              </span>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="flex-1 min-h-0" style={{ padding: "8px 32px 48px" }}>
             {runsError && (
@@ -502,10 +505,10 @@ function MonitorTabs({
   onChange: (v: StatusFilter) => void;
   t: (k: string) => string;
 }) {
-  const tabs: { id: StatusFilter; label: string; count: number; tone?: "ok" | "err" }[] = [
+  const tabs: { id: StatusFilter; label: string; count: number; tone?: "ok" | "err" | "info" }[] = [
     { id: "all",       label: t("mox_count_all"),       count: counts.all },
-    { id: "Running",   label: t("mox_count_running"),   count: counts.running, tone: counts.running > 0 ? "ok" : undefined },
-    { id: "Completed", label: t("mox_count_completed"), count: counts.completed },
+    { id: "Running",   label: t("mox_count_running"),   count: counts.running, tone: counts.running > 0 ? "info" : undefined },
+    { id: "Completed", label: t("mox_count_completed"), count: counts.completed, tone: counts.completed > 0 ? "ok" : undefined },
     { id: "Failed",    label: t("mox_count_failed"),    count: counts.failed, tone: counts.failed > 0 ? "err" : undefined },
   ];
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -518,7 +521,11 @@ function MonitorTabs({
     <div ref={containerRef} className="relative flex items-end gap-1">
       {tabs.map((tab) => {
         const on = value === tab.id;
-        const countColor = tab.tone === "err" ? "var(--c-err)" : tab.tone === "ok" ? "var(--c-ok)" : on ? "var(--c-ink-2)" : "var(--c-ink-4)";
+        const countColor =
+          tab.tone === "err" ? "var(--c-err)"
+          : tab.tone === "info" ? "var(--c-info)"
+          : tab.tone === "ok" ? "var(--c-ok)"
+          : on ? "var(--c-ink-2)" : "var(--c-ink-4)";
         return (
           <button
             key={tab.id}
@@ -541,30 +548,78 @@ function MonitorTabs({
 
 function WindowSelector({ value, onChange }: { value: WindowId; onChange: (v: WindowId) => void }) {
   const { t } = useApp();
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement>(null);
   const opts: { id: WindowId; label: string }[] = [
     { id: "1h", label: t("mox_window_1h") },
     { id: "24h", label: t("mox_window_24h") },
     { id: "7d", label: t("mox_window_7d") },
   ];
+  React.useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+  const activeLabel = opts.find((o) => o.id === value)?.label ?? value;
   return (
-    <div className="flex items-center gap-1">
-      {opts.map((o) => (
-        <button
-          key={o.id}
-          onClick={() => onChange(o.id)}
-          className="transition-colors rounded"
-          style={{
-            padding: "3px 9px",
-            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
-            background: value === o.id ? "var(--c-panel)" : "transparent",
-            fontWeight: value === o.id ? 500 : 400,
-            fontSize: 12.5,
-          }}
+    <div className="relative" ref={wrapRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded border border-line bg-surface text-ink-1 cursor-pointer hover:border-line-strong transition-colors"
+        style={{ padding: "5px 12px", fontSize: 12.5 }}
+      >
+        <Ic.clock />
+        <span>{activeLabel}</span>
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 min-w-[120px] bg-surface border border-line rounded-md shadow-sh-2 z-30 py-1"
         >
-          {o.label}
-        </button>
-      ))}
+          {opts.map((o) => {
+            const on = value === o.id;
+            return (
+              <button
+                key={o.id}
+                onClick={() => { onChange(o.id); setOpen(false); }}
+                className="flex items-center w-full text-left transition-colors"
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 12.5,
+                  color: on ? "var(--c-ink-1)" : "var(--c-ink-2)",
+                  background: on ? "var(--c-accent-bg)" : "transparent",
+                  fontWeight: on ? 500 : 400,
+                }}
+              >
+                {o.label}
+                {on && <span className="ml-auto text-[10px]" style={{ color: "var(--c-accent)" }}>●</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Small inline funnel SVG used in the AgentFilter trigger button. */
+function FunnelIcon({ active }: { active?: boolean }) {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={active ? 1.7 : 1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.5 2h9l-3.5 4.5V11l-2-1V6.5L1.5 2z" />
+    </svg>
   );
 }
 
@@ -573,9 +628,19 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
   const { realness: realnessMap } = useDeploymentMap();
   const { domain } = useDomain();
   const resolveName = useDisplayNameResolver();
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
 
   // Group deployed agents in the active domain by stage, in workflow order.
-  // Stages with no deployed agents are skipped so the strip stays tight.
   const grouped = React.useMemo(() => {
     const byStage = new Map<Stage, typeof AGENT_MAP>();
     for (const a of AGENT_MAP) {
@@ -593,123 +658,110 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
   }, [realnessMap, domain]);
 
   const totalAgents = grouped.reduce((sum, g) => sum + g.agents.length, 0);
-  const allSelected = value === null;
+  const active = value !== null;
+  const triggerLabel = active ? resolveName(value) : t("mox_col_agent");
 
   return (
-    <div className="flex flex-col" style={{ gap: 6 }}>
-      {/* Primary toggle — "全部" sits on its own row, visually separated from
-          the per-stage clusters below. */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={() => onChange(null)}
-          className="transition-colors rounded inline-flex items-center gap-1.5"
-          style={{
-            padding: "4px 12px",
-            fontSize: 12.5,
-            color: allSelected ? "var(--c-bg)" : "var(--c-ink-2)",
-            background: allSelected ? "var(--c-ink-1)" : "var(--c-panel)",
-            border: allSelected
-              ? "1px solid var(--c-ink-1)"
-              : "1px solid var(--c-line)",
-            fontWeight: allSelected ? 500 : 400,
-            cursor: "pointer",
-          }}
-        >
-          {t("mox_all")}
-          <span
-            className="mono tabular-nums"
-            style={{
-              fontSize: 10.5,
-              padding: "0 5px",
-              borderRadius: 3,
-              background: allSelected
-                ? "color-mix(in oklab, var(--c-bg) 22%, transparent)"
-                : "var(--c-bg)",
-              color: allSelected ? "var(--c-bg)" : "var(--c-ink-3)",
-              opacity: allSelected ? 0.85 : 1,
-            }}
-          >
-            {totalAgents}
-          </span>
-        </button>
-        {value !== null && (
-          <button
-            onClick={() => onChange(null)}
-            className="text-ink-3 hover:text-ink-1 text-[11.5px] cursor-pointer"
-            style={{
-              padding: "2px 8px",
-              border: "1px solid var(--c-line)",
-              borderRadius: 3,
-              background: "transparent",
-            }}
-            title={t("mox_all")}
-          >
-            ✕ {resolveName(value)}
-          </button>
+    <div className="relative" ref={wrapRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={clsx(
+          "inline-flex items-center gap-1.5 rounded border transition-colors cursor-pointer",
+          active
+            ? "border-[color:var(--c-accent-line)] bg-accent-bg text-[color:var(--c-accent)]"
+            : "border-line bg-surface text-ink-1 hover:border-line-strong",
         )}
-      </div>
-
-      {/* Per-stage clusters. Stage label on the left, agent chips on the right. */}
-      <div
-        className="flex flex-col"
-        style={{
-          gap: 4,
-          paddingTop: 6,
-          borderTop: "1px dashed var(--c-line)",
-        }}
+        style={{ padding: "5px 12px", fontSize: 12.5 }}
       >
-        {grouped.length === 0 ? (
-          <div className="text-ink-4" style={{ fontSize: 11.5, padding: "4px 0" }}>
-            {t("domain_empty_fleet")}
-          </div>
-        ) : (
-          grouped.map(({ stage, agents }) => (
-            <div
-              key={stage}
-              className="flex items-baseline gap-2 flex-wrap"
-            >
-              <span
-                className="mono text-ink-4 flex-none"
-                style={{
-                  fontSize: 10,
-                  minWidth: 48,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.04em",
-                  paddingTop: 4,
-                }}
-              >
-                {t(MONITOR_STAGE_KEYS[stage])}
-              </span>
-              <div className="flex items-center gap-1 flex-wrap">
-                {agents.map((a) => {
-                  const active = value === a.short;
-                  return (
-                    <button
-                      key={a.short}
-                      onClick={() => onChange(a.short)}
-                      className="transition-colors rounded"
-                      style={{
-                        padding: "3px 9px",
-                        fontSize: 12.5,
-                        color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
-                        background: active ? "var(--c-accent-bg)" : "transparent",
-                        border: active
-                          ? "1px solid var(--c-accent-line)"
-                          : "1px solid transparent",
-                        fontWeight: active ? 500 : 400,
-                        cursor: "pointer",
-                      }}
-                      title={a.short}
-                    >
-                      {resolveName(a.short)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))
+        <FunnelIcon active={active} />
+        <span>{triggerLabel}</span>
+        {active && (
+          <span
+            className="ml-1 mono text-[10px] cursor-pointer rounded-sm hover:bg-bg"
+            style={{ padding: "0 4px", color: "var(--c-ink-3)" }}
+            onClick={(e) => { e.stopPropagation(); onChange(null); }}
+            role="button"
+            aria-label={t("mox_all")}
+          >
+            ✕
+          </span>
         )}
-      </div>
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 bg-surface border border-line rounded-md shadow-sh-2 z-30"
+          style={{ minWidth: 320, maxWidth: 480, padding: "10px 4px" }}
+        >
+          {/* All toggle */}
+          <button
+            onClick={() => { onChange(null); setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left transition-colors"
+            style={{
+              padding: "5px 12px",
+              fontSize: 12.5,
+              color: !active ? "var(--c-ink-1)" : "var(--c-ink-2)",
+              background: !active ? "var(--c-accent-bg)" : "transparent",
+              fontWeight: !active ? 500 : 400,
+            }}
+          >
+            <span>{t("mox_all")}</span>
+            <span className="ml-auto mono tabular-nums text-[11px] text-ink-3">{totalAgents}</span>
+          </button>
+
+          <div className="my-1.5 border-t border-line" />
+
+          {/* Per-stage clusters inside the popover */}
+          {grouped.length === 0 ? (
+            <div className="text-ink-4" style={{ fontSize: 11.5, padding: "8px 12px" }}>
+              {t("domain_empty_fleet")}
+            </div>
+          ) : (
+            <div className="flex flex-col" style={{ gap: 4, padding: "4px 8px" }}>
+              {grouped.map(({ stage, agents }) => (
+                <div key={stage} className="flex items-baseline gap-2 flex-wrap">
+                  <span
+                    className="mono text-ink-4 flex-none"
+                    style={{
+                      fontSize: 10,
+                      minWidth: 56,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      paddingTop: 4,
+                    }}
+                  >
+                    {t(MONITOR_STAGE_KEYS[stage])}
+                  </span>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {agents.map((a) => {
+                      const on = value === a.short;
+                      return (
+                        <button
+                          key={a.short}
+                          onClick={() => { onChange(a.short); setOpen(false); }}
+                          className="transition-colors rounded cursor-pointer"
+                          style={{
+                            padding: "3px 9px",
+                            fontSize: 12,
+                            color: on ? "var(--c-accent)" : "var(--c-ink-2)",
+                            background: on ? "var(--c-accent-bg)" : "transparent",
+                            border: on
+                              ? "1px solid var(--c-accent-line)"
+                              : "1px solid transparent",
+                            fontWeight: on ? 500 : 400,
+                          }}
+                          title={a.short}
+                        >
+                          {resolveName(a.short)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
