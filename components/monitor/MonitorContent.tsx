@@ -5,8 +5,35 @@ import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
 import { InngestDlqTab } from "./InngestDlqTab";
 import { useApp } from "@/lib/i18n";
-import { AGENT_MAP, displayName as agentDisplayName } from "@/lib/agent-mapping";
+import { AGENT_MAP, displayName as agentDisplayName, type Stage } from "@/lib/agent-mapping";
 import { useDomain } from "@/lib/domains";
+import { useDisplayNameResolver } from "@/lib/agent-names";
+
+// Stage order — workflow-natural left-to-right reading order. Matches Fleet's
+// STAGE_ORDER. Used by AgentFilter to cluster the deployed agents.
+const MONITOR_STAGE_ORDER: Stage[] = [
+  "system",
+  "requirement",
+  "jd",
+  "resume",
+  "match",
+  "interview",
+  "eval",
+  "package",
+  "submit",
+];
+
+const MONITOR_STAGE_KEYS: Record<Stage, string> = {
+  system: "flx_stage_system",
+  requirement: "flx_stage_requirement",
+  jd: "flx_stage_jd",
+  resume: "flx_stage_resume",
+  match: "flx_stage_match",
+  interview: "flx_stage_interview",
+  eval: "flx_stage_eval",
+  package: "flx_stage_package",
+  submit: "flx_stage_submit",
+};
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import {
   RunDetailExpansion,
@@ -545,44 +572,144 @@ function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: 
   const { t } = useApp();
   const { realness: realnessMap } = useDeploymentMap();
   const { domain } = useDomain();
-  const deployedShorts = React.useMemo(
-    () =>
-      AGENT_MAP
-        .filter((a) => a.domain === domain)
-        .map((a) => a.short)
-        .filter((s) => (realnessMap.get(s) ?? "unbuilt") !== "unbuilt"),
-    [realnessMap, domain],
-  );
+  const resolveName = useDisplayNameResolver();
+
+  // Group deployed agents in the active domain by stage, in workflow order.
+  // Stages with no deployed agents are skipped so the strip stays tight.
+  const grouped = React.useMemo(() => {
+    const byStage = new Map<Stage, typeof AGENT_MAP>();
+    for (const a of AGENT_MAP) {
+      if (a.domain !== domain) continue;
+      if (a.short === "Chatbot") continue;
+      if ((realnessMap.get(a.short) ?? "unbuilt") === "unbuilt") continue;
+      const arr = byStage.get(a.stage) ?? [];
+      arr.push(a);
+      byStage.set(a.stage, arr);
+    }
+    return MONITOR_STAGE_ORDER.filter((s) => byStage.has(s)).map((s) => ({
+      stage: s,
+      agents: byStage.get(s)!,
+    }));
+  }, [realnessMap, domain]);
+
+  const totalAgents = grouped.reduce((sum, g) => sum + g.agents.length, 0);
+  const allSelected = value === null;
+
   return (
-    <div className="flex items-center gap-1 flex-wrap">
-      <button
-        onClick={() => onChange(null)}
-        className="transition-colors rounded"
+    <div className="flex flex-col" style={{ gap: 6 }}>
+      {/* Primary toggle — "全部" sits on its own row, visually separated from
+          the per-stage clusters below. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => onChange(null)}
+          className="transition-colors rounded inline-flex items-center gap-1.5"
+          style={{
+            padding: "4px 12px",
+            fontSize: 12.5,
+            color: allSelected ? "var(--c-bg)" : "var(--c-ink-2)",
+            background: allSelected ? "var(--c-ink-1)" : "var(--c-panel)",
+            border: allSelected
+              ? "1px solid var(--c-ink-1)"
+              : "1px solid var(--c-line)",
+            fontWeight: allSelected ? 500 : 400,
+            cursor: "pointer",
+          }}
+        >
+          {t("mox_all")}
+          <span
+            className="mono tabular-nums"
+            style={{
+              fontSize: 10.5,
+              padding: "0 5px",
+              borderRadius: 3,
+              background: allSelected
+                ? "color-mix(in oklab, var(--c-bg) 22%, transparent)"
+                : "var(--c-bg)",
+              color: allSelected ? "var(--c-bg)" : "var(--c-ink-3)",
+              opacity: allSelected ? 0.85 : 1,
+            }}
+          >
+            {totalAgents}
+          </span>
+        </button>
+        {value !== null && (
+          <button
+            onClick={() => onChange(null)}
+            className="text-ink-3 hover:text-ink-1 text-[11.5px] cursor-pointer"
+            style={{
+              padding: "2px 8px",
+              border: "1px solid var(--c-line)",
+              borderRadius: 3,
+              background: "transparent",
+            }}
+            title={t("mox_all")}
+          >
+            ✕ {resolveName(value)}
+          </button>
+        )}
+      </div>
+
+      {/* Per-stage clusters. Stage label on the left, agent chips on the right. */}
+      <div
+        className="flex flex-col"
         style={{
-          padding: "3px 9px", fontSize: 12.5,
-          color: value === null ? "var(--c-ink-1)" : "var(--c-ink-3)",
-          background: value === null ? "var(--c-panel)" : "transparent",
-          fontWeight: value === null ? 500 : 400,
+          gap: 4,
+          paddingTop: 6,
+          borderTop: "1px dashed var(--c-line)",
         }}
       >
-        {t("mox_all")}
-      </button>
-      {deployedShorts.map((short) => (
-        <button
-          key={short}
-          onClick={() => onChange(short)}
-          className="transition-colors rounded"
-          style={{
-            padding: "3px 9px", fontSize: 12.5,
-            color: value === short ? "var(--c-ink-1)" : "var(--c-ink-3)",
-            background: value === short ? "var(--c-panel)" : "transparent",
-            fontWeight: value === short ? 500 : 400,
-          }}
-          title={short}
-        >
-          {agentDisplayName(short)}
-        </button>
-      ))}
+        {grouped.length === 0 ? (
+          <div className="text-ink-4" style={{ fontSize: 11.5, padding: "4px 0" }}>
+            {t("domain_empty_fleet")}
+          </div>
+        ) : (
+          grouped.map(({ stage, agents }) => (
+            <div
+              key={stage}
+              className="flex items-baseline gap-2 flex-wrap"
+            >
+              <span
+                className="mono text-ink-4 flex-none"
+                style={{
+                  fontSize: 10,
+                  minWidth: 48,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  paddingTop: 4,
+                }}
+              >
+                {t(MONITOR_STAGE_KEYS[stage])}
+              </span>
+              <div className="flex items-center gap-1 flex-wrap">
+                {agents.map((a) => {
+                  const active = value === a.short;
+                  return (
+                    <button
+                      key={a.short}
+                      onClick={() => onChange(a.short)}
+                      className="transition-colors rounded"
+                      style={{
+                        padding: "3px 9px",
+                        fontSize: 12.5,
+                        color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
+                        background: active ? "var(--c-accent-bg)" : "transparent",
+                        border: active
+                          ? "1px solid var(--c-accent-line)"
+                          : "1px solid transparent",
+                        fontWeight: active ? 500 : 400,
+                        cursor: "pointer",
+                      }}
+                      title={a.short}
+                    >
+                      {resolveName(a.short)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
