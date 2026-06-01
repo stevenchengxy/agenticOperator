@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
+import { summarizePendingAlerts } from '@/server/notifications/summarize';
 
 /** Resolve a notification's deep-link target (the run/event single process). */
 function hrefFor(linkKind: string | null, linkId: string | null): string | null {
@@ -34,6 +35,12 @@ export async function GET(req: Request): Promise<Response> {
   const unread = url.searchParams.get('unread') === '1';
   const cursor = url.searchParams.get('cursor'); // ISO ts
   const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+
+  // Lazy-on-view: kick off AI enrichment of un-summarized firing alerts in the
+  // background (fire-and-forget — AO runs as a persistent `next start` server,
+  // so this completes after the response). The response below returns the
+  // deterministic body immediately; AI summaries appear on the next refresh.
+  void summarizePendingAlerts(8).catch(() => {});
 
   const where: Record<string, unknown> = {};
   if (kind === 'message' || kind === 'alert') where.kind = kind;
