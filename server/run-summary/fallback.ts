@@ -9,7 +9,12 @@
 // Extracted from app/api/runs/[id]/summary/route.ts.
 
 import { byShortFunction } from "@/lib/agent-functions";
+import { displayNameFor } from "@/lib/agent-display-names";
 import type { AgentBreakdownRow } from "./prompt";
+
+// Localize any agent identifier to its Chinese business name — the deterministic
+// (gateway-down) path must never leak a raw Inngest slug or English code either.
+const zh = (idOrShort: string) => displayNameFor(idOrShort, "zh");
 
 export function deterministicSummary(
   run: { triggerEvent: string; status: string; suspendedReason: string | null },
@@ -32,7 +37,7 @@ export function deterministicSummary(
       const lastBit = r.lastNarrative ? `；最近一次：${truncate(r.lastNarrative, 80)}` : "";
       const fnBit = fn ? `（${fn.summary}）` : "";
       lines.push(
-        `- **${r.agentName}** ${fnBit}：执行 ${r.steps} 个 step，累计 ${r.totalDurationMs} ms${r.failed > 0 ? `，**${r.failed} 失败**` : ""}${lastBit}`,
+        `- **${zh(r.agentName)}** ${fnBit}：执行 ${r.steps} 个环节，累计 ${r.totalDurationMs} ms${r.failed > 0 ? `，**${r.failed} 个失败**` : ""}${lastBit}`,
       );
     }
   }
@@ -40,25 +45,25 @@ export function deterministicSummary(
   lines.push("## 异常 / 关注点");
   const failed = steps.filter((s) => s.status === "failed" || s.error);
   if (failed.length === 0) {
-    lines.push("- 未发现失败 step。");
+    lines.push("- 未发现失败环节。");
   } else {
     for (const s of failed) {
-      lines.push(`- \`${s.nodeId}\`：${s.error ?? "step 状态为 failed"}`);
+      lines.push(`- **${zh(s.nodeId)}**：${s.error ?? "该环节执行失败"}`);
     }
   }
   lines.push("");
   lines.push("## 下一步建议");
   if (failed.length > 0) {
-    lines.push("- 复盘失败 step 的输入与上游事件，判断是数据问题还是 agent 逻辑问题。");
+    lines.push("- 建议人工复核失败环节涉及的候选人 / 职位数据，确认是数据缺失还是匹配规则需要调整。");
   } else if (run.status === "suspended" || run.status === "paused") {
-    lines.push("- 该 run 处于暂停状态，请检查 `suspendedReason` 并决定是否恢复。");
+    lines.push("- 该流程已暂停，请确认暂停原因并决定是否继续推进该候选人。");
   } else if (run.status === "running") {
-    lines.push("- 仍在执行中。可定期刷新本页观察进度。");
+    lines.push("- 流程进行中，可稍后刷新查看该候选人的处理进度。");
   } else {
-    lines.push("- 此 run 已正常完成，可作为基准参考。");
+    lines.push("- 该流程已正常完成，候选人已推进到下一阶段。");
   }
   lines.push("");
-  lines.push("> 未配置 LLM 网关（AI_BASE_URL / OPENAI_API_KEY），以上内容由统计字段直接渲染。配置后可获得更具体的语义解读。");
+  lines.push("> 当前由统计字段直接渲染（未启用 AI 解读）。");
   return lines.join("\n");
 }
 
@@ -67,9 +72,8 @@ function truncate(s: string, n: number): string {
 }
 
 // Honest "no data" notice rendered when a run has 0 AgentActivity AND
-// 0 WorkflowStep rows. Without this, calling the LLM on emptiness leads
-// to it inventing agent names like `JD_Writer / Recruiter_Agent` that
-// don't exist in AGENT_MAP.
+// 0 WorkflowStep rows. Skips the LLM entirely so it can't invent agent names.
+// User-facing → business language, no internal engineering details.
 export function emptyRunNotice(run: {
   triggerEvent: string;
   status: string;
@@ -79,26 +83,13 @@ export function emptyRunNotice(run: {
   const ageMs = Date.now() - run.startedAt.getTime();
   const ageMin = Math.round(ageMs / 60_000);
   return `## 概述
-触发事件 \`${run.triggerEvent}\`，当前状态 \`${run.status}\`${
+由 \`${run.triggerEvent}\` 触发，当前状态 \`${run.status}\`${
     run.suspendedReason ? `（${run.suspendedReason}）` : ""
-  }。run 开始于 **${ageMin} 分钟前**。
+  }，开始于 **${ageMin} 分钟前**。
 
 ## 数据状态
-**这条 run 在 AgentActivity 表里 0 行记录**，在 WorkflowStep 表里也 0 步。无法做有意义的多 agent 路径分析或行为总结——LLM 没有可信数据可依，强行生成会产生幻觉的 agent 名（如 \`JD_Writer\` 等不存在于 AGENT_MAP 的虚构名）。
-
-## 为什么是空的
-- AO-main 已禁用所有 Inngest function（见 \`server/inngest/functions.ts\` 的 \`allFunctions: []\`），不会自己写 AgentActivity
-- 实际 runtime 在 sibling 项目 \`resume-parser-agent\` (port 3020)，但它没接 AO-main 的 DB
-- 所以即使 RPA agent 跑了，活动日志也不会落到这里
-
-## 怎么修
-任选其一：
-1. RPA runtime 调用 \`POST /api/runs/[runId]/activity\` 把活动行 push 进来（详见路由文件注释）
-2. 或者在 AO-main 的 \`server/inngest/functions.ts\` 里 re-enable agents（取消注释 \`allFunctions\` 数组）
-3. 或者用 \`POST /api/runs/[runId]/activity\` 手动塞测试数据进来验证 UI
+这条运行暂时没有可供分析的活动记录，因此无法生成多智能体路径与行为总结，仅有触发事件与状态等基础信息可参考。
 
 ## 下一步建议
-接通活动日志契约后，重新点 "重新生成"——LLM 才有真实数据做多 agent 分析。
-
-> 这不是 LLM 不能用，是这条 run 没有数据可让它分析。`;
+- 稍后刷新本页，或在该运行产生活动后点击「重新生成」查看完整分析。`;
 }

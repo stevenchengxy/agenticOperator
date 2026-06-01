@@ -20,7 +20,7 @@
 
 import type { RunAiSummary } from "@prisma/client";
 import { prisma } from "@/server/db";
-import { byShort } from "@/lib/agent-mapping";
+import { resolveAgentMeta } from "@/lib/agent-mapping";
 import {
   chatComplete,
   GatewayUnavailableError,
@@ -311,7 +311,10 @@ export function computeAgentBreakdown(
   const map = new Map<string, AgentBreakdownRow>();
 
   for (const s of steps) {
-    const agentName = byShort(s.nodeId)?.short ?? s.nodeId;
+    // s.nodeId may be a canonical short OR an app-prefixed Inngest slug
+    // (archive runs). Resolve to the canonical short so the row groups
+    // correctly and never leaks a raw slug into the prompt / summary.
+    const agentName = resolveAgentMeta(s.nodeId)?.short ?? s.nodeId;
     const row = map.get(agentName) ?? {
       agentName,
       steps: 0,
@@ -329,7 +332,10 @@ export function computeAgentBreakdown(
   // from the agent rather than just a count).
   const lastByAgent = new Map<string, string>();
   for (const a of activities) {
-    lastByAgent.set(a.agentName, a.narrative);
+    // Normalize to the same canonical short used for step rows so slug-form
+    // and short-form activity names collapse onto one breakdown row.
+    const key = resolveAgentMeta(a.agentName)?.short ?? a.agentName;
+    lastByAgent.set(key, a.narrative);
   }
   for (const [name, narrative] of lastByAgent) {
     const row = map.get(name) ?? {

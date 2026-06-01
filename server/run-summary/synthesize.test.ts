@@ -115,10 +115,12 @@ const gatewayMock = vi.hoisted(() => ({
 
 vi.mock("@/server/llm/gateway", () => gatewayMock);
 
-// Stable AGENT_MAP — synthesize uses byShort() for the breakdown step.
+// Stable AGENT_MAP — synthesize uses resolveAgentMeta() for the breakdown step
+// (returns undefined so nodeId passes through unchanged, as before).
 vi.mock("@/lib/agent-mapping", () => ({
   AGENT_MAP: [],
   byShort: () => null,
+  resolveAgentMeta: () => undefined,
 }));
 
 import { synthesizeRunSummary } from "./synthesize";

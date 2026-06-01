@@ -126,6 +126,32 @@ export function byInngestSlug(slug: string): AgentMeta | undefined {
   });
 }
 
+/** Inngest registers AO functions under an app-prefixed slug, e.g.
+ *  `agentic-operator-main-rule-check-agent` — that prefixed slug is what the
+ *  Inngest archive stores in WorkflowStep.nodeId / function_slug. */
+export const INNGEST_APP_PREFIX = 'agentic-operator-main-';
+
+/**
+ * Resolve an AgentMeta from ANY identifier the system produces: a canonical
+ * short ('RuleCheck'), a bare Inngest fn id ('rule-check-agent'), or the
+ * app-prefixed Inngest slug ('agentic-operator-main-rule-check-agent'). This is
+ * the resolver observability paths (run-summary, audit) must use — `byShort`
+ * alone misses archive slugs and leaks the raw slug into user-facing output.
+ * Returns undefined only for genuinely unknown ids.
+ */
+export function resolveAgentMeta(idOrSlug: string): AgentMeta | undefined {
+  if (!idOrSlug) return undefined;
+  return (
+    byShort(idOrSlug) ??
+    byInngestSlug(idOrSlug) ??
+    byInngestSlug(
+      idOrSlug.startsWith(INNGEST_APP_PREFIX)
+        ? idOrSlug.slice(INNGEST_APP_PREFIX.length)
+        : idOrSlug,
+    )
+  );
+}
+
 // Agent realness derivation moved to lib/inngest-registry.ts which queries
 // Inngest live. These sync helpers read the LAST cached snapshot of that
 // registry. First call returns 'unbuilt' until fetchLiveRegistry() populates
