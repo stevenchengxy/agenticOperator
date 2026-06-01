@@ -62,6 +62,24 @@ export function typeForFileKind(kind: string): string {
   return 'info';
 }
 
+// File-logger ctx.agent (AGENT_NAME constants) → canonical AGENT_MAP short, so
+// the AgentActivity rows the bridge writes group correctly in /monitor
+// (overview rollup, agent pages, run-detail trail). Pure + total.
+const FILE_AGENT_TO_SHORT: Record<string, string> = {
+  ruleCheck: 'RuleCheck',
+  createJD: 'JDGenerator',
+  matchResume: 'Matcher',
+  resumeParser: 'ResumeParser',
+  interviewInviter: 'InterviewInviter',
+};
+export function canonicalShortForFileAgent(name: string): string {
+  return FILE_AGENT_TO_SHORT[name] ?? name;
+}
+
+// Verbose, low-signal kinds we keep in the audit log (LogEvent) but DON'T
+// mirror into AgentActivity, to keep the /monitor run timeline readable.
+const ACTIVITY_SKIP_KINDS = new Set(['step.start', 'step.end', 'handler.raw_input']);
+
 export interface RecordLogEventInput {
   type: string;
   message: string;
@@ -130,6 +148,25 @@ export async function mirrorAgentFileLog(input: MirrorFileLogInput): Promise<voi
     traceId: input.traceId ?? null,
     payloadJson,
   });
+  // Also mirror into AgentActivity (name-aligned) so the existing /monitor
+  // views (run-detail timeline, overview rollup, per-agent pages) — which read
+  // AgentActivity — surface the real agent narrative. Skip the verbose kinds.
+  if (!ACTIVITY_SKIP_KINDS.has(input.kind)) {
+    try {
+      await prisma.agentActivity.create({
+        data: {
+          runId: input.runId ?? null,
+          nodeId: input.agent,
+          agentName: canonicalShortForFileAgent(input.agent),
+          type,
+          narrative: input.kind,
+          metadata: payloadJson,
+        },
+      });
+    } catch (e) {
+      console.warn(`[log-event] AgentActivity mirror failed (${input.kind}): ${(e as Error).message}`);
+    }
+  }
   if (type === 'agent_error') {
     void recordNotification({
       level: 'error',

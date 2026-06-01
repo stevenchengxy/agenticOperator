@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { levelCategoryFor, typeForFileKind } from './log-event';
+import { levelCategoryFor, typeForFileKind, canonicalShortForFileAgent } from './log-event';
 
 // LogEvent is the unified, queryable audit log: every AgentActivity write is
 // mirrored here with a normalized (level, category) so /api/logs can filter by
@@ -58,5 +58,18 @@ describe('typeForFileKind', () => {
   it('defaults to info', () => {
     expect(typeForFileKind('save-candidate.ok')).toBe('info');
     expect(typeForFileKind('match.input')).toBe('info');
+  });
+});
+
+describe('canonicalShortForFileAgent', () => {
+  it('maps file-local AGENT_NAMEs to AGENT_MAP shorts (so /monitor groups them)', () => {
+    expect(canonicalShortForFileAgent('ruleCheck')).toBe('RuleCheck');
+    expect(canonicalShortForFileAgent('createJD')).toBe('JDGenerator');
+    expect(canonicalShortForFileAgent('matchResume')).toBe('Matcher');
+    expect(canonicalShortForFileAgent('resumeParser')).toBe('ResumeParser');
+    expect(canonicalShortForFileAgent('interviewInviter')).toBe('InterviewInviter');
+  });
+  it('passes through unknown names unchanged', () => {
+    expect(canonicalShortForFileAgent('SomethingElse')).toBe('SomethingElse');
   });
 });
