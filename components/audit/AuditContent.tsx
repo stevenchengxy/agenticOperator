@@ -9,7 +9,7 @@ import type { AuditResponse, AuditLogRow } from "@/app/api/audit/route";
 import type { RunAuditResponse, RunAuditSummary } from "@/app/api/audit/runs/route";
 import { describeLogKind } from "@/lib/monitor-step-descriptor";
 
-type Tab = "runs" | "events" | "ops";
+type Tab = "runs" | "events" | "ops" | "log";
 
 export function AuditContent() {
   const { t } = useApp();
@@ -38,9 +38,20 @@ export function AuditContent() {
           <TabButton active={tab === "ops"} onClick={() => setTab("ops")}>
             {t("adx_tab_ops")}
           </TabButton>
+          <TabButton active={tab === "log"} onClick={() => setTab("log")}>
+            {t("adx_tab_log")}
+          </TabButton>
         </div>
       </div>
-      {tab === "runs" ? <RunAuditTab /> : tab === "events" ? <EventAuditTab /> : <OpsAuditTab />}
+      {tab === "runs" ? (
+        <RunAuditTab />
+      ) : tab === "events" ? (
+        <EventAuditTab />
+      ) : tab === "ops" ? (
+        <OpsAuditTab />
+      ) : (
+        <LogEventTab />
+      )}
     </div>
   );
 }
@@ -537,6 +548,170 @@ function EventAuditRow({ row, onCopy }: { row: AuditLogRow; onCopy: (v: string) 
           style={{ margin: 0, padding: "8px 10px", maxHeight: 400, overflow: "auto", lineHeight: 1.55 }}
         >
           {prettyPayload || tr("adx_no_payload")}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Tab 4 — 运行日志 (unified audit log; reads LogEvent via /api/log-events).
+// Everything every agent does (lifecycle / tool / event / error), queryable by
+// level / agent / run / text — the 审计日志全可查 surface.
+// ════════════════════════════════════════════════════════════════════════
+
+type LogEventRow = {
+  id: string;
+  ts: string;
+  level: string;
+  category: string;
+  source: string;
+  agent: string | null;
+  runId: string | null;
+  traceId: string | null;
+  eventName: string | null;
+  message: string;
+  durationMs: number | null;
+  payloadPreview: string | null;
+};
+type LogEventsResponse = { logs: LogEventRow[]; nextCursor: string | null };
+
+const LOG_LEVELS = ["error", "warn", "notice", "info"];
+const LEVEL_INK: Record<string, string> = {
+  critical: "var(--c-err)",
+  error: "var(--c-err)",
+  warn: "oklch(0.62 0.15 70)",
+  notice: "var(--c-accent)",
+  info: "var(--c-ink-3)",
+};
+
+function LogEventTab() {
+  const { t } = useApp();
+  const [data, setData] = React.useState<LogEventsResponse | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [level, setLevel] = React.useState<string>("");
+  const [agent, setAgent] = React.useState("");
+  const [runId, setRunId] = React.useState("");
+  const [q, setQ] = React.useState("");
+
+  const load = React.useCallback(async () => {
+    const qs = new URLSearchParams();
+    if (level) qs.set("level", level);
+    if (agent.trim()) qs.set("agent", agent.trim());
+    if (runId.trim()) qs.set("runId", runId.trim());
+    if (q.trim()) qs.set("q", q.trim());
+    qs.set("limit", "200");
+    try {
+      setData(await fetchJson<LogEventsResponse>(`/api/log-events?${qs.toString()}`));
+    } catch {
+      setData({ logs: [], nextCursor: null });
+    } finally {
+      setLoading(false);
+    }
+  }, [level, agent, runId, q]);
+
+  React.useEffect(() => {
+    setLoading(true);
+    const id = setTimeout(load, 250); // debounce text inputs
+    return () => clearTimeout(id);
+  }, [load]);
+
+  const rows = data?.logs ?? [];
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex items-center gap-2 flex-wrap border-b border-line bg-panel" style={{ padding: "10px 22px" }}>
+        <div className="flex items-center gap-1 bg-surface rounded-md p-0.5 border border-line">
+          <FilterPill active={level === ""} onClick={() => setLevel("")}>{t("adx_log_all_levels")}</FilterPill>
+          {LOG_LEVELS.map((lv) => (
+            <FilterPill key={lv} active={level === lv} onClick={() => setLevel(lv)}>
+              <span style={{ color: LEVEL_INK[lv] }}>●</span> {lv}
+            </FilterPill>
+          ))}
+        </div>
+        <input
+          value={agent}
+          onChange={(e) => setAgent(e.target.value)}
+          placeholder="agent"
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 w-[120px]"
+        />
+        <input
+          value={runId}
+          onChange={(e) => setRunId(e.target.value)}
+          placeholder="run id"
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 w-[160px] mono"
+        />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={t("adx_log_search")}
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 flex-1 min-w-[160px]"
+        />
+        <span className="text-[11px] text-ink-3">{rows.length}</span>
+      </div>
+
+      <div className="flex-1 overflow-auto" style={{ padding: "8px 16px" }}>
+        {loading && !data ? (
+          <div className="text-ink-3 text-[12px] py-12 text-center">…</div>
+        ) : rows.length === 0 ? (
+          <EmptyState icon="book" title={t("adx_log_empty")} />
+        ) : (
+          <div className="flex flex-col">
+            {rows.map((r) => (
+              <LogEventRowView key={r.id} row={r} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-[11.5px] px-2 py-1 rounded ${active ? "bg-accent-bg text-accent font-medium" : "text-ink-3 hover:text-ink-1"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function LogEventRowView({ row }: { row: LogEventRow }) {
+  const [open, setOpen] = React.useState(false);
+  const ink = LEVEL_INK[row.level] ?? "var(--c-ink-3)";
+  const time = new Date(row.ts).toLocaleTimeString();
+  return (
+    <div className="border-b border-line">
+      <button
+        onClick={() => row.payloadPreview && setOpen((o) => !o)}
+        className="w-full flex items-center gap-3 text-left py-1.5"
+      >
+        <span className="text-[10.5px] text-ink-4 mono tabular-nums shrink-0 w-[72px]">{time}</span>
+        <span className="text-[10px] shrink-0 w-[44px] font-medium" style={{ color: ink }}>
+          {row.level}
+        </span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-raised text-ink-3 shrink-0">{row.category}</span>
+        <span className="text-[11px] text-ink-2 mono shrink-0 w-[90px] truncate">{row.agent ?? "—"}</span>
+        <span className="text-[12px] text-ink-1 truncate flex-1">{row.message}</span>
+        {row.runId && (
+          <a
+            href={`/monitor/runs/${row.runId}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-[10px] text-accent mono shrink-0 hover:underline"
+            title={row.runId}
+          >
+            run
+          </a>
+        )}
+      </button>
+      {open && row.payloadPreview && (
+        <pre
+          className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap break-words bg-bg"
+          style={{ margin: 0, padding: "6px 10px", maxHeight: 240, overflow: "auto" }}
+        >
+          {row.payloadPreview}
         </pre>
       )}
     </div>
