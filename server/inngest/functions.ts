@@ -45,6 +45,11 @@ import { matchResumeAgent } from "./agents/match-resume-agent";
 import { ruleCheckAgent } from "./agents/rule-check-agent";  // NEW PR-4
 import { interviewInviterAgent } from "./agents/interview-inviter-agent"; // 2026-05-25
 
+// Ontology-generated energy dispatch agents (nengyuandiaodu-v1). Importing only
+// builds function objects + reads the in-repo snapshot once; they are not served
+// unless added to allFunctions below (ENERGY_AGENTS=1). 2026-06-02.
+import { energyFunctions as energyAgentFunctions } from "./domains/energy";
+
 // wsIds owned by the real agents above. Stub-factory MUST skip these to
 // avoid double-handling of trigger events (race condition).
 // "11-1" = interviewInviterAgent;AGENT_MAP wsId 11-1 已从 shell 升 real(见
@@ -82,6 +87,14 @@ const behaviorFunctions = BEHAVIOR_AGENTS_ENABLED
   ? [monitorAgent, managerAgent]
   : [];
 
+// Ontology-generated domain agents (energy dispatch). Default OFF; set
+// ENERGY_AGENTS=1 to register the 28 nengyuandiaodu-v1 functions. They are
+// additionally self-gated on AgentVersion.status (deploy = activate), so a
+// registered-but-undeployed agent no-ops. See
+// docs/superpowers/specs/2026-06-02-ontology-agent-generator-runnable-design.md
+const ENERGY_AGENTS_ENABLED = process.env.ENERGY_AGENTS === "1";
+const energyFunctions = ENERGY_AGENTS_ENABLED ? energyAgentFunctions : [];
+
 const realFunctions = [
   resumeParserAgent,
   createJdAgent,
@@ -94,13 +107,14 @@ export const allFunctions = [
   ...realFunctions,
   ...stubFunctions,
   ...behaviorFunctions,
+  ...energyFunctions,
 ];
 
 // Server-side startup log so operators can confirm registration count.
 if (typeof window === "undefined") {
   // eslint-disable-next-line no-console
   console.log(
-    `[inngest] registered ${realFunctions.length} real + ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior = ${allFunctions.length} total ` +
-      `(STUB_AGENTS=${STUB_AGENTS_ENABLED ? "1" : "0"} BEHAVIOR_AGENTS=${BEHAVIOR_AGENTS_ENABLED ? "1" : "0"})`,
+    `[inngest] registered ${realFunctions.length} real + ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior + ${energyFunctions.length} energy = ${allFunctions.length} total ` +
+      `(STUB_AGENTS=${STUB_AGENTS_ENABLED ? "1" : "0"} BEHAVIOR_AGENTS=${BEHAVIOR_AGENTS_ENABLED ? "1" : "0"} ENERGY_AGENTS=${ENERGY_AGENTS_ENABLED ? "1" : "0"})`,
   );
 }
