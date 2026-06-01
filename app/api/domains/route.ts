@@ -43,7 +43,7 @@ const COLOR_PALETTE = [
 ];
 
 const SEED_DOMAINS: Array<Omit<DomainRow, "created_at" | "archived_at">> = [
-  { id: "raas", name: "RAAS · 招聘中台", color: "oklch(0.65 0.18 250)", is_system: true },
+  { id: "raas", name: "业务领域", color: "oklch(0.65 0.18 250)", is_system: true },
   { id: "r7", name: "R7 · ATS", color: "oklch(0.65 0.18 145)", is_system: true },
 ];
 

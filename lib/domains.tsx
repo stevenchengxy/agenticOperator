@@ -47,7 +47,7 @@ export const DEFAULT_DOMAIN: DomainId = "raas";
 export const SYSTEM_FALLBACK_DOMAINS: ReadonlyArray<Domain> = [
   {
     id: "raas",
-    name: "RAAS · 招聘中台",
+    name: "业务领域",
     color: "oklch(0.65 0.18 250)",
     is_system: true,
     created_at: new Date(0).toISOString(),

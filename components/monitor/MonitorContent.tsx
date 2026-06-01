@@ -6,6 +6,7 @@ import { SystemStatusCards } from "./SystemStatusCards";
 import { InngestDlqTab } from "./InngestDlqTab";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, displayName as agentDisplayName } from "@/lib/agent-mapping";
+import { useDomain } from "@/lib/domains";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import {
   RunDetailExpansion,
@@ -35,9 +36,10 @@ import {
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-// AGENT_MAP order — used as a stable display order; the actual "deployed"
-// subset is computed at render time via useDeploymentMap (Inngest live).
-const ALL_AGENT_SHORTS: string[] = AGENT_MAP.map((a) => a.short);
+// Phase 0 (2026-06-01): Monitor's agent filter scopes to the active domain
+// (matches /overview + /fleet). `shortsForDomain` is computed inside
+// `AgentFilter` via useDomain() so switching domains in the AppBar
+// immediately reshapes the chip strip.
 
 type StatusFilter = "all" | RunStatus;
 type WindowId = "1h" | "24h" | "7d";
@@ -542,9 +544,14 @@ function WindowSelector({ value, onChange }: { value: WindowId; onChange: (v: Wi
 function AgentFilter({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
   const { t } = useApp();
   const { realness: realnessMap } = useDeploymentMap();
+  const { domain } = useDomain();
   const deployedShorts = React.useMemo(
-    () => ALL_AGENT_SHORTS.filter((s) => (realnessMap.get(s) ?? "unbuilt") !== "unbuilt"),
-    [realnessMap],
+    () =>
+      AGENT_MAP
+        .filter((a) => a.domain === domain)
+        .map((a) => a.short)
+        .filter((s) => (realnessMap.get(s) ?? "unbuilt") !== "unbuilt"),
+    [realnessMap, domain],
   );
   return (
     <div className="flex items-center gap-1 flex-wrap">
