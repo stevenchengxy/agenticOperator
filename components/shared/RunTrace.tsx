@@ -2,8 +2,11 @@
 import React from "react";
 import Link from "next/link";
 import { Ic } from "@/components/shared/Ic";
+import { Markdown } from "@/components/shared/Markdown";
 import { describeStep, describeLogKind } from "@/lib/monitor-step-descriptor";
 import { useApp } from "@/lib/i18n";
+import { fetchJson } from "@/lib/api/client";
+import type { RunSummaryResponse } from "@/app/api/runs/[id]/summary/route";
 
 // Shared run-detail / trace components.
 // Used by /monitor (run inspection) and /fleet/[short] (light "today's stats"
@@ -342,35 +345,180 @@ export function summarizeRun(run: RunRow, detail: RunDetail, agentName?: string)
   return `${agent} ${phrase}。`;
 }
 
+type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
+
+/**
+ * Inline AI summary block. Replaces the old heuristic one-liner banner.
+ *
+ * Behavior:
+ *   - Running runs: skip fetch (no summary yet), show heuristic + "运行中" pill
+ *   - Failed/Completed/Suspended: fetch /api/runs/<id>/summary on mount.
+ *     The route is cache-then-lazy-synthesize; first viewer pays the LLM
+ *     wait, subsequent viewers get the cached Postgres row instantly.
+ *   - Header: title + AI badge + 重新生成 (DELETE + fresh refetch) + 追问 link
+ *   - Body: full markdown via <Markdown compact /> when ok; heuristic
+ *     one-liner as a fallback while loading / on error.
+ */
 function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: RunDetail; agentName?: string }) {
   const { t } = useApp();
-  const text = summarizeRun(run, detail, agentName);
   const failed = run.status === "Failed";
+  const running = run.status === "Running";
   const tone = failed ? "var(--c-err)" : "var(--c-accent)";
+  const heuristic = summarizeRun(run, detail, agentName);
+
+  const [data, setData] = React.useState<RunSummarySuccess | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [regenerating, setRegenerating] = React.useState(false);
+
+  const load = React.useCallback(
+    async (fresh: boolean) => {
+      if (running) return;
+      setLoading(true);
+      setErr(null);
+      try {
+        const path = `/api/runs/${encodeURIComponent(run.id)}/summary${fresh ? "?fresh=1" : ""}`;
+        const r = await fetchJson<RunSummaryResponse>(path, { timeoutMs: 60_000 });
+        if (r.ok) setData(r);
+        else setErr(r.message ?? r.reason);
+      } catch (e) {
+        setErr((e as Error)?.message ?? "unknown error");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [run.id, running],
+  );
+
+  React.useEffect(() => {
+    void load(false);
+    // Refetch when the run advances past Running.
+  }, [load, run.status]);
+
+  const onRegenerate = React.useCallback(async () => {
+    if (regenerating || loading) return;
+    setRegenerating(true);
+    try {
+      await fetch(`/api/runs/${encodeURIComponent(run.id)}/summary`, { method: "DELETE" });
+      await load(true);
+    } finally {
+      setRegenerating(false);
+    }
+  }, [run.id, regenerating, loading, load]);
+
   return (
     <div
-      className="ao-pop-in flex items-center gap-3 rounded-lg"
+      className="ao-pop-in rounded-lg"
       style={{
         padding: "11px 14px",
         background: `color-mix(in oklab, ${tone} 7%, var(--c-surface))`,
         border: `1px solid color-mix(in oklab, ${tone} 30%, var(--c-line))`,
       }}
     >
-      <Ic.bolt style={{ width: 15, height: 15, color: tone, flexShrink: 0 }} />
-      <div className="flex-1 text-ink-1" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{text}</div>
-      <Link
-        href={`/live?run=${encodeURIComponent(run.id)}`}
-        className="inline-flex items-center gap-1 rounded-md no-underline whitespace-nowrap shrink-0 ao-hover-lift"
-        style={{
-          padding: "5px 11px",
-          border: "1px solid var(--c-line)",
-          color: "var(--c-ink-1)",
-          background: "var(--c-surface)",
-          fontSize: 11.5,
-        }}
-      >
-        <Ic.chat style={{ width: 12, height: 12 }} /> {t("mox_ask_followup")}
-      </Link>
+      {/* header row */}
+      <div className="flex items-center gap-2" style={{ marginBottom: data || err ? 8 : 0 }}>
+        <Ic.bolt style={{ width: 15, height: 15, color: tone, flexShrink: 0 }} />
+        <span className="text-ink-1" style={{ fontSize: 12.5, fontWeight: 600 }}>
+          {failed ? t("run_ai_summary_title_failed") : running ? t("run_ai_summary_title_running") : t("run_ai_summary_title_normal")}
+        </span>
+        {data && data.source === "llm" && (
+          <span
+            className="mono rounded-sm"
+            style={{
+              fontSize: 9.5,
+              padding: "1px 6px",
+              color: tone,
+              background: `color-mix(in oklab, ${tone} 14%, transparent)`,
+              border: `1px solid color-mix(in oklab, ${tone} 35%, var(--c-line))`,
+            }}
+          >
+            {t("run_ai_summary_badge_ai")}
+          </span>
+        )}
+        {data && (data.source === "fallback" || data.source === "static-fallback") && (
+          <span
+            className="mono rounded-sm"
+            style={{
+              fontSize: 9.5,
+              padding: "1px 6px",
+              color: "var(--c-ink-3)",
+              background: "var(--c-panel)",
+              border: "1px solid var(--c-line)",
+            }}
+          >
+            {t("run_ai_summary_fallback_tag")}
+          </span>
+        )}
+        {(loading || regenerating) && (
+          <span className="text-ink-3 mono" style={{ fontSize: 10.5 }}>
+            {t("run_ai_summary_loading")}
+          </span>
+        )}
+        <div className="flex-1" />
+        {!running && (
+          <button
+            onClick={onRegenerate}
+            disabled={loading || regenerating}
+            className="inline-flex items-center gap-1 rounded-md no-underline whitespace-nowrap shrink-0 ao-hover-lift bg-surface text-ink-2 cursor-pointer disabled:opacity-50"
+            style={{
+              padding: "4px 9px",
+              border: "1px solid var(--c-line)",
+              fontSize: 11,
+            }}
+          >
+            ↻ {t("run_ai_summary_regenerate")}
+          </button>
+        )}
+        <Link
+          href={`/live?run=${encodeURIComponent(run.id)}`}
+          className="inline-flex items-center gap-1 rounded-md no-underline whitespace-nowrap shrink-0 ao-hover-lift"
+          style={{
+            padding: "5px 11px",
+            border: "1px solid var(--c-line)",
+            color: "var(--c-ink-1)",
+            background: "var(--c-surface)",
+            fontSize: 11.5,
+          }}
+        >
+          <Ic.chat style={{ width: 12, height: 12 }} /> {t("mox_ask_followup")}
+        </Link>
+      </div>
+
+      {/* body */}
+      {running ? (
+        <div className="text-ink-2" style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+          {t("run_ai_summary_pending")}
+        </div>
+      ) : data ? (
+        <div className="text-ink-1" style={{ fontSize: 12.5, lineHeight: 1.65 }}>
+          <Markdown compact>{data.summaryText}</Markdown>
+          {data.llmModel && (
+            <div
+              className="mono text-ink-4"
+              style={{ fontSize: 10, marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--c-line)" }}
+            >
+              {data.llmModel}
+              {data.llmDurationMs ? ` · ${(data.llmDurationMs / 1000).toFixed(1)}s` : ""}
+              {data.llmPromptTokens != null && data.llmCompletionTokens != null
+                ? ` · ${data.llmPromptTokens}/${data.llmCompletionTokens} tokens`
+                : ""}
+            </div>
+          )}
+        </div>
+      ) : loading && !err ? (
+        <div className="text-ink-2" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+          {heuristic}
+        </div>
+      ) : err ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="text-ink-2" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{heuristic}</div>
+          <div className="text-err mono" style={{ fontSize: 10.5 }}>{t("run_ai_summary_failed_inline")}{err.slice(0, 120)}</div>
+        </div>
+      ) : (
+        <div className="text-ink-1" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+          {heuristic}
+        </div>
+      )}
     </div>
   );
 }
