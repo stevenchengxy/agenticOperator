@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { levelCategoryFor } from './log-event';
+import { levelCategoryFor, typeForFileKind } from './log-event';
 
 // LogEvent is the unified, queryable audit log: every AgentActivity write is
 // mirrored here with a normalized (level, category) so /api/logs can filter by
@@ -27,5 +27,36 @@ describe('levelCategoryFor', () => {
   });
   it('defaults unknown types to info/info', () => {
     expect(levelCategoryFor('something_new')).toEqual({ level: 'info', category: 'info' });
+  });
+});
+
+// The real agents write to the JSONL file logger (lib/agent-logger) with kind
+// strings like 'handler.start' / 'emit.jd-generated' / 'api.RAAS' / 'handler.error'.
+// typeForFileKind maps those to the canonical AgentActivity type so the bridge
+// can run them through levelCategoryFor and into the unified audit log.
+describe('typeForFileKind', () => {
+  it('maps handler lifecycle', () => {
+    expect(typeForFileKind('handler.start')).toBe('agent_start');
+    expect(typeForFileKind('handler.done')).toBe('agent_complete');
+    expect(typeForFileKind('handler.error')).toBe('agent_error');
+    expect(typeForFileKind('handler.raw_input')).toBe('event_received');
+  });
+  it('maps emits to event_emitted and api.* to tool', () => {
+    expect(typeForFileKind('emit.jd-generated')).toBe('event_emitted');
+    expect(typeForFileKind('emit.resume-processed')).toBe('event_emitted');
+    expect(typeForFileKind('api.RAAS POST /candidates')).toBe('tool');
+  });
+  it('maps step phases', () => {
+    expect(typeForFileKind('step.start')).toBe('step.started');
+    expect(typeForFileKind('step.end')).toBe('step.completed');
+    expect(typeForFileKind('step.error')).toBe('step.failed');
+  });
+  it('maps business *.failed to anomaly, other *.error to agent_error', () => {
+    expect(typeForFileKind('save-candidate.failed')).toBe('anomaly');
+    expect(typeForFileKind('some.error')).toBe('agent_error');
+  });
+  it('defaults to info', () => {
+    expect(typeForFileKind('save-candidate.ok')).toBe('info');
+    expect(typeForFileKind('match.input')).toBe('info');
   });
 });

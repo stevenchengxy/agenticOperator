@@ -5,6 +5,7 @@
 // "审计日志全可查" requirement. Writing never throws (audit must not break work).
 
 import { prisma } from '@/server/db';
+import { recordNotification } from '@/server/notifications/ingest';
 
 export type LogLevel = 'debug' | 'info' | 'notice' | 'warn' | 'error' | 'critical';
 
@@ -44,6 +45,23 @@ export function levelCategoryFor(type: string): LevelCategory {
   }
 }
 
+// Maps a JSONL file-logger `kind` (lib/agent-logger) to the canonical
+// AgentActivity type understood by levelCategoryFor. Pure + total.
+export function typeForFileKind(kind: string): string {
+  if (kind === 'handler.start') return 'agent_start';
+  if (kind === 'handler.done') return 'agent_complete';
+  if (kind === 'handler.error') return 'agent_error';
+  if (kind === 'handler.raw_input') return 'event_received';
+  if (kind.startsWith('emit.')) return 'event_emitted';
+  if (kind.startsWith('api.')) return 'tool';
+  if (kind === 'step.start') return 'step.started';
+  if (kind === 'step.end') return 'step.completed';
+  if (kind === 'step.error') return 'step.failed';
+  if (kind.endsWith('.failed')) return 'anomaly';
+  if (kind.endsWith('.error')) return 'agent_error';
+  return 'info';
+}
+
 export interface RecordLogEventInput {
   type: string;
   message: string;
@@ -76,5 +94,52 @@ export async function recordLogEvent(input: RecordLogEventInput): Promise<void> 
     });
   } catch (e) {
     console.warn(`[log-event] recordLogEvent failed (${input.type}): ${(e as Error).message}`);
+  }
+}
+
+export interface MirrorFileLogInput {
+  agent: string;
+  runId?: string | null;
+  traceId?: string | null;
+  kind: string;
+  payload?: unknown;
+}
+
+/**
+ * Bridge: mirror one JSONL file-logger entry (lib/agent-logger) into the unified
+ * audit log, and route unrecoverable errors to the notification center. This is
+ * what makes the REAL agents (which log to files, not the DB) show up in
+ * /api/log-events and 消息通知. Fire-and-forget — never throws.
+ */
+export async function mirrorAgentFileLog(input: MirrorFileLogInput): Promise<void> {
+  const type = typeForFileKind(input.kind);
+  let payloadJson: string | null = null;
+  if (input.payload !== undefined) {
+    try {
+      payloadJson = JSON.stringify(input.payload).slice(0, 4000);
+    } catch {
+      payloadJson = null;
+    }
+  }
+  await recordLogEvent({
+    type,
+    message: input.kind,
+    source: 'agent',
+    agent: input.agent,
+    runId: input.runId ?? null,
+    traceId: input.traceId ?? null,
+    payloadJson,
+  });
+  if (type === 'agent_error') {
+    void recordNotification({
+      level: 'error',
+      category: 'agent_error',
+      source: input.agent,
+      agent: input.agent,
+      runId: input.runId ?? null,
+      traceId: input.traceId ?? null,
+      message: `${input.agent} 运行异常:${input.kind}`,
+      dedupeHint: `agent_error.${input.agent}`,
+    }).catch(() => {});
   }
 }

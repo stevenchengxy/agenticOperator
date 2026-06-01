@@ -15,6 +15,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { terminalLogEnabled } from '@/lib/terminal-log';
+import { mirrorAgentFileLog } from '@/server/log/log-event';
 
 const LOG_DIR = process.env.AO_LOG_DIR ?? path.join(process.cwd(), 'logs');
 
@@ -199,6 +200,16 @@ export function createAgentLogger(ctx: AgentLoggerCtx): AgentLogger {
     // multi-line pretty-printed for api.* kinds (which carry request +
     // response objects that are most useful read top-to-bottom).
     echoToTerminal(ctx, kind, payload);
+    // 2026-06-01 — bridge into the DB so the real agents (which log to files,
+    // not Prisma) show up in the unified audit log (/api/log-events) and route
+    // their errors into 消息通知. Fire-and-forget; never blocks the file write.
+    void mirrorAgentFileLog({
+      agent: ctx.agent,
+      runId: ctx.runId,
+      traceId: ctx.traceId,
+      kind,
+      payload,
+    });
   };
 
   return {
