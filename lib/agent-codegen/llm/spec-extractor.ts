@@ -18,11 +18,12 @@ import {
 import { getToolRegistry, type ToolRegistryEntry } from '../registries';
 import { pickCodegenGateway, makeClient } from './gateway';
 import { formatCanonicalForPrompt } from '../ontology/canonical-schemas';
+import type { DomainId } from '@/lib/domains';
 
 export type GenerateStepsInput = {
   form: AgentFormFields;
   businessLogic: string;
-  domain: 'raas' | 'r7';
+  domain: DomainId;
 };
 
 export type GenerateStepsResult = {

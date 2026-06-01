@@ -382,18 +382,24 @@ export function FleetContent() {
             <span style={{ textAlign: "right" }}>{t("flx_col_actions")}</span>
           </div>
         )}
-        {agentsRes !== null && grouped.map((g) => (
-          <section key={g.key}>
-            {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} t={t} />}
-            {g.rows.map((r, i) => (
-              <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} />
+        {agentsRes !== null && effectiveRows.length === 0 ? (
+          <DomainEmptyStateCard onDeploy={() => setBehaviorModal(true)} t={t} />
+        ) : (
+          <>
+            {agentsRes !== null && grouped.map((g) => (
+              <section key={g.key}>
+                {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} t={t} />}
+                {g.rows.map((r, i) => (
+                  <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} />
+                ))}
+              </section>
             ))}
-          </section>
-        ))}
-        {agentsRes !== null && grouped.length === 0 && (
-          <div className="text-ink-3 text-[13px] text-center py-16">
-            {t("flx_no_match")}
-          </div>
+            {agentsRes !== null && grouped.length === 0 && (
+              <div className="text-ink-3 text-[13px] text-center py-16">
+                {t("flx_no_match")}
+              </div>
+            )}
+          </>
         )}
         {agentsRes !== null && filtered.length > 0 && (
           <div className="flex items-center gap-2 text-[12px] text-ink-3 mt-6">
@@ -832,6 +838,39 @@ function BehaviorPlaceholderModal({ onClose, t }: { onClose: () => void; t: (k: 
           <Btn variant="primary" size="sm" onClick={onClose}>{t("flx_close")}</Btn>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Phase 0 (2026-06-01) — empty-state card shown when the active domain has
+// zero agents (user-created domain pre-Codegen). The "+ 部署智能体" button is
+// the same placeholder as the page-header CTA; Behavior axis spec will swap
+// the modal for the real deployment wizard.
+function DomainEmptyStateCard({
+  onDeploy,
+  t,
+}: {
+  onDeploy: () => void;
+  t: (k: string) => string;
+}) {
+  return (
+    <div
+      className="border border-line rounded-md text-center"
+      style={{
+        padding: "48px 24px",
+        marginTop: 16,
+        background: "var(--c-panel)",
+      }}
+    >
+      <div className="text-ink-1" style={{ fontSize: 15, fontWeight: 500, marginBottom: 6 }}>
+        {t("domain_empty_fleet")}
+      </div>
+      <div className="text-ink-3" style={{ fontSize: 12.5, marginBottom: 18, lineHeight: 1.55 }}>
+        {t("domain_empty_fleet_hint")}
+      </div>
+      <Btn variant="primary" size="sm" onClick={onDeploy}>
+        <Ic.plus /> {t("deploy_agent")}
+      </Btn>
     </div>
   );
 }

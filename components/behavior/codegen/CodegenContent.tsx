@@ -81,7 +81,7 @@ const DIFF_EMPTY_LEFT = `// No saved version yet for this agent.
 `;
 
 export function CodegenContent() {
-  const { t, lang } = useApp();
+  const { t } = useApp();
   const { domain } = useDomain();
   const domainMeta = getDomain(domain);
 
@@ -537,7 +537,7 @@ export function CodegenContent() {
               {t("codegen_hero_blurb_v2")}
             </p>
           </div>
-          <DomainBadge color={domainMeta.color} label={domainMeta.label[lang]} />
+          <DomainBadge color={domainMeta.color} label={domainMeta.name} />
         </div>
 
         <PipelineTimeline states={pipelineStates} />

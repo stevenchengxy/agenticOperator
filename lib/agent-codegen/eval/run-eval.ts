@@ -12,6 +12,7 @@
 
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import type { DomainId } from '@/lib/domains';
 import { runPipeline } from '../pipeline';
 import { scoreCandidate, DEFAULT_WEIGHTS } from './score';
 import { reviewCode } from './code-reviewer';
@@ -42,7 +43,7 @@ export type RunOptions = {
 export async function runEval(
   fixture: EvalFixture,
   opts: RunOptions = {},
-  domain: 'raas' | 'r7' = 'raas',
+  domain: DomainId = 'raas',
 ): Promise<EvaluationReport> {
   const productionContent = await readFile(path.join(ROOT, fixture.productionPath), 'utf8');
 

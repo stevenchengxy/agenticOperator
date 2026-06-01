@@ -11,23 +11,17 @@ const EMPTY_TOOLS: ReadonlyArray<ToolRegistryEntry> = [];
 const EMPTY_EVENTS: ReadonlyArray<EventRegistryEntry> = [];
 
 export function getToolRegistry(domain: DomainId): ReadonlyArray<ToolRegistryEntry> {
-  switch (domain) {
-    case 'raas':
-      return TOOL_REGISTRY_RAAS;
-    case 'r7':
-      // R7 has no registered tools yet — codegen for R7 will return spec
-      // with no callsLib, and step bodies stay as TODO until R7 onboarding.
-      return EMPTY_TOOLS;
-  }
+  // Phase 0 (2026-06-01): DomainId widened to string for user-extensible
+  // domains. raas keeps its built-in registry; everything else (r7 + any
+  // user-created domain) returns the empty set, so codegen falls back to
+  // TODO bodies until that domain's registry is wired in (Phase 1 chore).
+  if (domain === 'raas') return TOOL_REGISTRY_RAAS;
+  return EMPTY_TOOLS;
 }
 
 export function getEventRegistry(domain: DomainId): ReadonlyArray<EventRegistryEntry> {
-  switch (domain) {
-    case 'raas':
-      return EVENT_REGISTRY_RAAS;
-    case 'r7':
-      return EMPTY_EVENTS;
-  }
+  if (domain === 'raas') return EVENT_REGISTRY_RAAS;
+  return EMPTY_EVENTS;
 }
 
 export type { ToolRegistryEntry, EventRegistryEntry };

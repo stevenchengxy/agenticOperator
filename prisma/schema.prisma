@@ -905,3 +905,21 @@ model InngestArchiveCursor {
 
   @@map("inngest_archive_cursor")
 }
+
+// =====================================================================
+// Domain — top-level business container (Phase 0)
+// =====================================================================
+// User-extensible top-level scope. Each domain holds its own agent fleet.
+// `id` is the slug used by localStorage `ao:domain` + AGENT_MAP.domain.
+// `raas` and `r7` are seeded with `is_system=true` and cannot be archived.
+// See docs/superpowers/specs/2026-06-01-domain-foundation-design.md.
+model Domain {
+  id          String    @id
+  name        String
+  color       String
+  is_system   Boolean   @default(false) @map("is_system")
+  created_at  DateTime  @default(now()) @map("created_at")
+  archived_at DateTime? @map("archived_at")
+
+  @@map("domain")
+}

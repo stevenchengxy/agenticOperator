@@ -14,6 +14,7 @@ import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
 import { InngestPill } from "@/components/shared/InngestPill";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 
 // /overview — system-at-a-glance dashboard.
 //
@@ -62,6 +63,9 @@ export function OverviewContent() {
   const health = useAgentsHealth(4_000);
   const { byWsId: liveByWsId } = useInngestLiveOverlay();
   const { realness: realnessMap } = useDeploymentMap();
+  // Phase 0 (2026-06-01): Overview scopes to the AppBar's current domain.
+  // Matches /fleet's existing pattern — single source of truth is the AppBar.
+  const { domain } = useDomain();
   const [activeRuns, setActiveRuns] = React.useState<RunSummary[] | null>(null);
   const [failed1h, setFailed1h] = React.useState<RunSummary[] | null>(null);
   const [anomalies, setAnomalies] = React.useState<LogEntry[] | null>(null);
@@ -140,8 +144,11 @@ export function OverviewContent() {
   // runtime health is overlaid as a secondary signal.
   const matrixRows: MatrixRow[] = React.useMemo(() => {
     // Chatbot is the UI assistant (AO·UI), not a recruitment-pipeline agent —
-    // hide it from the fleet matrix.
-    const rows: MatrixRow[] = AGENT_MAP.filter((a) => a.short !== "Chatbot").map((a) => {
+    // hide it from the fleet matrix. Also scope to the active domain so the
+    // matrix reflects whatever the AppBar is showing.
+    const rows: MatrixRow[] = AGENT_MAP
+      .filter((a) => a.short !== "Chatbot" && a.domain === domain)
+      .map((a) => {
       const kind = realnessMap.get(a.short) ?? "unbuilt";
       const live = liveByWsId.get(a.wsId);
       const deploy: DeployStatus =
@@ -166,7 +173,7 @@ export function OverviewContent() {
       return x.short.localeCompare(y.short);
     });
     return rows;
-  }, [liveByWsId, health.byShort, realnessMap]);
+  }, [liveByWsId, health.byShort, realnessMap, domain]);
 
   const deployCounts = React.useMemo(() => {
     const out = { online: 0, paused: 0, not_deployed: 0 };
