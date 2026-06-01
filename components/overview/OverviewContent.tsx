@@ -51,7 +51,6 @@ export function OverviewContent() {
   const [todayRuns, setTodayRuns] = React.useState<{ total: number; completed: number } | null>(null);
   const [hitlTasks, setHitlTasks] = React.useState<HumanTaskCard[] | null>(null);
   const [activity, setActivity] = React.useState<LogEntry[] | null>(null);
-  const [dlqPending, setDlqPending] = React.useState<number | null>(null);
   const [alertsActive, setAlertsActive] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -60,7 +59,7 @@ export function OverviewContent() {
     today0.setHours(0, 0, 0, 0);
     const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [active, failed, activityRes, todayFinished, hitl, dlq, alerts] = await Promise.all([
+      const [active, failed, activityRes, todayFinished, hitl, alerts] = await Promise.all([
         fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=20"),
         fetchJson<RunsResponse>(
           `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
@@ -70,7 +69,6 @@ export function OverviewContent() {
           `/api/runs?status=completed,failed,timed_out,interrupted&since=${encodeURIComponent(today0.toISOString())}&limit=1000`,
         ),
         fetchJson<HumanTasksResponse>("/api/human-tasks?status=pending"),
-        fetchJson<{ pending: number }>("/api/em/dlq/count"),
         fetchJson<{ alerts: Array<{ acked: boolean }> }>("/api/alerts"),
       ]);
       setActiveCount(active.runs.length);
@@ -81,7 +79,6 @@ export function OverviewContent() {
         completed: todayFinished.runs.filter((r) => r.status === "completed").length,
       });
       setHitlTasks(hitl.recent ?? []);
-      setDlqPending(dlq.pending ?? 0);
       setAlertsActive(alerts.alerts.filter((a) => !a.acked).length);
       setError(null);
     } catch (e) {
@@ -138,7 +135,6 @@ export function OverviewContent() {
   const tone: OverallTone = computeTone(
     failed1hCount ?? 0,
     alertsActive ?? 0,
-    dlqPending ?? 0,
   );
 
   return (
@@ -148,7 +144,6 @@ export function OverviewContent() {
         activeCount={activeCount}
         hitlCount={hitlInDomain?.length ?? null}
         alertsActive={alertsActive}
-        dlqPending={dlqPending}
         tone={tone}
         fetchedAt={health.fetchedAt}
         onRefresh={refresh}
@@ -201,7 +196,6 @@ function HeroHeader({
   activeCount,
   hitlCount,
   alertsActive,
-  dlqPending,
   tone,
   fetchedAt,
   onRefresh,
@@ -210,7 +204,6 @@ function HeroHeader({
   activeCount: number | null;
   hitlCount: number | null;
   alertsActive: number | null;
-  dlqPending: number | null;
   tone: OverallTone;
   fetchedAt: Date | null;
   onRefresh: () => void;
@@ -233,8 +226,7 @@ function HeroHeader({
     .replace("{hitl}", hitlCount === null ? "…" : String(hitlCount))
     .replace("{tone}", t(toneKey));
   const statusStrip = t("overview_status_strip")
-    .replace("{alerts}", alertsActive === null ? "…" : String(alertsActive))
-    .replace("{dlq}", dlqPending === null ? "…" : String(dlqPending));
+    .replace("{alerts}", alertsActive === null ? "…" : String(alertsActive));
 
   return (
     <div
@@ -1015,8 +1007,8 @@ function greetingForHour(h: number, t: (k: string) => string): string {
   return t("overview_greeting_evening");
 }
 
-function computeTone(failed1h: number, alertsActive: number, dlqPending: number): OverallTone {
-  if (failed1h >= 10 || dlqPending > 5 || alertsActive >= 5) return "alarm";
+function computeTone(failed1h: number, alertsActive: number): OverallTone {
+  if (failed1h >= 10 || alertsActive >= 5) return "alarm";
   if (failed1h >= 3 || alertsActive >= 2) return "tense";
   return "calm";
 }

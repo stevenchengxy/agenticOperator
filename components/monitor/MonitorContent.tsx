@@ -4,7 +4,6 @@ import clsx from "clsx";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { SystemStatusCards } from "./SystemStatusCards";
-import { InngestDlqTab } from "./InngestDlqTab";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, displayName as agentDisplayName, type Stage } from "@/lib/agent-mapping";
 import { useDomain } from "@/lib/domains";
@@ -71,7 +70,6 @@ const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman"
 
 type StatusFilter = "all" | RunStatus;
 type WindowId = "1h" | "24h" | "7d";
-type TabId = "runs" | "dlq";
 
 export function MonitorContent() {
   const router = useRouter();
@@ -83,18 +81,12 @@ export function MonitorContent() {
   const windowId = (sp.get("window") ?? "24h") as WindowId;
   const eventName = sp.get("event");
   const runIdParam = sp.get("run");
-  const tab: TabId = (sp.get("tab") === "dlq" ? "dlq" : "runs");
 
   const setUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(sp.toString());
     mut(next);
     router.replace(`/monitor${next.toString() ? `?${next.toString()}` : ""}`);
   }, [router, sp]);
-
-  const setTab = (next: TabId) => setUrl((p) => {
-    if (next === "runs") p.delete("tab");
-    else p.set("tab", next);
-  });
 
   const agentSlug = React.useMemo(() => {
     if (!agentFilter) return null;
@@ -199,29 +191,9 @@ export function MonitorContent() {
         </div>
       </div>
 
-      {/* tab nav */}
-      <div className="flex items-center gap-1 border-b border-line" style={{ padding: "0 32px" }}>
-        {(["runs", "dlq"] as TabId[]).map((id) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className="transition-colors"
-            style={{
-              padding: "10px 14px",
-              borderBottom: tab === id ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
-              color: tab === id ? "var(--c-ink-1)" : "var(--c-ink-3)",
-              fontWeight: tab === id ? 500 : 400,
-              fontSize: 13,
-              marginBottom: -1,
-            }}
-          >
-            {t(id === "runs" ? "monitor_tab_runs" : "monitor_tab_dlq")}
-          </button>
-        ))}
-      </div>
+      <div className="border-b border-line" style={{ padding: "0 32px", height: 1 }} />
 
-      {tab === "runs" && (
-        <>
+      <>
           {/* infrastructure status — preserved per user request 2026-05-19 */}
           <div style={{ padding: "16px 32px 0" }}>
             <div className="text-ink-3 mb-2 flex items-baseline gap-2" style={{ fontSize: 12 }}>
@@ -288,13 +260,6 @@ export function MonitorContent() {
             )}
           </div>
         </>
-      )}
-
-      {tab === "dlq" && (
-        <div style={{ padding: "20px 32px" }}>
-          <InngestDlqTab />
-        </div>
-      )}
     </div>
   );
 }
