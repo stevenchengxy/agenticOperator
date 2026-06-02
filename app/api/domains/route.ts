@@ -141,40 +141,72 @@ async function pickColor(): Promise<string> {
   return COLOR_PALETTE[count % COLOR_PALETTE.length]!;
 }
 
+// Data isolation: the switcher list is the UNION of
+//   1. domains live in Allmeta/Neo4j now (synced in — additive),
+//   2. domains that already hold agent data (AgentVersion rows),
+//   3. the packs AO ships (recruitment + energy).
+// Consequence: when Allmeta REMOVES a domain id, AO KEEPS it iff it has agent
+// data (so agents are never orphaned); a removed domain with no data simply
+// drops off (nothing to lose). AO never writes to / deletes from the Domain
+// table here — that table is used ONLY as an optional per-id name/color/archived
+// OVERRIDE (so 管理领域 renames survive). Nothing auto-deletes a business domain.
 export async function GET() {
   try {
-    const [allmeta, overrides] = await Promise.all([
-      fetchAllmetaDomains(),
-      prisma.domain.findMany().catch(() => [] as Array<{
-        id: string;
-        name: string;
-        color: string;
-        is_system: boolean;
-        created_at: Date;
-        archived_at: Date | null;
-      }>),
-    ]);
+    const allmeta = await fetchAllmetaDomains();
+
+    // Domains that already hold agent data must never disappear from the list.
+    const agentDomains = await prisma.agentVersion
+      .findMany({
+        where: { domain: { not: null } },
+        distinct: ["domain"],
+        select: { domain: true },
+      })
+      .then((rows) => rows.map((r) => r.domain!).filter(Boolean))
+      .catch(() => [] as string[]);
+
+    // Optional name/color/archived overrides (never auto-written here).
+    const overrides = await prisma.domain
+      .findMany()
+      .catch(
+        () =>
+          [] as Array<{
+            id: string;
+            name: string;
+            color: string;
+            is_system: boolean;
+            created_at: Date;
+            archived_at: Date | null;
+          }>,
+      );
     const ovById = new Map(overrides.map((o) => [o.id, o]));
 
-    // Recruitment is always first; everything else keeps Allmeta's order.
-    const orderOf = (id: string) => (id === RECRUITMENT_DOMAIN_ID ? -1 : 0);
+    // Union of live Allmeta + agent-bearing + the shipped packs.
+    const orderedIds: string[] = [];
+    const pushUnique = (id: string) => {
+      if (id && !orderedIds.includes(id)) orderedIds.push(id);
+    };
+    allmeta.forEach((d) => pushUnique(d.id));
+    agentDomains.forEach(pushUnique);
+    pushUnique(RECRUITMENT_DOMAIN_ID);
+    pushUnique(ENERGY_DOMAIN_ID);
 
-    const domains: DomainRow[] = allmeta
-      .map((d, i) => {
-        const ov = ovById.get(d.id);
+    const orderOf = (id: string) => (id === RECRUITMENT_DOMAIN_ID ? -1 : 0);
+    const allmetaName = new Map(allmeta.map((d) => [d.id, d.name]));
+
+    const domains: DomainRow[] = orderedIds
+      .map((id, i) => {
+        const ov = ovById.get(id);
         return {
           row: {
-            id: d.id,
-            // override > derived-from-id (short, clean) > Allmeta name > id
-            name: ov?.name ?? (friendlyDomainName(d.id) || d.name || d.id),
-            color: ov?.color ?? colorForDomain(d.id),
-            // Allmeta-owned → not deletable from AO (rename/recolor still allowed).
-            is_system: true,
+            id,
+            name: ov?.name ?? (friendlyDomainName(id) || allmetaName.get(id) || id),
+            color: ov?.color ?? colorForDomain(id),
+            is_system: true, // synced/owned → not casually deletable from AO
             created_at: (ov?.created_at ?? new Date(0)).toISOString(),
             archived_at: ov?.archived_at ? ov.archived_at.toISOString() : null,
-            runnable: hasSnapshot(d.id),
+            runnable: hasSnapshot(id),
           } satisfies DomainRow,
-          order: orderOf(d.id) * 1000 + i,
+          order: orderOf(id) * 1000 + i,
           archived: !!ov?.archived_at,
         };
       })

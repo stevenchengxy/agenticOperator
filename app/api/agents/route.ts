@@ -65,12 +65,35 @@ export async function GET(_req: Request): Promise<Response> {
     };
   });
 
+  // Ontology-generated agents (e.g. the energy pack) are registered as real
+  // functions in the MAIN app, so they show up in the live registry — but they
+  // belong to their own business domain and are surfaced below from
+  // AgentVersion (with the right domain + shell management). Collect their slugs
+  // so we DON'T also add them here under the default (recruitment) domain, which
+  // would both mis-scope them and double-count them.
+  let ontologyShellSlugs = new Set<string>();
+  try {
+    const shellSlugs = await prisma.agentVersion.findMany({
+      where: { capturedFrom: ONTOLOGY_GEN_SOURCE, slug: { not: '' } },
+      select: { slug: true },
+    });
+    ontologyShellSlugs = new Set(shellSlugs.map((s) => s.slug));
+  } catch {
+    /* best-effort — if this read fails, fall back to prior behavior */
+  }
+
   // Surface live Inngest functions not in AGENT_MAP — lets a brand-new
   // agent appear in Fleet without an AGENT_MAP edit. Falls back to 'system'
   // stage and '—' owner team so the row still renders.
   const knownShorts = new Set(AGENT_MAP.map((a) => a.short));
   for (const r of registry) {
     if (knownShorts.has(r.short)) continue;
+    // Skip ontology agents — they're surfaced from AgentVersion under their own
+    // domain (and managed as shells), not here under the recruitment default.
+    // The registry exposes the ontology function id as `short`/`fnId` (= the
+    // AgentVersion.slug, e.g. "energy-forecast-output"), so match all of them.
+    const candidateSlugs = [r.slug, r.short, (r as { fnId?: string }).fnId].filter(Boolean) as string[];
+    if (candidateSlugs.some((s) => ontologyShellSlugs.has(s))) continue;
     agents.push({
       short: r.short,
       wsId: r.fnId ?? r.short,

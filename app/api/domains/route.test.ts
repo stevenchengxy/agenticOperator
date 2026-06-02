@@ -11,6 +11,9 @@ vi.mock("@/server/db", () => ({
       create: vi.fn(),
       count: vi.fn(),
     },
+    agentVersion: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -33,6 +36,7 @@ const m = prisma.domain as unknown as {
   create: ReturnType<typeof vi.fn>;
   count: ReturnType<typeof vi.fn>;
 };
+const av = prisma.agentVersion as unknown as { findMany: ReturnType<typeof vi.fn> };
 
 const fixedDate = new Date("2026-06-01T10:00:00Z");
 
@@ -79,13 +83,14 @@ describe("countAgentsInDomain", () => {
 describe("GET /api/domains", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Force the Allmeta fetch to fail → deterministic FALLBACK_ALLMETA list,
+    // Force the Allmeta fetch to fail → deterministic seed list (招聘-v1, 能源调度-v1),
     // independent of whether the Studio dev server is running.
     vi.spyOn(global, "fetch").mockRejectedValue(new Error("no studio"));
+    av.findMany.mockResolvedValue([]); // no agent-bearing domains by default
+    m.findMany.mockResolvedValue([]); // no overrides by default
   });
 
-  it("sources the list from the Allmeta/Neo4j domain ids (no seeding)", async () => {
-    m.findMany.mockResolvedValue([]); // no local overrides
+  it("lists the union of Allmeta + agent-bearing + shipped packs (no DB writes)", async () => {
     const res = await GET();
     const j = await res.json();
     expect(j.ok).toBe(true);
@@ -93,19 +98,21 @@ describe("GET /api/domains", () => {
     expect(ids).toContain("招聘-v1");
     expect(ids).toContain("能源调度-v1");
     expect(j.domains[0].id).toBe("招聘-v1"); // recruitment ordered first
-    expect(m.upsert).not.toHaveBeenCalled(); // domains follow Neo4j, never seeded
+    // Never auto-writes / deletes the Domain table from GET (data isolation).
+    expect(m.upsert).not.toHaveBeenCalled();
+    expect(m.create).not.toHaveBeenCalled();
   });
 
-  it("stays ok and still returns Allmeta domains when the override read fails", async () => {
-    m.findMany.mockRejectedValue(new Error("boom"));
+  it("retains a domain that has agent data even if Allmeta dropped it (data isolation)", async () => {
+    // Allmeta no longer lists 'orphan-v1', but agents still reference it.
+    av.findMany.mockResolvedValue([{ domain: "orphan-v1" }]);
     const res = await GET();
     const j = await res.json();
-    expect(j.ok).toBe(true);
-    expect(j.domains.length).toBeGreaterThan(0);
+    const ids = j.domains.map((d: { id: string }) => d.id);
+    expect(ids).toContain("orphan-v1"); // never auto-removed → no orphaned agents
   });
 
   it("flags the runnable domain (能源调度-v1 ships an agent pack)", async () => {
-    m.findMany.mockResolvedValue([]);
     const res = await GET();
     const j = await res.json();
     const energy = j.domains.find((d: { id: string }) => d.id === "能源调度-v1");
