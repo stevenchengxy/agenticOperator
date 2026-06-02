@@ -8,7 +8,8 @@
 // domain's (curated) candidate agents annotated with ontology grounding.
 
 import { NextResponse } from "next/server";
-import { inferAgents, inferFromOntology, hasRealOntology } from "@/lib/ontology-generator/infer";
+import { inferAgents, buildInferResult } from "@/lib/ontology-generator/infer";
+import { fetchDomainOntology } from "@/lib/ontology-generator/ontology-source";
 import { DEFAULT_DOMAIN_ID } from "@/lib/ontology-generator/profiles";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +28,13 @@ export async function POST(req: Request) {
   } catch {
     // empty / invalid body → default domain
   }
-  // Domains backed by a real ontology (Allmeta domain id → in-repo snapshot /
-  // live) derive candidates from the actual actions; legacy curated domains use
-  // the profile-based inference.
-  if (hasRealOntology(domainId)) {
-    return NextResponse.json(await inferFromOntology(domainId));
+  // Read the domain's REAL ontology (live Allmeta/Neo4j → snapshot). If it has
+  // actions, derive candidates from them — so selecting any deployed domain
+  // shows ITS real ontology. Only domains with no ontology at all fall back to
+  // the legacy curated profile.
+  const onto = await fetchDomainOntology(domainId);
+  if (onto.actions.length > 0) {
+    return NextResponse.json(buildInferResult(onto));
   }
   return NextResponse.json(inferAgents(domainId, domainName));
 }

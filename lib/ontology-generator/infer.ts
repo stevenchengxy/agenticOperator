@@ -95,12 +95,11 @@ export function hasRealOntology(domainId: string): boolean {
   return hasSnapshot(domainId);
 }
 
-/** Build the infer response from the real ontology of an Allmeta domain id. */
-export async function inferFromOntology(domainId: string): Promise<InferResult> {
-  const onto = await fetchDomainOntology(domainId);
+/** Build the infer response from an already-fetched ontology (pure). */
+export function buildInferResult(onto: DomainOntology): InferResult {
   const specs = deriveAgents(onto);
   return {
-    domainId,
+    domainId: onto.domainId,
     counts: {
       rules: onto.rules.length,
       dataObjects: onto.objects.length,
@@ -111,4 +110,9 @@ export async function inferFromOntology(domainId: string): Promise<InferResult> 
     candidates: specs.map(toCandidate),
     danglingEvents: danglingFromOntology(onto),
   };
+}
+
+/** Build the infer response from the real ontology of an Allmeta domain id. */
+export async function inferFromOntology(domainId: string): Promise<InferResult> {
+  return buildInferResult(await fetchDomainOntology(domainId));
 }

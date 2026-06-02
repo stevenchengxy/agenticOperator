@@ -115,23 +115,50 @@ export function hasSnapshot(domainId: string): boolean {
   return fs.existsSync(path.join(SNAPSHOT_ROOT, domainId, "actions.json"));
 }
 
-// ── Allmeta live (best-effort) ──────────────────────────────────────────────
+// ── Allmeta live (the real Neo4j read) ──────────────────────────────────────
+//
+// Allmeta stores ontology data as graph NODES whose shape differs from the
+// five-piece snapshot JSON: stringified `*_json` fields, `uid`/`action_id`
+// instead of `id`, `trigger_events` (consumed) on the action and NO emitted
+// field (emitted events are derived from each event's `source_action`). These
+// normalizers map an Allmeta node back to our OntologyObject/Event/Action shape
+// so the analyzer/infer work identically on live data and on snapshots.
 const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? "";
 const ALLMETA_KEY = process.env.ALLMETA_API_KEY ?? "";
+const ALLMETA_TIMEOUT_MS = 8000; // > Studio first-hit lazy-compile
 
-async function allmetaList(resource: string, domainId: string, timeoutMs = 4000): Promise<unknown[]> {
+type Node = Record<string, unknown>;
+
+function parseJsonField<T>(v: unknown, fallback: T): T {
+  if (v == null) return fallback;
+  if (typeof v === "object") return v as T;
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+function asArray(v: unknown): string[] {
+  return Array.isArray(v) ? (v.filter((x) => typeof x === "string") as string[]) : [];
+}
+
+async function allmetaList(resource: string, domainId: string): Promise<Node[]> {
   if (!ALLMETA_BASE) return [];
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), ALLMETA_TIMEOUT_MS);
   try {
-    const url = `${ALLMETA_BASE.replace(/\/+$/, "")}/api/v1/ontology/${resource}?domain=${encodeURIComponent(domainId)}&limit=500`;
+    const url = `${ALLMETA_BASE.replace(/\/+$/, "")}/api/v1/ontology/${resource}?domain=${encodeURIComponent(domainId)}&limit=1000`;
     const res = await fetch(url, {
       headers: ALLMETA_KEY ? { Authorization: `Bearer ${ALLMETA_KEY}` } : {},
       signal: controller.signal,
     });
     if (!res.ok) return [];
     const body = (await res.json()) as { items?: unknown[] };
-    return Array.isArray(body.items) ? body.items : [];
+    return Array.isArray(body.items) ? (body.items as Node[]) : [];
   } catch {
     return [];
   } finally {
@@ -139,38 +166,97 @@ async function allmetaList(resource: string, domainId: string, timeoutMs = 4000)
   }
 }
 
-/**
- * Fetch a domain's ontology by domain id. Tries Allmeta live; if the core
- * resources (actions/events) come back empty, falls back to the in-repo
- * snapshot. Never throws for a known-snapshot domain.
- */
-export async function fetchDomainOntology(domainId: string): Promise<DomainOntology> {
-  const [actions, events] = await Promise.all([
+function normalizeAllmetaObject(n: Node): OntologyObject {
+  return {
+    id: String(n.uid ?? n.id ?? ""),
+    name: String(n.name ?? n.uid ?? ""),
+    description: typeof n.description === "string" ? n.description : undefined,
+    type: typeof n.type === "string" ? n.type : undefined,
+    primary_key: typeof n.primary_key === "string" ? n.primary_key : undefined,
+    properties: parseJsonField(n.properties_json, [] as OntologyObject["properties"]),
+  };
+}
+
+function normalizeAllmetaEvent(n: Node): OntologyEvent {
+  return {
+    name: String(n.name ?? ""),
+    description: typeof n.description === "string" ? n.description : undefined,
+    payload: {
+      source_action: typeof n.source_action === "string" ? n.source_action : null,
+      event_data: parseJsonField(n.event_data_json, [] as OntologyEvent["payload"]["event_data"]),
+      state_mutations: parseJsonField(n.mutations_json, [] as OntologyEvent["payload"]["state_mutations"]),
+    },
+  };
+}
+
+function normalizeAllmetaAction(n: Node, emitByAction: Map<string, string[]>): OntologyAction {
+  const name = String(n.name ?? "");
+  return {
+    id: String(n.action_id ?? n.id ?? ""),
+    name,
+    description: typeof n.description === "string" ? n.description : undefined,
+    category: typeof n.category === "string" ? n.category : undefined,
+    actor: asArray(n.actor),
+    trigger: asArray(n.trigger_events), // Allmeta: trigger_events = consumed
+    triggered_event: emitByAction.get(name) ?? [], // derived from events' source_action
+    target_objects: asArray(n.target_objects),
+    // Allmeta deployment doesn't carry prompts/tools/side-effects on the node;
+    // they're only needed to RUN an agent (snapshot path), not to display/infer.
+    tool_use: asArray(n.tool_use),
+    system_prompt: typeof n.system_prompt === "string" ? n.system_prompt : "",
+    user_prompt: typeof n.user_prompt === "string" ? n.user_prompt : "",
+    outputs: parseJsonField(n.outputs_json, [] as OntologyAction["outputs"]),
+    side_effects: parseJsonField(n.side_effects_json, {} as OntologyAction["side_effects"]),
+  };
+}
+
+/** Fetch + normalize a domain's ontology from Allmeta (the live Neo4j read). */
+async function fetchAllmetaOntology(domainId: string): Promise<DomainOntology | null> {
+  const [actionsRaw, eventsRaw] = await Promise.all([
     allmetaList("actions", domainId),
     allmetaList("events", domainId),
   ]);
+  if (actionsRaw.length === 0) return null; // not served / domain empty → caller falls back
 
-  // Live is only usable when it actually returns the action graph. The new
-  // domains return empty items today → snapshot wins.
-  if (actions.length > 0 && events.length > 0) {
-    const [objects, rules] = await Promise.all([
-      allmetaList("objects", domainId),
-      allmetaList("rules", domainId),
-    ]);
-    return {
-      domainId,
-      objects: objects as OntologyObject[],
-      rules: rules as OntologyRule[],
-      actions: actions as OntologyAction[],
-      events: events as OntologyEvent[],
-      workflow: null, // live workflow read not wired; analyzer only needs actions+events
-      source: "allmeta",
-    };
+  const [objectsRaw, rulesRaw] = await Promise.all([
+    allmetaList("objects", domainId),
+    allmetaList("rules", domainId),
+  ]);
+
+  const events = eventsRaw.map(normalizeAllmetaEvent);
+  // action name → emitted event names (an event names the action that emits it).
+  const emitByAction = new Map<string, string[]>();
+  for (const e of events) {
+    const sa = e.payload.source_action;
+    if (sa) {
+      const arr = emitByAction.get(sa) ?? [];
+      arr.push(e.name);
+      emitByAction.set(sa, arr);
+    }
   }
 
-  if (hasSnapshot(domainId)) return loadSnapshotOntology(domainId);
+  return {
+    domainId,
+    objects: objectsRaw.map(normalizeAllmetaObject),
+    rules: rulesRaw as OntologyRule[],
+    actions: actionsRaw.map((n) => normalizeAllmetaAction(n, emitByAction)),
+    events,
+    workflow: null, // Allmeta has no workflow resource; analyzer needs actions+events
+    source: "allmeta",
+  };
+}
 
-  // No live data and no snapshot → empty shell (generic/empty domain).
+/**
+ * Fetch a domain's ontology by domain id — the REAL Neo4j read.
+ * Priority: live Allmeta (normalized) → in-repo snapshot (offline/runnable) →
+ * empty shell. So selecting any deployed Allmeta domain shows ITS real ontology;
+ * the snapshot is the offline fallback + the complete (prompt-carrying) source
+ * the runnable packs load directly.
+ */
+export async function fetchDomainOntology(domainId: string): Promise<DomainOntology> {
+  const live = await fetchAllmetaOntology(domainId);
+  if (live) return live;
+  if (hasSnapshot(domainId)) return loadSnapshotOntology(domainId);
   return {
     domainId,
     objects: [],

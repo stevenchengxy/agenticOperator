@@ -14,7 +14,6 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { resolveProfile } from "@/lib/ontology-generator/profiles";
-import { hasRealOntology } from "@/lib/ontology-generator/infer";
 import { fetchDomainOntology } from "@/lib/ontology-generator/ontology-source";
 import { deriveAgents } from "@/lib/ontology-generator/analyze";
 import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
@@ -35,8 +34,8 @@ export const dynamic = "force-dynamic";
 async function activateRealAgents(
   domainId: string,
   selectedKeys: string[],
+  onto: Awaited<ReturnType<typeof fetchDomainOntology>>,
 ): Promise<GenerateResult> {
-  const onto = await fetchDomainOntology(domainId);
   const specs = deriveAgents(onto);
   const selected =
     selectedKeys.length > 0 ? specs.filter((s) => selectedKeys.includes(s.key)) : specs;
@@ -129,9 +128,11 @@ export async function POST(req: Request) {
     // fall through with defaults
   }
 
-  // Real-ontology domains → activate real runnable agents (deploy = activate).
-  if (hasRealOntology(domainId)) {
-    return NextResponse.json(await activateRealAgents(domainId, selectedKeys));
+  // Real-ontology domains → activate real agents (deploy = activate). Read the
+  // domain's live ontology; if it has actions, derive + persist from them.
+  const onto = await fetchDomainOntology(domainId);
+  if (onto.actions.length > 0) {
+    return NextResponse.json(await activateRealAgents(domainId, selectedKeys, onto));
   }
 
   const profile = resolveProfile(domainId, domainName);
