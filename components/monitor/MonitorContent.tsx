@@ -7,7 +7,56 @@ import { SystemStatusCards } from "./SystemStatusCards";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, displayName as agentDisplayName, type Stage } from "@/lib/agent-mapping";
 import { useDomain } from "@/lib/domains";
+import { ENERGY_DOMAIN_ID, RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import { useDisplayNameResolver } from "@/lib/agent-names";
+
+// Resolve which business domain a run belongs to, from its Inngest function
+// slug (`agentic-operator-main-<fnId>`). Ontology-pack functions carry their
+// pack prefix (energy-*); everything else is recruitment. A live slug→domain
+// map (from /api/agents, which already attributes shells to their domain) takes
+// precedence so future packs work without a code change.
+function runDomainOf(
+  run: { function?: { slug?: string } | undefined },
+  slugToDomain: Map<string, string>,
+): string {
+  const slug = run.function?.slug ?? "";
+  const fnId = slug.replace(/^agentic-operator-[a-z0-9-]+?-/i, "").replace(/^agentic-operator-main-/, "");
+  const bare = slug.replace(/^agentic-operator-main-/, "");
+  return (
+    slugToDomain.get(bare) ??
+    slugToDomain.get(fnId) ??
+    (bare.startsWith("energy-") ? ENERGY_DOMAIN_ID : RECRUITMENT_DOMAIN_ID)
+  );
+}
+
+/** Fetch /api/agents once → Map<fnId(slug), domain> for run attribution. */
+function useAgentDomainMap(): Map<string, string> {
+  const [map, setMap] = React.useState<Map<string, string>>(new Map());
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/agents");
+        const body = (await res.json()) as { agents?: Array<{ slug?: string | null; wsId?: string; domain?: string }> };
+        if (!alive) return;
+        const m = new Map<string, string>();
+        for (const a of body.agents ?? []) {
+          if (a.domain) {
+            if (a.slug) m.set(a.slug, a.domain);
+            if (a.wsId) m.set(a.wsId, a.domain);
+          }
+        }
+        setMap(m);
+      } catch {
+        /* keep prefix-based fallback */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return map;
+}
 
 // Stage order — workflow-natural left-to-right reading order. Matches Fleet's
 // STAGE_ORDER. Used by AgentFilter to cluster the deployed agents.
@@ -75,6 +124,8 @@ export function MonitorContent() {
   const router = useRouter();
   const sp = useSearchParams();
   const { t } = useApp();
+  const { domain } = useDomain();
+  const slugToDomain = useAgentDomainMap();
 
   const agentFilter = sp.get("agent");
   const statusFilter = (sp.get("status") ?? "all") as StatusFilter;
@@ -134,6 +185,11 @@ export function MonitorContent() {
   const filtered = React.useMemo(() => {
     if (!runs) return [];
     let xs = runs;
+    // Scope to the active business domain — each run is attributed via its
+    // Inngest function slug (energy runs → 能源调度, recruitment → 招聘), so
+    // switching the AppBar domain shows only that domain's runs. (When a specific
+    // agent is selected, the runs are already that agent's, so this is a no-op.)
+    xs = xs.filter((r) => runDomainOf(r, slugToDomain) === domain);
     if (statusFilter !== "all") xs = xs.filter((r) => r.status === statusFilter);
     if (eventName) xs = xs.filter((r) => r.eventName === eventName);
     const windowMs = windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000;
@@ -143,7 +199,7 @@ export function MonitorContent() {
       return new Date(r.startedAt).getTime() >= cutoff;
     });
     return xs;
-  }, [runs, statusFilter, eventName, windowId]);
+  }, [runs, statusFilter, eventName, windowId, domain, slugToDomain]);
 
   const counts = React.useMemo(() => {
     const c = { running: 0, completed: 0, failed: 0, cancelled: 0 };
