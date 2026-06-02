@@ -20,7 +20,7 @@ describe('GET /api/ontology/rules', () => {
       rules: [{ id: 'R-001', name: 'rule one' } as any],
       source: 'ontology-api',
     });
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/ontology/rules"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -35,7 +35,7 @@ describe('GET /api/ontology/rules', () => {
       source: 'json-fallback',
       api_error: 'ECONNREFUSED',
     });
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/ontology/rules"));
     const body = await res.json();
     expect(body.source).toBe('json-fallback');
     expect(body.api_error).toBe('ECONNREFUSED');
@@ -47,14 +47,14 @@ describe('GET /api/ontology/rules', () => {
       source: 'ontology-api',
       drift: { only_in_api: ['R-X'], only_in_json: [] },
     });
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/ontology/rules"));
     const body = await res.json();
     expect(body.drift).toEqual({ only_in_api: ['R-X'], only_in_json: [] });
   });
 
   it('500 + ok:false when fetcher throws', async () => {
     mockFetch.mockRejectedValue(new Error('boom'));
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/ontology/rules"));
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.ok).toBe(false);

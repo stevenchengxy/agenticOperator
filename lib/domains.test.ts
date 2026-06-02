@@ -6,6 +6,7 @@ import {
   isDomainId,
   getDomain,
 } from "./domains";
+import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID } from "./domain-ids";
 
 // Phase 0 (2026-06-01): the static `DOMAINS` constant became a pre-fetch
 // fallback (SYSTEM_FALLBACK_DOMAINS). Runtime list comes from /api/domains.
@@ -13,13 +14,13 @@ import {
 // fallback-shape invariants only.
 
 describe("SYSTEM_FALLBACK_DOMAINS", () => {
-  it("contains raas as the first / default domain", () => {
-    expect(SYSTEM_FALLBACK_DOMAINS[0]!.id).toBe("raas");
-    expect(DEFAULT_DOMAIN).toBe("raas");
+  it("contains the recruitment domain as the first / default domain", () => {
+    expect(SYSTEM_FALLBACK_DOMAINS[0]!.id).toBe(RECRUITMENT_DOMAIN_ID);
+    expect(DEFAULT_DOMAIN).toBe(RECRUITMENT_DOMAIN_ID);
   });
 
-  it("contains r7 provisioned for future use", () => {
-    expect(SYSTEM_FALLBACK_DOMAINS.find((d) => d.id === "r7")).toBeDefined();
+  it("contains the energy pack domain in the pre-fetch fallback", () => {
+    expect(SYSTEM_FALLBACK_DOMAINS.find((d) => d.id === ENERGY_DOMAIN_ID)).toBeDefined();
   });
 
   it("every fallback domain has a non-empty name + OKLCH color + is_system=true", () => {
@@ -52,14 +53,14 @@ describe("isDomainId", () => {
 
 describe("getDomain (legacy static lookup against fallback)", () => {
   it("returns the matching fallback row for known ids", () => {
-    expect(getDomain("raas").id).toBe("raas");
-    expect(getDomain("r7").id).toBe("r7");
+    expect(getDomain(RECRUITMENT_DOMAIN_ID).id).toBe(RECRUITMENT_DOMAIN_ID);
+    expect(getDomain(ENERGY_DOMAIN_ID).id).toBe(ENERGY_DOMAIN_ID);
   });
 
-  it("falls back to raas for unknown ids (legacy stable behavior)", () => {
-    // Runtime ids that aren't in the static fallback resolve to raas — the
-    // intent is that React-tree callers should switch to useDomain().getById()
-    // for accurate lookups; getDomain() is kept stable for non-React callers.
-    expect(getDomain("procurement").id).toBe("raas");
+  it("falls back to the default (recruitment) domain for unknown ids", () => {
+    // Runtime ids that aren't in the static fallback resolve to the default —
+    // React-tree callers should use useDomain().getById() for accurate lookups;
+    // getDomain() is kept stable for non-React callers.
+    expect(getDomain("procurement").id).toBe(RECRUITMENT_DOMAIN_ID);
   });
 });
