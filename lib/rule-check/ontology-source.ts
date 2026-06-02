@@ -14,6 +14,7 @@
 //   3. 上报 drift(API 有 JSON 没有 / JSON 有 API 没有)给 audit + console
 
 import { fetchAction, OntologyGenError } from '@/lib/ontology-gen';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
 import { loadAllRules } from './ontology';
 import type { Rule } from './types';
@@ -49,7 +50,10 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
   try {
     const action = await fetchAction({
       actionRef: 'matchResume',
-      domain: 'RAAS-v1',
+      // Recruitment ontology id — renamed RAAS-v1 → 招聘-v1 in Allmeta. Centralized
+      // in lib/domain-ids.ts so a future rename is a one-line change. A stale id
+      // here just 404s → silent JSON fallback ("Ontology API 不可达" banner).
+      domain: RECRUITMENT_DOMAIN_ID,
       apiBase,
       apiToken,
       timeoutMs: 5000,
