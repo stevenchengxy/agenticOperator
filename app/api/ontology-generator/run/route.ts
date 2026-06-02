@@ -10,13 +10,15 @@ import { NextResponse } from "next/server";
 import { inngest } from "@/server/inngest/client";
 import { prisma } from "@/server/db";
 import { resetClaims } from "@/server/inngest/domains/energy/run-state";
+import { ENERGY_SEED_EVENT } from "@/server/inngest/domains/energy";
+import { ENERGY_DOMAIN_ID } from "@/lib/domain-ids";
 
 export const dynamic = "force-dynamic";
 
 // Map an Allmeta domain id → its seed event. Only domains with a runnable agent
 // pack can be seeded.
 const SEED_EVENT: Record<string, string> = {
-  "nengyuandiaodu-v1": "nengyuandiaodu-v1/DISPATCH_CYCLE_STARTED",
+  [ENERGY_DOMAIN_ID]: ENERGY_SEED_EVENT,
 };
 
 export async function POST(req: Request) {

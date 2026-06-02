@@ -1,17 +1,22 @@
-// Energy dispatch (nengyuandiaodu-v1) ontology agents.
+// Energy dispatch (能源调度) ontology agents.
 //
 // Builds one Inngest function per ontology action via the shared factory. 17
 // actor=Agent actions become real LLM agents; 11 actor=Human actions become
 // simulated-human auto-responders. All gated by ENERGY_AGENTS=1 at the
 // functions.ts registration site, and individually self-gated on
 // AgentVersion.status (deploy = activate).
+//
+// The domain id (ENERGY_DOMAIN_ID, may be CJK) is the Allmeta id used for
+// scoping / snapshot / AgentVersion.domain; Inngest EVENT names use a stable
+// ASCII namespace (ENERGY_EVENT_NS) so they never contain CJK.
 
 import { loadSnapshotOntology, type OntologyEvent } from "@/lib/ontology-generator/ontology-source";
 import { deriveAgents } from "@/lib/ontology-generator/analyze";
+import { ENERGY_DOMAIN_ID, ENERGY_EVENT_NS } from "@/lib/domain-ids";
 import { makeOntologyAgent, type AgentFactoryOpts } from "./make-agent";
 
-export const ENERGY_DOMAIN_ID = "nengyuandiaodu-v1";
-export const ENERGY_SEED_EVENT = `${ENERGY_DOMAIN_ID}/DISPATCH_CYCLE_STARTED`;
+export { ENERGY_DOMAIN_ID };
+export const ENERGY_SEED_EVENT = `${ENERGY_EVENT_NS}/DISPATCH_CYCLE_STARTED`;
 
 // Loop / forward-branch actions — gated behind enableBranches so the default
 // demo seed produces a clean linear ingest→archive trace. (Once-per-case dedup
@@ -31,6 +36,7 @@ const objectNameById = new Map<string, string>(onto.objects.map((o) => [o.id, o.
 
 const opts: AgentFactoryOpts = {
   domainId: ENERGY_DOMAIN_ID,
+  eventNs: ENERGY_EVENT_NS,
   seedEvent: ENERGY_SEED_EVENT,
   eventsByName,
   objectNameById,

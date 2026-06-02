@@ -16,12 +16,13 @@ import { prisma } from "@/server/db";
 import { ensureWorkflowRun, markRunComplete, createAgentLogger } from "@/server/agent-logger";
 import { getInngestUrl } from "@/lib/inngest-url";
 import { ONTOLOGY_GEN_SOURCE } from "@/lib/ontology-generator/draft-store";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import type { ShellCardData } from "@/lib/ontology-generator/types";
 
 // The `raas` (业务领域) domain is ALREADY served by the main app
 // (agentic-operator-main, /api/inngest) which hosts the 5 real production
 // agents. It must never get its own per-domain app.
-const MAIN_DOMAIN = "RAAS-v1";
+const MAIN_DOMAIN = RECRUITMENT_DOMAIN_ID;
 const MAIN_APP_ID = "agentic-operator-main";
 
 function domainAppId(domain: string): string {

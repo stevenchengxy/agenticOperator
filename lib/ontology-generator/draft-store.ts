@@ -3,6 +3,7 @@
 // nothing here can ever read or mutate a real production agent.
 
 import type { AgentDraftRow, DraftLifecycle, ShellCardData } from "./types";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 
 export const ONTOLOGY_GEN_SOURCE = "ontology-gen";
 
@@ -52,7 +53,7 @@ export function rowToDraftRow(row: ShellVersionRow): AgentDraftRow {
     id: row.id,
     short: row.short,
     slug: row.slug,
-    domain: row.domain ?? "RAAS-v1",
+    domain: row.domain ?? RECRUITMENT_DOMAIN_ID,
     versionLabel: row.versionLabel,
     status: normalizeStatus(row.status),
     createdAt: row.createdAt.toISOString(),

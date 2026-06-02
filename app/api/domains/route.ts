@@ -11,6 +11,12 @@ import { pinyin } from "pinyin-pro";
 import { prisma } from "@/server/db";
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { hasSnapshot } from "@/lib/ontology-generator/ontology-source";
+import {
+  RECRUITMENT_DOMAIN_ID,
+  ENERGY_DOMAIN_ID,
+  friendlyDomainName,
+  colorForDomain,
+} from "@/lib/domain-ids";
 
 export const dynamic = "force-dynamic";
 
@@ -25,36 +31,31 @@ export type DomainRow = {
   runnable?: boolean;
 };
 
-// ── Domains follow the Neo4j / Allmeta domain ids ────────────────────────────
+// ── Domains follow the Neo4j / Allmeta domain ids (fully dynamic) ─────────────
 //
-// The business-domain switcher is NOT hand-seeded anymore: its canonical list
-// IS the Allmeta domain id list (GET <studio>/api/domains). AO maps each id to a
-// friendly name + accent color (KNOWN_DOMAIN_META), and the local Domain table
-// is used ONLY as a name/color/archived OVERRIDE for those ids (so 管理领域 still
-// works). Switching the domain therefore selects a real Neo4j domain id, and the
-// ontology generator + generated agents all scope by that same id.
+// The switcher list IS the live Allmeta domain id list (GET <studio>/api/domains)
+// — AO never invents domains and never hardcodes the id set. Display name + color
+// are DERIVED from the id (friendlyDomainName / colorForDomain), so renaming a
+// domain in Allmeta Studio flows through automatically. The local Domain table is
+// only a per-id name/color/archived OVERRIDE (so 管理领域 still works). The last
+// successful Allmeta read is cached so a transient Studio outage doesn't blank
+// the switcher.
 
 const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? "";
 const ALLMETA_KEY = process.env.ALLMETA_API_KEY ?? "";
 
-type KnownMeta = { name: string; color: string; is_system?: boolean; order: number };
-const KNOWN_DOMAIN_META: Record<string, KnownMeta> = {
-  "RAAS-v1": { name: "招聘", color: "oklch(0.65 0.18 250)", is_system: true, order: 0 },
-  "R7-001": { name: "R7 · ATS", color: "oklch(0.65 0.18 145)", is_system: true, order: 1 },
-  "baoxiao-v1": { name: "采购报销", color: "oklch(0.64 0.15 70)", order: 2 },
-  "nengyuandiaodu-v1": { name: "能源调度", color: "oklch(0.62 0.14 200)", order: 3 },
-};
+type AllmetaDomain = { id: string; name?: string };
 
-/** Fallback domain ids when Allmeta Studio is unreachable — the four known ids. */
-const FALLBACK_ALLMETA: Array<{ id: string; name?: string }> = [
-  { id: "RAAS-v1" },
-  { id: "R7-001" },
-  { id: "baoxiao-v1" },
-  { id: "nengyuandiaodu-v1" },
+// Last good Allmeta read — survives a transient Studio outage. Seeded with the
+// ids AO ships packs for so the very first render (Studio still booting) isn't
+// empty; replaced by the live list on the first successful fetch.
+let lastGoodAllmeta: AllmetaDomain[] = [
+  { id: RECRUITMENT_DOMAIN_ID },
+  { id: ENERGY_DOMAIN_ID },
 ];
 
-async function fetchAllmetaDomains(): Promise<Array<{ id: string; name?: string }>> {
-  if (!ALLMETA_BASE) return FALLBACK_ALLMETA;
+async function fetchAllmetaDomains(): Promise<AllmetaDomain[]> {
+  if (!ALLMETA_BASE) return lastGoodAllmeta;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
   try {
@@ -62,15 +63,17 @@ async function fetchAllmetaDomains(): Promise<Array<{ id: string; name?: string 
       headers: ALLMETA_KEY ? { Authorization: `Bearer ${ALLMETA_KEY}` } : {},
       signal: controller.signal,
     });
-    if (!res.ok) return FALLBACK_ALLMETA;
+    if (!res.ok) return lastGoodAllmeta;
     const body = (await res.json()) as { domains?: Array<Record<string, unknown>> };
     const list = Array.isArray(body.domains) ? body.domains : [];
-    if (list.length === 0) return FALLBACK_ALLMETA;
-    return list
+    const mapped = list
       .map((d) => ({ id: String(d.id ?? ""), name: typeof d.name === "string" ? d.name : undefined }))
       .filter((d) => d.id);
+    if (mapped.length === 0) return lastGoodAllmeta;
+    lastGoodAllmeta = mapped; // cache the live list
+    return mapped;
   } catch {
-    return FALLBACK_ALLMETA;
+    return lastGoodAllmeta;
   } finally {
     clearTimeout(timer);
   }
@@ -153,23 +156,25 @@ export async function GET() {
     ]);
     const ovById = new Map(overrides.map((o) => [o.id, o]));
 
-    let fallbackOrder = 100;
+    // Recruitment is always first; everything else keeps Allmeta's order.
+    const orderOf = (id: string) => (id === RECRUITMENT_DOMAIN_ID ? -1 : 0);
+
     const domains: DomainRow[] = allmeta
-      .map((d) => {
-        const meta = KNOWN_DOMAIN_META[d.id];
+      .map((d, i) => {
         const ov = ovById.get(d.id);
-        const order = meta?.order ?? fallbackOrder++;
         return {
           row: {
             id: d.id,
-            name: ov?.name ?? meta?.name ?? d.name ?? d.id,
-            color: ov?.color ?? meta?.color ?? COLOR_PALETTE[order % COLOR_PALETTE.length]!,
-            is_system: ov?.is_system ?? meta?.is_system ?? false,
+            // override > derived-from-id (short, clean) > Allmeta name > id
+            name: ov?.name ?? (friendlyDomainName(d.id) || d.name || d.id),
+            color: ov?.color ?? colorForDomain(d.id),
+            // Allmeta-owned → not deletable from AO (rename/recolor still allowed).
+            is_system: true,
             created_at: (ov?.created_at ?? new Date(0)).toISOString(),
             archived_at: ov?.archived_at ? ov.archived_at.toISOString() : null,
             runnable: hasSnapshot(d.id),
           } satisfies DomainRow,
-          order,
+          order: orderOf(d.id) * 1000 + i,
           archived: !!ov?.archived_at,
         };
       })

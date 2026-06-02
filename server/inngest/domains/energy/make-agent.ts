@@ -19,7 +19,10 @@ import { buildSchemaHint, parseOrSynthesize } from "./structured-output";
 import { claimOnce, MAX_CHAIN_DEPTH } from "./run-state";
 
 export type AgentFactoryOpts = {
+  /** Allmeta domain id — scoping, self-gate, AgentVersion.domain (may be CJK). */
   domainId: string;
+  /** Stable ASCII namespace for Inngest event names (decoupled from domainId). */
+  eventNs: string;
   /** Seed event that kicks off entry agents (those with no trigger). */
   seedEvent: string;
   /** All domain events, by bare name — for emitted-payload schemas. */
@@ -66,11 +69,11 @@ async function safeLlm(system: string, user: string): Promise<string> {
 }
 
 export function makeOntologyAgent(spec: DerivedAgent, opts: AgentFactoryOpts) {
-  const { domainId, seedEvent, eventsByName, objectNameById, branchActions } = opts;
+  const { domainId, eventNs, seedEvent, eventsByName, objectNameById, branchActions } = opts;
 
   const triggers =
     spec.triggerEvents.length > 0
-      ? spec.triggerEvents.map((e) => ({ event: `${domainId}/${e}` }))
+      ? spec.triggerEvents.map((e) => ({ event: `${eventNs}/${e}` }))
       : [{ event: seedEvent }];
 
   return inngest.createFunction(
@@ -176,7 +179,7 @@ export function makeOntologyAgent(spec: DerivedAgent, opts: AgentFactoryOpts) {
             logger.event("anomaly", { stage: "parse", emit: emitName, note: "合成载荷" });
           }
           await step.sendEvent(`emit-${emitName}`, {
-            name: `${domainId}/${emitName}`,
+            name: `${eventNs}/${emitName}`,
             data: {
               caseId,
               domainId,

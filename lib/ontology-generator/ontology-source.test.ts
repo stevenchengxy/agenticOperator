@@ -5,13 +5,13 @@ import {
   fetchDomainOntology,
 } from "./ontology-source";
 
-describe("ontology-source — nengyuandiaodu-v1 snapshot", () => {
+describe("ontology-source — 能源调度-v1 snapshot", () => {
   it("has a snapshot for the energy domain", () => {
-    expect(hasSnapshot("nengyuandiaodu-v1")).toBe(true);
+    expect(hasSnapshot("能源调度-v1")).toBe(true);
   });
 
   it("loads the five-piece ontology with expected counts", () => {
-    const o = loadSnapshotOntology("nengyuandiaodu-v1");
+    const o = loadSnapshotOntology("能源调度-v1");
     expect(o.actions.length).toBe(28);
     expect(o.events.length).toBe(31);
     expect(o.objects.length).toBe(30);
@@ -20,7 +20,7 @@ describe("ontology-source — nengyuandiaodu-v1 snapshot", () => {
   });
 
   it("preserves action wiring fields (actor / trigger / triggered_event / prompts)", () => {
-    const o = loadSnapshotOntology("nengyuandiaodu-v1");
+    const o = loadSnapshotOntology("能源调度-v1");
     const forecast = o.actions.find((a) => a.name === "forecastOutput");
     expect(forecast).toBeDefined();
     expect(forecast!.actor).toContain("Agent");
@@ -32,7 +32,7 @@ describe("ontology-source — nengyuandiaodu-v1 snapshot", () => {
 
   it("fetchDomainOntology falls back to snapshot when live is empty", async () => {
     // Live Allmeta returns empty items for the new domain → snapshot wins.
-    const o = await fetchDomainOntology("nengyuandiaodu-v1");
+    const o = await fetchDomainOntology("能源调度-v1");
     expect(o.actions.length).toBe(28);
     expect(o.source).toBe("snapshot");
   });

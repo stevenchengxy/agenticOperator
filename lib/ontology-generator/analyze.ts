@@ -9,6 +9,7 @@
 // now derived 1:1 from the real ontology actions, with real trigger→emit edges.
 
 import type { DomainOntology, OntologyAction, OntologyEvent } from "./ontology-source";
+import { ENERGY_DOMAIN_ID } from "@/lib/domain-ids";
 
 export type DerivedAgentKind = "llm" | "simulated-human";
 
@@ -42,13 +43,16 @@ export type DerivedAgent = {
   confidence: number;
 };
 
+// Stable ASCII slug prefix per domain id — keeps function ids / slugs ASCII even
+// when the domain id is CJK. Falls back to an ASCII-ified id.
 const SLUG_PREFIX: Record<string, string> = {
-  "nengyuandiaodu-v1": "energy",
-  "baoxiao-v1": "feikong",
+  [ENERGY_DOMAIN_ID]: "energy",
 };
 
 function slugPrefix(domainId: string): string {
-  return SLUG_PREFIX[domainId] ?? domainId.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  if (SLUG_PREFIX[domainId]) return SLUG_PREFIX[domainId];
+  const ascii = domainId.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
+  return ascii || "domain";
 }
 
 function camelToKebab(s: string): string {

@@ -15,6 +15,12 @@
 
 import React from "react";
 import { fetchJson } from "@/lib/api/client";
+import {
+  RECRUITMENT_DOMAIN_ID,
+  ENERGY_DOMAIN_ID,
+  friendlyDomainName,
+  colorForDomain,
+} from "@/lib/domain-ids";
 import type {
   DomainCreateResponse,
   DomainListResponse,
@@ -41,31 +47,24 @@ export type Domain = {
   runnable?: boolean;
 };
 
-// Domains now follow the Neo4j / Allmeta domain ids. RAAS-v1 is recruitment
-// (AO's primary domain); the others mirror the deployed Allmeta domains.
-export const DEFAULT_DOMAIN: DomainId = "RAAS-v1";
+// Domains follow the Neo4j / Allmeta domain ids — the live list comes from
+// GET /api/domains. The recruitment domain is AO's default/primary.
+export const DEFAULT_DOMAIN: DomainId = RECRUITMENT_DOMAIN_ID;
 
-/** Pre-fetch fallback — the known Allmeta domain ids, so the chrome renders
- *  sensibly while `GET /api/domains` is in flight (and for SSR / tests that
- *  don't hit the network). */
+/** Pre-fetch fallback — only shown for the brief window before the first
+ *  `GET /api/domains` resolves (names/colors derived from the id, same as the
+ *  API). The live fetch replaces it; renaming domains happens in Allmeta. */
 export const SYSTEM_FALLBACK_DOMAINS: ReadonlyArray<Domain> = [
-  {
-    id: "RAAS-v1",
-    name: "招聘",
-    color: "oklch(0.65 0.18 250)",
-    is_system: true,
-    created_at: new Date(0).toISOString(),
-    archived_at: null,
-  },
-  {
-    id: "R7-001",
-    name: "R7 · ATS",
-    color: "oklch(0.65 0.18 145)",
-    is_system: true,
-    created_at: new Date(0).toISOString(),
-    archived_at: null,
-  },
-];
+  RECRUITMENT_DOMAIN_ID,
+  ENERGY_DOMAIN_ID,
+].map((id) => ({
+  id,
+  name: friendlyDomainName(id),
+  color: colorForDomain(id),
+  is_system: true,
+  created_at: new Date(0).toISOString(),
+  archived_at: null,
+}));
 
 const STORAGE_KEY = "ao:domain";
 
@@ -140,6 +139,22 @@ export function DomainProvider({ children }: { children: React.ReactNode }) {
       if (isDomainId(stored)) setDomainState(stored);
     }
     void reload();
+  }, [reload]);
+
+  // Keep the switcher in sync with Allmeta in (near) real time: refetch on a
+  // light interval and whenever the tab regains focus, so domains created /
+  // renamed in Allmeta Studio appear without a manual reload.
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onFocus = () => void reload();
+    const id = window.setInterval(() => void reload(), 30_000);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
   }, [reload]);
 
   // After `all` updates, validate the active domain id. If the stored slug

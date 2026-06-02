@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { loadSnapshotOntology } from "./ontology-source";
 import { deriveAgents, findEvent } from "./analyze";
 
-describe("deriveAgents — nengyuandiaodu-v1", () => {
-  const onto = loadSnapshotOntology("nengyuandiaodu-v1");
+describe("deriveAgents — 能源调度-v1", () => {
+  const onto = loadSnapshotOntology("能源调度-v1");
   const agents = deriveAgents(onto);
 
   it("derives one agent per action", () => {

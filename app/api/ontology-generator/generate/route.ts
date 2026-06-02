@@ -17,6 +17,7 @@ import { resolveProfile } from "@/lib/ontology-generator/profiles";
 import { hasRealOntology } from "@/lib/ontology-generator/infer";
 import { fetchDomainOntology } from "@/lib/ontology-generator/ontology-source";
 import { deriveAgents } from "@/lib/ontology-generator/analyze";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import type {
   GeneratedDraft,
   GenerateResult,
@@ -114,7 +115,7 @@ function versionLabel(seq: number): string {
 }
 
 export async function POST(req: Request) {
-  let domainId = "RAAS-v1";
+  let domainId = RECRUITMENT_DOMAIN_ID;
   let domainName: string | undefined;
   let selectedKeys: string[] = [];
   try {

@@ -13,7 +13,7 @@ import { deriveAgents } from "@/lib/ontology-generator/analyze";
 import { parseOrSynthesize } from "./structured-output";
 import { claimOnce, resetClaims, MAX_CHAIN_DEPTH } from "./run-state";
 
-const DOMAIN = "nengyuandiaodu-v1";
+const DOMAIN = "能源调度-v1";
 const SEED = "DISPATCH_CYCLE_STARTED";
 const BRANCH = new Set(["rollingRevision", "raiseRiskEvent", "declareMarket", "assessForecastAccuracy"]);
 

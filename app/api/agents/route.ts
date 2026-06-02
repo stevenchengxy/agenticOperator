@@ -5,6 +5,7 @@ import { wsClient } from '@/server/clients/ws';
 import { fetchLiveRegistry } from '@/lib/inngest-registry';
 import { prisma } from '@/server/db';
 import { ONTOLOGY_GEN_SOURCE, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import type { AgentsResponse, AgentRow } from '@/lib/api/types';
 
 export async function GET(_req: Request): Promise<Response> {
@@ -73,9 +74,9 @@ export async function GET(_req: Request): Promise<Response> {
     agents.push({
       short: r.short,
       wsId: r.fnId ?? r.short,
-      // Unknown-to-AGENT_MAP live functions: default to 'RAAS-v1' since RAAS is
-      // AO's primary domain today. R7 agents must be added to AGENT_MAP_R7.
-      domain: 'RAAS-v1',
+      // Unknown-to-AGENT_MAP live functions: default to the recruitment domain
+      // (AO's primary domain). R7 agents must be added to AGENT_MAP_R7.
+      domain: RECRUITMENT_DOMAIN_ID,
       displayName: r.inngestName ?? r.short,
       inngestName: r.inngestName ?? r.short,
       stage: 'system',

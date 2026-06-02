@@ -1,4 +1,5 @@
 import type { DomainId } from './domains';
+import { RECRUITMENT_DOMAIN_ID } from './domain-ids';
 
 export type Stage =
   | 'system'
@@ -98,10 +99,11 @@ const AGENT_MAP_RAAS_RAW: Omit<AgentMeta, 'domain'>[] = [
 // Empty until R7 onboarding. New R7 agents go here with explicit domain.
 const AGENT_MAP_R7: AgentMeta[] = [];
 
-// Recruitment agents' domain is the Allmeta domain id 'RAAS-v1' (was 'raas')
-// so they scope under the same business-domain the switcher now lists.
+// Recruitment agents' domain is the live Allmeta recruitment domain id
+// (RECRUITMENT_DOMAIN_ID) so they scope under the business-domain the switcher
+// lists. Rename the domain in Allmeta → update lib/domain-ids.ts only.
 export const AGENT_MAP: AgentMeta[] = [
-  ...AGENT_MAP_RAAS_RAW.map((a): AgentMeta => ({ ...a, domain: 'RAAS-v1' })),
+  ...AGENT_MAP_RAAS_RAW.map((a): AgentMeta => ({ ...a, domain: RECRUITMENT_DOMAIN_ID })),
   ...AGENT_MAP_R7,
 ];
 

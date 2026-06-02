@@ -90,9 +90,9 @@ describe("GET /api/domains", () => {
     const j = await res.json();
     expect(j.ok).toBe(true);
     const ids = j.domains.map((d: { id: string }) => d.id);
-    expect(ids).toContain("RAAS-v1");
-    expect(ids).toContain("nengyuandiaodu-v1");
-    expect(j.domains[0].id).toBe("RAAS-v1"); // recruitment ordered first
+    expect(ids).toContain("招聘-v1");
+    expect(ids).toContain("能源调度-v1");
+    expect(j.domains[0].id).toBe("招聘-v1"); // recruitment ordered first
     expect(m.upsert).not.toHaveBeenCalled(); // domains follow Neo4j, never seeded
   });
 
@@ -104,11 +104,11 @@ describe("GET /api/domains", () => {
     expect(j.domains.length).toBeGreaterThan(0);
   });
 
-  it("flags the runnable domain (nengyuandiaodu-v1 ships an agent pack)", async () => {
+  it("flags the runnable domain (能源调度-v1 ships an agent pack)", async () => {
     m.findMany.mockResolvedValue([]);
     const res = await GET();
     const j = await res.json();
-    const energy = j.domains.find((d: { id: string }) => d.id === "nengyuandiaodu-v1");
+    const energy = j.domains.find((d: { id: string }) => d.id === "能源调度-v1");
     expect(energy?.runnable).toBe(true);
   });
 });
