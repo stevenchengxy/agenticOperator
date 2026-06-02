@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { EVENT_CATALOG } from '@/lib/events-catalog';
 import { em } from '@/server/em';
+import { fetchDomainOntology } from '@/lib/ontology-generator/ontology-source';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import type {
   EventsResponse,
   EventContract,
@@ -9,6 +11,58 @@ import type {
   EventKind,
 } from '@/lib/api/types';
 import type { Stage } from '@/lib/agent-mapping';
+
+function isRecruitmentDomain(d: string): boolean {
+  return !d || d === RECRUITMENT_DOMAIN_ID || d === 'RAAS-v1' || d === 'raas';
+}
+
+/** Build EventContracts from a domain's ontology (events + the action graph). */
+async function ontologyEventContracts(
+  domain: string,
+  filters: { stageFilter?: string[]; kindFilter?: string[]; q?: string | null },
+): Promise<EventContract[]> {
+  const onto = await fetchDomainOntology(domain);
+  const pub = new Map<string, string[]>();
+  const sub = new Map<string, string[]>();
+  const add = (m: Map<string, string[]>, key: string, v: string) => {
+    const arr = m.get(key) ?? [];
+    arr.push(v);
+    m.set(key, arr);
+  };
+  for (const a of onto.actions) {
+    for (const e of a.triggered_event ?? []) add(pub, e, a.name);
+    for (const e of a.trigger ?? []) add(sub, e, a.name);
+  }
+  let events: EventContract[] = onto.events.map((e) => {
+    const isErr = /FAIL|ERROR|BLOCK|REJECT/i.test(e.name);
+    return {
+      name: e.name,
+      stage: 'system' as Stage,
+      kind: (isErr ? 'error' : 'domain') as EventKind,
+      desc: e.description ?? '',
+      publishers: pub.get(e.name) ?? (e.payload?.source_action ? [e.payload.source_action] : []),
+      subscribers: sub.get(e.name) ?? [],
+      emits: [],
+      schema: { event_data: e.payload?.event_data ?? [] },
+      schemaVersion: 1,
+      rateLastHour: 0,
+      errorRateLastHour: 0,
+      source: 'neo4j',
+      syncedAt: new Date().toISOString(),
+      activeVersions: ['v1'],
+    };
+  });
+  if (filters.kindFilter?.length) {
+    events = events.filter((e) => filters.kindFilter!.includes(e.kind));
+  }
+  if (filters.q) {
+    const ql = filters.q.toLowerCase();
+    events = events.filter(
+      (e) => e.name.toLowerCase().includes(ql) || e.desc.toLowerCase().includes(ql),
+    );
+  }
+  return events;
+}
 
 // GET /api/events
 //
@@ -32,6 +86,23 @@ export async function GET(req: Request): Promise<Response> {
   const kindFilter = url.searchParams.get('kind')?.split(',');
   const q = url.searchParams.get('q');
   const debugRaw = url.searchParams.get('debug') === 'raw';
+  const domain = url.searchParams.get('domain')?.trim() ?? '';
+
+  // Non-recruitment business domains: serve THEIR ontology's events (read live
+  // from Allmeta/Neo4j), with publishers/subscribers derived from the action
+  // graph. Recruitment keeps the eventDefinition / hardcoded-catalog path below.
+  if (domain && !isRecruitmentDomain(domain)) {
+    const events = await ontologyEventContracts(domain, { stageFilter, kindFilter, q });
+    const body: EventsResponse = {
+      events,
+      meta: {
+        generatedAt: new Date().toISOString(),
+        source: events.length ? 'neo4j' : 'hardcoded',
+        lastNeo4jSyncAt: new Date().toISOString(),
+      } as EventsMeta,
+    };
+    return NextResponse.json(body);
+  }
 
   // Pull sync status — if sync ever succeeded we surface lastNeo4jSyncAt even
   // when the table is empty (which would mean Neo4j has zero EventDefinitions).

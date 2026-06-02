@@ -12,6 +12,7 @@ import type { EventsResponse, EventContract } from "@/lib/api/types";
 import { CandidateTrackingTab } from "./CandidateTrackingTab";
 import { AllmetaSyncStrip } from "./AllmetaSyncStrip";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import { classifyByPublishers, DIRECTION_META } from "@/lib/events/event-direction";
 
 // /events — 事件
@@ -592,17 +593,20 @@ function LiveDot({ connected, lastFetchAt, t }: { connected: boolean; lastFetchA
 // ── Event registry (Ontology / Neo4j) ───────────────────────────
 
 function useEventRegistry() {
+  const { domain } = useDomain();
   const [registry, setRegistry] = React.useState<Map<string, EventContract>>(new Map());
   const [syncing, setSyncing] = React.useState(false);
 
   const refreshRegistry = React.useCallback(async () => {
     try {
-      const body = await fetchJson<EventsResponse>("/api/events?includeRetired=1");
+      const body = await fetchJson<EventsResponse>(
+        `/api/events?includeRetired=1&domain=${encodeURIComponent(domain)}`,
+      );
       const m = new Map<string, EventContract>();
       for (const e of body.events ?? []) m.set(e.name, e);
       setRegistry(m);
     } catch { /* soft */ }
-  }, []);
+  }, [domain]);
 
   const syncNow = React.useCallback(async () => {
     setSyncing(true);
