@@ -34,7 +34,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return (await r.json()) as T;
 }
 
-// Allmeta domain (from GET /api/ontology-generator/domains). The generator's
 const EMPTY_COUNTS: OntologyCounts = { rules: 0, dataObjects: 0, actions: 0, events: 0, workflow: 0 };
 
 export function OntologyGeneratorContent() {
