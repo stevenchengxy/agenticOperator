@@ -44,15 +44,26 @@ export type DerivedAgent = {
 };
 
 // Stable ASCII slug prefix per domain id — keeps function ids / slugs ASCII even
-// when the domain id is CJK. Falls back to an ASCII-ified id.
+// when the domain id is CJK. Mapped domains (the runnable packs) use a fixed
+// prefix that matches their registered Inngest function ids.
 const SLUG_PREFIX: Record<string, string> = {
   [ENERGY_DOMAIN_ID]: "energy",
 };
 
+/** Short deterministic hash of a string → stable hex, for unique ASCII slugs. */
+function hashId(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 function slugPrefix(domainId: string): string {
   if (SLUG_PREFIX[domainId]) return SLUG_PREFIX[domainId];
+  // ASCII-ifying a CJK id collapses to a version token (费控-v1 → "v1") that
+  // collides across domains (招聘-v1 → "v1" too). Append a stable hash of the
+  // full id so each domain gets a unique, deterministic prefix.
   const ascii = domainId.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
-  return ascii || "domain";
+  return `${ascii ? `${ascii}-` : ""}d${hashId(domainId)}`;
 }
 
 function camelToKebab(s: string): string {

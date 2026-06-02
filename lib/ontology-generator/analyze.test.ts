@@ -39,6 +39,35 @@ describe("deriveAgents — 能源调度-v1", () => {
     expect(slugs.size).toBe(agents.length);
   });
 
+  it("gives distinct CJK domains distinct slug prefixes (no collision)", () => {
+    const mk = (domainId: string) => ({
+      domainId,
+      objects: [],
+      rules: [],
+      events: [],
+      workflow: null,
+      source: "allmeta" as const,
+      actions: [
+        {
+          id: "1",
+          name: "forecastOutput",
+          actor: ["Agent"],
+          trigger: ["X"],
+          triggered_event: ["Y"],
+          target_objects: [],
+          tool_use: [],
+          system_prompt: "",
+          user_prompt: "",
+        },
+      ],
+    });
+    const feikong = deriveAgents(mk("费控-v1"))[0].slug;
+    const zhaopin = deriveAgents(mk("招聘-v1"))[0].slug;
+    const energy = deriveAgents(mk("能源调度-v1"))[0].slug;
+    expect(feikong).not.toBe(zhaopin); // would both be "v1-..." before the fix
+    expect(energy).toBe("energy-forecast-output"); // mapped → matches registered fn id
+  });
+
   it("findEvent resolves an emitted event's payload schema", () => {
     const evt = findEvent(onto, "FORECAST_COMPLETED");
     expect(evt).toBeDefined();

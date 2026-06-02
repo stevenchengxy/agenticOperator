@@ -14,7 +14,11 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { resolveProfile } from "@/lib/ontology-generator/profiles";
-import { fetchDomainOntology } from "@/lib/ontology-generator/ontology-source";
+import {
+  fetchDomainOntology,
+  hasSnapshot,
+  loadSnapshotOntology,
+} from "@/lib/ontology-generator/ontology-source";
 import { deriveAgents } from "@/lib/ontology-generator/analyze";
 import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import type {
@@ -26,17 +30,26 @@ import type {
 export const dynamic = "force-dynamic";
 
 /**
- * Real-ontology deploy: write an `active` AgentVersion per selected derived
- * agent (real slug/short, no `og-` prefix). The energy Inngest functions are
- * already registered and self-gate on this status — so deploy = activate, and
- * the chain goes live. Newest-row-wins (is-active reads the latest by createdAt).
+ * Real-ontology deploy. For a RUNNABLE domain (it ships an in-repo snapshot +
+ * registered Inngest functions, e.g. energy) we derive from the SNAPSHOT — the
+ * authoritative source whose slugs/shorts/prompts match the registered
+ * functions — and write status='active' so the self-gate flips on and the chain
+ * goes live. For a domain with only live Allmeta ontology (no runnable pack,
+ * e.g. 费控) we derive from the live data but write status='draft': there is no
+ * registered function to execute it, so marking it 'active' would falsely show
+ * "运行中". Newest-row-wins (is-active reads the latest by createdAt).
  */
 async function activateRealAgents(
   domainId: string,
   selectedKeys: string[],
   onto: Awaited<ReturnType<typeof fetchDomainOntology>>,
 ): Promise<GenerateResult> {
-  const specs = deriveAgents(onto);
+  // Runnable domain → use the authoritative snapshot so deployed shells line up
+  // exactly with the registered functions; otherwise the live Allmeta ontology.
+  const runnable = hasSnapshot(domainId);
+  const sourceOnto = runnable ? loadSnapshotOntology(domainId) : onto;
+  const deployStatus: "active" | "draft" = runnable ? "active" : "draft";
+  const specs = deriveAgents(sourceOnto);
   const selected =
     selectedKeys.length > 0 ? specs.filter((s) => selectedKeys.includes(s.key)) : specs;
 
@@ -66,13 +79,13 @@ async function activateRealAgents(
           short: s.short,
           slug: s.slug,
           versionLabel: label,
-          status: "active", // deploy = activate (self-gate flips on)
+          status: deployStatus, // runnable → active (self-gate on); else draft
           domain: domainId,
           capturedFrom: "ontology-gen",
           configJson: JSON.stringify({ ...card, kind: s.kind }),
           generatedBy: "ontology-generator",
-          deployedAt: new Date(),
-          notes: `runnable agent from ${domainId} ontology — ${triggerEvent} → ${emitEvent}`,
+          deployedAt: deployStatus === "active" ? new Date() : null,
+          notes: `${runnable ? "runnable" : "shell"} agent from ${domainId} ontology — ${triggerEvent} → ${emitEvent}`,
         },
       });
       persisted = true;

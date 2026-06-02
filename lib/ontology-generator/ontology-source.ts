@@ -130,16 +130,21 @@ const ALLMETA_TIMEOUT_MS = 8000; // > Studio first-hit lazy-compile
 type Node = Record<string, unknown>;
 
 function parseJsonField<T>(v: unknown, fallback: T): T {
+  let parsed: unknown;
   if (v == null) return fallback;
-  if (typeof v === "object") return v as T;
-  if (typeof v === "string") {
+  if (typeof v === "object") parsed = v;
+  else if (typeof v === "string") {
     try {
-      return JSON.parse(v) as T;
+      parsed = JSON.parse(v);
     } catch {
       return fallback;
     }
-  }
-  return fallback;
+  } else return fallback;
+  // Type-guard against shape mismatch: if the caller expects an array (its
+  // fallback is `[]`) but Allmeta returned a plain object, use the fallback so
+  // downstream `.map()`/`.length` never crash.
+  if (Array.isArray(fallback) && !Array.isArray(parsed)) return fallback;
+  return parsed as T;
 }
 
 function asArray(v: unknown): string[] {
