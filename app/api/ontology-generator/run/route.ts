@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { inngest } from "@/server/inngest/client";
+import { prisma } from "@/server/db";
 import { resetClaims } from "@/server/inngest/domains/energy/run-state";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +41,24 @@ export async function POST(req: Request) {
   // Fresh run → clear the once-per-case dedup so a re-run actually fires.
   resetClaims();
 
-  const caseId = `case-${domainId}-${Date.now()}`;
+  // A WorkflowRun gives the chain a real run id: agents log against it (the
+  // AgentActivity.runId FK is satisfied) and the run surfaces in /monitor.
+  // Fall back to a synthetic id if the row can't be written.
+  let caseId = `case-${domainId}-${Date.now()}`;
+  try {
+    const run = await prisma.workflowRun.create({
+      data: {
+        triggerEvent: seedEvent,
+        triggerData: JSON.stringify({ domainId, enableBranches }),
+        status: "running",
+      },
+      select: { id: true },
+    });
+    caseId = run.id;
+  } catch {
+    // keep synthetic caseId — LogEvent still records (no FK there)
+  }
+
   const result = await inngest.send({
     name: seedEvent,
     data: {

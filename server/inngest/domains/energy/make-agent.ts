@@ -45,6 +45,26 @@ function unwrap(data: unknown): Envelope {
   return {};
 }
 
+// LLM call with a hard cap that NEVER throws — a timeout or an unreachable
+// gateway degrades to "" (caller then synthesizes the event payload). Kept out
+// of Inngest's retry path: because it never throws, the wrapping step.run always
+// succeeds, so a dead gateway can't trigger a multi-minute retry storm.
+const LLM_TIMEOUT_MS = Number(process.env.ENERGY_LLM_TIMEOUT_MS ?? 10_000);
+
+async function safeLlm(system: string, user: string): Promise<string> {
+  try {
+    const res = await Promise.race([
+      chatComplete({ system, user, temperature: 0.2, maxTokens: 700 }),
+      new Promise<{ text: string }>((_, reject) =>
+        setTimeout(() => reject(new Error("llm-timeout")), LLM_TIMEOUT_MS),
+      ),
+    ]);
+    return (res as { text?: string }).text ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export function makeOntologyAgent(spec: DerivedAgent, opts: AgentFactoryOpts) {
   const { domainId, seedEvent, eventsByName, objectNameById, branchActions } = opts;
 
@@ -54,7 +74,9 @@ export function makeOntologyAgent(spec: DerivedAgent, opts: AgentFactoryOpts) {
       : [{ event: seedEvent }];
 
   return inngest.createFunction(
-    { id: spec.slug, name: `${spec.nameZh} · ${spec.short}`, retries: 1, triggers },
+    // retries: 0 — the only fallible call (LLM) is made non-throwing via
+    // safeLlm, so retries would only re-run a deterministic, degraded path.
+    { id: spec.slug, name: `${spec.nameZh} · ${spec.short}`, retries: 0, triggers },
     async ({ event, step }: any) => {
       const data = unwrap(event.data);
       const caseId = data.caseId ?? `case-${spec.actionName}`;
@@ -129,25 +151,13 @@ export function makeOntologyAgent(spec: DerivedAgent, opts: AgentFactoryOpts) {
             `${spec.userPrompt}\n\n【上游事件载荷】${upstream}\n` +
             `【工具结果(模拟)】\n${toolResultsForPrompt(toolResults)}\n` +
             `【相关对象】${objectCtx || "(无)"}\n\n${buildSchemaHint(primaryEvt)}`;
-          try {
-            const res = await step.run("llm", () =>
-              chatComplete({
-                system: spec.systemPrompt,
-                user: userPrompt,
-                temperature: 0.2,
-                maxTokens: 700,
-              }),
-            );
-            completion = (res as { text?: string }).text ?? "";
-            logger.event("decision", {
-              action: spec.actionName,
-              llm_chars: completion.length,
-            });
-          } catch (err) {
+          completion = await step.run("llm", () => safeLlm(spec.systemPrompt, userPrompt));
+          if (completion) {
+            logger.event("decision", { action: spec.actionName, llm_chars: completion.length });
+          } else {
             logger.event("anomaly", {
               stage: "llm",
-              error: (err as Error).message,
-              note: "降级为按事件 schema 合成载荷",
+              note: "LLM 网关不可达/超时,降级为按事件 schema 合成载荷",
             });
           }
         } else {
