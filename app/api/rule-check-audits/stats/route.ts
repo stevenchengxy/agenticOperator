@@ -1,6 +1,7 @@
 // GET /api/rule-check-audits/stats — Prisma 版
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
+import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,10 +21,33 @@ export type RuleCheckStatsResponse = {
 
 const ROBOHIRE_USD_PER_MATCH = 0.2;
 
+function parseWindowDays(searchParams: URLSearchParams): number {
+  // accepts ?days=7 or ?window=7d
+  const raw = searchParams.get('days') ?? (searchParams.get('window') ?? '').replace(/d$/i, '');
+  return Math.max(1, Math.min(90, parseInt(raw || '7', 10) || 7));
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const days = Math.max(1, Math.min(90, parseInt(searchParams.get('days') ?? '7', 10) || 7));
+  const days = parseWindowDays(searchParams);
   const cutoff = new Date(Date.now() - days * 86_400_000);
+
+  // A domain with no recorded rule-check audits gets an empty (zeroed) result.
+  if (!isRuleCheckDomain(searchParams.get('domain'))) {
+    return NextResponse.json<RuleCheckStatsResponse>({
+      total: 0,
+      pass: 0,
+      fail: 0,
+      blocked_robohire_calls: 0,
+      avg_llm_duration_ms: 0,
+      total_prompt_tokens: 0,
+      total_completion_tokens: 0,
+      estimated_robohire_savings_usd: 0,
+      by_client: [],
+      top_failure_rules: [],
+      meta: { window_days: days, generated_at: new Date().toISOString() },
+    });
+  }
 
   try {
     const audits = await prisma.ruleCheckAudit.findMany({

@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { extractRawFlagsByRuleId } from '@/app/api/rule-check-audits/[auditId]/route';
+import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,16 @@ export async function GET(req: Request) {
   const raw = parseInt(daysParam ?? fromWindow ?? '30', 10);
   const days = Math.max(1, Math.min(90, Number.isFinite(raw) ? raw : 30));
   const cutoff = new Date(Date.now() - days * 86_400_000);
+
+  // A domain with no recorded rule-check audits gets an empty matrix.
+  if (!isRuleCheckDomain(searchParams.get('domain'))) {
+    return NextResponse.json<RuleMatrixResponse>({
+      rules: [],
+      total_audits: 0,
+      window_days: days,
+      meta: { generated_at: new Date().toISOString() },
+    });
+  }
 
   try {
     const totalAudits = await prisma.ruleCheckAudit.count({

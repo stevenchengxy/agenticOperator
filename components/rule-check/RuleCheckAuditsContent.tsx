@@ -2,8 +2,10 @@
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import { Ic } from "@/components/shared/Ic";
 import { Btn, EmptyState } from "@/components/shared/atoms";
+import { verdictLabel } from "@/components/rule-check/verdict-label";
 import { fetchJson } from "@/lib/api/client";
 import type {
   RuleCheckAuditListResponse,
@@ -19,6 +21,7 @@ export function RuleCheckAuditsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t, lang } = useApp();
+  const { domain } = useDomain();
   const decision = searchParams.get("decision") ?? "";
   const client = searchParams.get("client") ?? "";
   const jrId = searchParams.get("jrId") ?? "";
@@ -33,20 +36,21 @@ export function RuleCheckAuditsContent() {
     if (decision) sp.set("decision", decision);
     if (client) sp.set("client", client);
     if (jrId) sp.set("jrId", jrId);
+    sp.set("domain", domain);
     const qs = sp.toString();
     fetchJson<RuleCheckAuditListResponse>(
       `/api/rule-check-audits${qs ? "?" + qs : ""}`,
     )
       .then(setData)
       .finally(() => setLoading(false));
-  }, [decision, client, jrId]);
+  }, [decision, client, jrId, domain]);
 
   // value-anchor stats (7d window)
   React.useEffect(() => {
-    fetchJson<RuleCheckStatsResponse>("/api/rule-check-audits/stats?days=7")
+    fetchJson<RuleCheckStatsResponse>(`/api/rule-check-audits/stats?days=7&domain=${encodeURIComponent(domain)}`)
       .then(setStats)
       .catch(() => {});
-  }, []);
+  }, [domain]);
 
   const setFilter = (k: "decision" | "client" | "jrId", v: string) => {
     const sp = new URLSearchParams(searchParams.toString());
@@ -87,8 +91,8 @@ export function RuleCheckAuditsContent() {
           onChange={(v) => setFilter("decision", v)}
           options={[
             { value: "", label: t("rc_filter_all") },
-            { value: "PASS", label: "PASS" },
-            { value: "FAIL", label: "FAIL" },
+            { value: "PASS", label: verdictLabel("PASS", t) },
+            { value: "FAIL", label: verdictLabel("FAIL", t) },
           ]}
         />
         <FilterInput
@@ -296,7 +300,7 @@ function FilterSelect({
 function AuditCard({
   row,
   onOpen,
-  t: _t,
+  t,
   lang,
 }: {
   row: RuleCheckAuditRow;
@@ -339,7 +343,7 @@ function AuditCard({
               fontWeight: 600,
             }}
           >
-            {row.decision}
+            {verdictLabel(row.decision, t)}
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[13px] text-ink-1 truncate" style={{ fontFamily: SERIF, fontWeight: 500 }}>

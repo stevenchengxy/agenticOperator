@@ -3,6 +3,8 @@ import React from "react";
 import Link from "next/link";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
+import { verdictLabel } from "@/components/rule-check/verdict-label";
 
 // Rule Check Dashboard (陈洋 macro view).
 // Per Kenny / 2026-05-13 review:
@@ -76,6 +78,7 @@ type OntologyRulesResponse = {
 
 export function RuleCheckDashboardContent() {
   const { t } = useApp();
+  const { domain } = useDomain();
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [audits, setAudits] = React.useState<AuditListRow[] | null>(null);
   const [details, setDetails] = React.useState<Record<string, AuditDetail | "error">>({});
@@ -93,28 +96,31 @@ export function RuleCheckDashboardContent() {
   // requiring a refresh.
   React.useEffect(() => {
     let cancel = false;
+    const dq = `&domain=${encodeURIComponent(domain)}`;
     const load = () => {
-      fetchJson<Stats>(`/api/rule-check-audits/stats?window=${windowDays}d`)
+      fetchJson<Stats>(`/api/rule-check-audits/stats?window=${windowDays}d${dq}`)
         .then((s) => { if (!cancel) setStats(s); })
         .catch(() => { /* keep prior */ });
-      fetchJson<{ rules: MatrixRule[]; total_audits: number }>(`/api/rule-check-audits/matrix?window=${windowDays}d`)
+      fetchJson<{ rules: MatrixRule[]; total_audits: number }>(`/api/rule-check-audits/matrix?window=${windowDays}d${dq}`)
         .then((m) => { if (!cancel) setMatrix(m); })
         .catch(() => { /* keep prior */ });
-      fetchJson<{ rows: AuditListRow[]; total: number }>(`/api/rule-check-audits?limit=${auditLimit}`)
+      fetchJson<{ rows: AuditListRow[]; total: number }>(`/api/rule-check-audits?limit=${auditLimit}${dq}`)
         .then((d) => { if (!cancel) setAudits(d.rows); })
         .catch(() => { /* keep prior */ });
     };
     load();
     const id = setInterval(load, 10_000);
     return () => { cancel = true; clearInterval(id); };
-  }, [windowDays, auditLimit]);
+  }, [windowDays, auditLimit, domain]);
 
-  // Fetch ontology full rule set with 30s polling
+  // Fetch the active domain's ontology rule set with 30s polling
   React.useEffect(() => {
     let cancel = false;
     async function load() {
       try {
-        const r = await fetchJson<OntologyRulesResponse>("/api/ontology/rules");
+        const r = await fetchJson<OntologyRulesResponse>(
+          `/api/ontology/rules?domain=${encodeURIComponent(domain)}`,
+        );
         if (!cancel) setOntology(r);
       } catch {
         if (!cancel) setOntology(null);
@@ -123,7 +129,7 @@ export function RuleCheckDashboardContent() {
     load();
     const timer = setInterval(load, 30_000); // 30s polling
     return () => { cancel = true; clearInterval(timer); };
-  }, []);
+  }, [domain]);
 
   // Fetch per-audit flags for the grid cells
   React.useEffect(() => {
@@ -385,7 +391,7 @@ function RuleAuditGrid({
             title={t("rc_grid_audit_col_tip")
               .replace("{n}", String(i + 1))
               .replace("{id}", a.audit_id)
-              .replace("{decision}", a.decision)
+              .replace("{decision}", verdictLabel(a.decision, t))
               .replace("{client}", a.client_name)
               .replace("{date}", fmtDate(a.created_at))}
           >

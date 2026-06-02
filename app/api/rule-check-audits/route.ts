@@ -5,6 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
+import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,15 @@ export async function GET(req: Request) {
   const client = searchParams.get('client') ?? '';
   const jrId = searchParams.get('jrId') ?? '';
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 200);
+
+  // A domain with no recorded rule-check audits gets an empty list.
+  if (!isRuleCheckDomain(searchParams.get('domain'))) {
+    return NextResponse.json<RuleCheckAuditListResponse>({
+      rows: [],
+      total: 0,
+      meta: { empty: true, generatedAt: new Date().toISOString() },
+    });
+  }
 
   try {
     const where: Record<string, unknown> = {};
