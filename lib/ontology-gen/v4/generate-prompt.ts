@@ -29,6 +29,7 @@ import { fetchAction } from "../fetch";
 
 import { RUNTIME_INPUT_PLACEHOLDER } from "./assemble";
 import { assembleActionObjectV4_4 } from "./assemble-v4-4";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import { fillRuntimeInput } from "./fill-runtime-input";
 import {
   MATCH_RESUME_HIERARCHY_SENTINEL,
@@ -52,7 +53,7 @@ export interface GeneratePromptOptions {
   timeoutMs?: number;
 }
 
-const DEFAULT_DOMAIN = "RAAS-v1";
+const DEFAULT_DOMAIN = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
 
 export async function generatePrompt(
   opts: GeneratePromptOptions,

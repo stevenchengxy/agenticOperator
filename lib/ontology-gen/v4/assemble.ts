@@ -8,6 +8,7 @@
  */
 
 import { applyClientFilter } from "../compile/filter";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 
 import type { ActionOutput, ActionRule, ActionStep } from "../types.public";
 
@@ -59,7 +60,7 @@ export function assembleActionObject(
   const meta: ActionObjectMetaV4 = {
     actionId: filteredAction.id,
     actionName: filteredAction.name,
-    domain: input.enriched.action.id ? "RAAS-v1" : "RAAS-v1", // domain is on enriched, default for now
+    domain: process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID, // default domain for now
     client: input.client,
     compiledAt: new Date().toISOString(),
     templateVersion: "v4",

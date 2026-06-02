@@ -10,6 +10,7 @@
 
 import { NextResponse } from 'next/server';
 import { getInstance, AllmetaApiError } from '@/lib/allmeta-client';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const label = (url.searchParams.get('label') ?? '').trim();
   const pk = (url.searchParams.get('pk') ?? '').trim();
-  const domain = (url.searchParams.get('domain') ?? process.env.ALLMETA_DOMAIN ?? 'RAAS-v1').trim();
+  const domain = (url.searchParams.get('domain') ?? process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID).trim();
 
   if (!label || !pk) {
     return NextResponse.json({ ok: false, reason: 'missing_label_or_pk' }, { status: 400 });

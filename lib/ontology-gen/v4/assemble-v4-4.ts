@@ -7,6 +7,7 @@
  */
 
 import { applyClientFilter } from "../compile/filter";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import type { Action, ActionRule, ActionStep } from "../types.public";
 
 import type {
@@ -104,7 +105,7 @@ export function assembleActionObjectV4_4(input: AssembleV4_4Input): ActionObject
   const meta: ActionObjectMetaV4 = {
     actionId: action.id,
     actionName: action.name,
-    domain: input.domain ?? "RAAS-v1",
+    domain: input.domain ?? process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID,
     client: input.client,
     compiledAt: new Date().toISOString(),
     templateVersion: "v4",

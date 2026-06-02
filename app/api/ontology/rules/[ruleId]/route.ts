@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server';
 import { loadAllRules } from '@/lib/rule-check/ontology';
 import { fetchAction, OntologyGenError } from '@/lib/ontology-gen';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import type { Rule } from '@/lib/rule-check/types';
 
 type Success = { ok: true; rule: Rule; source: 'ontology-api' | 'json-fallback' };
@@ -54,7 +55,7 @@ export async function GET(
   try {
     const action = await fetchAction({
       actionRef: 'matchResume',
-      domain: 'RAAS-v1',
+      domain: process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID,
       apiBase,
       apiToken,
       timeoutMs: 5000,

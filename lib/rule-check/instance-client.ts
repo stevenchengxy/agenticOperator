@@ -9,8 +9,9 @@
 //                       reads from a different ontology than agents write to.
 
 import { getInstanceFallback, hasInstanceFallback } from './pg-fallback';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
-const DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
+const DOMAIN = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
 
 function getConfig(): { base: string; token: string } {
   const base = process.env.ALLMETA_BASE_URL;

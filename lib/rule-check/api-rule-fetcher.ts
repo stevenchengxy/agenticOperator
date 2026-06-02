@@ -20,6 +20,7 @@
 // 不再有 JSON fallback —— API 失败直接抛错(failSafe in runner.ts)。
 
 import type { AgentLogger } from '@/lib/agent-logger';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import type {
   MatchResumeStepGroup,
   Rule,
@@ -471,7 +472,7 @@ async function resolveDepartmentBg(
 export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<RuleFetchResult> {
   const apiBase = (process.env.ALLMETA_BASE_URL ?? '').replace(/\/+$/, '');
   const apiToken = process.env.ALLMETA_API_KEY ?? '';
-  const domain = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
+  const domain = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
 
   if (!apiBase) {
     throw new RuleFetchApiError('ALLMETA_BASE_URL env not configured');

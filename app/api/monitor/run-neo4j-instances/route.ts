@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import { getRunHistory } from '@/lib/inngest-admin-client';
 import { getInstance } from '@/lib/allmeta-client';
 import { query as pgQuery } from '@/lib/partner-pg/client';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
 function isAllmetaConfigured(): boolean {
   return !!process.env.ALLMETA_BASE_URL;
@@ -24,7 +25,7 @@ function isAllmetaConfigured(): boolean {
 // from silently aiming at a wrong host in misconfigured deploys.
 const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? '';
 const ALLMETA_TOKEN = process.env.ALLMETA_API_KEY ?? '';
-const ALLMETA_DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
+const ALLMETA_DOMAIN = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
 
 /** Fallback for ruleCheck path B: list all CMRs by candidate_id via allmeta filter. */
 async function listCMRsByCandidate(candidateId: string): Promise<Array<Record<string, unknown>>> {

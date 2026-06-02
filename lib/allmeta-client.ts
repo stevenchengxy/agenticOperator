@@ -5,6 +5,7 @@
 
 import { currentLogger } from '@/lib/agent-logger';
 import { logApiCall } from '@/lib/external-api-log';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
 // Read at module load. No silent localhost fallback for the base URL —
 // a partner whose .env.local is half-configured used to get cryptic
@@ -14,7 +15,7 @@ import { logApiCall } from '@/lib/external-api-log';
 // load side-effect-free so importing this file in a misconfigured env
 // doesn't crash the whole server boot.
 const DEFAULT_BASE_URL = process.env.ALLMETA_BASE_URL ?? '';
-const DEFAULT_DOMAIN = process.env.ALLMETA_DOMAIN ?? 'RAAS-v1';
+const DEFAULT_DOMAIN = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
 const API_KEY = process.env.ALLMETA_API_KEY ?? '';
 
 // Label = first 2 URL segments, e.g. "allmeta.POST /api/v1/ontology/instances".
