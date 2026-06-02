@@ -74,6 +74,7 @@ data/*.db-shm
 # Runtime state + e2e test artifacts (regenerated each run)
 data/agentic-state.json
 data/e2e-out/
+data/allmeta-domains-cache.json
 
 # External projects (separate git repos that happen to live in this dir)
 event_manager/

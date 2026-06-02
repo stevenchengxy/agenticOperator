@@ -5,6 +5,8 @@
 //
 // Detail routes (PATCH / DELETE) live in app/api/domains/[id]/route.ts.
 
+import fs from "node:fs";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { pinyin } from "pinyin-pro";
@@ -46,18 +48,48 @@ const ALLMETA_KEY = process.env.ALLMETA_API_KEY ?? "";
 
 type AllmetaDomain = { id: string; name?: string };
 
-// Last good Allmeta read — survives a transient Studio outage. Seeded with the
-// ids AO ships packs for so the very first render (Studio still booting) isn't
-// empty; replaced by the live list on the first successful fetch.
-let lastGoodAllmeta: AllmetaDomain[] = [
-  { id: RECRUITMENT_DOMAIN_ID },
-  { id: ENERGY_DOMAIN_ID },
-];
+// Durable last-good Allmeta read. Allmeta Studio (:3500) is a dev app that
+// lazy-compiles and flaps, so a single slow/failed fetch must NOT shrink the
+// switcher (that's how 费控-v1 "disappeared"). The last successful list is cached
+// to disk so it survives both a transient Studio outage AND an AO restart — once
+// AO has seen the full domain set, it keeps showing it. This is the persistence
+// half of the data-isolation contract (Neo4j only ever ADDS domains to AO).
+const CACHE_PATH = path.join(process.cwd(), "data", "allmeta-domains-cache.json");
+const ALLMETA_TIMEOUT_MS = 8000; // > Studio's first-hit lazy-compile
+
+function readCacheSync(): AllmetaDomain[] | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(CACHE_PATH, "utf8"));
+    if (Array.isArray(raw)) {
+      const list = raw
+        .map((d) => ({ id: String(d?.id ?? ""), name: typeof d?.name === "string" ? d.name : undefined }))
+        .filter((d) => d.id);
+      if (list.length) return list;
+    }
+  } catch {
+    /* no cache yet / unreadable */
+  }
+  return null;
+}
+
+function writeCache(list: AllmetaDomain[]): void {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
+    fs.writeFileSync(CACHE_PATH, JSON.stringify(list), "utf8");
+  } catch {
+    /* best-effort cache */
+  }
+}
+
+// Seed: disk cache (survives restarts) → else the ids AO ships packs for, so the
+// very first render before any successful Allmeta fetch still isn't empty.
+let lastGoodAllmeta: AllmetaDomain[] =
+  readCacheSync() ?? [{ id: RECRUITMENT_DOMAIN_ID }, { id: ENERGY_DOMAIN_ID }];
 
 async function fetchAllmetaDomains(): Promise<AllmetaDomain[]> {
   if (!ALLMETA_BASE) return lastGoodAllmeta;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
+  const timer = setTimeout(() => controller.abort(), ALLMETA_TIMEOUT_MS);
   try {
     const res = await fetch(`${ALLMETA_BASE.replace(/\/+$/, "")}/api/domains`, {
       headers: ALLMETA_KEY ? { Authorization: `Bearer ${ALLMETA_KEY}` } : {},
@@ -70,7 +102,8 @@ async function fetchAllmetaDomains(): Promise<AllmetaDomain[]> {
       .map((d) => ({ id: String(d.id ?? ""), name: typeof d.name === "string" ? d.name : undefined }))
       .filter((d) => d.id);
     if (mapped.length === 0) return lastGoodAllmeta;
-    lastGoodAllmeta = mapped; // cache the live list
+    lastGoodAllmeta = mapped; // cache the live list (memory)
+    writeCache(mapped); //       + disk (survives restart)
     return mapped;
   } catch {
     return lastGoodAllmeta;
