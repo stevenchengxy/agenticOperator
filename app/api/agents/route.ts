@@ -3,6 +3,8 @@ import { AGENT_MAP } from '@/lib/agent-mapping';
 import { displayKey } from '@/server/normalize/agents';
 import { wsClient } from '@/server/clients/ws';
 import { fetchLiveRegistry } from '@/lib/inngest-registry';
+import { prisma } from '@/server/db';
+import { ONTOLOGY_GEN_SOURCE, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
 import type { AgentsResponse, AgentRow } from '@/lib/api/types';
 
 export async function GET(_req: Request): Promise<Response> {
@@ -71,9 +73,9 @@ export async function GET(_req: Request): Promise<Response> {
     agents.push({
       short: r.short,
       wsId: r.fnId ?? r.short,
-      // Unknown-to-AGENT_MAP live functions: default to 'raas' since RAAS is
+      // Unknown-to-AGENT_MAP live functions: default to 'RAAS-v1' since RAAS is
       // AO's primary domain today. R7 agents must be added to AGENT_MAP_R7.
-      domain: 'raas',
+      domain: 'RAAS-v1',
       displayName: r.inngestName ?? r.short,
       inngestName: r.inngestName ?? r.short,
       stage: 'system',
@@ -91,6 +93,49 @@ export async function GET(_req: Request): Promise<Response> {
       slug: r.slug,
       paused: r.paused,
     });
+  }
+
+  // Surface DEPLOYED ontology-generated shell agents (per business domain) so
+  // they appear in the Fleet under their domain. Sourced from AgentVersion
+  // (deploy state), independent of the main-app Inngest registry. status:
+  // 'active' → online, 'offline' → paused.
+  try {
+    const shells = (await prisma.agentVersion.findMany({
+      where: { capturedFrom: ONTOLOGY_GEN_SOURCE, status: { in: ['active', 'offline'] }, domain: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, short: true, slug: true, domain: true, versionLabel: true, status: true, configJson: true, createdAt: true },
+    })) as ShellVersionRow[];
+    // Dedupe by (domain, slug) — a domain may have re-deployed the same agent.
+    const seen = new Set<string>();
+    for (const s of shells) {
+      const key = `${s.domain}::${s.slug}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const card = rowToDraftRow(s);
+      agents.push({
+        short: card.short,
+        wsId: card.slug,
+        domain: card.domain,
+        displayName: card.nameZh,
+        inngestName: card.nameZh,
+        stage: 'system',
+        kind: 'auto',
+        ownerTeam: '—',
+        version: '—',
+        status: null,
+        p50Ms: null,
+        runs24h: 0,
+        successRate: null,
+        costYuan: 0,
+        lastActivityAt: null,
+        spark: Array(16).fill(0),
+        realness: 'shell',
+        slug: card.slug,
+        paused: card.status === 'offline',
+      });
+    }
+  } catch {
+    // shells are additive — never fail the agents list on a DB hiccup
   }
 
   const body: AgentsResponse = {

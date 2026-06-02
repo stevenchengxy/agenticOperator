@@ -35,31 +35,19 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 // Allmeta domain (from GET /api/ontology-generator/domains). The generator's
-// domain selector follows the real Allmeta domain ids — we never invent domains.
-type GeneratorDomain = {
-  id: string;
-  name?: string;
-  version?: string;
-  runnable: boolean;
-};
-
 const EMPTY_COUNTS: OntologyCounts = { rules: 0, dataObjects: 0, actions: 0, events: 0, workflow: 0 };
 
 export function OntologyGeneratorContent() {
   const { t } = useApp();
   const router = useRouter();
 
-  // The generator's domain follows the real Allmeta domain ids (GET
-  // /api/ontology-generator/domains), independent of the app-wide switcher — we
-  // never invent domains. The app domain is kept only as the initial fallback.
-  const { current } = useDomain();
-
-  const [genDomains, setGenDomains] = React.useState<GeneratorDomain[]>([]);
-  const [genDomainId, setGenDomainId] = React.useState<string>("");
-
-  const genDomain = genDomains.find((d) => d.id === genDomainId);
-  const domainName = genDomain?.name ?? genDomainId ?? current.name;
-  const runnable = genDomain?.runnable ?? false;
+  // Single source of truth for the domain: the app-wide 业务领域 switcher, which
+  // now follows the Neo4j / Allmeta domain ids. No separate 本体域 selector — the
+  // generator infers / deploys / runs for whatever business domain is active, so
+  // generated agents scope to that same id.
+  const { domain, current } = useDomain();
+  const domainName = current.name;
+  const runnable = current.runnable ?? false;
 
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [counts, setCounts] = React.useState<OntologyCounts>(EMPTY_COUNTS);
@@ -69,32 +57,10 @@ export function OntologyGeneratorContent() {
 
   const currentStep: 0 | 1 | 2 = phase === "generating" ? 1 : phase === "deployed" ? 2 : 0;
 
-  // Load the Allmeta domain list once; default to the first runnable domain
-  // (the one AO ships agents for), else the first domain.
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const r = await fetch("/api/ontology-generator/domains");
-        const body = (await r.json()) as { domains?: GeneratorDomain[] };
-        const list = body.domains ?? [];
-        if (!alive) return;
-        setGenDomains(list);
-        const def = list.find((d) => d.runnable) ?? list[0];
-        if (def) setGenDomainId(def.id);
-      } catch {
-        // leave empty — selector will be hidden
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Switching the selected domain resets the wizard and reseeds the ontology
+  // Switching the business domain resets the wizard and reseeds the ontology
   // counts (a quiet infer call so the idle panel shows the real element counts).
   React.useEffect(() => {
-    if (!genDomainId) return;
+    if (!domain) return;
     setPhase("idle");
     setCounts(EMPTY_COUNTS);
     setCandidates([]);
@@ -104,7 +70,7 @@ export function OntologyGeneratorContent() {
     (async () => {
       try {
         const res = await postJson<InferResult>("/api/ontology-generator/infer", {
-          domainId: genDomainId,
+          domainId: domain,
           domainName,
         });
         if (alive) setCounts(res.counts);
@@ -115,14 +81,13 @@ export function OntologyGeneratorContent() {
     return () => {
       alive = false;
     };
-    // domainName is derived from genDomainId + the loaded list; re-run on id only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [genDomainId]);
+  }, [domain]);
 
   async function runInfer() {
     setPhase("inferring");
     const [res] = await Promise.all([
-      postJson<InferResult>("/api/ontology-generator/infer", { domainId: genDomainId, domainName }),
+      postJson<InferResult>("/api/ontology-generator/infer", { domainId: domain, domainName }),
       sleep(INFER_MIN_MS),
     ]);
     setCounts(res.counts);
@@ -135,7 +100,7 @@ export function OntologyGeneratorContent() {
     setPhase("generating");
     const keys = [...selected];
     const [res] = await Promise.all([
-      postJson<GenerateResult>("/api/ontology-generator/generate", { domainId: genDomainId, domainName, selectedKeys: keys }),
+      postJson<GenerateResult>("/api/ontology-generator/generate", { domainId: domain, domainName, selectedKeys: keys }),
       sleep(GENERATE_MIN_MS),
     ]);
     setDrafts(res.drafts);
@@ -145,7 +110,7 @@ export function OntologyGeneratorContent() {
   async function runChainOnce() {
     return postJson<{ ok: boolean; caseId?: string; error?: string }>(
       "/api/ontology-generator/run",
-      { domainId: genDomainId },
+      { domainId: domain },
     );
   }
 
@@ -180,25 +145,8 @@ export function OntologyGeneratorContent() {
             {t("og_subtitle").replace("{domain}", domainName)}
           </p>
         </div>
-        <div className="flex-none pt-1 flex flex-col items-end gap-2">
+        <div className="flex-none pt-1">
           <DomainChip />
-          {genDomains.length > 0 && (
-            <label className="flex items-center gap-2 text-[12px] text-ink-3">
-              <span className="text-ink-4">本体域</span>
-              <select
-                value={genDomainId}
-                onChange={(e) => setGenDomainId(e.target.value)}
-                className="h-8 rounded-md border border-line bg-surface px-2 text-[12.5px] text-ink-1"
-              >
-                {genDomains.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {(d.name ? `${d.name} · ` : "") + d.id}
-                    {d.runnable ? " ●" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
       </div>
 

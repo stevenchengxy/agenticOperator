@@ -55,10 +55,16 @@ describe("slugifyDomainName", () => {
     expect(slugifyDomainName("  spaced out  ")).toBe("spaced-out");
   });
 
-  it("returns empty string when nothing ASCII-alphanumeric remains", () => {
-    expect(slugifyDomainName("采购报销")).toBe("");
+  it("transliterates CJK names to a pinyin slug", () => {
+    expect(slugifyDomainName("采购报销")).toBe("cai-gou-bao-xiao");
+    expect(slugifyDomainName("能源调度")).toBe("neng-yuan-diao-du");
+    expect(slugifyDomainName("能源调度 v2")).toBe("neng-yuan-diao-du-v2");
+  });
+
+  it("returns empty string when nothing slug-able remains", () => {
     expect(slugifyDomainName("")).toBe("");
     expect(slugifyDomainName("   ")).toBe("");
+    expect(slugifyDomainName("！？。")).toBe("");
   });
 });
 
@@ -73,29 +79,37 @@ describe("countAgentsInDomain", () => {
 describe("GET /api/domains", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    m.upsert.mockResolvedValue(rowForId("raas"));
+    // Force the Allmeta fetch to fail → deterministic FALLBACK_ALLMETA list,
+    // independent of whether the Studio dev server is running.
+    vi.spyOn(global, "fetch").mockRejectedValue(new Error("no studio"));
   });
 
-  it("seeds raas + r7 on first call, returns active rows", async () => {
-    m.findMany.mockResolvedValue([rowForId("raas"), rowForId("r7")]);
+  it("sources the list from the Allmeta/Neo4j domain ids (no seeding)", async () => {
+    m.findMany.mockResolvedValue([]); // no local overrides
     const res = await GET();
     const j = await res.json();
     expect(j.ok).toBe(true);
-    expect(j.domains).toHaveLength(2);
-    expect(j.domains[0].id).toBe("raas");
-    // upsert called twice (raas + r7) regardless of pre-existing rows
-    expect(m.upsert).toHaveBeenCalledTimes(2);
-    expect(m.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { archived_at: null } }),
-    );
+    const ids = j.domains.map((d: { id: string }) => d.id);
+    expect(ids).toContain("RAAS-v1");
+    expect(ids).toContain("nengyuandiaodu-v1");
+    expect(j.domains[0].id).toBe("RAAS-v1"); // recruitment ordered first
+    expect(m.upsert).not.toHaveBeenCalled(); // domains follow Neo4j, never seeded
   });
 
-  it("returns { ok: false, reason: 'error' } on prisma failure", async () => {
+  it("stays ok and still returns Allmeta domains when the override read fails", async () => {
     m.findMany.mockRejectedValue(new Error("boom"));
     const res = await GET();
     const j = await res.json();
-    expect(j.ok).toBe(false);
-    expect(j.reason).toBe("error");
+    expect(j.ok).toBe(true);
+    expect(j.domains.length).toBeGreaterThan(0);
+  });
+
+  it("flags the runnable domain (nengyuandiaodu-v1 ships an agent pack)", async () => {
+    m.findMany.mockResolvedValue([]);
+    const res = await GET();
+    const j = await res.json();
+    const energy = j.domains.find((d: { id: string }) => d.id === "nengyuandiaodu-v1");
+    expect(energy?.runnable).toBe(true);
   });
 });
 
@@ -144,7 +158,7 @@ describe("POST /api/domains", () => {
   });
 
   it("returns invalid_name when name is empty or produces no slug", async () => {
-    const cases = ["", "   ", "采购报销"];
+    const cases = ["", "   ", "！？。"];
     for (const name of cases) {
       const req = new Request("http://x/api/domains", {
         method: "POST",

@@ -98,8 +98,10 @@ const AGENT_MAP_RAAS_RAW: Omit<AgentMeta, 'domain'>[] = [
 // Empty until R7 onboarding. New R7 agents go here with explicit domain.
 const AGENT_MAP_R7: AgentMeta[] = [];
 
+// Recruitment agents' domain is the Allmeta domain id 'RAAS-v1' (was 'raas')
+// so they scope under the same business-domain the switcher now lists.
 export const AGENT_MAP: AgentMeta[] = [
-  ...AGENT_MAP_RAAS_RAW.map((a): AgentMeta => ({ ...a, domain: 'raas' })),
+  ...AGENT_MAP_RAAS_RAW.map((a): AgentMeta => ({ ...a, domain: 'RAAS-v1' })),
   ...AGENT_MAP_R7,
 ];
 

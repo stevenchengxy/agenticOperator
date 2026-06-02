@@ -114,7 +114,7 @@ function versionLabel(seq: number): string {
 }
 
 export async function POST(req: Request) {
-  let domainId = "raas";
+  let domainId = "RAAS-v1";
   let domainName: string | undefined;
   let selectedKeys: string[] = [];
   try {

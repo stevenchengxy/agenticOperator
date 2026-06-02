@@ -37,24 +37,28 @@ export type Domain = {
   is_system: boolean;
   created_at: string;
   archived_at: string | null;
+  /** True when AO ships a runnable ontology-agent pack for this domain id. */
+  runnable?: boolean;
 };
 
-export const DEFAULT_DOMAIN: DomainId = "raas";
+// Domains now follow the Neo4j / Allmeta domain ids. RAAS-v1 is recruitment
+// (AO's primary domain); the others mirror the deployed Allmeta domains.
+export const DEFAULT_DOMAIN: DomainId = "RAAS-v1";
 
-/** Pre-fetch fallback. Mirrors the API's SEED_DOMAINS so the chrome renders
- *  sensibly while `GET /api/domains` is in flight, and so SSR / tests that
- *  don't hit the network still see the two system domains. */
+/** Pre-fetch fallback — the known Allmeta domain ids, so the chrome renders
+ *  sensibly while `GET /api/domains` is in flight (and for SSR / tests that
+ *  don't hit the network). */
 export const SYSTEM_FALLBACK_DOMAINS: ReadonlyArray<Domain> = [
   {
-    id: "raas",
-    name: "业务领域",
+    id: "RAAS-v1",
+    name: "招聘",
     color: "oklch(0.65 0.18 250)",
     is_system: true,
     created_at: new Date(0).toISOString(),
     archived_at: null,
   },
   {
-    id: "r7",
+    id: "R7-001",
     name: "R7 · ATS",
     color: "oklch(0.65 0.18 145)",
     is_system: true,

@@ -7,8 +7,10 @@
 
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { pinyin } from "pinyin-pro";
 import { prisma } from "@/server/db";
 import { AGENT_MAP } from "@/lib/agent-mapping";
+import { hasSnapshot } from "@/lib/ontology-generator/ontology-source";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,60 @@ export type DomainRow = {
   is_system: boolean;
   created_at: string;
   archived_at: string | null;
+  /** True when AO ships a runnable ontology-agent pack (snapshot) for this id. */
+  runnable?: boolean;
 };
+
+// ── Domains follow the Neo4j / Allmeta domain ids ────────────────────────────
+//
+// The business-domain switcher is NOT hand-seeded anymore: its canonical list
+// IS the Allmeta domain id list (GET <studio>/api/domains). AO maps each id to a
+// friendly name + accent color (KNOWN_DOMAIN_META), and the local Domain table
+// is used ONLY as a name/color/archived OVERRIDE for those ids (so 管理领域 still
+// works). Switching the domain therefore selects a real Neo4j domain id, and the
+// ontology generator + generated agents all scope by that same id.
+
+const ALLMETA_BASE = process.env.ALLMETA_BASE_URL ?? "";
+const ALLMETA_KEY = process.env.ALLMETA_API_KEY ?? "";
+
+type KnownMeta = { name: string; color: string; is_system?: boolean; order: number };
+const KNOWN_DOMAIN_META: Record<string, KnownMeta> = {
+  "RAAS-v1": { name: "招聘", color: "oklch(0.65 0.18 250)", is_system: true, order: 0 },
+  "R7-001": { name: "R7 · ATS", color: "oklch(0.65 0.18 145)", is_system: true, order: 1 },
+  "baoxiao-v1": { name: "采购报销", color: "oklch(0.64 0.15 70)", order: 2 },
+  "nengyuandiaodu-v1": { name: "能源调度", color: "oklch(0.62 0.14 200)", order: 3 },
+};
+
+/** Fallback domain ids when Allmeta Studio is unreachable — the four known ids. */
+const FALLBACK_ALLMETA: Array<{ id: string; name?: string }> = [
+  { id: "RAAS-v1" },
+  { id: "R7-001" },
+  { id: "baoxiao-v1" },
+  { id: "nengyuandiaodu-v1" },
+];
+
+async function fetchAllmetaDomains(): Promise<Array<{ id: string; name?: string }>> {
+  if (!ALLMETA_BASE) return FALLBACK_ALLMETA;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(`${ALLMETA_BASE.replace(/\/+$/, "")}/api/domains`, {
+      headers: ALLMETA_KEY ? { Authorization: `Bearer ${ALLMETA_KEY}` } : {},
+      signal: controller.signal,
+    });
+    if (!res.ok) return FALLBACK_ALLMETA;
+    const body = (await res.json()) as { domains?: Array<Record<string, unknown>> };
+    const list = Array.isArray(body.domains) ? body.domains : [];
+    if (list.length === 0) return FALLBACK_ALLMETA;
+    return list
+      .map((d) => ({ id: String(d.id ?? ""), name: typeof d.name === "string" ? d.name : undefined }))
+      .filter((d) => d.id);
+  } catch {
+    return FALLBACK_ALLMETA;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type DomainListResponse =
   | { ok: true; domains: DomainRow[] }
@@ -42,22 +97,6 @@ const COLOR_PALETTE = [
   "oklch(0.65 0.18 145)",  // green (= r7)
 ];
 
-const SEED_DOMAINS: Array<Omit<DomainRow, "created_at" | "archived_at">> = [
-  { id: "raas", name: "业务领域", color: "oklch(0.65 0.18 250)", is_system: true },
-  { id: "r7", name: "R7 · ATS", color: "oklch(0.65 0.18 145)", is_system: true },
-];
-
-/** Idempotent: ensures raas + r7 exist as system domains. Cheap (two upserts). */
-async function ensureSeed() {
-  for (const d of SEED_DOMAINS) {
-    await prisma.domain.upsert({
-      where: { id: d.id },
-      create: d,
-      update: {}, // never overwrite existing rows on seed re-run
-    });
-  }
-}
-
 function toRow(d: {
   id: string;
   name: string;
@@ -76,13 +115,18 @@ function toRow(d: {
   };
 }
 
-/** Slug from name: lowercase ASCII letters/digits/hyphens; collapses other chars. */
+/** Slug from name: lowercase ASCII letters/digits/hyphens; collapses other chars.
+ *  CJK is transliterated to pinyin first, so a pure-Chinese display name like
+ *  「能源调度」 still yields a usable ASCII id (neng-yuan-diao-du). The Chinese
+ *  name is preserved separately in `Domain.name` and is what the UI shows; this
+ *  slug is only the internal primary key / URL segment. */
 export function slugifyDomainName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return "";
-  // CJK and other non-ASCII chars get stripped — caller will hit invalid_name if
-  // nothing remains (which is acceptable for Phase 0: ASCII-pinyin only).
-  const slug = trimmed
+  // Non-Chinese chars pass through unchanged (nonZh: consecutive); Chinese chars
+  // become space-separated pinyin, which the regex below collapses into hyphens.
+  const ascii = pinyin(trimmed, { toneType: "none", nonZh: "consecutive" });
+  const slug = ascii
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -96,15 +140,44 @@ async function pickColor(): Promise<string> {
 
 export async function GET() {
   try {
-    await ensureSeed();
-    const rows = await prisma.domain.findMany({
-      where: { archived_at: null },
-      orderBy: [{ is_system: "desc" }, { created_at: "asc" }],
-    });
-    return NextResponse.json<DomainListResponse>({
-      ok: true,
-      domains: rows.map(toRow),
-    });
+    const [allmeta, overrides] = await Promise.all([
+      fetchAllmetaDomains(),
+      prisma.domain.findMany().catch(() => [] as Array<{
+        id: string;
+        name: string;
+        color: string;
+        is_system: boolean;
+        created_at: Date;
+        archived_at: Date | null;
+      }>),
+    ]);
+    const ovById = new Map(overrides.map((o) => [o.id, o]));
+
+    let fallbackOrder = 100;
+    const domains: DomainRow[] = allmeta
+      .map((d) => {
+        const meta = KNOWN_DOMAIN_META[d.id];
+        const ov = ovById.get(d.id);
+        const order = meta?.order ?? fallbackOrder++;
+        return {
+          row: {
+            id: d.id,
+            name: ov?.name ?? meta?.name ?? d.name ?? d.id,
+            color: ov?.color ?? meta?.color ?? COLOR_PALETTE[order % COLOR_PALETTE.length]!,
+            is_system: ov?.is_system ?? meta?.is_system ?? false,
+            created_at: (ov?.created_at ?? new Date(0)).toISOString(),
+            archived_at: ov?.archived_at ? ov.archived_at.toISOString() : null,
+            runnable: hasSnapshot(d.id),
+          } satisfies DomainRow,
+          order,
+          archived: !!ov?.archived_at,
+        };
+      })
+      .filter((x) => !x.archived)
+      .sort((a, b) => a.order - b.order)
+      .map((x) => x.row);
+
+    return NextResponse.json<DomainListResponse>({ ok: true, domains });
   } catch (e) {
     return NextResponse.json<DomainListResponse>({
       ok: false,
@@ -116,7 +189,6 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await ensureSeed();
     const body = (await req.json().catch(() => ({}))) as {
       name?: unknown;
       color?: unknown;
