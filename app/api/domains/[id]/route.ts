@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { countAgentsInDomain, type DomainRow } from "@/app/api/domains/route";
+import { friendlyDomainName, colorForDomain } from "@/lib/domain-ids";
 
 export const dynamic = "force-dynamic";
 
@@ -72,16 +73,18 @@ export async function PATCH(
         error: "no patch fields provided (name or color required)",
       });
     }
-    const existing = await prisma.domain.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json<DomainPatchResponse>({
-        ok: false,
-        reason: "not_found",
-      });
-    }
-    const updated = await prisma.domain.update({
+    // Upsert, not update: domains synced from Allmeta/Neo4j have no Domain row
+    // (the switcher lists them from the live union, not the table). Renaming one
+    // must CREATE its override row — otherwise rename fails with "not_found".
+    const updated = await prisma.domain.upsert({
       where: { id },
-      data,
+      create: {
+        id,
+        name: data.name ?? (friendlyDomainName(id) || id),
+        color: data.color ?? colorForDomain(id),
+        is_system: true, // a synced/known domain being customized — keep protected
+      },
+      update: data,
     });
     return NextResponse.json<DomainPatchResponse>({
       ok: true,
@@ -115,7 +118,13 @@ export async function DELETE(
         reason: "is_system",
       });
     }
-    const agentCount = countAgentsInDomain(id);
+    // Block archive while the domain still holds agents — both real (AGENT_MAP)
+    // and ontology-generated shells (AgentVersion). Data isolation: a domain is
+    // only removable once its agents are gone, so archiving never orphans data.
+    const shellCount = await prisma.agentVersion
+      .count({ where: { domain: id } })
+      .catch(() => 0);
+    const agentCount = countAgentsInDomain(id) + shellCount;
     if (agentCount > 0) {
       return NextResponse.json<DomainDeleteResponse>({
         ok: false,

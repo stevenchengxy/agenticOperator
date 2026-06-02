@@ -5,8 +5,23 @@ import { wsClient } from '@/server/clients/ws';
 import { fetchLiveRegistry } from '@/lib/inngest-registry';
 import { prisma } from '@/server/db';
 import { ONTOLOGY_GEN_SOURCE, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
-import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID } from '@/lib/domain-ids';
+import { deriveAgents } from '@/lib/ontology-generator/analyze';
+import { loadSnapshotOntology, hasSnapshot } from '@/lib/ontology-generator/ontology-source';
 import type { AgentsResponse, AgentRow } from '@/lib/api/types';
+
+// Deterministic ontology-pack function slugs (from the in-repo snapshot, no DB).
+// Used to skip ontology functions in the live-registry pass even if the DB read
+// fails — so energy agents can never leak into the recruitment domain.
+function knownOntologyPackSlugs(): string[] {
+  try {
+    return hasSnapshot(ENERGY_DOMAIN_ID)
+      ? deriveAgents(loadSnapshotOntology(ENERGY_DOMAIN_ID)).map((s) => s.slug)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 export async function GET(_req: Request): Promise<Response> {
   const partial: ('ws' | 'em')[] = [];
@@ -68,18 +83,23 @@ export async function GET(_req: Request): Promise<Response> {
   // Ontology-generated agents (e.g. the energy pack) are registered as real
   // functions in the MAIN app, so they show up in the live registry — but they
   // belong to their own business domain and are surfaced below from
-  // AgentVersion (with the right domain + shell management). Collect their slugs
-  // so we DON'T also add them here under the default (recruitment) domain, which
-  // would both mis-scope them and double-count them.
-  let ontologyShellSlugs = new Set<string>();
+  // AgentVersion. Fetch all ontology shells ONCE and reuse for BOTH the skip-set
+  // (so we don't also add them here under the recruitment default) AND the
+  // shell-display pass below — one query, one failure mode (never a leak in one
+  // pass + a duplicate in the other). The skip-set is seeded with the pack's
+  // deterministic snapshot slugs so the registered functions are skipped even if
+  // the DB read fails.
+  const ontologyShellSlugs = new Set<string>(knownOntologyPackSlugs());
+  let allShells: ShellVersionRow[] = [];
   try {
-    const shellSlugs = await prisma.agentVersion.findMany({
-      where: { capturedFrom: ONTOLOGY_GEN_SOURCE, slug: { not: '' } },
-      select: { slug: true },
-    });
-    ontologyShellSlugs = new Set(shellSlugs.map((s) => s.slug));
+    allShells = (await prisma.agentVersion.findMany({
+      where: { capturedFrom: ONTOLOGY_GEN_SOURCE },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, short: true, slug: true, domain: true, versionLabel: true, status: true, configJson: true, createdAt: true },
+    })) as ShellVersionRow[];
+    for (const s of allShells) if (s.slug) ontologyShellSlugs.add(s.slug);
   } catch {
-    /* best-effort — if this read fails, fall back to prior behavior */
+    /* best-effort — pack snapshot slugs still cover the registered functions */
   }
 
   // Surface live Inngest functions not in AGENT_MAP — lets a brand-new
@@ -120,15 +140,13 @@ export async function GET(_req: Request): Promise<Response> {
   }
 
   // Surface DEPLOYED ontology-generated shell agents (per business domain) so
-  // they appear in the Fleet under their domain. Sourced from AgentVersion
-  // (deploy state), independent of the main-app Inngest registry. status:
-  // 'active' → online, 'offline' → paused.
+  // they appear in the Fleet under their domain. Reuses the single `allShells`
+  // read above (deploy state), independent of the main-app Inngest registry.
+  // status: 'active' → online, 'offline' → paused.
   try {
-    const shells = (await prisma.agentVersion.findMany({
-      where: { capturedFrom: ONTOLOGY_GEN_SOURCE, status: { in: ['active', 'offline'] }, domain: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, short: true, slug: true, domain: true, versionLabel: true, status: true, configJson: true, createdAt: true },
-    })) as ShellVersionRow[];
+    const shells = allShells.filter(
+      (s) => (s.status === 'active' || s.status === 'offline') && s.domain,
+    );
     // Dedupe by (domain, slug) — a domain may have re-deployed the same agent.
     const seen = new Set<string>();
     for (const s of shells) {

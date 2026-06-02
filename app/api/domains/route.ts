@@ -214,6 +214,7 @@ export async function GET() {
     const ovById = new Map(overrides.map((o) => [o.id, o]));
 
     // Union of live Allmeta + agent-bearing + the shipped packs.
+    const agentDomainSet = new Set(agentDomains);
     const orderedIds: string[] = [];
     const pushUnique = (id: string) => {
       if (id && !orderedIds.includes(id)) orderedIds.push(id);
@@ -225,22 +226,35 @@ export async function GET() {
 
     const orderOf = (id: string) => (id === RECRUITMENT_DOMAIN_ID ? -1 : 0);
     const allmetaName = new Map(allmeta.map((d) => [d.id, d.name]));
+    const allmetaIds = new Set(allmeta.map((d) => d.id));
+    // "系统" = Neo4j-owned (live in Allmeta) or a pack AO ships → protected, not
+    // user-deletable. A domain retained ONLY because it still holds agent data
+    // (not in Allmeta, not a pack — e.g. an old leftover slug) is NOT a system
+    // domain: the operator can archive/clean it once its agents are removed.
+    const isSystem = (id: string) =>
+      allmetaIds.has(id) || id === RECRUITMENT_DOMAIN_ID || id === ENERGY_DOMAIN_ID;
 
     const domains: DomainRow[] = orderedIds
       .map((id, i) => {
         const ov = ovById.get(id);
+        // A real custom rename differs from the id; an override whose name is
+        // just the id (non-informative, from an earlier code path) is ignored so
+        // the clean derived name shows.
+        const customName = ov?.name && ov.name !== id ? ov.name : undefined;
         return {
           row: {
             id,
-            name: ov?.name ?? (friendlyDomainName(id) || allmetaName.get(id) || id),
+            name: customName ?? (friendlyDomainName(id) || allmetaName.get(id) || id),
             color: ov?.color ?? colorForDomain(id),
-            is_system: true, // synced/owned → not casually deletable from AO
+            is_system: isSystem(id),
             created_at: (ov?.created_at ?? new Date(0)).toISOString(),
             archived_at: ov?.archived_at ? ov.archived_at.toISOString() : null,
             runnable: hasSnapshot(id),
           } satisfies DomainRow,
           order: orderOf(id) * 1000 + i,
-          archived: !!ov?.archived_at,
+          // A domain that still holds agent data is NEVER hidden, even if it has
+          // an archived override — hiding it would orphan its agents.
+          archived: !!ov?.archived_at && !agentDomainSet.has(id),
         };
       })
       .filter((x) => !x.archived)
