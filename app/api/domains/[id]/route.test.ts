@@ -5,6 +5,10 @@ vi.mock("@/server/db", () => ({
     domain: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      upsert: vi.fn(),
+    },
+    agentVersion: {
+      count: vi.fn(),
     },
   },
 }));
@@ -22,7 +26,9 @@ import { prisma } from "@/server/db";
 const m = prisma.domain as unknown as {
   findUnique: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  upsert: ReturnType<typeof vi.fn>;
 };
+const av = prisma.agentVersion as unknown as { count: ReturnType<typeof vi.fn> };
 
 const fixedDate = new Date("2026-06-01T10:00:00Z");
 
@@ -41,9 +47,8 @@ function rowForId(id: string, overrides: Record<string, unknown> = {}) {
 describe("PATCH /api/domains/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("renames an existing domain", async () => {
-    m.findUnique.mockResolvedValue(rowForId("raas"));
-    m.update.mockResolvedValue(rowForId("raas", { name: "RAAS · v2" }));
+  it("renames an existing domain (upsert update branch)", async () => {
+    m.upsert.mockResolvedValue(rowForId("raas", { name: "RAAS · v2" }));
     const res = await PATCH(
       new Request("http://x/api/domains/raas", {
         method: "PATCH",
@@ -54,24 +59,32 @@ describe("PATCH /api/domains/[id]", () => {
     const j = await res.json();
     expect(j.ok).toBe(true);
     expect(j.domain.name).toBe("RAAS · v2");
-    expect(m.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "raas" }, data: { name: "RAAS · v2" } }),
+    expect(m.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "raas" }, update: { name: "RAAS · v2" } }),
     );
   });
 
-  it("returns not_found when the domain doesn't exist", async () => {
-    m.findUnique.mockResolvedValue(null);
+  it("creates an override row when renaming a synced domain with no row", async () => {
+    // Allmeta-synced domains have no Domain row → upsert must CREATE it (no
+    // longer a not_found error).
+    m.upsert.mockResolvedValue(rowForId("费控-v1", { name: "费控X" }));
     const res = await PATCH(
-      new Request("http://x/api/domains/nope", {
+      new Request("http://x/api/domains/费控-v1", {
         method: "PATCH",
-        body: JSON.stringify({ name: "anything" }),
+        body: JSON.stringify({ name: "费控X" }),
       }),
-      { params: Promise.resolve({ id: "nope" }) },
+      { params: Promise.resolve({ id: "费控-v1" }) },
     );
     const j = await res.json();
-    expect(j.ok).toBe(false);
-    expect(j.reason).toBe("not_found");
-    expect(m.update).not.toHaveBeenCalled();
+    expect(j.ok).toBe(true);
+    expect(j.domain.name).toBe("费控X");
+    expect(m.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "费控-v1" },
+        create: expect.objectContaining({ id: "费控-v1", name: "费控X" }),
+        update: { name: "费控X" },
+      }),
+    );
   });
 
   it("rejects empty body / empty name", async () => {
@@ -89,7 +102,10 @@ describe("PATCH /api/domains/[id]", () => {
 });
 
 describe("DELETE /api/domains/[id]", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    av.count.mockResolvedValue(0); // no ontology shells unless a test sets it
+  });
 
   it("archives an empty non-system domain", async () => {
     m.findUnique.mockResolvedValue(rowForId("procurement", { is_system: false }));
@@ -134,6 +150,20 @@ describe("DELETE /api/domains/[id]", () => {
     expect(j.ok).toBe(false);
     expect(j.reason).toBe("has_agents");
     expect(j.count).toBe(2);
+    expect(m.update).not.toHaveBeenCalled();
+  });
+
+  it("blocks archive when ontology shells exist (AgentVersion), even with 0 AGENT_MAP agents", async () => {
+    m.findUnique.mockResolvedValue(rowForId("能源调度-v1", { is_system: false }));
+    av.count.mockResolvedValue(5); // 5 ontology shells under this domain
+    const res = await DELETE(
+      new Request("http://x/api/domains/能源调度-v1", { method: "DELETE" }),
+      { params: Promise.resolve({ id: "能源调度-v1" }) },
+    );
+    const j = await res.json();
+    expect(j.ok).toBe(false);
+    expect(j.reason).toBe("has_agents");
+    expect(j.count).toBe(5); // 0 AGENT_MAP + 5 shells
     expect(m.update).not.toHaveBeenCalled();
   });
 
