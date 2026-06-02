@@ -15,17 +15,23 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
   const { t, lang } = useApp();
   const { getById, domain } = useDomain();
   const [rows, setRows] = React.useState<AgentDraftRow[] | null>(null);
+  const [recycled, setRecycled] = React.useState<AgentDraftRow[]>([]);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
   // Scoped to the active business domain — switching domains shows that
-  // domain's drafts. Re-runs when `domain` changes (load identity changes).
+  // domain's agents. Loads both the live set and the recycle bin (archived).
   const load = React.useCallback(async () => {
+    const d = encodeURIComponent(domain);
     try {
-      const r = await fetch(`/api/agent-drafts?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
-      const j = (await r.json()) as AgentDraftsResponse;
-      setRows(j.rows ?? []);
+      const [live, bin] = await Promise.all([
+        fetch(`/api/agent-drafts?domain=${d}`, { cache: "no-store" }).then((r) => r.json() as Promise<AgentDraftsResponse>),
+        fetch(`/api/agent-drafts?domain=${d}&recycled=1`, { cache: "no-store" }).then((r) => r.json() as Promise<AgentDraftsResponse>),
+      ]);
+      setRows(live.rows ?? []);
+      setRecycled(bin.rows ?? []);
     } catch {
       setRows([]);
+      setRecycled([]);
     }
   }, [domain]);
 
@@ -61,6 +67,16 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
     setBusyId(row.id);
     try {
       await fetch(`/api/agent-drafts/${encodeURIComponent(row.id)}`, { method: "DELETE" });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function restore(row: AgentDraftRow) {
+    setBusyId(row.id);
+    try {
+      await fetch(`/api/agent-drafts/${encodeURIComponent(row.id)}/restore`, { method: "POST" });
       await load();
     } finally {
       setBusyId(null);
@@ -148,6 +164,31 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
                   </div>
                 )}
               </section>
+
+              {/* Recycle bin (回收站) — soft-deleted agents, restorable */}
+              {recycled.length > 0 && (
+                <section>
+                  <SectionLabel text={t("dst_section_recycled")} count={recycled.length} />
+                  <div className="flex flex-col gap-2.5 mt-2">
+                    {recycled.map((r) => (
+                      <ShellCard
+                        key={r.id}
+                        row={r}
+                        name={nameOf(r)}
+                        domainName={domainName(r.domain)}
+                        t={t}
+                        badge={
+                          <span className="text-[11px] px-2 py-0.5 rounded-full text-ink-4 bg-panel border border-line">
+                            {t("dst_archived")}
+                          </span>
+                        }
+                      >
+                        <ActionBtn kind="primary" busy={busyId === r.id} onClick={() => restore(r)} label={t("dst_restore")} />
+                      </ShellCard>
+                    ))}
+                  </div>
+                </section>
+              )}
             </>
           )}
         </div>

@@ -293,12 +293,16 @@ model AgentVersion {
   short        String
   slug         String
   versionLabel String   // 'v1.9.4' 或 '2026-05-25-1830' 自动生成
-  status       String   @default("draft")  // 'draft' | 'active' | 'archived'
+  status       String   @default("draft")  // 'draft' | 'active' | 'offline' | 'archived'
+  // 业务领域 (raas / feikong / energy …). Set for ontology-generated shell
+  // agents so the Fleet drafts store can scope by domain. Null for real-agent
+  // versions (their domain is derived from short → AGENT_MAP).
+  domain       String?
 
   // Phase 0 实际使用
-  configJson   String?  // JSON: AgentConfig 快照
+  configJson   String?  // JSON: AgentConfig 快照 (ontology-gen: 草稿展示字段 JSON)
   configHash   String?  // sha256(configJson) — 用于去重
-  capturedFrom String?  // 'current-config' | 'manual' | 'codegen'
+  capturedFrom String?  // 'current-config' | 'manual' | 'codegen' | 'ontology-gen'
   notes        String?
 
   // Phase 1+ 留空字段 (nullable,Phase 0 不写)
@@ -312,11 +316,15 @@ model AgentVersion {
   generatedBy  String   @default("operator-unknown")
   createdAt    DateTime @default(now())
   deployedAt   DateTime?
+  // Recycle bin: set when an agent is soft-deleted (status='archived'); cleared
+  // on restore. Keeps deleted agents as a restorable backup.
+  archivedAt   DateTime?
 
   @@unique([short, versionLabel])
   @@index([short, createdAt])
   @@index([slug])
   @@index([status])
+  @@index([capturedFrom, domain, status])
 }
 
 // =====================================================================
@@ -702,6 +710,73 @@ model RuleCheckFlag {
 }
 
 // =====================================================================
+// Generic, domain-agnostic rule-check store. The recruitment RuleCheckAudit
+// above is hard-coupled to recruitment fields (candidate/resume/job, all
+// required), so non-recruitment rule-check agents (e.g. the energy-dispatch
+// validateConstraints agent) write here instead. One row per agent run; the
+// principle is the same for every domain/step: 筛查 rules → 二次验证抓取对不对
+// → 规则判断. The /rule-check 总览 + 审计面板 read this for non-recruitment
+// domains (scoped by `domain`).
+// =====================================================================
+model OntologyRuleCheck {
+  id            String   @id @default(cuid())
+  domain        String   // Allmeta domain id, e.g. 能源调度-v1
+  agentSlug     String   // e.g. energy-validate-constraints
+  agentName     String   // e.g. ValidateConstraintsAgent
+  stage         String   // 业务步骤, e.g. 约束规则校验
+  caseId        String   // 案件/run id (= WorkflowRun.id when present)
+  runId         String?
+  traceId       String?
+  dsNo          String?  // 调度辅助案件号 DS…
+
+  decision      String   // VALIDATED | VIOLATED
+  redlineFlag   Boolean  @default(false)
+
+  // 筛查 + 二次验证统计
+  rulesTotal    Int      // 域内规则总数
+  rulesSelected Int      // 本步骤筛出的规则数
+  rulesExpected Int      // 期望抓到的规则数(二次验证基准)
+  selectionOk   Boolean  // 二次验证结论:抓取是否正确/齐全
+  selectionNote String?  // JSON {missing[], extra[], parseIssues[]}
+  rulesEvaluated Int     // 实际执行判断的规则数
+  ruleSource    String   // ontology-api | json-fallback | snapshot
+
+  createdAt     DateTime @default(now())
+
+  evals         OntologyRuleCheckEval[]
+
+  @@index([domain])
+  @@index([caseId])
+  @@index([decision])
+  @@index([createdAt])
+}
+
+model OntologyRuleCheckEval {
+  id            String   @id @default(cuid())
+  checkId       String
+  check         OntologyRuleCheck @relation(fields: [checkId], references: [id], onDelete: Cascade)
+
+  ruleId        String   // CR-HYD-05 …
+  ruleName      String
+  ruleGroup     String   // 机组 | 水库水调 | 电网 | 安全 | 市场
+  hardSoft      String   // hard | soft
+  result        String   // PASS | FAIL | CLAMPED | NA
+  checkPoint    String?  // 96点中哪几点 / 检查口径
+  beforeVal     String?  // 前值
+  afterVal      String?  // 后值(钳制/调整后)
+  defaultAction String?  // 命中默认动作
+  riskType      String?  // T1..T8
+  riskLevel     String?  // L1..L4
+  evidence      String?
+
+  createdAt     DateTime @default(now())
+
+  @@index([checkId])
+  @@index([ruleId])
+  @@index([result])
+}
+
+// =====================================================================
 // AgentStepEvidence — captures input/output/external-call evidence per
 // step.run inside the 3 PRA agents. Used by /monitor/flows/[flowId] to
 // render a complete trail: "RAAS POST /candidates → Allmeta POST
@@ -925,6 +1000,24 @@ model Domain {
 }
 
 // =====================================================================
+// Per-domain Inngest app registration. Each business domain can register
+// its own Inngest app (id `agentic-operator-<domain>`), served at the
+// dynamic route /api/inngest/<domain>. Ontology-generated agents deployed
+// in that domain become live (stub) functions on this app. status='offline'
+// means the serve route returns zero functions (effectively unregistered).
+// =====================================================================
+model DomainInngestApp {
+  domain       String    @id // matches Domain.id
+  appId        String // 'agentic-operator-<domain>'
+  status       String    @default("offline") // 'online' | 'offline'
+  callbackUrl  String? // last serve URL POSTed to Inngest /fn/register
+  registeredAt DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@map("domain_inngest_app")
+}
+
+// =====================================================================
 // Run AI Summary — durable LLM-generated summary of a workflow run.
 // Supports both run-summary and agent-summary uses via nullable run_id +
 // function_slug. trigger_path = 'eager-on-fail' | 'lazy-on-view' |
@@ -1054,4 +1147,22 @@ model LogEvent {
   @@index([level, ts])
   @@index([category, ts])
   @@map("log_event")
+}
+
+// ── 服务心跳 (backend liveness) ─────────────────────────────────────────
+// Single-row liveness marker for the AO backend. instrumentation.ts#register
+// writes a boot record on every process start and a periodic heartbeat; a clean
+// SIGTERM/SIGINT sets cleanShutdown=true. On the NEXT boot, a previous row with
+// cleanShutdown=false ⇒ the process crashed → a critical "异常重启" notification.
+// Deterministic, zero-LLM. See 2026-06-01-system-health-notifications-design.md §3.
+model ServiceHeartbeat {
+  id              String    @id @default("default")
+  bootCount       Int       @default(0)
+  lastBootAt      DateTime?
+  lastHeartbeatAt DateTime?
+  cleanShutdown   Boolean   @default(true) // was the previous run shut down cleanly?
+  pid             Int?
+  updatedAt       DateTime  @updatedAt
+
+  @@map("service_heartbeat")
 }

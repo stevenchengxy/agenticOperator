@@ -4,7 +4,7 @@ import { displayKey } from '@/server/normalize/agents';
 import { wsClient } from '@/server/clients/ws';
 import { fetchLiveRegistry } from '@/lib/inngest-registry';
 import { prisma } from '@/server/db';
-import { ONTOLOGY_GEN_SOURCE, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
+import { ONTOLOGY_GEN_SOURCE, REAL_AGENT_SOURCE, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
 import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID } from '@/lib/domain-ids';
 import { deriveAgents } from '@/lib/ontology-generator/analyze';
 import { loadSnapshotOntology, hasSnapshot } from '@/lib/ontology-generator/ontology-source';
@@ -54,31 +54,49 @@ export async function GET(_req: Request): Promise<Response> {
   const registry = await fetchLiveRegistry();
   const regByShort = new Map(registry.map((r) => [r.short, r]));
 
-  const agents: AgentRow[] = AGENT_MAP.map((a) => {
-    const live = regByShort.get(a.short);
-    const acts = activityByAgent[a.short] ?? [];
-    return {
-      short: a.short,
-      wsId: a.wsId,
-      domain: a.domain,
-      displayName: displayKey(a.short),
-      inngestName: live?.inngestName ?? a.inngestName ?? a.short,
-      stage: a.stage,
-      kind: a.kind,
-      ownerTeam: a.ownerTeam,
-      version: a.version,
-      status: null,
-      p50Ms: wsDown ? null : null, // P3 will compute
-      runs24h: 0,
-      successRate: null,
-      costYuan: 0,
-      lastActivityAt: wsDown ? null : (acts[0]?.createdAt ?? null),
-      spark: Array(16).fill(0),
-      realness: live?.realness ?? 'unbuilt',
-      slug: live?.slug ?? null,
-      paused: live?.paused ?? false,
-    };
-  });
+  // Real-agent lifecycle overrides: an 'archived' override soft-deletes a real
+  // agent into the recycle bin (hide it from the fleet); 'offline' shows it
+  // paused. Keyed by short (recruitment shorts are unique).
+  const realOverride = new Map<string, string>();
+  try {
+    const ovs = await prisma.agentVersion.findMany({
+      where: { capturedFrom: REAL_AGENT_SOURCE },
+      orderBy: { createdAt: 'desc' },
+      select: { short: true, status: true },
+    });
+    for (const o of ovs) if (!realOverride.has(o.short)) realOverride.set(o.short, o.status);
+  } catch {
+    /* best-effort — no overrides → all real agents live */
+  }
+
+  const agents: AgentRow[] = AGENT_MAP
+    .filter((a) => realOverride.get(a.short) !== 'archived') // archived → recycle bin, hidden
+    .map((a) => {
+      const live = regByShort.get(a.short);
+      const acts = activityByAgent[a.short] ?? [];
+      const ov = realOverride.get(a.short);
+      return {
+        short: a.short,
+        wsId: a.wsId,
+        domain: a.domain,
+        displayName: displayKey(a.short),
+        inngestName: live?.inngestName ?? a.inngestName ?? a.short,
+        stage: a.stage,
+        kind: a.kind,
+        ownerTeam: a.ownerTeam,
+        version: a.version,
+        status: null,
+        p50Ms: wsDown ? null : null, // P3 will compute
+        runs24h: 0,
+        successRate: null,
+        costYuan: 0,
+        lastActivityAt: wsDown ? null : (acts[0]?.createdAt ?? null),
+        spark: Array(16).fill(0),
+        realness: live?.realness ?? 'unbuilt',
+        slug: live?.slug ?? null,
+        paused: ov === 'offline' || ov === 'draft' ? true : (live?.paused ?? false),
+      };
+    });
 
   // Ontology-generated agents (e.g. the energy pack) are registered as real
   // functions in the MAIN app, so they show up in the live registry — but they
