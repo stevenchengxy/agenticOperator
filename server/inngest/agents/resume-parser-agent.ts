@@ -35,6 +35,7 @@ import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { prisma } from '@/server/db';
+import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 
 // Local alias mirroring the RoboHire parse-resume `data` shape that we
 // historically imported from raas-api-client.ts. After the 2026-05-20
@@ -391,6 +392,16 @@ export const resumeParserAgent = inngest.createFunction(
     await step.sendEvent('emit-resume-processed', {
       name: 'RESUME_PROCESSED',
       data: processedPayload,
+    });
+    await notifyRecruitmentLifecycle(step, 'RESUME_PROCESSED', {
+      anchors: {
+        candidate_id: saveResult.candidate_id,
+        upload_id,
+        resume_id: saveResult.resume_id,
+        client_id: client_id ?? null,
+      },
+      runId: runId ?? null,
+      traceId,
     });
 
     logger.info(

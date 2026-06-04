@@ -43,6 +43,7 @@ import {
 } from '@/lib/allmeta-writers';
 import { inngest, type JdGeneratedEnvelope } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
+import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 
 const AGENT_ID = 'create-jd-agent';
 const AGENT_NAME = 'createJD';
@@ -370,6 +371,11 @@ export const createJdAgent = inngest.createFunction(
     await step.sendEvent(`emit-jd-generated-${sanitize(requisitionId)}`, {
       name: 'JD_GENERATED',
       data: outboundEnvelope,
+    });
+    await notifyRecruitmentLifecycle(step, 'JD_GENERATED', {
+      anchors: { job_requisition_id: requisitionId, client_id: clientId },
+      runId: runId ?? null,
+      traceId,
     });
 
     logger.info(

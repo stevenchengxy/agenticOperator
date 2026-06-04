@@ -20,6 +20,7 @@ import { resolveMatchPayload } from '@/lib/partner-pg/_robohire-normalize';
 import { writeCandidateMatchResultInstance } from '@/lib/allmeta-writers';
 import { matchResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
+import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import {
   inngest,
   type MatchEventData,
@@ -239,6 +240,13 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
     overall_status,
   });
   await step.sendEvent(`emit-match-${stepKey}`, { name: eventName, data: payload });
+  if (eventName === 'MATCH_PASSED_NEED_INTERVIEW' || eventName === 'MATCH_FAILED') {
+    await notifyRecruitmentLifecycle(step, eventName, {
+      anchors: { candidate_id: candidateId, job_requisition_id: data.job_requisition_id, upload_id: uploadId },
+      runId: runId ?? null,
+      traceId,
+    });
+  }
 
   logger.info(
     `[${AGENT_NAME}] ✅ emitted ${eventName} · jr=${data.job_requisition_id} score=${matching_score}`,

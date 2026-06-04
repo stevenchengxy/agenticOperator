@@ -18,10 +18,11 @@
 // 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
 
 import { NonRetriableError } from 'inngest';
-import { buildRuleCheckInput, runRuleCheck } from '@/lib/rule-check';
+import { buildRuleCheckInput, runRuleCheck, formatExplanation } from '@/lib/rule-check';
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
 import { isInfraFailure } from '@/lib/rule-check/infra-failure';
 import { recordNotification } from '@/server/notifications/ingest';
+import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { getRequirementsAgentView } from '@/lib/partner-pg/agent-view';
@@ -416,15 +417,15 @@ export async function ruleCheckAgentHandler({
             // fall back to dims only when resolution returned nothing.
             business_group: result.audit.business_group_resolved ?? dims.business_group ?? null,
             studio: dims.studio ?? null,
-            // Policy 2026-05-20: 信息缺失/REVIEW 都放行,只有真违反才 FAIL。
-            // foldDecision 已经把 insufficient_info 折成 PASS;REVIEW 表示需要
-            // HSM 人工复核,但流程不阻断 — audit decision 仍记 'PASS' 让 UI 不显失败。
+            // Policy 2026-06-01 (fail-closed): 底线规则若 agent 无法自证达标
+            // (insufficient_info / pending / not_executed)→ foldDecision 折成 FAIL。
+            // decision 仍只 PASS/FAIL 两态。
             decision: result.decision === 'FAIL' ? 'FAIL' : 'PASS',
             llm_decision: result.decision,
+            // 不通过原因含全部阻断状态(确认违反 + 信息不足/待复核/未能评估),
+            // 后者带「需人工复核」标注 — 见 formatExplanation。
             failure_reasons: JSON.stringify(
-              result.explanations
-                .filter((e) => e.status === 'fail')
-                .map((e) => `${e.rule_id}:${(e.reason ?? '').slice(0, 240)}`),
+              result.explanations.map((e) => formatExplanation(e).slice(0, 240)),
             ),
             llm_model: result.audit.llm_model,
             llm_duration_ms: Math.round(result.audit.llm_duration_ms ?? 0),
@@ -508,16 +509,12 @@ export async function ruleCheckAgentHandler({
     //   Soft-fail: write errors don't block emit downstream.
     await step.run(`write-cmr-${stepKey}`, async () => {
       const cmrId = `cmr_${candidateId || 'unknown'}_${jrid}`;
-      // 2026-05-26: rule_check_result 二元化(REVIEW 折成 PASS,不再有 待人工复核)。
+      // rule_check_result 二元化:通过/未通过。原因含全部阻断状态(信息不足等带标注)。
       const ruleCheckResult: '通过' | '未通过' =
         result.decision === 'FAIL' ? '未通过' : '通过';
       const ruleCheckReason =
         result.decision === 'FAIL'
-          ? result.explanations
-              .filter((e) => e.status === 'fail')
-              .map((e) => `[${e.rule_id}] ${e.rule_name}: ${e.reason ?? ''}`)
-              .join(' | ')
-              .slice(0, 1000)
+          ? result.explanations.map(formatExplanation).join(' | ').slice(0, 1000)
           : '';
       const r = await writeCandidateMatchResultInstance({
         candidate_match_result_id: cmrId,
@@ -537,9 +534,8 @@ export async function ruleCheckAgentHandler({
       return r;
     });
 
-    // Policy 2026-05-26: 信息缺失 / pending(原 REVIEW)都放行,只有违反才 FAIL。
-    // foldDecision 已把 insufficient_info + pending 都折成 PASS,decision 只剩
-    // PASS / FAIL 两态。PASS → rule_check_result='通过',直接进 MATCH_RULE_CHECK_PASSED。
+    // Policy 2026-06-01 (fail-closed): 底线规则信息不足/待复核/未能评估都折成 FAIL,
+    // 只剩 PASS / FAIL 两态。PASS → rule_check_result='通过',直接进 MATCH_RULE_CHECK_PASSED。
     if (result.decision !== 'FAIL') {
       const payload: MatchRuleCheckPassedData = {
         candidate_id: candidateId ?? null,
@@ -560,20 +556,25 @@ export async function ruleCheckAgentHandler({
         name: 'MATCH_RULE_CHECK_PASSED',
         data: payload,
       });
+      await notifyRecruitmentLifecycle(step, 'MATCH_RULE_CHECK_PASSED', {
+        anchors: { candidate_id: candidateId ?? null, job_requisition_id: jrid, upload_id: uploadId ?? null },
+        runId: runId ?? null,
+        traceId,
+      });
       logger.info(`[${AGENT_NAME}] ✓ emitted MATCH_RULE_CHECK_PASSED for JR=${jrid}`);
       passed += 1;
     } else {
-      const failedRules = result.explanations
-        .filter((e) => e.status === 'fail')
-        .map((e) => ({
-          rule_id: e.rule_id,
-          rule_name: e.rule_name,
-          step_id: e.step_id,
-          severity: undefined,
-          reason: e.reason,
-        }));
-      const failureReason = failedRules
-        .map((r) => `[${r.rule_id}] ${r.rule_name}: ${r.reason ?? ''}`)
+      // 全部阻断状态都进 failed_rules(确认违反 + 信息不足/待复核/未能评估)。
+      const failedRules = result.explanations.map((e) => ({
+        rule_id: e.rule_id,
+        rule_name: e.rule_name,
+        step_id: e.step_id,
+        severity: undefined,
+        reason: e.reason,
+      }));
+      // match_reason / 事件 rule_check_reason:用统一 formatExplanation(信息不足等带标注)。
+      const failureReason = result.explanations
+        .map(formatExplanation)
         .join(' | ')
         .slice(0, 1000);
 
@@ -626,6 +627,11 @@ export async function ruleCheckAgentHandler({
       await step.sendEvent(`emit-failed-${stepKey}`, {
         name: 'MATCH_RULE_CHECK_FAILED',
         data: failedPayload,
+      });
+      await notifyRecruitmentLifecycle(step, 'MATCH_RULE_CHECK_FAILED', {
+        anchors: { candidate_id: candidateId ?? null, job_requisition_id: jrid, upload_id: uploadId ?? null },
+        runId: runId ?? null,
+        traceId,
       });
       logger.info(
         `[${AGENT_NAME}] ✗ emitted MATCH_RULE_CHECK_FAILED for JR=${jrid} (${result.decision}) — ${failedRules.length} failed rule(s)`,

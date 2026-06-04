@@ -26,6 +26,19 @@ vi.mock('@/server/inngest/client', () => ({
 vi.mock('@/lib/rule-check', () => ({
   buildRuleCheckInput: vi.fn((x: unknown) => x),
   runRuleCheck: vi.fn(),
+  // mirrors the real helper (lib/rule-check/runner.ts) so the agent's reason
+  // composition works under mock; tags the unconfirmable statuses.
+  formatExplanation: (e: { rule_id: string; rule_name: string; status: string; reason?: string }) => {
+    const tag =
+      e.status === 'insufficient_info'
+        ? '（信息不足·需人工复核）'
+        : e.status === 'pending'
+          ? '（需 HSM 人工复核）'
+          : e.status === 'not_executed'
+            ? '（未能评估·需人工复核）'
+            : '';
+    return `[${e.rule_id}] ${e.rule_name}${tag}: ${e.reason ?? ''}`;
+  },
 }));
 
 vi.mock('@/lib/rule-check/ontology', () => ({
@@ -75,6 +88,11 @@ vi.mock('@/lib/partner-pg/rule-check-result', () => ({
     created: true,
     job_posting_id: null,
   })),
+}));
+
+const notifyRecruitmentLifecycle = vi.fn(async () => {});
+vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
+  notifyRecruitmentLifecycle: (...a: unknown[]) => notifyRecruitmentLifecycle(...a),
 }));
 
 import { ruleCheckAgentHandler } from './rule-check-agent';
@@ -172,6 +190,7 @@ const passResult = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  notifyRecruitmentLifecycle.mockClear();
   mockExtractDims.mockReturnValue({ client_id: '腾讯', business_group: null, studio: null });
 });
 
@@ -201,6 +220,12 @@ describe('ruleCheckAgent — path A (linked job_requisition_id)', () => {
     expect(step.sent[0].data.job_requisition_id).toBe('JR1');
     expect(step.sent[0].data.parsed_resume).toEqual({ name: 'John' });
     expect(step.sent[0].data.job_requisition).toMatchObject({ job_requisition_id: 'JR1' });
+
+    expect(notifyRecruitmentLifecycle).toHaveBeenCalledWith(
+      expect.anything(),
+      'MATCH_RULE_CHECK_PASSED',
+      expect.objectContaining({ anchors: expect.objectContaining({ job_requisition_id: expect.anything() }) }),
+    );
   });
 });
 
@@ -286,6 +311,12 @@ describe('ruleCheckAgent — decision branches', () => {
     expect(mockSavePartnerFail).toHaveBeenCalledTimes(1);
     expect(mockWriteCmr).toHaveBeenCalledWith(
       expect.objectContaining({ rule_check_result: '未通过', job_requisition_id: 'JR1' }),
+    );
+
+    expect(notifyRecruitmentLifecycle).toHaveBeenCalledWith(
+      expect.anything(),
+      'MATCH_RULE_CHECK_FAILED',
+      expect.objectContaining({ anchors: expect.objectContaining({ job_requisition_id: expect.anything() }) }),
     );
   });
 

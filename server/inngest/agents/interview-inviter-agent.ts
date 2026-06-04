@@ -28,6 +28,7 @@ import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { markInterviewInvitationSent } from '@/lib/partner-pg/interview-invitations';
 import { createAgentLogger, currentLogger, runWithLogger } from '@/lib/agent-logger';
+import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import {
   inngest,
   type InterviewInvitationRequestedData,
@@ -56,7 +57,7 @@ export const interviewInviterAgent = inngest.createFunction(
 // ──────────────────────────────────────────────────────────────────────
 //
 // Exported so unit tests can drive it directly without spinning up Inngest
-// (same pattern as ruleCheckAgentHandler / manager-agent handler).
+// (same pattern as ruleCheckAgentHandler).
 export async function interviewInviterAgentHandler({ event, step, logger, runId }: any) {
   // RAAS 端发的事件信封形态:{ payload:{...}, trace?, entity_*? }。沿用
   // 其它 RAAS-emitted 事件的 unwrap 风格 — 优先从 .payload 取,扁平兜底。
@@ -466,6 +467,11 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
         payload: sentPayload,
         trace: { trace_id: traceId ?? null },
       },
+    });
+    await notifyRecruitmentLifecycle(step, 'INTERVIEW_INVITATION_SENT', {
+      anchors: { candidate_id: candidateId, job_requisition_id: jrId, application_id: interviewRecordId },
+      runId: runId ?? null,
+      traceId: traceId ?? null,
     });
 
     logger.info(
