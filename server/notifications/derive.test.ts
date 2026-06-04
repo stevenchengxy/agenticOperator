@@ -71,6 +71,7 @@ describe('isMessageWorthy', () => {
     expect(isMessageWorthy(base({ category: 'agent_lifecycle', message: 'handler.end' }))).toBe(true);
     expect(isMessageWorthy(base({ category: 'event_publish', eventName: 'REQUIREMENT_SYNCED' }))).toBe(true);
     expect(isMessageWorthy(base({ category: 'manage_action' }))).toBe(true);
+    expect(isMessageWorthy(base({ category: 'system_lifecycle' }))).toBe(true);
   });
   it('drops low-value plumbing (tool/db/api/debug)', () => {
     expect(isMessageWorthy(base({ category: 'tool_call' }))).toBe(false);
@@ -103,6 +104,20 @@ describe('deriveNotification', () => {
     expect(n!.shouldNotify).toBe(false);
   });
 
+  it('backend lifecycle: info system_lifecycle → system message; crash → critical system alert', () => {
+    const start = deriveNotification(base({ level: 'info', category: 'system_lifecycle', source: '系统', message: '后端服务已启动(首次启动 · 第 1 次)' }));
+    expect(start!.kind).toBe('message');
+    expect(start!.category).toBe('system');
+    expect(start!.shouldNotify).toBe(false);
+
+    const crash = deriveNotification(base({ level: 'critical', category: 'system', source: '系统', dedupeHint: 'backend_crash_restart', message: '后端异常重启 · 上次未正常关闭' }));
+    expect(crash!.kind).toBe('alert');
+    expect(crash!.severity).toBe('critical');
+    expect(crash!.category).toBe('system');
+    expect(crash!.dedupeKey).toBe('backend_crash_restart');
+    expect(crash!.shouldNotify).toBe(true);
+  });
+
   it('low-value plumbing → null (stays in the audit log, not surfaced)', () => {
     expect(deriveNotification(base({ category: 'tool_call', level: 'info' }))).toBeNull();
     expect(deriveNotification(base({ category: 'db_call', level: 'debug' }))).toBeNull();
@@ -117,5 +132,35 @@ describe('deriveNotification', () => {
   it('critical alert is notified even in fallback mode', () => {
     const crit = base({ level: 'error', dedupeHint: 'em_degraded', source: 'EM', category: 'system', message: 'EM down' });
     expect(deriveNotification(crit, { mode: 'fallback' })!.shouldNotify).toBe(true);
+  });
+});
+
+describe('agent_lifecycle 消息（招聘接线回归）', () => {
+  it('带 candidate_id 且无 eventName → candidate 消息、不推红点', () => {
+    const d = deriveNotification({
+      level: 'info',
+      category: 'agent_lifecycle',
+      source: '简历解析',
+      message: '简历解析完成',
+      anchors: { candidate_id: 'c1', upload_id: 'u1' },
+      runId: 'r1',
+    })!;
+    expect(d.kind).toBe('message');
+    expect(d.category).toBe('candidate');
+    expect(d.shouldNotify).toBe(false);
+    expect(d.linkKind).toBe('run');
+  });
+
+  it('只带 job_requisition_id 且无 eventName → job 消息', () => {
+    const d = deriveNotification({
+      level: 'info',
+      category: 'agent_lifecycle',
+      source: 'JD 生成',
+      message: '职位描述已生成',
+      anchors: { job_requisition_id: 'jr1' },
+      runId: 'r2',
+    })!;
+    expect(d.kind).toBe('message');
+    expect(d.category).toBe('job');
   });
 });
