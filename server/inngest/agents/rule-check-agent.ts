@@ -22,6 +22,9 @@ import { buildRuleCheckInput, runRuleCheck, formatExplanation } from '@/lib/rule
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
 import { isInfraFailure } from '@/lib/rule-check/infra-failure';
 import { recordNotification } from '@/server/notifications/ingest';
+import { classifyLlm } from '@/lib/dependency-health/classify';
+import { recordDependencySignal } from '@/lib/dependency-health/report';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
@@ -352,9 +355,28 @@ export async function ruleCheckAgentHandler({
       // the audit / Neo4j CMR / partner-pg writes + emit below, so an infra outage
       // never writes 未通过 to the partner main table or emits MATCH_RULE_CHECK_FAILED.
       if (r.decision === 'FAIL' && isInfraFailure(r.audit.fail_reason)) {
+        const reason = r.audit.fail_reason;
         logger.error(
-          `[${AGENT_NAME}] ✗ rule-check infra failure jr=${jrid} reason=${r.audit.fail_reason} — retry+park, candidate NOT rejected`,
+          `[${AGENT_NAME}] ✗ rule-check infra failure jr=${jrid} reason=${reason} — retry+park, candidate NOT rejected`,
         );
+        // LLM-vendor degrade (gateway down / 401 / out-of-funds) → ALSO feed the
+        // unified dependency-health channel so it surfaces as a 没钱/故障/说不准
+        // alert and on the Dependency Health card. Write-only: rule-check already
+        // parks (throws) + fires its own rule_check_parked alert below, so we
+        // don't hijack the throw here. Non-LLM infra (graph / tool-loop / parse)
+        // is not a vendor-funds issue → no dependency signal.
+        if (reason === 'llm-call-error' || reason === 'gateway-unavailable') {
+          const oc = classifyLlm('ruleCheck', new Error(r.audit.llm_error_detail ?? String(reason)));
+          if (!oc.ok) {
+            await recordDependencySignal(oc, {
+              agent: 'RuleCheck',
+              runId: runId ?? null,
+              traceId: traceId ?? null,
+              domain: RECRUITMENT_DOMAIN_ID,
+              anchors: { candidate_id: candidateId, job_requisition_id: jrid, upload_id: uploadId },
+            });
+          }
+        }
         // Surface a critical alert into the 消息通知 center. Deduped by reason, so
         // a gateway outage collapses every parked rule-check into ONE alert with a
         // count — not N. Fire-and-forget: recordNotification never throws.
@@ -363,14 +385,14 @@ export async function ruleCheckAgentHandler({
           category: 'system',
           source: 'rule-check',
           agent: AGENT_NAME,
-          message: `规则校验因基础设施故障挂起(${r.audit.fail_reason})— 候选人未被拒绝,网关恢复后将自动重放`,
+          message: `规则校验因基础设施故障挂起(${reason})— 候选人未被拒绝,网关恢复后将自动重放`,
           runId: runId ?? null,
           traceId: traceId ?? null,
           anchors: { candidate_id: candidateId, job_requisition_id: jrid, upload_id: uploadId },
-          dedupeHint: `rule_check_parked.${r.audit.fail_reason}`,
+          dedupeHint: `rule_check_parked.${reason}`,
         });
         throw new Error(
-          `[${AGENT_NAME}] rule-check infra failure (jr=${jrid}, reason=${r.audit.fail_reason}) — retrying; candidate NOT rejected`,
+          `[${AGENT_NAME}] rule-check infra failure (jr=${jrid}, reason=${reason}) — retrying; candidate NOT rejected`,
         );
       }
 
@@ -666,7 +688,7 @@ export async function ruleCheckAgentHandler({
 export const ruleCheckAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Rule Check',
+    name: 'Rule Check Agent',
     retries: 1,
     triggers: [{ event: 'RESUME_PROCESSED' }],
   },

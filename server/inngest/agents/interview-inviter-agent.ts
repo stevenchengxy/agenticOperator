@@ -24,6 +24,10 @@ import {
   writeInterviewRecordInstance,
 } from '@/lib/allmeta-writers';
 import { inviteCandidateDirect, RobohireApiError } from '@/lib/robohire-client';
+import { classifyRobohire } from '@/lib/dependency-health/classify';
+import { reportDependencyDegraded, isRecoverableReason } from '@/lib/dependency-health/report';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import type { DepOutcome } from '@/lib/dependency-health/types';
 import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { markInterviewInvitationSent } from '@/lib/partner-pg/interview-invitations';
@@ -43,7 +47,7 @@ const AGENT_NAME = 'interviewInviter';
 export const interviewInviterAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Interview Inviter',
+    name: 'Interview Inviter Agent',
     retries: 2,
     triggers: [{ event: 'INTERVIEW_INVITATION_REQUESTED' }],
   },
@@ -179,6 +183,22 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       jdText = backfilled.text;
     }
 
+    // External-dependency-health context — when RoboHire is dead (out-of-funds /
+    // fault) we still emit INTERVIEW_INVITATION_FAILED, then fail the run instead
+    // of reporting false success. GoHire business rejections (GOHIRE_REJECTED)
+    // are NOT dependency failures and are left as-is.
+    const depCtx = {
+      agent: 'InterviewInviter',
+      runId: runId ?? null,
+      traceId: traceId ?? null,
+      domain: RECRUITMENT_DOMAIN_ID,
+      anchors: {
+        candidate_id: candidateId || undefined,
+        job_requisition_id: jrId || undefined,
+        application_id: applicationId ?? undefined,
+      },
+    };
+
     // ── 2. RoboHire POST /api/v1/invite-candidate ──────────────────────
     const inviteResult = await step.run(`invite-${stepKey}`, async () => {
       const inviteInput = {
@@ -227,6 +247,8 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
               error_message: `${e.code}: ${e.message}`,
               http_status: e.httpStatus,
               request_id: e.requestId ?? null,
+              // Dead-dependency signal (没钱了 / 凭证) — reported after FAILED is emitted.
+              degraded: classifyRobohire('inviteCandidate', e) as Extract<DepOutcome, { ok: false }>,
             };
           }
           // 2026-05-25 fix(由 e2e 暴露):2xx + body.success=false 是上游业务拒绝
@@ -245,25 +267,44 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
               request_id: e.requestId ?? null,
             };
           }
-          // 429 / 实际 5xx HTTP / NETWORK — 抛错走 Inngest retry
+          // 429 / 实际 5xx HTTP / NETWORK — 落 dependency 信号后抛错走 Inngest retry
         }
-        throw e;
+        // Transient (429/5xx/network) or unwrapped error — record the degraded
+        // signal then throw (retriable; the run parks + retries, not green).
+        const oc = classifyRobohire('inviteCandidate', e);
+        if (!oc.ok) await reportDependencyDegraded(oc, depCtx);
+        throw e; // an error always classifies as degraded; this also fails the run
       }
     });
 
     if (!inviteResult.ok) {
-      const failedPayload: InterviewInvitationFailedPayload = {
-        candidate_id: candidateId,
-        job_requisition_id: jrId,
-        application_id: applicationId,
-        error_code: inviteResult.error_code as InterviewInvitationFailedPayload['error_code'],
-        error_message: inviteResult.error_message,
-        http_status: inviteResult.http_status,
-        robohire_request_id: inviteResult.request_id,
-        failed_at: new Date().toISOString(),
-      };
-      await emitFailed(step, stepKey, failedPayload, traceId);
-      return { ok: false, candidate_id: candidateId, job_requisition_id: jrId, error: failedPayload.error_code };
+      const degraded = 'degraded' in inviteResult ? inviteResult.degraded : null;
+      const recoverable = degraded ? isRecoverableReason(degraded.reason) : false;
+      // Emit the terminal INTERVIEW_INVITATION_FAILED for business rejections
+      // (GOHIRE_REJECTED) and non-recoverable dependency degrades (bad
+      // credentials). A recoverable degrade (out-of-funds / transient) parks +
+      // auto-resumes, so we skip the terminal event to avoid a spurious _FAILED
+      // before a later retry-success.
+      if (!recoverable) {
+        const failedPayload: InterviewInvitationFailedPayload = {
+          candidate_id: candidateId,
+          job_requisition_id: jrId,
+          application_id: applicationId,
+          error_code: inviteResult.error_code as InterviewInvitationFailedPayload['error_code'],
+          error_message: inviteResult.error_message,
+          http_status: inviteResult.http_status,
+          robohire_request_id: inviteResult.request_id,
+          failed_at: new Date().toISOString(),
+        };
+        await emitFailed(step, stepKey, failedPayload, traceId);
+      }
+      // Dead dependency → record signal + fail the run (recoverable → retriable
+      // park + auto-resume; otherwise NonRetriable). Business rejections carry no
+      // `degraded` and behave as before (terminal _FAILED, returns).
+      if (degraded) {
+        await reportDependencyDegraded(degraded, depCtx);
+      }
+      return { ok: false, candidate_id: candidateId, job_requisition_id: jrId, error: inviteResult.error_code };
     }
 
     // ── 2b. Persistence-warning 旁路:RoboHire 邀请送出但自己落库失败 ─────

@@ -16,12 +16,14 @@ import type {
   MatchResumeCheckResult,
   MatchResumeCheckStats,
   MatchResumeStepGroup,
+  Rule,
   RuleCheckInput,
   RuleCheckRuntimeContext,
   RuleExplanation,
   RuleNextAction,
   RuleResult,
   RuleStatus,
+  Severity,
 } from './types';
 import { chatComplete } from '@/server/llm/gateway';
 import { ruleCheckLog } from './log';
@@ -134,6 +136,7 @@ function failSafe(
       fail_reason: reason,
       raw_llm_text: base.raw_llm_text,
       llm_finish_reason: base.llm_finish_reason,
+      llm_error_detail: base.llm_error_detail,
     },
   };
 }
@@ -263,16 +266,62 @@ function statsFromResults(results: RuleResult[]): MatchResumeCheckStats {
   return s;
 }
 
-export function foldDecision(stats: MatchResumeCheckStats): MatchResumeCheckResult['decision'] {
-  // Only REAL rule violations (status='fail') block matching. Missing data
-  // (status='insufficient_info') folds to PASS — we shouldn't penalize the
-  // candidate for incomplete graph context.
-  //
-  // 2026-05-26: `pending`(规则要求 HSM 主观判断)不再单列 REVIEW、不再阻断 —
-  // 直接折成 PASS,流程继续(rule_check_result 二元化:通过/未通过)。
-  // 这条 rule 的 pending 仍会在 audit/flag 里单独显示,只是不影响整体推进。
-  if (stats.fail > 0) return 'FAIL';
+/** agent 无法自证「达标」的状态 —— 信息不足 / 需 HSM 主观判断 / 未能评估。 */
+const BLOCK_WHEN_UNCONFIRMABLE: ReadonlySet<RuleStatus> = new Set<RuleStatus>([
+  'insufficient_info',
+  'pending',
+  'not_executed',
+]);
+
+/** 取规则严重度:优先用 fetch 时算好的 severity,否则按 enforcement+failure 推导。
+ *  未知(字段全缺)→ terminal 兜底(fail-closed:无法判定就当底线规则)。 */
+export function severityOfRule(r: Pick<Rule, 'severity' | 'enforcementLevel' | 'failurePolicy'>): Severity {
+  if (r.severity) return r.severity;
+  if (r.enforcementLevel === 'optional' && r.failurePolicy === 'warn') return 'flag_only';
+  if (r.enforcementLevel === 'mandatory' && r.failurePolicy === 'warn') return 'needs_human';
+  return 'terminal';
+}
+
+export function foldDecision(
+  ruleResults: RuleResult[],
+  severityByRuleId: Map<string, Severity>,
+): MatchResumeCheckResult['decision'] {
+  // 2026-06-01 fail-closed 政策(替代 2026-05-26 的全量折 PASS):
+  //   - status='fail'(确认违反,已引用具体字段+数值)→ 无条件 FAIL(与历史一致)。
+  //   - insufficient_info / pending / not_executed(agent 无法自证达标)→ 只要落在
+  //     底线规则(severity≠flag_only,即 terminal/needs_human)上就 FAIL。提示类
+  //     (flag_only,实际已被 fetcher 过滤出场)不阻断。rule_id 查不到 severity →
+  //     当 terminal 兜底(fail-closed)。
+  //   - 只剩 pass / not_triggered / 命中 flag_only 的不确定状态 → PASS。
+  // per-rule 真实 status 不在这里改(LLM 仍诚实分类),只改 server 端汇总。
+  for (const r of ruleResults) {
+    if (r.status === 'fail') return 'FAIL';
+    if (BLOCK_WHEN_UNCONFIRMABLE.has(r.status)) {
+      const sev = severityByRuleId.get(r.rule_id) ?? 'terminal';
+      if (sev !== 'flag_only') return 'FAIL';
+    }
+  }
   return 'PASS';
+}
+
+/** 2026-06-01:不通过原因里给「非确认违反」类状态加人工复核标注,让 reason 文本
+ *  自带「需人工复核」信号(写主表/Neo4j/事件/审计都带)。 */
+export function explanationTag(status: RuleExplanation['status']): string {
+  switch (status) {
+    case 'insufficient_info':
+      return '（信息不足·需人工复核）';
+    case 'pending':
+      return '（需 HSM 人工复核）';
+    case 'not_executed':
+      return '（未能评估·需人工复核）';
+    default:
+      return ''; // 'fail' — 确认违反,已引用具体数值,无需标注
+  }
+}
+
+/** 统一的不通过原因行 `[id] 名称（标注）: 理由`。四处落库/发事件共用,保证一致。 */
+export function formatExplanation(e: RuleExplanation): string {
+  return `[${e.rule_id}] ${e.rule_name}${explanationTag(e.status)}: ${e.reason ?? ''}`;
 }
 
 export type RunRuleCheckOptions = {
@@ -439,6 +488,7 @@ export async function runRuleCheck(
       rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
       rule_source: sourceResult.source,
+      llm_error_detail: msg,
     });
   }
 
@@ -495,7 +545,11 @@ export async function runRuleCheck(
 
   const stats = statsFromResults(ruleResults);
   const explanations = deriveExplanations(ruleResults);
-  const decision = foldDecision(stats);
+  // severity 取本次 fetch 到的规则(enforcement+failure 派生);fold 用它做底线规则门控。
+  const severityByRuleId = new Map<string, Severity>(
+    sourceResult.rules.map((r) => [r.id, severityOfRule(r)]),
+  );
+  const decision = foldDecision(ruleResults, severityByRuleId);
   ruleCheckLog.info('runRuleCheck.done', {
     candidate_id: input.runtime_context.candidate_id,
     decision, stats, expected_rule_count: expectedRuleCount,

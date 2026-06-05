@@ -34,9 +34,11 @@ import type {
 } from '@/lib/partner-pg/types';
 import {
   generateJdDirect,
-  RobohireApiError,
   type RobohireGenerateJdData,
 } from '@/lib/robohire-client';
+import { classifyRobohire } from '@/lib/dependency-health/classify';
+import { reportDependencyDegraded } from '@/lib/dependency-health/report';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import {
   writeJobPostingInstance,
   writeJobRequisitionInstance,
@@ -103,7 +105,7 @@ type RequirementLoggedEnvelope = {
 export const createJdAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'JD Generator',
+    name: 'Create JD Agent',
     retries: 1,
     triggers: [
       { event: 'REQUIREMENT_LOGGED' },
@@ -213,10 +215,24 @@ export const createJdAgent = inngest.createFunction(
         `client_id=${clientId} prompt_len=${prompt.length}`,
     );
 
+    // External-dependency-health context — fail the run (instead of false
+    // success) when RoboHire is dead, and let the monitor alert.
+    const depCtx = {
+      agent: 'JDGenerator',
+      runId: runId ?? null,
+      traceId: traceId ?? null,
+      domain: RECRUITMENT_DOMAIN_ID,
+      anchors: {
+        job_requisition_id: typeof requisitionId === 'string' ? requisitionId : undefined,
+        client_id: typeof clientId === 'string' ? clientId : undefined,
+      },
+    };
+
     // ── 4. 调 RoboHire: POST /api/v1/jobs/generate-jd (direct, F4) ──
     const generated = await step.run(`generate-${sanitize(requisitionId)}`, async () => {
+      let r: Awaited<ReturnType<typeof generateJdDirect>>;
       try {
-        const r = await generateJdDirect(
+        r = await generateJdDirect(
           {
             prompt,
             language: 'zh',
@@ -229,20 +245,20 @@ export const createJdAgent = inngest.createFunction(
           // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
           { traceId, logger: fileLogger },
         );
-        logger.info(
-          `[${AGENT_NAME}] RoboHire jobs/generate-jd OK · title="${r.data.title ?? '?'}" ` +
-            `parse=${r.meta?.stages?.parse} generate=${r.meta?.stages?.generate} ` +
-            `requestId=${r.requestId}`,
-        );
-        return r;
       } catch (e) {
-        if (e instanceof RobohireApiError && e.isClientError) {
-          throw new NonRetriableError(
-            `RoboHire jobs/generate-jd 4xx: ${e.httpStatus} ${e.code} ${e.message}`,
-          );
-        }
-        throw e;
+        const oc = classifyRobohire('generateJd', e);
+        if (!oc.ok) await reportDependencyDegraded(oc, depCtx);
+        throw e; // an error always classifies as degraded; this also fails the run
       }
+      // Silent degrade: 200 OK but no usable JD content.
+      const oc = classifyRobohire('generateJd', r);
+      if (!oc.ok) await reportDependencyDegraded(oc, depCtx);
+      logger.info(
+        `[${AGENT_NAME}] RoboHire jobs/generate-jd OK · title="${r.data.title ?? '?'}" ` +
+          `parse=${r.meta?.stages?.parse} generate=${r.meta?.stages?.generate} ` +
+          `requestId=${r.requestId}`,
+      );
+      return r;
     });
 
     const jdData = generated.data;

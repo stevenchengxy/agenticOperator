@@ -18,7 +18,11 @@ import { NonRetriableError } from 'inngest';
 import { saveMatchResultsToPartnerPg } from '@/lib/partner-pg/match-results';
 import { resolveMatchPayload } from '@/lib/partner-pg/_robohire-normalize';
 import { writeCandidateMatchResultInstance } from '@/lib/allmeta-writers';
-import { matchResumeDirect, RobohireApiError } from '@/lib/robohire-client';
+import { matchResumeDirect } from '@/lib/robohire-client';
+import { classifyRobohire } from '@/lib/dependency-health/classify';
+import { reportDependencyDegraded, isRecoverableReason } from '@/lib/dependency-health/report';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import type { DepOutcome } from '@/lib/dependency-health/types';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import {
@@ -37,7 +41,7 @@ const AGENT_NAME = 'matchResume';
 export const matchResumeAgent = inngest.createFunction(
   {
     id: AGENT_ID,
-    name: 'Resume Matcher',
+    name: 'Match Resume Agent',
     retries: 2,
     triggers: [{ event: 'MATCH_RULE_CHECK_PASSED' }],
   },
@@ -107,6 +111,21 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
     );
   }
 
+  // External-dependency-health context — when RoboHire is dead we still emit
+  // MATCH_FAILED (downstream keeps its context) but then fail the run instead of
+  // reporting false success, and the monitor alerts (没钱/故障/说不准).
+  const depCtx = {
+    agent: 'Matcher',
+    runId: runId ?? null,
+    traceId: traceId ?? null,
+    domain: RECRUITMENT_DOMAIN_ID,
+    anchors: {
+      candidate_id: candidateId || undefined,
+      job_requisition_id: data.job_requisition_id,
+      upload_id: uploadId || undefined,
+    },
+  };
+
   const matchResult = await step.run(`match-${stepKey}`, async () => {
     logger.info(
       `[${AGENT_NAME}] calling RoboHire /match-resume · jr=${data.job_requisition_id} ` +
@@ -119,46 +138,61 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
       resume_src: resumeSource,
       jd_chars: jdText.length,
     });
+    let r: Awaited<ReturnType<typeof matchResumeDirect>>;
     try {
-      const r = await matchResumeDirect(
+      r = await matchResumeDirect(
         { resume: resumeText, jd: jdText },
         // 显式传 fileLogger → RoboHire match-resume 完整 in/out 进 per-run 审计
         // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
         { traceId: traceId ?? undefined, logger: fileLogger },
       );
-      logger.info(
-        `[${AGENT_NAME}] RoboHire match OK · score=${r.data.matchScore} rec=${r.data.recommendation} requestId=${r.requestId}`,
-      );
-      return { ok: true as const, data: r.data, requestId: r.requestId, savedAs: r.savedAs };
     } catch (e) {
-      if (e instanceof RobohireApiError && e.isClientError) {
-        logger.error(`[${AGENT_NAME}] RoboHire match 4xx · ${e.code} — skipping JR`);
-        return { ok: false as const, error: `${e.code}: ${e.message}` };
-      }
-      throw e;
+      // Carry the classified degrade out so the handler can emit MATCH_FAILED
+      // then report+throw (instead of returning a green run).
+      const degraded = classifyRobohire('matchResume', e) as Extract<DepOutcome, { ok: false }>;
+      return { ok: false as const, error: `${degraded.reason}: ${degraded.detail}`, degraded };
     }
+    // Silent degrade: 200 OK but no usable match score.
+    const oc = classifyRobohire('matchResume', r);
+    if (!oc.ok) {
+      return { ok: false as const, error: `${oc.reason}: ${oc.detail}`, degraded: oc };
+    }
+    logger.info(
+      `[${AGENT_NAME}] RoboHire match OK · score=${r.data.matchScore} rec=${r.data.recommendation} requestId=${r.requestId}`,
+    );
+    return { ok: true as const, data: r.data, requestId: r.requestId, savedAs: r.savedAs };
   });
 
   if (!matchResult.ok) {
-    const failedPayload: MatchEventData = {
-      job_requisition_id: data.job_requisition_id,
-      candidate_id: candidateId || null,
-      matching_score: null,
-      upload_id: uploadId || null,
-      overall_status: '不匹配',
-      success: false,
-      data: { error_kind: 'robohire-match-call-failed' },
-      error: matchResult.error,
-    };
-    fileLogger.event('emit.match-failed-robohire-error', {
-      candidate_id: candidateId,
-      job_requisition_id: data.job_requisition_id,
-      error: matchResult.error,
-    });
-    await step.sendEvent(`emit-match-failed-${stepKey}`, {
-      name: 'MATCH_FAILED',
-      data: failedPayload,
-    });
+    const oc = matchResult.degraded;
+    // Non-recoverable degrade (bad credentials / empty result) = we give up on
+    // this candidate → emit the terminal MATCH_FAILED so downstream is informed.
+    // Recoverable (out-of-funds / transient) → park + auto-resume after recovery,
+    // so we do NOT emit a terminal event (avoids a spurious MATCH_FAILED before a
+    // later retry-success). Mirrors rule-check's infra-failure park model.
+    if (!isRecoverableReason(oc.reason)) {
+      const failedPayload: MatchEventData = {
+        job_requisition_id: data.job_requisition_id,
+        candidate_id: candidateId || null,
+        matching_score: null,
+        upload_id: uploadId || null,
+        overall_status: '不匹配',
+        success: false,
+        data: { error_kind: 'robohire-match-call-failed' },
+        error: matchResult.error,
+      };
+      fileLogger.event('emit.match-failed-robohire-error', {
+        candidate_id: candidateId,
+        job_requisition_id: data.job_requisition_id,
+        error: matchResult.error,
+      });
+      await step.sendEvent(`emit-match-failed-${stepKey}`, {
+        name: 'MATCH_FAILED',
+        data: failedPayload,
+      });
+    }
+    // Record the dependency signal + fail the run (recoverable → retriable park).
+    await reportDependencyDegraded(oc, depCtx);
     return { ok: false, job_requisition_id: data.job_requisition_id, error: matchResult.error };
   }
 

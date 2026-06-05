@@ -31,7 +31,10 @@ import {
   writeCandidateInstance,
   writeResumeInstance,
 } from '@/lib/allmeta-writers';
-import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
+import { parseResumeDirect } from '@/lib/robohire-client';
+import { classifyRobohire } from '@/lib/dependency-health/classify';
+import { reportDependencyDegraded } from '@/lib/dependency-health/report';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { prisma } from '@/server/db';
@@ -46,7 +49,7 @@ type RaasParseResumeData = Record<string, unknown> & { name?: string | null };
 export const resumeParserAgent = inngest.createFunction(
   {
     id: 'resume-parser-agent',
-    name: 'Resume Parser',
+    name: 'Resume Parser Agent',
     retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
     triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
@@ -114,6 +117,21 @@ export const resumeParserAgent = inngest.createFunction(
           ? raw.sourcingChannelId.trim()
           : null;
     const traceId = getTraceId(event.data);
+
+    // External-dependency-health context — passed to reportDependencyDegraded
+    // when RoboHire is found dead (out-of-funds / fault / empty-200) so the run
+    // fails instead of reporting false success, and the monitor can alert.
+    const depCtx = {
+      agent: 'ResumeParser',
+      runId: runId ?? null,
+      traceId: traceId ?? null,
+      domain: RECRUITMENT_DOMAIN_ID,
+      anchors: {
+        upload_id: typeof upload_id === 'string' ? upload_id : undefined,
+        job_requisition_id: typeof job_requisition_id === 'string' ? job_requisition_id : undefined,
+        client_id: typeof client_id === 'string' ? client_id : undefined,
+      },
+    };
 
     if (!upload_id) {
       throw new NonRetriableError(
@@ -185,19 +203,21 @@ export const resumeParserAgent = inngest.createFunction(
 
         // 2) POST /api/v1/parse-resume (multipart) — 直连 RoboHire
         const pdfFilename = (filename as string | undefined) ?? 'resume.pdf';
-        let parseRes;
+        let parseRes: Awaited<ReturnType<typeof parseResumeDirect>>;
         try {
           // 显式传 fileLogger → RoboHire parse-resume 完整 in/out 进 per-run 审计
           // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
           parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId, logger: fileLogger });
         } catch (e) {
-          if (e instanceof RobohireApiError && e.isClientError) {
-            throw new NonRetriableError(
-              `RoboHire POST /parse-resume 4xx: ${e.httpStatus} ${e.code} ${e.message}`,
-            );
-          }
-          throw e;
+          // Out-of-funds / fault / network — classify, record the dependency
+          // signal, and throw (run fails/parks; quota auto-resumes after top-up).
+          const oc = classifyRobohire('parseResume', e);
+          if (!oc.ok) await reportDependencyDegraded(oc, depCtx);
+          throw e; // an error always classifies as degraded; this also fails the run
         }
+        // Silent degrade: 200 OK but RoboHire extracted nothing usable.
+        const oc = classifyRobohire('parseResume', parseRes);
+        if (!oc.ok) await reportDependencyDegraded(oc, depCtx);
         logger.info(
           `[resume-persist] RoboHire parse-resume OK · cached=${parseRes.cached} ` +
             `name="${parseRes.data?.name ?? '?'}" requestId=${parseRes.requestId}`,

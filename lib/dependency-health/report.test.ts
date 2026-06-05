@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NonRetriableError } from 'inngest';
-import { reportDependencyDegraded } from './report';
+import { reportDependencyDegraded, recordDependencySignal, isRecoverableReason } from './report';
 import type { DepOutcome } from './types';
 
 function degraded(over: Partial<Extract<DepOutcome, { ok: false }>>): Extract<DepOutcome, { ok: false }> {
@@ -63,5 +63,30 @@ describe('reportDependencyDegraded', () => {
     };
     await reportDependencyDegraded(degraded({}), { domain: '招聘-v1' }, { recordLogEvent: slowRecord }).catch(() => {});
     expect(wrote).toBe(true);
+  });
+});
+
+describe('recordDependencySignal', () => {
+  it('writes the signal and does NOT throw (caller owns the throw/park)', async () => {
+    const writes: any[] = [];
+    await recordDependencySignal(
+      degraded({ provider: 'llm', op: 'ruleCheck', reason: 'quota' }),
+      { agent: 'RuleCheck', runId: 'run_9', domain: '招聘-v1' },
+      { recordLogEvent: async (i) => void writes.push(i) },
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0].type).toBe('dependency_degraded');
+    expect(JSON.parse(writes[0].payloadJson)).toMatchObject({ provider: 'llm', reason: 'quota' });
+  });
+});
+
+describe('isRecoverableReason', () => {
+  it('quota/rate_limit/network/server are recoverable; auth/empty are not', () => {
+    expect(isRecoverableReason('quota')).toBe(true);
+    expect(isRecoverableReason('rate_limit')).toBe(true);
+    expect(isRecoverableReason('network')).toBe(true);
+    expect(isRecoverableReason('server')).toBe(true);
+    expect(isRecoverableReason('auth')).toBe(false);
+    expect(isRecoverableReason('empty')).toBe(false);
   });
 });

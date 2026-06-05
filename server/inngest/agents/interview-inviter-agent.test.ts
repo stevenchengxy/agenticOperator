@@ -376,23 +376,27 @@ describe('interviewInviterAgentHandler — error paths', () => {
     expect(failedEmit?.payload.data.payload.error_code).toBe('MISSING_PAYLOAD');
   });
 
-  it('RoboHire 422(GoHire reject) → emit _FAILED ROBOHIRE_4XX,不重试', async () => {
+  it('RoboHire 422(GoHire reject, non-recoverable) → emit _FAILED ROBOHIRE_4XX + 标失败(throws)', async () => {
     mockInvite.mockRejectedValueOnce(
       new RobohireApiError(422, 'CLIENT', 'gohire_invitation_failed', 'req_x'),
     );
     const { step, calls } = fakeStep();
-    const out = await interviewInviterAgentHandler({
-      event: envelope({
-        candidate_id: 'C1',
-        job_requisition_id: 'JR1',
-        resume_text: 'r',
-        jd_text: 'j',
+    // Dead-dependency degrade now fails the run instead of returning a green
+    // success. A non-recoverable (auth/bad-input) degrade still emits the
+    // terminal _FAILED before throwing so downstream is informed.
+    await expect(
+      interviewInviterAgentHandler({
+        event: envelope({
+          candidate_id: 'C1',
+          job_requisition_id: 'JR1',
+          resume_text: 'r',
+          jd_text: 'j',
+        }),
+        step,
+        logger: fakeLogger(),
+        runId: 'r1',
       }),
-      step,
-      logger: fakeLogger(),
-      runId: 'r1',
-    });
-    expect(out).toMatchObject({ ok: false, error: 'ROBOHIRE_4XX' });
+    ).rejects.toThrow();
     expect(mockWriteComm).not.toHaveBeenCalled();
     expect(mockWriteIvr).not.toHaveBeenCalled();
     const failedEmit = calls.events.find(
@@ -405,27 +409,31 @@ describe('interviewInviterAgentHandler — error paths', () => {
     });
   });
 
-  it('RoboHire 402 quota → emit _FAILED ROBOHIRE_QUOTA', async () => {
+  it('RoboHire 402 quota(recoverable) → 标失败(throws) + parks, NO terminal _FAILED (auto-resumes after top-up)', async () => {
     mockInvite.mockRejectedValueOnce(
       new RobohireApiError(402, 'QUOTA_EXHAUSTED', 'out of quota'),
     );
     const { step, calls } = fakeStep();
-    const out = await interviewInviterAgentHandler({
-      event: envelope({
-        candidate_id: 'C1',
-        job_requisition_id: 'JR1',
-        resume_text: 'r',
-        jd_text: 'j',
+    // Out-of-funds is recoverable: the run parks (throws retriable) and resumes
+    // after a top-up, so we must NOT emit a terminal INTERVIEW_INVITATION_FAILED
+    // (it would race a later retry-success).
+    await expect(
+      interviewInviterAgentHandler({
+        event: envelope({
+          candidate_id: 'C1',
+          job_requisition_id: 'JR1',
+          resume_text: 'r',
+          jd_text: 'j',
+        }),
+        step,
+        logger: fakeLogger(),
+        runId: 'r1',
       }),
-      step,
-      logger: fakeLogger(),
-      runId: 'r1',
-    });
-    expect(out).toMatchObject({ ok: false, error: 'ROBOHIRE_QUOTA' });
+    ).rejects.toThrow();
     const failedEmit = calls.events.find(
       (e) => e.payload.name === 'INTERVIEW_INVITATION_FAILED',
     );
-    expect(failedEmit?.payload.data.payload.error_code).toBe('ROBOHIRE_QUOTA');
+    expect(failedEmit).toBeUndefined();
   });
 
   it('RoboHire 2xx 但 success=false(GoHire upload_resume 失败)→ emit _FAILED GOHIRE_REJECTED 不重试', async () => {
