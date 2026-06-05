@@ -1,13 +1,31 @@
 // 消息通知中心 API — reads the curated Notification table.
-//   GET  /api/notifications?kind=&category=&severity=&needsHuman=&unread=&cursor=&limit=
+//   GET  /api/notifications?kind=&category=&severity=&needsHuman=&unread=&cursor=&limit=&domain=
 //   POST /api/notifications   { action: 'read' | 'read_all' | 'ack', id? }
 //
 // The full log/trace lives in the audit log; this endpoint serves only the
 // surfaced message+alert subset for the notification center UI.
+//
+// Domain scope: when `domain` is passed (the active 业务领域 from the AppBar),
+// notifications are scoped to that domain — other domains' notifications are
+// hidden — EXCEPT category='system' (系统消息), which always shows regardless of
+// domain. Null-domain (legacy / cross-domain business) rows are folded into the
+// recruitment default so the original recruitment view is unchanged.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { summarizePendingAlerts } from '@/server/notifications/summarize';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+
+/** Build the domain-scope where-fragment: system always shows; otherwise scope
+ *  to the active domain (recruitment default also absorbs null-domain rows). */
+function domainScopeWhere(domain: string | null): Record<string, unknown> {
+  if (!domain) return {};
+  const isRecruitmentDefault =
+    domain === RECRUITMENT_DOMAIN_ID || domain === 'RAAS-v1' || domain === 'raas';
+  const or: Record<string, unknown>[] = [{ category: 'system' }, { domain }];
+  if (isRecruitmentDefault) or.push({ domain: null });
+  return { OR: or };
+}
 
 /** Resolve a notification's deep-link target (the run/event single process). */
 function hrefFor(linkKind: string | null, linkId: string | null): string | null {
@@ -34,7 +52,9 @@ export async function GET(req: Request): Promise<Response> {
   const needsHuman = url.searchParams.get('needsHuman') === '1';
   const unread = url.searchParams.get('unread') === '1';
   const cursor = url.searchParams.get('cursor'); // ISO ts
+  const domain = url.searchParams.get('domain')?.trim() || null; // active 业务领域
   const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+  const scope = domainScopeWhere(domain);
 
   // Lazy-on-view: kick off AI enrichment of un-summarized firing alerts in the
   // background (fire-and-forget — AO runs as a persistent `next start` server,
@@ -49,14 +69,15 @@ export async function GET(req: Request): Promise<Response> {
   if (needsHuman) where.disposition = 'needs_human';
   if (unread) where.readAt = null;
   if (cursor) where.ts = { lt: new Date(cursor) };
+  Object.assign(where, scope); // domain scope (system always shown)
 
   try {
     const [rows, byCategory, byKind, needsHumanCount, unreadCount] = await Promise.all([
       prisma.notification.findMany({ where, orderBy: { ts: 'desc' }, take: limit + 1 }),
-      prisma.notification.groupBy({ by: ['category'], _count: { _all: true } }),
-      prisma.notification.groupBy({ by: ['kind'], _count: { _all: true } }),
-      prisma.notification.count({ where: { disposition: 'needs_human', readAt: null } }),
-      prisma.notification.count({ where: { readAt: null } }),
+      prisma.notification.groupBy({ by: ['category'], _count: { _all: true }, where: scope }),
+      prisma.notification.groupBy({ by: ['kind'], _count: { _all: true }, where: scope }),
+      prisma.notification.count({ where: { disposition: 'needs_human', readAt: null, ...scope } }),
+      prisma.notification.count({ where: { readAt: null, ...scope } }),
     ]);
 
     const hasMore = rows.length > limit;
@@ -68,6 +89,7 @@ export async function GET(req: Request): Promise<Response> {
       kind: n.kind,
       severity: n.severity,
       category: n.category,
+      domain: n.domain,
       source: n.source,
       title: n.title,
       body: n.aiSummary ?? n.body,
