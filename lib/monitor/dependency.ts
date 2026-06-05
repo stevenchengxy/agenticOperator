@@ -23,7 +23,7 @@ const PREFIX = 'dep_down.';
 /** Clean infra faults — unambiguous "their service is broken" signals. */
 const CLEAN_FAULT = new Set<DepFailure['reason']>(['server', 'network']);
 
-type Judgment = { label: DepLabel; level: CaptureInput['level'] } | null;
+type Judgment = { label: DepLabel; level: 'critical' | 'warn' } | null;
 
 /** Render the windowed 没钱/故障/说不准 verdict for one (provider, domain) group. */
 export function judgeDependency(failures: DepFailure[], t: MonitorThresholds): Judgment {

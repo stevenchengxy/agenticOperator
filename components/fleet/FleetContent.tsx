@@ -1,11 +1,13 @@
 "use client";
 import React from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Btn } from "@/components/shared/atoms";
 import { InngestPill } from "@/components/shared/InngestPill";
+import { DraftStorePanel } from "./DraftStorePanel";
+import { AgentDetailDrawer } from "./AgentDetailDrawer";
+import { DependencyHealthCard } from "./DependencyHealthCard";
 import { fetchJson } from "@/lib/api/client";
 import type { AgentsResponse, AgentRow } from "@/lib/api/types";
 import { isReal, deploymentKind, type DeploymentKind } from "@/lib/agent-mapping";
@@ -32,7 +34,7 @@ type Lifecycle = "active" | "paused" | "deprecated" | "draft";
 type FleetStatus = "deployed" | "paused" | "not_deployed";
 type Realness = DeploymentKind; // "real" | "shell" | "unbuilt"
 
-type FleetRow = {
+export type FleetRow = {
   short: string;
   name: string;
   roleK: string;
@@ -295,7 +297,22 @@ export function FleetContent() {
   const setWindow = (next: typeof windowId) =>
     setUrl((p) => { if (next === "7d") p.delete("window"); else p.set("window", next); });
 
-  const [behaviorModal, setBehaviorModal] = React.useState(false);
+  // 部署智能体 — drafts store drawer. Auto-opens when the Ontology Generator
+  // routes here after generating (`/fleet?drafts=open`).
+  const [draftStoreOpen, setDraftStoreOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (sp.get("drafts") === "open") setDraftStoreOpen(true);
+  }, [sp]);
+
+  // Agent detail drawer — clicking a row opens a right-side panel over the list
+  // (it does NOT navigate to a new page). The open agent lives in the URL
+  // (?agent=<short>) like every other Fleet filter, so it's deep-linkable and
+  // back/Esc-closable. We resolve the row from effectiveRows (not a frozen
+  // snapshot) so the drawer re-reads the 5s-refreshed live stats.
+  const selectedShort = sp.get("agent");
+  const selectedRow = selectedShort ? effectiveRows.find((r) => r.short === selectedShort) ?? null : null;
+  const openAgent = (short: string) => setUrl((p) => p.set("agent", short));
+  const closeAgent = () => setUrl((p) => p.delete("agent"));
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
@@ -303,11 +320,8 @@ export function FleetContent() {
       <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
         <div className="flex items-start gap-6">
           <div className="flex-1 min-w-0">
-            <div className="text-[10.5px] uppercase tracking-[0.16em] font-medium text-ink-4 mb-2">
-              {t("fleet_title")} · AGENT FLEET
-            </div>
             <h1
-              className="m-0 text-ink-1 tabular-nums"
+              className="m-0 text-ink-1"
               style={{
                 fontFamily: 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif',
                 fontWeight: 500,
@@ -316,11 +330,8 @@ export function FleetContent() {
                 lineHeight: 1.15,
               }}
             >
-              {agentsRes === null ? t("fleet_title") : `${total} ${t("flx_count_suffix")}`}
+              {t("fleet_title")}
             </h1>
-            <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-              {t("fleet_sub")}
-            </div>
           </div>
           <div className="flex items-center gap-3 mt-1 shrink-0">
             <InngestPill />
@@ -331,7 +342,7 @@ export function FleetContent() {
                 {t("flx_partial_data")}
               </span>
             )}
-            <Btn variant="primary" size="sm" onClick={() => setBehaviorModal(true)}>
+            <Btn variant="primary" size="sm" onClick={() => setDraftStoreOpen(true)}>
               <Ic.plus /> {t("deploy_agent")}
             </Btn>
           </div>
@@ -366,6 +377,12 @@ export function FleetContent() {
 
       {/* list */}
       <div className="flex-1 min-h-0" style={{ padding: "4px 32px 48px" }}>
+        {/* External dependency health — surfaces a dead paid dependency
+            (RoboHire / AI gateway out-of-funds / fault) at a glance, above the
+            roster, so an on-call sees it the moment they land on /fleet. */}
+        <div className="mb-4 mt-1">
+          <DependencyHealthCard />
+        </div>
         {agentsRes === null && (
           <div className="text-ink-3 text-[13px] text-center py-16">{t("flx_loading")}</div>
         )}
@@ -383,14 +400,14 @@ export function FleetContent() {
           </div>
         )}
         {agentsRes !== null && effectiveRows.length === 0 ? (
-          <DomainEmptyStateCard onDeploy={() => setBehaviorModal(true)} t={t} />
+          <DomainEmptyStateCard onDeploy={() => setDraftStoreOpen(true)} t={t} />
         ) : (
           <>
             {agentsRes !== null && grouped.map((g) => (
               <section key={g.key}>
                 {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} t={t} />}
                 {g.rows.map((r, i) => (
-                  <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} />
+                  <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} onOpen={openAgent} />
                 ))}
               </section>
             ))}
@@ -408,9 +425,8 @@ export function FleetContent() {
         )}
       </div>
 
-      {behaviorModal && (
-        <BehaviorPlaceholderModal onClose={() => setBehaviorModal(false)} t={t} />
-      )}
+      <DraftStorePanel open={draftStoreOpen} onClose={() => setDraftStoreOpen(false)} />
+      <AgentDetailDrawer row={selectedRow} onClose={closeAgent} t={t} />
     </div>
   );
 }
@@ -658,13 +674,23 @@ function GroupHeader({ title, rows, t }: { title: string; rows: FleetRow[]; t: (
   );
 }
 
-function AgentListRow({ row, idx, t, onTogglePause }: { row: FleetRow; idx: number; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void }) {
+function AgentListRow({ row, idx, t, onTogglePause, onOpen }: { row: FleetRow; idx: number; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void; onOpen: (short: string) => void }) {
   const stub = row.realness === "unbuilt";
   const dim = row.lifecycle === "deprecated";
   const roleLabel = t(row.roleK);
   return (
     <div
-      className="group relative grid gap-4 border-b border-line ao-fade-rise ao-hover-lift"
+      role="button"
+      tabIndex={0}
+      aria-label={`open ${row.name}`}
+      onClick={() => onOpen(row.short)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(row.short);
+        }
+      }}
+      className="group relative grid gap-4 border-b border-line ao-fade-rise ao-hover-lift cursor-pointer"
       style={{
         gridTemplateColumns: GRID,
         padding: "14px 12px",
@@ -675,14 +701,9 @@ function AgentListRow({ row, idx, t, onTogglePause }: { row: FleetRow; idx: numb
         ["--ao-i"]: Math.min(idx, 18),
       } as React.CSSProperties}
     >
-      {/* the row itself is a link; the action button is a sibling that
-          captures clicks before the Link does */}
-      <Link
-        href={`/fleet/${row.short}`}
-        className="absolute inset-0"
-        style={{ textDecoration: "none" }}
-        aria-label={`open ${row.name}`}
-      />
+      {/* The whole row opens the detail drawer (onClick above). The pause
+          toggle is the only interactive child and stops propagation so it
+          doesn't also open the drawer. */}
 
       {/* identity — color tile + name + role/team */}
       <div className="relative flex items-center gap-2.5 min-w-0">
@@ -811,34 +832,6 @@ function LiveIndicator({ lastRefresh, t }: { lastRefresh: string | null; t: (k: 
       />
       {live ? t("flx_live") : t("flx_connecting")}
     </span>
-  );
-}
-
-// ── modal ─────────────────────────────────────────────────────────
-
-function BehaviorPlaceholderModal({ onClose, t }: { onClose: () => void; t: (k: string) => string }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center"
-      style={{ background: "color-mix(in oklab, var(--c-ink-1) 35%, transparent)" }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-surface rounded-lg border border-line shadow-sh-3"
-        style={{ padding: "24px 28px", maxWidth: 460 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="m-0 text-ink-1" style={{ fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em" }}>
-          {t("f2_behavior_not_live_title")}
-        </h2>
-        <p className="text-ink-2 mt-3" style={{ fontSize: 13, lineHeight: 1.55 }}>
-          {t("f2_behavior_not_live_body")}
-        </p>
-        <div className="flex justify-end mt-6">
-          <Btn variant="primary" size="sm" onClick={onClose}>{t("flx_close")}</Btn>
-        </div>
-      </div>
-    </div>
   );
 }
 
