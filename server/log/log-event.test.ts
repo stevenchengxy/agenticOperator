@@ -25,6 +25,9 @@ describe('levelCategoryFor', () => {
   it('maps hitl to notice', () => {
     expect(levelCategoryFor('hitl')).toEqual({ level: 'notice', category: 'hitl' });
   });
+  it('maps dependency_degraded to its own warn/dependency lane', () => {
+    expect(levelCategoryFor('dependency_degraded')).toEqual({ level: 'warn', category: 'dependency' });
+  });
   it('defaults unknown types to info/info', () => {
     expect(levelCategoryFor('something_new')).toEqual({ level: 'info', category: 'info' });
   });

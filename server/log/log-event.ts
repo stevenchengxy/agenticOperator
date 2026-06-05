@@ -20,6 +20,11 @@ export function levelCategoryFor(type: string): LevelCategory {
   switch (type) {
     case 'agent_error':
       return { level: 'error', category: 'error' };
+    case 'dependency_degraded':
+      // External paid dependency (RoboHire / LLM gateway) returned an error or
+      // an empty-200. Its own `dependency` category is the queryable lane the
+      // monitor reads (lib/monitor/dependency.ts). See the dep-health spec.
+      return { level: 'warn', category: 'dependency' };
     case 'step.failed':
       return { level: 'error', category: 'step' };
     case 'anomaly':
