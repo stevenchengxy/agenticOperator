@@ -22,12 +22,45 @@ import { healthMonitor } from "../lib/monitor/health";
 import { slaMonitor } from "../lib/monitor/sla";
 import { costMonitor } from "../lib/monitor/cost";
 import { errorRateMonitor } from "../lib/monitor/error-rate";
+import { runEvalSample } from "../lib/monitor/run-eval";
+import { resolveMonitorConfig } from "../lib/monitor/monitor-config";
+import { makeLlmJudge, makeJury } from "../lib/monitor/llm-judge";
+import { createPgEvalStore, getMonitorConfig, recentAuditSamples } from "../lib/monitor/pg-eval-store";
+import { RECRUITMENT_DOMAIN_ID } from "../lib/domain-ids";
 
 const ENABLED = process.env.MONITOR_SWEEP !== "0";
+const EVAL_ENABLED = process.env.MONITOR_EVAL !== "0";
 const INTERVAL_MS = Number(process.env.MONITOR_SWEEP_INTERVAL_MS) || 60_000;
+const EVAL_WINDOW_MS = 60 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor];
+
+// AI fact-monitor — sampled groundedness eval over recent rule-check audits.
+// Fire-and-forget so it NEVER blocks or breaks the deterministic sweep; judges
+// degrade to a skip when the gateway is down. Each audit is judged at most once.
+async function runEvalTick(): Promise<void> {
+  const domain = RECRUITMENT_DOMAIN_ID;
+  const config = resolveMonitorConfig(await getMonitorConfig(domain), domain);
+  const samples = await recentAuditSamples(EVAL_WINDOW_MS);
+  if (samples.length === 0) return;
+  const primaryModel = process.env.AI_MODEL || "openai/gpt-5.4";
+  const r = await runEvalSample({
+    samples,
+    config,
+    primaryJudge: makeLlmJudge(),
+    juryJudges: makeJury(primaryModel, 2),
+    store: createPgEvalStore(),
+    record: (f) => recordNotification(f),
+    sweepWindow: new Date().toISOString().slice(0, 13),
+  });
+  if (r.evaluated > 0 || r.skipped > 0) {
+    console.log(
+      `[monitor] eval — evaluated=${r.evaluated} contested=${r.contested} ` +
+        `flagged=${r.flagged} skipped=${r.skipped}`,
+    );
+  }
+}
 
 let stopping = false;
 
@@ -51,6 +84,12 @@ async function loop(): Promise<void> {
       );
     } catch (e) {
       console.error(`[monitor] tick FAILED: ${(e as Error).message}`);
+    }
+    // fire-and-forget AI eval — must not block or break the deterministic sweep
+    if (EVAL_ENABLED) {
+      void runEvalTick().catch((e) =>
+        console.error(`[monitor] eval FAILED: ${(e as Error).message}`),
+      );
     }
     if (stopping) break;
     await sleep(Math.max(0, INTERVAL_MS - (Date.now() - t0)));
