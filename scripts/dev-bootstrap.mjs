@@ -123,4 +123,36 @@ if (pgReady && process.env.ARCHIVE_ENABLED !== "0") {
   warn("skipping archiver (Postgres not ready). Start it later with `npm run archive`.");
 }
 
+// 5. Monitor sweeper (deterministic health/SLA/cost/error monitors) — background,
+//    dedup-guarded, soft-fail. Off-Inngest; reads the archive, writes Notification.
+if (pgReady && process.env.MONITOR_SWEEP !== "0") {
+  let alreadyRunning = false;
+  try {
+    execSync("pgrep -f scripts/monitor-sweeper", { cwd: ROOT, stdio: "ignore" });
+    alreadyRunning = true;
+  } catch {
+    alreadyRunning = false; // pgrep exits non-zero when no match
+  }
+  if (alreadyRunning) {
+    log("monitor sweeper already running — leaving it.");
+  } else {
+    try {
+      mkdirSync(resolve(ROOT, "logs"), { recursive: true });
+      const out = openSync(resolve(ROOT, "logs/monitor-sweeper.log"), "a");
+      const child = spawn("npm", ["run", "monitor:sweep"], {
+        cwd: ROOT,
+        detached: true,
+        stdio: ["ignore", out, out],
+      });
+      child.unref();
+      log("started monitor sweeper in background → logs/monitor-sweeper.log");
+    } catch (e) {
+      warn(`could not start monitor sweeper: ${e.message}`);
+      warn("manual: run `npm run monitor:sweep` in another terminal");
+    }
+  }
+} else if (!pgReady) {
+  warn("skipping monitor sweeper (Postgres not ready). Start it later with `npm run monitor:sweep`.");
+}
+
 log("ready");

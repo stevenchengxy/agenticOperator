@@ -12,7 +12,7 @@ import {
   COST_CONTROL_DOMAIN_ID,
   COST_CONTROL_EVENT_NS,
   RECRUITMENT_DOMAIN_ID,
-} from '@/lib/domain-ids';
+} from '../domain-ids';
 
 /** A running run + its latest step time (the liveness heartbeat). */
 export interface RunHeartbeat {
