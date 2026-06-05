@@ -10,6 +10,7 @@ function fakePort(inflight: RunHeartbeat[]): MonitorReadPort {
     tokenUsageByRun: async () => ({}),
     toolStepCounts: async () => ({}),
     errorWindow: async () => ({ total: 0, byAgent: {} }),
+    dependencyFailures: async () => [],
   };
 }
 

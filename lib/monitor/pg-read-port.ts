@@ -6,12 +6,14 @@
 import { prisma } from '../../server/db';
 import { getRunTokenUsage } from './run-token-usage';
 import type {
+  DepFailure,
   ErrorWindow,
   MonitorReadPort,
   RunHeartbeat,
   RunRef,
   StepTiming,
 } from './monitor-types';
+import { parseDependencyRow } from '../dependency-health/parse-signal';
 import type { ResolveDeps } from './resolve';
 
 export function createPgReadPort(): MonitorReadPort {
@@ -118,6 +120,21 @@ export function createPgReadPort(): MonitorReadPort {
         if (r.status === 'Failed') a.errors++;
       }
       return { total: rows.length, byAgent };
+    },
+
+    async dependencyFailures(windowMs: number): Promise<DepFailure[]> {
+      const cutoff = new Date(Date.now() - windowMs);
+      const rows = await prisma.logEvent.findMany({
+        where: { category: 'dependency', ts: { gte: cutoff } },
+        select: { runId: true, ts: true, payloadJson: true },
+        orderBy: { ts: 'asc' },
+      });
+      const out: DepFailure[] = [];
+      for (const r of rows) {
+        const f = parseDependencyRow(r);
+        if (f) out.push(f);
+      }
+      return out;
     },
   };
 }

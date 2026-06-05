@@ -11,6 +11,7 @@ function fakePort(steps: StepTiming[]): MonitorReadPort {
     tokenUsageByRun: async () => ({}),
     toolStepCounts: async () => ({}),
     errorWindow: async () => ({ total: 0, byAgent: {} }),
+    dependencyFailures: async () => [],
   };
 }
 

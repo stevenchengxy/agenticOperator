@@ -6,6 +6,7 @@
 // recordNotification pipeline. NO LLM, NO direct DB writes here.
 
 import type { CaptureInput } from '@/server/notifications/derive';
+import type { DepFailure } from '../dependency-health/types';
 import {
   ENERGY_DOMAIN_ID,
   ENERGY_EVENT_NS,
@@ -13,6 +14,8 @@ import {
   COST_CONTROL_EVENT_NS,
   RECRUITMENT_DOMAIN_ID,
 } from '../domain-ids';
+
+export type { DepFailure } from '../dependency-health/types';
 
 /** A running run + its latest step time (the liveness heartbeat). */
 export interface RunHeartbeat {
@@ -52,6 +55,8 @@ export interface MonitorReadPort {
   tokenUsageByRun(runIds: string[]): Promise<Record<string, number>>;
   toolStepCounts(runIds: string[]): Promise<Record<string, number>>;
   errorWindow(windowMs: number): Promise<ErrorWindow>;
+  /** Degraded external-dependency signals (LogEvent category 'dependency') in the window. */
+  dependencyFailures(windowMs: number): Promise<DepFailure[]>;
 }
 
 /**
@@ -74,6 +79,9 @@ export interface MonitorThresholds {
   toolLoop: number; // cost: per-run tool-step count over this is runaway
   errorRatePct: number; // error-rate: errors/total over this pct is a breach
   minVolume: number; // error-rate: suppress below this sample size
+  depFailWindowMs: number; // dependency: lookback window for degraded-call signals
+  depFailMinCount: number; // dependency: min failures before a fault/unknown fires (quota fires at 1)
+  depUnknownEscalateCount: number; // dependency: 'unknown' warn → critical at/above this count
 }
 
 export const DEFAULT_THRESHOLDS: MonitorThresholds = {
@@ -83,6 +91,9 @@ export const DEFAULT_THRESHOLDS: MonitorThresholds = {
   toolLoop: 40,
   errorRatePct: 30,
   minVolume: 5,
+  depFailWindowMs: 15 * 60_000,
+  depFailMinCount: 2,
+  depUnknownEscalateCount: 6,
 };
 
 /**

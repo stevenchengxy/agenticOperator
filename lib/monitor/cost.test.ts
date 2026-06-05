@@ -15,6 +15,7 @@ function fakePort(opts: {
     tokenUsageByRun: async () => opts.tokens,
     toolStepCounts: async () => opts.tools,
     errorWindow: async () => ({ total: 0, byAgent: {} }),
+    dependencyFailures: async () => [],
   };
 }
 
