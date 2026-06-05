@@ -1174,3 +1174,71 @@ model ServiceHeartbeat {
 
   @@map("service_heartbeat")
 }
+
+// ─── Multi-agent monitor (P2/P3) ────────────────────────────────────────────
+// Durable observation cache for the AI fact-monitoring layer. NOT the
+// authoritative verdict store (RuleCheckAudit/OntologyRuleCheck stay
+// authoritative) — this holds judge opinions, jury votes, drift + calibration.
+// Retention: raw rows ~90d (covers the 60–90d judge-drift window), then prune.
+model MonitorEval {
+  id                  String   @id @default(cuid())
+  ts                  DateTime @default(now())
+
+  domain              String?
+  kind                String // "groundedness" | "jury" | "drift" | "calibration"
+  agent               String?
+  runId               String?  @map("run_id")
+  auditId             String?  @map("audit_id")
+  anchorsJson         String?  @map("anchors_json")
+
+  // judge opinion (non-authoritative)
+  score               Float?
+  verdict             String? // "grounded" | "not_grounded" | "contested" | "unsure"
+  juryVotesJson       String?  @map("jury_votes_json")
+  rationale           String?
+
+  // judge meta + reproducible drift
+  judgeModel          String?  @map("judge_model")
+  judgeFamily         String?  @map("judge_family")
+  judgePromptVersion  String?  @map("judge_prompt_version")
+  rubricVersion       String?  @map("rubric_version")
+  primaryAgreed       Boolean? @map("primary_agreed")
+
+  // cost / latency (evidences bounded jury cost)
+  llmPromptTokens     Int?     @map("llm_prompt_tokens")
+  llmCompletionTokens Int?     @map("llm_completion_tokens")
+  llmDurationMs       Int?     @map("llm_duration_ms")
+
+  // idempotency + autonomy gate
+  sampledFrom         String?  @map("sampled_from")
+  sweepWindow         String?  @map("sweep_window")
+  autonomyMode        String?  @map("autonomy_mode")
+  suppressed          Boolean  @default(false)
+
+  // calibration
+  humanLabel          String?  @map("human_label")
+  agreement           Float?
+
+  aiSource            String   @default("llm") @map("ai_source")
+
+  @@unique([kind, sampledFrom])
+  @@index([domain, ts])
+  @@index([kind, ts])
+  @@index([auditId])
+  @@index([runId])
+  @@map("monitor_eval")
+}
+
+// Per-domain monitor configuration (sampling %, judge family, autonomy level,
+// thresholds). Absent row → coded defaults (see lib/monitor/monitor-config.ts).
+model MonitorConfig {
+  domain              String   @id // Allmeta domain id
+  samplingPct         Int      @default(10) @map("sampling_pct")
+  judgeFamily         String?  @map("judge_family")
+  autonomy            String   @default("read_only") // "read_only" | "notify" | "act"
+  thresholdsJson      String?  @map("thresholds_json")
+  enabledMonitorsJson String?  @map("enabled_monitors_json")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("monitor_config")
+}
