@@ -1077,6 +1077,13 @@ model Notification {
   title    String
   body     String
 
+  // Business domain (Allmeta domain id, e.g. 能源调度-v1) this notification
+  // belongs to. Null = cross-domain/system or legacy (treated as the default
+  // recruitment domain). The notifications view scopes by the active business
+  // domain (other domains' notifications are hidden) EXCEPT category='system',
+  // which always shows regardless of domain.
+  domain          String?
+
   // correlation / deep-link
   runId           String?
   traceId         String?
@@ -1117,6 +1124,7 @@ model Notification {
   @@index([status])
   @@index([runId])
   @@index([readAt])
+  @@index([domain, ts])
   @@map("notification")
 }
 
