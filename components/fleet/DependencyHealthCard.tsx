@@ -3,32 +3,16 @@ import React from "react";
 import { useApp } from "@/lib/i18n";
 import { Card, CardHead, StatusDot, Badge } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
+import { friendlyDomainName } from "@/lib/domain-ids";
+import type { DependencyHealthResponse, DependencyHealthRow } from "@/lib/dependency-health/contract";
 
 // Dependency Health card — the at-a-glance operator view of whether a paid
 // external dependency (RoboHire / AI gateway) is dead, and the AO-side verdict
-// (没钱了 / 故障了 / 说不准). Mirrors the 消息通知 alert; polls the read API. A green
-// "all healthy" state is intentional — it's the reassurance an on-call wants.
+// (没钱了 / 故障了 / 说不准). Mirrors the 消息通知 alert (shares its wire contract);
+// polls the read API. A green "all healthy" state is intentional — it's the
+// reassurance an on-call wants.
 
-type Severity = "ok" | "info" | "warn" | "critical";
-type Label = "healthy" | "watching" | "out_of_funds" | "fault" | "unknown";
-
-interface ProviderRow {
-  provider: "robohire" | "llm";
-  label: Label;
-  severity: Severity;
-  failureCount: number;
-  sinceTs: string | null;
-  lastReason: string | null;
-  affectedOps: string[];
-  affectedDomains: string[];
-  notificationId: string | null;
-}
-interface Resp {
-  providers: ProviderRow[];
-  windowMinutes: number;
-  generatedAt: string;
-  partial: boolean;
-}
+type Severity = DependencyHealthRow["severity"];
 
 const DOT: Record<Severity, "ok" | "warn" | "err" | "info"> = {
   ok: "ok",
@@ -53,7 +37,7 @@ function sinceLabel(iso: string | null): string {
 
 export function DependencyHealthCard() {
   const { t } = useApp();
-  const [data, setData] = React.useState<Resp | null>(null);
+  const [data, setData] = React.useState<DependencyHealthResponse | null>(null);
 
   React.useEffect(() => {
     let alive = true;
@@ -61,7 +45,7 @@ export function DependencyHealthCard() {
       fetch("/api/dependency-health")
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
-          if (alive && j) setData(j as Resp);
+          if (alive && j) setData(j as DependencyHealthResponse);
         })
         .catch(() => {});
     };
@@ -91,20 +75,21 @@ export function DependencyHealthCard() {
           <ProviderLine key={p.provider} p={p} t={t} />
         ))}
       </div>
-      {!anyUnhealthy && (
+      {(!anyUnhealthy || data.partial) && (
         <div className="px-4 py-2 text-[11px] text-ink-4 border-t border-line">
-          {t("dep_hint_healthy")}
+          {data.partial ? t("dep_partial") : t("dep_hint_healthy")}
         </div>
       )}
     </Card>
   );
 }
 
-function ProviderLine({ p, t }: { p: ProviderRow; t: (k: string) => string }) {
+function ProviderLine({ p, t }: { p: DependencyHealthRow; t: (k: string) => string }) {
   const name = t(`dep_provider_${p.provider}`);
   const labelText = t(`dep_label_${p.label}`);
   const hint = t(`dep_hint_${p.label}`);
   const ops = p.affectedOps.map((op) => t(`dep_op_${op}`) || op).join("、");
+  const domains = p.affectedDomains.map(friendlyDomainName).join("、");
 
   return (
     <div className="flex items-start gap-3 px-4 py-2.5">
@@ -128,6 +113,7 @@ function ProviderLine({ p, t }: { p: ProviderRow; t: (k: string) => string }) {
         {ops && (
           <div className="text-[11px] text-ink-4 mt-0.5">
             {t("dep_affected")}: {ops}
+            {domains ? ` · ${domains}` : ""}
           </div>
         )}
       </div>

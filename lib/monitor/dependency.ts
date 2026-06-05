@@ -126,7 +126,11 @@ export async function dependencyMonitor(
       dedupeHint: dedupeKey,
       domain,
       runId: latestRunId,
-      anchors: latestAnchors(group),
+      // Stamp the structured verdict + provider into the alert so the
+      // Dependency Health card can read the authoritative label straight off the
+      // firing notification (the deduped, auto-resolving source of truth) — even
+      // after the degraded-call window has aged out but before the sweep resolves.
+      anchors: { ...(latestAnchors(group) ?? {}), dep_label: verdict.label, dep_provider: provider },
     });
   }
 
