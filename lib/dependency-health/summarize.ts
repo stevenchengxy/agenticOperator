@@ -17,9 +17,12 @@ export interface ProviderHealth {
   /** 'healthy' (no failures) | 'watching' (sub-threshold) | judged verdict. */
   label: DepLabel | 'healthy' | 'watching';
   severity: ProviderSeverity;
+  /** Count of actual degraded calls in the window (NOT the alarm dedupe count). */
   failureCount: number;
   /** ISO timestamp of the earliest failure in the window (null when healthy). */
   sinceTs: string | null;
+  /** ISO timestamp of the most recent failure — "last failed N ago" (null when healthy). */
+  lastFailureTs: string | null;
   lastReason: DepReason | null;
   affectedOps: string[];
   affectedDomains: string[];
@@ -43,6 +46,7 @@ export function summarizeDependencyHealth(
         severity: 'ok' as const,
         failureCount: 0,
         sinceTs: null,
+        lastFailureTs: null,
         lastReason: null,
         affectedOps: [],
         affectedDomains: [],
@@ -56,6 +60,7 @@ export function summarizeDependencyHealth(
       severity: verdict ? verdict.level : 'info',
       failureCount: fs.length,
       sinceTs: sorted[0].ts.toISOString(),
+      lastFailureTs: sorted[sorted.length - 1].ts.toISOString(),
       lastReason: sorted[sorted.length - 1].reason,
       affectedOps: [...new Set(fs.map((f) => f.op))],
       affectedDomains: [...new Set(fs.map((f) => f.domain))],

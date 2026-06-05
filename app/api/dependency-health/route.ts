@@ -45,6 +45,7 @@ export async function GET(): Promise<Response> {
       severity: 'ok',
       failureCount: 0,
       sinceTs: null,
+      lastFailureTs: null,
       lastReason: null,
       affectedOps: [],
       affectedDomains: [],

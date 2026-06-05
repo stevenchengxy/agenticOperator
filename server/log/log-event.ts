@@ -25,6 +25,10 @@ export function levelCategoryFor(type: string): LevelCategory {
       // an empty-200. Its own `dependency` category is the queryable lane the
       // monitor reads (lib/monitor/dependency.ts). See the dep-health spec.
       return { level: 'warn', category: 'dependency' };
+    case 'dependency_reset':
+      // Operator "I topped up" marker — degraded-call signals at/before it are
+      // ignored. Its own category so the read port can find it. See reset.ts.
+      return { level: 'info', category: 'dependency_reset' };
     case 'step.failed':
       return { level: 'error', category: 'step' };
     case 'anomaly':

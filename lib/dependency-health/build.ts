@@ -99,12 +99,13 @@ export function buildDependencyHealth(
   return summarizeDependencyHealth(failures, t).map((base) => {
     const alert = firstByProvider.get(base.provider);
     if (!alert) return { ...base, notificationId: null };
-    // Firing alert wins the headline; keep the window's ops/domains/reason detail.
+    // Firing alert wins the headline (label/severity) and owns "since" (when the
+    // alarm started). The failure COUNT and last-failure time stay window-derived
+    // so "N 次失败" means actual degraded calls, not how many sweeps re-fired.
     return {
       ...base,
       label: alert.label,
       severity: alert.severity,
-      failureCount: alert.count,
       sinceTs: alert.sinceTs,
       notificationId: alert.notificationId,
     };

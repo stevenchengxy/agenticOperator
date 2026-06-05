@@ -14,6 +14,7 @@ import type {
   StepTiming,
 } from './monitor-types';
 import { parseDependencyRow } from '../dependency-health/parse-signal';
+import { parseResetRow, applyResets, type DepReset } from '../dependency-health/reset';
 import type { ResolveDeps } from './resolve';
 
 export function createPgReadPort(): MonitorReadPort {
@@ -124,17 +125,30 @@ export function createPgReadPort(): MonitorReadPort {
 
     async dependencyFailures(windowMs: number): Promise<DepFailure[]> {
       const cutoff = new Date(Date.now() - windowMs);
-      const rows = await prisma.logEvent.findMany({
-        where: { category: 'dependency', ts: { gte: cutoff } },
-        select: { runId: true, ts: true, payloadJson: true },
-        orderBy: { ts: 'asc' },
-      });
-      const out: DepFailure[] = [];
-      for (const r of rows) {
+      const [failRows, resetRows] = await Promise.all([
+        prisma.logEvent.findMany({
+          where: { category: 'dependency', ts: { gte: cutoff } },
+          select: { runId: true, ts: true, payloadJson: true },
+          orderBy: { ts: 'asc' },
+        }),
+        prisma.logEvent.findMany({
+          where: { category: 'dependency_reset', ts: { gte: cutoff } },
+          select: { ts: true, payloadJson: true },
+          orderBy: { ts: 'asc' },
+        }),
+      ]);
+      const failures: DepFailure[] = [];
+      for (const r of failRows) {
         const f = parseDependencyRow(r);
-        if (f) out.push(f);
+        if (f) failures.push(f);
       }
-      return out;
+      const resets: DepReset[] = [];
+      for (const r of resetRows) {
+        const reset = parseResetRow(r);
+        if (reset) resets.push(reset);
+      }
+      // Drop signals the operator already reset away ("I topped up").
+      return applyResets(failures, resets);
     },
   };
 }

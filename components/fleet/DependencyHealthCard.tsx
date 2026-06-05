@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { useApp } from "@/lib/i18n";
-import { Card, CardHead, StatusDot, Badge } from "@/components/shared/atoms";
+import { Card, CardHead, StatusDot, Badge, Btn } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import { friendlyDomainName } from "@/lib/domain-ids";
 import type { DependencyHealthResponse, DependencyHealthRow } from "@/lib/dependency-health/contract";
@@ -38,24 +38,46 @@ function sinceLabel(iso: string | null): string {
 export function DependencyHealthCard() {
   const { t } = useApp();
   const [data, setData] = React.useState<DependencyHealthResponse | null>(null);
+  const [resetting, setResetting] = React.useState<string | null>(null);
+  const aliveRef = React.useRef(true);
+
+  const load = React.useCallback(() => {
+    return fetch("/api/dependency-health")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (aliveRef.current && j) setData(j as DependencyHealthResponse);
+      })
+      .catch(() => {});
+  }, []);
 
   React.useEffect(() => {
-    let alive = true;
-    const load = () => {
-      fetch("/api/dependency-health")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (alive && j) setData(j as DependencyHealthResponse);
-        })
-        .catch(() => {});
-    };
+    aliveRef.current = true;
     load();
     const id = setInterval(load, 10_000);
     return () => {
-      alive = false;
+      aliveRef.current = false;
       clearInterval(id);
     };
-  }, []);
+  }, [load]);
+
+  const onReset = React.useCallback(
+    async (provider: string) => {
+      setResetting(provider);
+      try {
+        await fetch("/api/dependency-health/reset", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ provider }),
+        });
+        await load(); // reflect the cleared state immediately
+      } catch {
+        /* best-effort — the next poll will reconcile */
+      } finally {
+        if (aliveRef.current) setResetting(null);
+      }
+    },
+    [load],
+  );
 
   if (!data) return null;
 
@@ -72,7 +94,7 @@ export function DependencyHealthCard() {
       </CardHead>
       <div className="divide-y divide-[color:var(--c-line)]">
         {data.providers.map((p) => (
-          <ProviderLine key={p.provider} p={p} t={t} />
+          <ProviderLine key={p.provider} p={p} t={t} onReset={onReset} resetting={resetting === p.provider} />
         ))}
       </div>
       {(!anyUnhealthy || data.partial) && (
@@ -84,12 +106,23 @@ export function DependencyHealthCard() {
   );
 }
 
-function ProviderLine({ p, t }: { p: DependencyHealthRow; t: (k: string) => string }) {
+function ProviderLine({
+  p,
+  t,
+  onReset,
+  resetting,
+}: {
+  p: DependencyHealthRow;
+  t: (k: string) => string;
+  onReset: (provider: string) => void;
+  resetting: boolean;
+}) {
   const name = t(`dep_provider_${p.provider}`);
   const labelText = t(`dep_label_${p.label}`);
   const hint = t(`dep_hint_${p.label}`);
   const ops = p.affectedOps.map((op) => t(`dep_op_${op}`) || op).join("、");
   const domains = p.affectedDomains.map(friendlyDomainName).join("、");
+  const unhealthy = p.label !== "healthy";
 
   return (
     <div className="flex items-start gap-3 px-4 py-2.5">
@@ -116,16 +149,33 @@ function ProviderLine({ p, t }: { p: DependencyHealthRow; t: (k: string) => stri
             {domains ? ` · ${domains}` : ""}
           </div>
         )}
+        {p.lastFailureTs && (
+          <div className="text-[11px] text-ink-4 mt-0.5">
+            {t("dep_last_fail").replace("{ago}", sinceLabel(p.lastFailureTs))}
+          </div>
+        )}
       </div>
-      {p.notificationId && (
-        <a
-          href="/notifications"
-          className="shrink-0 inline-flex items-center gap-1 text-[11.5px] text-accent hover:underline pt-0.5"
-        >
-          <Ic.bell style={{ width: 12, height: 12 }} />
-          {t("dep_view_alert")}
-        </a>
-      )}
+      <div className="shrink-0 flex flex-col items-end gap-1.5 pt-0.5">
+        {p.notificationId && (
+          <a
+            href="/notifications"
+            className="inline-flex items-center gap-1 text-[11.5px] text-accent hover:underline"
+          >
+            <Ic.bell style={{ width: 12, height: 12 }} />
+            {t("dep_view_alert")}
+          </a>
+        )}
+        {unhealthy && (
+          <Btn
+            size="sm"
+            onClick={() => onReset(p.provider)}
+            disabled={resetting}
+            title={t("dep_reset_hint")}
+          >
+            {resetting ? t("dep_resetting") : t("dep_reset")}
+          </Btn>
+        )}
+      </div>
     </div>
   );
 }

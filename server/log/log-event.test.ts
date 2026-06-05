@@ -28,6 +28,9 @@ describe('levelCategoryFor', () => {
   it('maps dependency_degraded to its own warn/dependency lane', () => {
     expect(levelCategoryFor('dependency_degraded')).toEqual({ level: 'warn', category: 'dependency' });
   });
+  it('maps dependency_reset to its own info/dependency_reset lane', () => {
+    expect(levelCategoryFor('dependency_reset')).toEqual({ level: 'info', category: 'dependency_reset' });
+  });
   it('defaults unknown types to info/info', () => {
     expect(levelCategoryFor('something_new')).toEqual({ level: 'info', category: 'info' });
   });

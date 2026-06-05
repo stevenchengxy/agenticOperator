@@ -69,8 +69,8 @@ describe('buildDependencyHealth', () => {
     const robo = rows.find((r) => r.provider === 'robohire')!;
     expect(robo.label).toBe('out_of_funds');
     expect(robo.severity).toBe('critical');
-    expect(robo.failureCount).toBe(23); // the alert's deduped count
-    expect(robo.sinceTs).toBe(firstSeen.toISOString());
+    expect(robo.failureCount).toBe(0); // window aged out → actual recent failures = 0
+    expect(robo.sinceTs).toBe(firstSeen.toISOString()); // since = alarm start, from the alert
     expect(robo.notificationId).toBe('n1');
   });
 
@@ -82,6 +82,7 @@ describe('buildDependencyHealth', () => {
     );
     const robo = rows.find((r) => r.provider === 'robohire')!;
     expect(robo.affectedOps.sort()).toEqual(['matchResume', 'parseResume']);
+    expect(robo.failureCount).toBe(2); // actual degraded calls in the window
     expect(robo.notificationId).toBe('n1');
   });
 

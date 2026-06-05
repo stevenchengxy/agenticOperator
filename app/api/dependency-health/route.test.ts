@@ -41,9 +41,14 @@ describe('GET /api/dependency-health', () => {
         anchorsJson: JSON.stringify({ dep_label: 'out_of_funds', candidate_id: 'c1' }),
       },
     ]);
-    (prisma.logEvent.findMany as any).mockResolvedValue([
-      { runId: 'r1', ts, payloadJson: JSON.stringify({ provider: 'robohire', op: 'parseResume', reason: 'quota', domain: '招聘-v1' }) },
-    ]);
+    // dependencyFailures reads two lanes — degraded signals + reset markers.
+    (prisma.logEvent.findMany as any).mockImplementation((args: any) =>
+      Promise.resolve(
+        args?.where?.category === 'dependency_reset'
+          ? []
+          : [{ runId: 'r1', ts, payloadJson: JSON.stringify({ provider: 'robohire', op: 'parseResume', reason: 'quota', domain: '招聘-v1' }) }],
+      ),
+    );
 
     const res = await GET();
     const j = await res.json();
@@ -51,9 +56,9 @@ describe('GET /api/dependency-health', () => {
     expect(robo).toMatchObject({
       label: 'out_of_funds',
       severity: 'critical',
-      failureCount: 23,
+      failureCount: 1, // actual degraded calls in the window (not the alarm dedupe count)
       notificationId: 'n1',
-      sinceTs: since.toISOString(),
+      sinceTs: since.toISOString(), // since = alarm start, from the alert
     });
     expect(robo.affectedOps).toContain('parseResume');
     expect(j.providers.find((p: any) => p.provider === 'llm')).toMatchObject({ label: 'healthy', notificationId: null });
