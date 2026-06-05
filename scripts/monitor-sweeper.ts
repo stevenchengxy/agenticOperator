@@ -22,6 +22,7 @@ import { healthMonitor } from "../lib/monitor/health";
 import { slaMonitor } from "../lib/monitor/sla";
 import { costMonitor } from "../lib/monitor/cost";
 import { errorRateMonitor } from "../lib/monitor/error-rate";
+import { dependencyMonitor } from "../lib/monitor/dependency";
 import { runEvalSample } from "../lib/monitor/run-eval";
 import { resolveMonitorConfig } from "../lib/monitor/monitor-config";
 import { makeLlmJudge, makeJury } from "../lib/monitor/llm-judge";
@@ -34,7 +35,7 @@ const INTERVAL_MS = Number(process.env.MONITOR_SWEEP_INTERVAL_MS) || 60_000;
 const EVAL_WINDOW_MS = 60 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor];
+const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor, dependencyMonitor];
 
 // AI fact-monitor — sampled groundedness eval over recent rule-check audits.
 // Fire-and-forget so it NEVER blocks or breaks the deterministic sweep; judges
