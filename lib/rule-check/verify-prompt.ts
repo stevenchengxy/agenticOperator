@@ -111,6 +111,17 @@ export type VerifyPromptInput = {
     executor: string;
     reason: string;
   }>;
+  /** 被 client/department/executor 过滤掉的规则,补了名称/定义 —— 让第二模型
+   *  对每条也给 selection_ok(该不该排除)。来自 buildExcludedRules(provenance)。 */
+  excluded_rules: Array<{
+    rule_id: string;
+    rule_name: string;
+    applicable_client: string;
+    applicable_department: string;
+    tier: string;
+    reason: string;
+    definition: string;
+  }>;
 };
 
 /**
@@ -161,7 +172,7 @@ C. 多维度置信(confidence + dimensions)—— 给这条规则 0-100 的整�
 - 一律用中文。judgment_reasoning 写成连贯的一段话(60–180 字),其余 reasoning ≤ 120 字。
 - second_verdict 只能是 PASS / FAIL / NOT_APPLICABLE / INSUFFICIENT_INFO / UNSURE;对原模型标 applicable=false / NOT_TRIGGERED 的规则,通常给 NOT_APPLICABLE。
 - 评分政策(2026-06-01 fail-closed):强制规则(底线/需人工)若所需信息缺失或无法自动确认 → 应判**不通过**(原模型会标 INSUFFICIENT_INFO)。请认可这类「信息不足 → 不通过」为**正确**结论,**不要**因此判原模型错;若你也认为信息不足,second_verdict 用 INSUFFICIENT_INFO,judgment_reasoning 写明「因信息不足而不通过,建议人工复核」。
-- **rule_opinions 必须逐条对应"原模型已评估的规则":每条规则恰好一条意见。rule_id 必须原样照抄(形如 10-25),严禁自创 id、用规则名/英文 slug 当 id、拆分或合并规则。** 本该有却缺失的规则放进 missing_rules,不要塞进 rule_opinions。
+- **rule_opinions 覆盖两类规则,各恰好一条意见:① 原模型已评估的规则(给完整 selection_ok + second_verdict + judgment_reasoning + confidence + dimensions);② 被排除的规则(只判 selection_ok = 该不该为此候选人×岗位纳入,second_verdict 填 NOT_APPLICABLE,judgment_reasoning/dimensions 可省)。rule_id 必须原样照抄(形如 10-25),严禁自创 id、用规则名/英文 slug 当 id、拆分或合并规则。** 本该有却两类都没列的规则才放进 missing_rules,不要塞进 rule_opinions。
 - 必须输出**合法 JSON**,不要在 JSON 外写任何文字(包括 markdown code fence)。
 
 输出 JSON schema:
@@ -294,7 +305,24 @@ export function composeVerifyPrompt(input: VerifyPromptInput): string {
     lines.push('');
   }
 
-  if (input.filtered_out_rules.length > 0) {
+  // 被排除的规则 —— 也要逐条判断「该不该排除」(优先用补了名称/定义的 excluded_rules;
+  // 退回旧 filtered_out_rules 仅作兼容,二者择一渲染)。
+  if (input.excluded_rules.length > 0) {
+    lines.push(`## 被排除的规则(${input.excluded_rules.length} 条 —— 也要逐条判断:该不该排除)`);
+    lines.push('这些规则被系统的硬编码过滤(客户/部门/executor)排除,未进入 PASS/FAIL 评估。');
+    lines.push('请对每条独立判断:**这条规则本该为此候选人×岗位纳入吗?**(给 selection_ok + selection_reasoning)');
+    lines.push('排除规则不做 PASS/FAIL 判定:second_verdict 一律填 NOT_APPLICABLE。');
+    lines.push('');
+    for (const r of input.excluded_rules) {
+      lines.push(`### 规则 ${r.rule_id}${r.rule_name ? `:${r.rule_name}` : ''}`);
+      if (r.definition) lines.push(`- 规则定义:${truncate(r.definition, 500)}`);
+      lines.push(
+        `- 适用客户=${r.applicable_client || '?'} · 适用部门=${r.applicable_department || 'N/A'} · tier=${r.tier}`,
+      );
+      lines.push(`- 系统排除理由:${r.reason}`);
+      lines.push('');
+    }
+  } else if (input.filtered_out_rules.length > 0) {
     lines.push('## FILTERED_OUT(被 client/department/executor 过滤掉、未进入评估的规则)');
     for (const r of input.filtered_out_rules) {
       lines.push(
@@ -305,8 +333,9 @@ export function composeVerifyPrompt(input: VerifyPromptInput): string {
   }
 
   lines.push('---');
+  const opinionTotal = input.flags.length + input.excluded_rules.length;
   lines.push(
-    `请按 system 指定的 JSON schema 输出。rule_opinions 必须恰好 ${input.flags.length} 条,rule_id 用上面"原模型已评估的规则"里的 id(如 ${input.flags[0]?.rule_id ?? '10-25'});每条都要给 selection_ok / selection_reasoning / second_verdict / judgment_reasoning(点名候选人+岗位)/ confidence / dimensions。missing_rules 只放确实缺失的硬性规则(通常 0–3 条),不要把已评估规则列为 missing。`,
+    `请按 system 指定的 JSON schema 输出。rule_opinions 必须恰好 ${opinionTotal} 条 = 已评估 ${input.flags.length} 条 + 被排除 ${input.excluded_rules.length} 条,rule_id 原样照抄(如 ${input.flags[0]?.rule_id ?? input.excluded_rules[0]?.rule_id ?? '10-25'});每条都要给 selection_ok / selection_reasoning;已评估规则另给 second_verdict / judgment_reasoning(点名候选人+岗位)/ confidence / dimensions,被排除规则 second_verdict=NOT_APPLICABLE。missing_rules 只放确实缺失且不在上述任何列表里的硬性规则。`,
   );
   return lines.join('\n');
 }

@@ -28,7 +28,11 @@ export function enrichProvenanceWithNames(prov: RuleProvenance[]): EnrichedProve
   });
 }
 
-export function buildExcludedRules(prov: RuleProvenance[]): ExcludedRule[] {
+// 入参用结构化最小类型(而非 RuleProvenance),好让 route 那边 parseArray 出来的
+// `tier: string` 宽类型直接传入,无需 as 桥接。RuleProvenance[] 也兼容。
+export function buildExcludedRules(
+  prov: Array<{ rule_id: string; tier: string; included: boolean; reason: string }>,
+): ExcludedRule[] {
   const byId = catalogById();
   return prov
     .filter((p) => !p.included)

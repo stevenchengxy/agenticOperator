@@ -25,6 +25,7 @@ import {
   type VerifyFlag,
 } from '@/lib/rule-check/verify-prompt';
 import { ontologyAuditDetail } from '@/lib/rule-check/ontology-audit-source';
+import { buildExcludedRules } from '@/lib/rule-check/excluded-rule-enrich';
 import {
   composeEnergyVerifyPrompt,
   ENERGY_VERIFY_SYSTEM_PROMPT,
@@ -206,6 +207,13 @@ export async function POST(
       next_action: f.next_action ?? '',
     }));
 
+    const provenance = parseArray<{
+      rule_id: string;
+      tier: string;
+      included: boolean;
+      reason: string;
+    }>(audit.rule_provenance);
+
     const userPrompt = composeVerifyPrompt({
       decision: audit.decision,
       failure_reasons: parseArray<string>(audit.failure_reasons),
@@ -215,12 +223,7 @@ export async function POST(
       resume: parseJsonObject(audit.parsed_resume_json),
       jr: parseJsonObject(audit.job_requisition_json),
       flags,
-      rule_provenance: parseArray<{
-        rule_id: string;
-        tier: string;
-        included: boolean;
-        reason: string;
-      }>(audit.rule_provenance),
+      rule_provenance: provenance,
       filtered_out_rules: parseArray<{
         rule_id: string;
         rule_name: string;
@@ -229,6 +232,8 @@ export async function POST(
         executor: string;
         reason: string;
       }>(audit.filtered_out_rules),
+      // 从 provenance 的排除条目按 id 补名称/定义,喂给第二模型逐条判「该不该排除」。
+      excluded_rules: buildExcludedRules(provenance),
     });
 
     const verifierModel = pickVerifierModel(audit.llm_model);
