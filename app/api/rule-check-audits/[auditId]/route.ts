@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import neo4j, { type Driver } from 'neo4j-driver';
 import { prisma } from '@/server/db';
 import { severityForRuleId } from '@/lib/rule-check/ontology';
+import { enrichProvenanceWithNames } from '@/lib/rule-check/excluded-rule-enrich';
 import { ontologyAuditDetail } from '@/lib/rule-check/ontology-audit-source';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,10 @@ export type RuleCheckAuditDetail = {
    *  recruitment chrome (candidate graph / LLM prompt / LLM response). */
   deterministic?: boolean;
   decision: 'PASS' | 'FAIL';
+  /** Non-null = infra park (没钱/故障): decision='FAIL' for display but the
+   *  candidate was NOT rejected. Drawer banner reads this to show 校验未完成
+   *  instead of 未通过. null/absent for genuine business decisions. */
+  fail_reason?: string | null;
   llm_decision: string;
   created_at: string;
   upload_id: string;
@@ -68,12 +73,14 @@ export type RuleCheckAuditDetail = {
     executor: string;
     reason: string;
   }>;
-  /** 三层抓取证据:为何纳入/排除每条规则。 */
+  /** 三层抓取证据:为何纳入/排除每条规则。rule_name 读时按 id 从规则目录补全
+   *  (provenance 不落库名称),供 UI 展示被排除规则。 */
   rule_provenance: Array<{
     rule_id: string;
     tier: 'general' | 'client' | 'department';
     included: boolean;
     reason: string;
+    rule_name?: string;
   }>;
   user_prompt: string | null;
   system_prompt: string | null;
@@ -381,6 +388,7 @@ export async function GET(
     const detail: RuleCheckAuditDetail = {
       audit_id: audit.audit_id,
       decision: audit.decision as 'PASS' | 'FAIL',
+      fail_reason: audit.fail_reason,
       llm_decision: audit.llm_decision,
       created_at: audit.created_at.toISOString(),
       upload_id: audit.upload_id,
@@ -404,7 +412,7 @@ export async function GET(
       partial_resume_fields: parseStringArray(audit.partial_resume_fields),
       failure_reasons: parseStringArray(audit.failure_reasons),
       filtered_out_rules: parseFilteredOut(audit.filtered_out_rules),
-      rule_provenance: parseProvenance(audit.rule_provenance),
+      rule_provenance: enrichProvenanceWithNames(parseProvenance(audit.rule_provenance)),
       user_prompt: audit.user_prompt,
       system_prompt: audit.system_prompt,
       llm_raw_text: audit.llm_raw_text,
