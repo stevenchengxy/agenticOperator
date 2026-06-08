@@ -24,6 +24,11 @@ import {
   type RuleSelectionVerification,
   type VerifyFlag,
 } from '@/lib/rule-check/verify-prompt';
+import { ontologyAuditDetail } from '@/lib/rule-check/ontology-audit-source';
+import {
+  composeEnergyVerifyPrompt,
+  ENERGY_VERIFY_SYSTEM_PROMPT,
+} from '@/lib/rule-check/energy-verify-prompt';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +44,10 @@ export type RuleCheckVerifyResponse =
     }
   | {
       ok: false;
-      reason: 'not_found' | 'gateway_unavailable' | 'parse_error' | 'llm_error' | 'error';
+      // 'not_applicable' = a deterministic (non-LLM) rule-check audit, e.g. the
+      // energy validateConstraints/triageScheme agents — there is no primary-LLM
+      // judgment to cross-validate, so the second-opinion panel is N/A, not an error.
+      reason: 'not_found' | 'gateway_unavailable' | 'parse_error' | 'llm_error' | 'error' | 'not_applicable';
       error?: string;
     };
 
@@ -68,6 +76,90 @@ export async function POST(
   ctx: { params: Promise<{ auditId: string }> },
 ) {
   const { auditId } = await ctx.params;
+
+  // Non-recruitment audits live in OntologyRuleCheck and are produced by
+  // DETERMINISTIC rule-check agents (energy validateConstraints / triageScheme /
+  // …). The numeric judgment stays AUTHORITATIVE — here we run a SECOND,
+  // independent LLM purely as an ADVISORY cross-check of the rule selection +
+  // per-rule verdicts (it never overrides the deterministic decision). Handled
+  // BEFORE the recruitment lookup (which would otherwise 404). NOTE: this path
+  // is energy/ontology-only and is deliberately separate from the recruitment
+  // rule-check agent — different store (OntologyRuleCheck), different prompt.
+  const ontoDetail = await ontologyAuditDetail(auditId).catch(() => null);
+  if (ontoDetail) {
+    if (!isGatewayConfigured()) {
+      return NextResponse.json<RuleCheckVerifyResponse>({
+        ok: false,
+        reason: 'gateway_unavailable',
+      });
+    }
+    const energyFlags: VerifyFlag[] = ontoDetail.flags.map((f) => ({
+      rule_id: f.rule_id,
+      rule_name_snapshot: f.rule_name_snapshot,
+      severity: f.severity,
+      applicable: f.applicable,
+      result: f.result,
+      evidence: f.evidence ?? '',
+      next_action: f.next_action ?? '',
+    }));
+    if (energyFlags.length === 0) {
+      // No evaluated rules → nothing to cross-check.
+      return NextResponse.json<RuleCheckVerifyResponse>({ ok: false, reason: 'not_applicable' });
+    }
+    const redline =
+      ontoDetail.llm_decision === 'VIOLATED' ||
+      ontoDetail.llm_decision === 'RISK-FIRST' ||
+      energyFlags.some((f) => f.severity === 'terminal' && f.result === 'FAIL');
+    const userPrompt = composeEnergyVerifyPrompt({
+      stage: ontoDetail.client_name,
+      domain: ontoDetail.business_group ?? '',
+      decision: ontoDetail.llm_decision,
+      dsNo: ontoDetail.job_requisition_id,
+      redline,
+      selection: ontoDetail.selection,
+      flags: energyFlags,
+      failure_reasons: ontoDetail.failure_reasons,
+    });
+    const energyVerifierModel = pickVerifierModel('');
+    let energyLlm;
+    try {
+      energyLlm = await chatComplete({
+        system: ENERGY_VERIFY_SYSTEM_PROMPT,
+        user: userPrompt,
+        model: energyVerifierModel,
+        maxTokens: 12000,
+        toolName: 'RuleCheck.energyVerify',
+      });
+    } catch (e) {
+      return NextResponse.json<RuleCheckVerifyResponse>({
+        ok: false,
+        reason: 'llm_error',
+        error: (e as Error).message.slice(0, 300),
+      });
+    }
+    let energyVerification: RuleSelectionVerification;
+    try {
+      energyVerification = parseVerification(energyLlm.text, energyFlags);
+    } catch (e) {
+      if (e instanceof VerificationParseError) {
+        return NextResponse.json<RuleCheckVerifyResponse>({
+          ok: false,
+          reason: 'parse_error',
+          error: e.message.slice(0, 300),
+        });
+      }
+      throw e;
+    }
+    return NextResponse.json<RuleCheckVerifyResponse>({
+      ok: true,
+      verification: energyVerification,
+      primary_model: '确定性规则引擎',
+      verifier_model: energyLlm.modelUsed,
+      duration_ms: energyLlm.durationMs,
+      prompt_tokens: energyLlm.usage?.promptTokens,
+      completion_tokens: energyLlm.usage?.completionTokens,
+    });
+  }
 
   if (!isGatewayConfigured()) {
     return NextResponse.json<RuleCheckVerifyResponse>({

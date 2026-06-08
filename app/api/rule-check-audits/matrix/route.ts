@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { extractRawFlagsByRuleId } from '@/app/api/rule-check-audits/[auditId]/route';
 import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
+import { hasOntologyRuleChecks, ontologyMatrix } from '@/lib/rule-check/ontology-audit-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,8 +41,13 @@ export async function GET(req: Request) {
   const days = Math.max(1, Math.min(90, Number.isFinite(raw) ? raw : 30));
   const cutoff = new Date(Date.now() - days * 86_400_000);
 
-  // A domain with no recorded rule-check audits gets an empty matrix.
-  if (!isRuleCheckDomain(searchParams.get('domain'))) {
+  // Non-recruitment domains: serve from the generic ontology rule-check store.
+  const domain = searchParams.get('domain');
+  if (!isRuleCheckDomain(domain)) {
+    if (await hasOntologyRuleChecks(domain)) {
+      const m = await ontologyMatrix(domain!.trim(), days);
+      return NextResponse.json<RuleMatrixResponse>({ rules: m.rules, total_audits: m.total_audits, window_days: days, meta: { generated_at: new Date().toISOString() } });
+    }
     return NextResponse.json<RuleMatrixResponse>({
       rules: [],
       total_audits: 0,

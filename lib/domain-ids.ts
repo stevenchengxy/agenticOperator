@@ -22,6 +22,31 @@ export const ENERGY_DOMAIN_ID = "能源调度-v1";
  *  (possibly CJK) domain id so event names stay ASCII even if the id changes. */
 export const ENERGY_EVENT_NS = "energy";
 
+/** Allmeta domain id for the cost-control (费控) ontology agent pack. Must match
+ *  the snapshot dir name under lib/ontology-generator/snapshots/. */
+export const COST_CONTROL_DOMAIN_ID = "费控-v1";
+
+/** Stable ASCII namespace for cost-control Inngest event names (e.g.
+ *  feikong/EXPENSE_SUBMITTED) — same rationale as ENERGY_EVENT_NS. */
+export const COST_CONTROL_EVENT_NS = "feikong";
+
+/** Map a (runnable) domain id → its ASCII Inngest event namespace. Used by the
+ *  generalized human-decision route to send `<ns>/HUMAN_DECISION` and to derive
+ *  the gate-notification dedupe prefix. Returns null for domains with no
+ *  runnable pack (recruitment has no per-domain event namespace). */
+export function eventNsForDomain(id: string | null | undefined): string | null {
+  if (id === ENERGY_DOMAIN_ID) return ENERGY_EVENT_NS;
+  if (id === COST_CONTROL_DOMAIN_ID) return COST_CONTROL_EVENT_NS;
+  return null;
+}
+
+/** True when a domain id refers to the recruitment (招聘) pack. Empty/absent
+ *  domain defaults to recruitment (the app's original single-domain behavior).
+ *  Accepts the legacy `RAAS-v1` / `raas` ids so reads survive the rename. */
+export function isRecruitmentDomain(id: string | null | undefined): boolean {
+  return !id || id === RECRUITMENT_DOMAIN_ID || id === "RAAS-v1" || id === "raas";
+}
+
 /** A clean, short display name derived from a domain id: strips a trailing
  *  version suffix (`-v1`, `-001`, `-v0_1_3`). e.g. 能源调度-v1 → 能源调度,
  *  R7-001 → R7, 招聘-v1 → 招聘. */

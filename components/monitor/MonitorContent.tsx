@@ -7,26 +7,39 @@ import { SystemStatusCards } from "./SystemStatusCards";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, displayName as agentDisplayName, type Stage } from "@/lib/agent-mapping";
 import { useDomain } from "@/lib/domains";
-import { ENERGY_DOMAIN_ID, RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
+import { ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID, RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import { useDisplayNameResolver } from "@/lib/agent-names";
 
-// Resolve which business domain a run belongs to, from its Inngest function
-// slug (`agentic-operator-main-<fnId>`). Ontology-pack functions carry their
-// pack prefix (energy-*); everything else is recruitment. A live slug→domain
-// map (from /api/agents, which already attributes shells to their domain) takes
-// precedence so future packs work without a code change.
+// Each runnable pack runs on its OWN Inngest app `agentic-operator-<domainId>`,
+// and the function slug is `agentic-operator-<domainId>-<fnId>`. The domainId can
+// be CJK (费控-v1 / 能源调度-v1), so the old `^agentic-operator-[a-z0-9-]+?-`
+// strip silently failed on it and EVERY domain-app run fell through to the
+// recruitment default — i.e. energy/费控 runs showed up under 招聘-v1, not their
+// own domain. Match the known domain-app prefixes directly instead.
+const DOMAIN_APP_IDS = [ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID];
+
+// Resolve which business domain a run belongs to, from its Inngest function slug.
 function runDomainOf(
   run: { function?: { slug?: string } | undefined },
   slugToDomain: Map<string, string>,
 ): string {
   const slug = run.function?.slug ?? "";
-  const fnId = slug.replace(/^agentic-operator-[a-z0-9-]+?-/i, "").replace(/^agentic-operator-main-/, "");
-  const bare = slug.replace(/^agentic-operator-main-/, "");
-  return (
-    slugToDomain.get(bare) ??
-    slugToDomain.get(fnId) ??
-    (bare.startsWith("energy-") ? ENERGY_DOMAIN_ID : RECRUITMENT_DOMAIN_ID)
-  );
+  // 1. Own per-domain app: `agentic-operator-<domainId>-<fnId>` (authoritative
+  //    for the hardcoded packs; works regardless of /api/agents availability).
+  for (const d of DOMAIN_APP_IDS) {
+    if (slug.startsWith(`agentic-operator-${d}-`)) return d;
+  }
+  // 2. Recruitment main app + the live slug→domain map (deployed shells).
+  const fnId = slug.replace(/^agentic-operator-main-/, "");
+  const mapped = slugToDomain.get(fnId) ?? slugToDomain.get(slug);
+  if (mapped) return mapped;
+  // 3. Generic fallback for any other per-domain app: the longest live-map key
+  //    the run slug ends with (future packs work without a code change).
+  let best = "";
+  for (const key of slugToDomain.keys()) {
+    if (key && (slug === key || slug.endsWith(`-${key}`)) && key.length > best.length) best = key;
+  }
+  return best ? (slugToDomain.get(best) ?? RECRUITMENT_DOMAIN_ID) : RECRUITMENT_DOMAIN_ID;
 }
 
 /** Fetch /api/agents once → Map<fnId(slug), domain> for run attribution. */

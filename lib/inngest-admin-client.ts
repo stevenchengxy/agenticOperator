@@ -16,14 +16,17 @@ import { getInngestUrl } from './inngest-url';
 const BASE = getInngestUrl();
 
 // ★ Monitoring scope filter:
-//   AO 的监控页面只关心 agentic-operator-main app 的 functions,
-//   不监控 raas-backend / 其他第三方 app(他们由各自团队负责)。
+//   AO 的监控页面关心所有 AO app —— 主招聘 app (agentic-operator-main) +
+//   每个业务域自己的 per-domain app (agentic-operator-能源调度-v1 /
+//   agentic-operator-费控-v1 / …)。只排除 raas-backend / 其他第三方 app
+//   (他们由各自团队负责)。所以前缀是 `agentic-operator-`(不是 `-main`),
+//   否则域 agent 的 run 记录(能源/费控)永远不会出现在监控/归档里。
 //
 //   过滤在 listFunctions / listRecentRuns 等核心 client 函数里统一应用,
 //   所有下游 API endpoint(functions / runs / dlq / flows / agents/[slug])
 //   自然继承这个 scope。运维 / 调试可设 `MONITORED_APP_PREFIX=` 关闭过滤。
 const MONITORED_APP_PREFIX =
-  process.env.MONITORED_APP_PREFIX ?? 'agentic-operator-main';
+  process.env.MONITORED_APP_PREFIX ?? 'agentic-operator-';
 
 function isMonitoredSlug(slug: string | undefined): boolean {
   if (!MONITORED_APP_PREFIX) return true; // empty prefix = monitor all

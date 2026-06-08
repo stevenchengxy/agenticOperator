@@ -32,6 +32,7 @@ import {
   type AgentBreakdownRow,
 } from "./prompt";
 import { deterministicSummary, emptyRunNotice } from "./fallback";
+import { classifyStep, isTerminalFailure } from "./step-classify";
 
 export class RunNotFoundError extends Error {
   constructor(runId: string) {
@@ -68,6 +69,9 @@ export type NormalizedRun = {
     status: string;
     error: string | null;
     durationMs: number | null;
+    /** Inngest attempt count (archive runs); null for AO-native runs. Lets the
+     *  summary tell "failed then recovered on retry" apart from a real failure. */
+    attempts: number | null;
   }>;
 };
 
@@ -96,6 +100,9 @@ export async function loadRunSnapshot(runId: string): Promise<NormalizedRun | nu
         status: s.status,
         error: s.error,
         durationMs: s.durationMs,
+        // AO-native WorkflowStep has no attempt counter; recovery is inferred
+        // from the archive path only.
+        attempts: null,
       })),
     };
   }
@@ -133,6 +140,7 @@ export async function loadRunSnapshot(runId: string): Promise<NormalizedRun | nu
       status: s.status ?? "unknown",
       error: s.error,
       durationMs: s.durationMs,
+      attempts: s.attempts,
     })),
   };
 }
@@ -157,7 +165,11 @@ export async function synthesizeRunSummary(
   const breakdown = computeAgentBreakdown(run.steps, activities);
 
   const stepsTotal = run.steps.length;
-  const stepsFailed = run.steps.filter((s) => s.status === "failed").length;
+  // Count only TERMINAL failures (infra + business). A step that failed then
+  // recovered on retry (status=completed, attempts>1) is not a failure.
+  const stepsFailed = run.steps.filter((s) =>
+    isTerminalFailure(classifyStep(s).outcome),
+  ).length;
   const errorsExcerpt = buildErrorsExcerpt(run.steps);
 
   // Base row fields shared across all three write paths. Null defaults for
@@ -300,7 +312,9 @@ export function computeAgentBreakdown(
   steps: Array<{
     nodeId: string;
     status: string;
+    error?: string | null;
     durationMs: number | null;
+    attempts?: number | null;
   }>,
   activities: Array<{
     agentName: string;
@@ -310,20 +324,36 @@ export function computeAgentBreakdown(
 ): AgentBreakdownRow[] {
   const map = new Map<string, AgentBreakdownRow>();
 
+  const newRow = (agentName: string): AgentBreakdownRow => ({
+    agentName,
+    steps: 0,
+    failed: 0,
+    infraFailed: 0,
+    businessFailed: 0,
+    recovered: 0,
+    totalDurationMs: 0,
+    lastNarrative: null,
+  });
+
   for (const s of steps) {
     // s.nodeId may be a canonical short OR an app-prefixed Inngest slug
     // (archive runs). Resolve to the canonical short so the row groups
     // correctly and never leaks a raw slug into the prompt / summary.
     const agentName = resolveAgentMeta(s.nodeId)?.short ?? s.nodeId;
-    const row = map.get(agentName) ?? {
-      agentName,
-      steps: 0,
-      failed: 0,
-      totalDurationMs: 0,
-      lastNarrative: null,
-    };
+    const row = map.get(agentName) ?? newRow(agentName);
     row.steps += 1;
-    if (s.status === "failed") row.failed += 1;
+    // Classify so transient/infra failures and retry-recoveries are counted
+    // honestly rather than lumped into a single "failed" tally.
+    const c = classifyStep(s);
+    if (c.outcome === "infra-failed") {
+      row.infraFailed += 1;
+      row.failed += 1;
+    } else if (c.outcome === "business-failed") {
+      row.businessFailed += 1;
+      row.failed += 1;
+    } else if (c.outcome === "recovered") {
+      row.recovered += 1;
+    }
     if (typeof s.durationMs === "number") row.totalDurationMs += s.durationMs;
     map.set(agentName, row);
   }
@@ -338,13 +368,7 @@ export function computeAgentBreakdown(
     lastByAgent.set(key, a.narrative);
   }
   for (const [name, narrative] of lastByAgent) {
-    const row = map.get(name) ?? {
-      agentName: name,
-      steps: 0,
-      failed: 0,
-      totalDurationMs: 0,
-      lastNarrative: null,
-    };
+    const row = map.get(name) ?? newRow(name);
     row.lastNarrative = narrative;
     map.set(name, row);
   }
@@ -352,15 +376,27 @@ export function computeAgentBreakdown(
 }
 
 function buildErrorsExcerpt(
-  steps: Array<{ nodeId: string; status: string; error: string | null }>,
+  steps: Array<{
+    nodeId: string;
+    status: string;
+    error: string | null;
+    attempts?: number | null;
+  }>,
 ): string | null {
-  const failed = steps.filter((s) => s.error || s.status === "failed");
+  // Only TERMINAL failures belong in the excerpt — a retry-recovery is not a
+  // failure. Each line is tagged infra-vs-business so /monitor failure lists
+  // (and the LLM) never mistake a gateway blip for a candidate rejection.
+  const failed = steps
+    .map((s) => ({ s, c: classifyStep(s) }))
+    .filter(({ c }) => isTerminalFailure(c.outcome));
   if (failed.length === 0) return null;
   // Cap at first 5 errors, each line truncated — keeps the row small but
   // makes /monitor failure lists meaningful at a glance.
-  const lines = failed.slice(0, 5).map((s) => {
-    const msg = s.error ?? `step ${s.nodeId} failed`;
-    return `${s.nodeId}: ${msg.length > 200 ? msg.slice(0, 199) + "…" : msg}`;
+  const lines = failed.slice(0, 5).map(({ s, c }) => {
+    const tag = c.outcome === "infra-failed" ? "[基础设施故障·已重试/重放]" : "[业务失败]";
+    const msg = c.message ?? `step ${s.nodeId} failed`;
+    const trimmed = msg.length > 200 ? msg.slice(0, 199) + "…" : msg;
+    return `${s.nodeId} ${tag}: ${trimmed}`;
   });
   return lines.join("\n");
 }

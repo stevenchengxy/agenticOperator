@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import neo4j, { type Driver } from 'neo4j-driver';
 import { prisma } from '@/server/db';
 import { severityForRuleId } from '@/lib/rule-check/ontology';
+import { ontologyAuditDetail } from '@/lib/rule-check/ontology-audit-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,11 @@ export type RuleCheckFlagRow = {
 
 export type RuleCheckAuditDetail = {
   audit_id: string;
+  /** true = a deterministic (non-LLM) ontology rule-check (energy / 费控 …):
+   *  numeric judgment, no candidate/resume/JD, no LLM prompt/response. The detail
+   *  drawer uses this to render the ontology-appropriate tabs instead of the
+   *  recruitment chrome (candidate graph / LLM prompt / LLM response). */
+  deterministic?: boolean;
   decision: 'PASS' | 'FAIL';
   llm_decision: string;
   created_at: string;
@@ -334,6 +340,11 @@ export async function GET(
       include: { flags: true },
     });
     if (!audit) {
+      // Fall back to the generic ontology rule-check store (energy etc.).
+      const onto = await ontologyAuditDetail(auditId);
+      if (onto) {
+        return NextResponse.json({ ok: true, detail: onto });
+      }
       return NextResponse.json<RuleCheckAuditDetailResponse>({
         ok: false,
         reason: 'not_found',

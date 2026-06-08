@@ -57,13 +57,9 @@ const STATUS_DECISION_TREE = `## 5. 单条 rule 的 status 决策树（**严格�
 
 如果回答否，**必须**改为 \`insufficient_info\`。`;
 
-const DECISION_FOLD_BLOCK = `## 6. 决策结算（仅供你参考，最终由 server 计算）
+const DECISION_FOLD_BLOCK = `## 6. 决策结算（由 server 计算，与你无关）
 
-逐 rule 评估完后 server 端会按下列规则汇总；你**只**输出 rule_results[]，不要输出 decision：
-- 任一 rule status="fail" → \`decision="FAIL"\`
-- 否则 → 整体 \`PASS\`（\`insufficient_info\` 与 \`pending\` 都**不**阻断，server 会在 audit 中单独显示这两类，但不影响整体推进）
-
-不要根据自己的判断重新归类 rule status；按 §5 决策树独立评估每条规则。`;
+最终 decision 完全由 server 端依据各 rule 的 status 汇总；你**只**输出 rule_results[]，**不要**输出 decision，也**不要为了影响最终结果而改变任何一条 rule 的 status**。你的唯一职责是按 §5 决策树独立、诚实地判定每条规则的真实 status（缺字段一律 \`insufficient_info\`，既不是 \`fail\` 也不是 \`pass\`）。`;
 
 const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
 
@@ -79,7 +75,7 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
 
 **关键规则（违反即视为无效输出）：**
 - status ∈ {pass, fail, pending, insufficient_info, not_triggered, not_executed}。
-- next_action ∈ {continue, block, supplement, review}，**必填**，按 status 取值：fail→block(阻断)；insufficient_info→supplement(补充材料)；pending→review(人工复核，不阻断)；pass / not_triggered→continue(放行)。
+- next_action ∈ {continue, block, supplement, review}，**必填**，按 status 取值：fail→block(阻断)；insufficient_info→supplement(补充材料)；pending→review(人工复核)；pass / not_triggered→continue(放行)。
 - 每条规则都必须有一条对应的 \`rule_results\` 条目，按 Set 顺序、Set 内列出顺序输出。
 - \`reason\` 字段 **必填**（每条 rule 都要写，所有 status 都要写）：
   - status='fail'：写**详细**判定链(≤120 字)——①触发判定:为何本规则适用本候选人 ②引用 GRAPH_CONTEXT 的具体字段+数值 ③套用规则逻辑(注意极性:排除/冷冻类是"命中坏条件→fail"，别被"满足"二字误导)④结论。例:"目标岗位归属CDG适用；employment_links 最近腾讯离职 2024.02 距今约3个月<6；命中冷冻期阻断条件→未通过"

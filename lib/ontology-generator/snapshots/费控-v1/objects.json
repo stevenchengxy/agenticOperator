@@ -1,0 +1,1106 @@
+{
+  "metadata": {
+    "project_name": "FK-v1",
+    "document_type": "数据对象",
+    "version": "v0_1_001",
+    "last_updated": "2026-06-01",
+    "description": "费控本体的名词 — 类型化实体、属性、外键与归集维度，覆盖报销单、发票、预算、成本中心、费控审核案件与财务动作全链路。"
+  },
+  "objects": [
+    {
+      "id": "Employee",
+      "name": "员工",
+      "description": "员工主数据，记录工号、姓名、所属部门与成本中心、职级、岗位、银行卡、报销权限与默认审批人，真相源在启人HR，智控只读同步。",
+      "type": "data",
+      "relationship_description": "【员工 (Employee)】属于一个【部门 (Department)】，默认归集到一个【成本中心 (Cost_Center)】。他作为报销人发起【报销单 (Expense_Claim)】，其职级决定差旅标准与审批权限，其默认审批人是【审批流实例 (Approval_Instance)】审批路由的起点。",
+      "primary_key": "employee_id",
+      "properties": [
+        {
+          "name": "employee_id",
+          "type": "String",
+          "description": "员工唯一工号，格式 E+6 位（如 E100245），登录、报销、审计都用它"
+        },
+        {
+          "name": "department_id",
+          "type": "String",
+          "description": "员工所属部门编号，决定审批链与成本归集",
+          "is_foreign_key": true,
+          "references": "Department"
+        },
+        {
+          "name": "cost_center_id",
+          "type": "String",
+          "description": "员工默认归属的成本中心编号，报销单单头默认带出",
+          "is_foreign_key": true,
+          "references": "Cost_Center"
+        },
+        {
+          "name": "default_approver_id",
+          "type": "String",
+          "description": "员工的默认审批人（直接主管）工号，审批路由的起点",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "name",
+          "type": "String",
+          "description": "员工姓名"
+        },
+        {
+          "name": "job_level",
+          "type": "String",
+          "description": "员工职级，枚举：员工/主管/经理/总监/VP/C级，决定差旅标准与审批权限"
+        },
+        {
+          "name": "job_title",
+          "type": "String",
+          "description": "员工的具体岗位名称"
+        },
+        {
+          "name": "hire_date",
+          "type": "Date",
+          "description": "员工入职日期"
+        },
+        {
+          "name": "bank_card_masked",
+          "type": "String",
+          "description": "员工报销收款的对私银行卡号，脱敏存储仅后四位可见，敏感 PII"
+        },
+        {
+          "name": "expense_permission",
+          "type": "Boolean",
+          "description": "员工是否开通报销权限，建案时校验"
+        },
+        {
+          "name": "phone",
+          "type": "String",
+          "description": "员工手机号码"
+        },
+        {
+          "name": "email",
+          "type": "String",
+          "description": "员工电子邮箱地址"
+        },
+        {
+          "name": "is_active",
+          "type": "Boolean",
+          "description": "员工当前是否在职，离职员工不可代报或被代报"
+        }
+      ]
+    },
+    {
+      "id": "Department",
+      "name": "部门",
+      "description": "组织维度的部门主数据，记录部门号、名称、上级部门、负责人、归属条线与默认成本中心，构成审批链层级。",
+      "type": "data",
+      "relationship_description": "【部门 (Department)】下辖多名【员工 (Employee)】，可有一个上级【部门 (Department)】构成审批链层级。它绑定一个默认【成本中心 (Cost_Center)】作为本部门员工费用归集口袋，是【报销单 (Expense_Claim)】单头归属维度之一。",
+      "primary_key": "department_id",
+      "properties": [
+        {
+          "name": "department_id",
+          "type": "String",
+          "description": "部门唯一编号，格式 D+4 位（如 D2030）"
+        },
+        {
+          "name": "parent_department_id",
+          "type": "String",
+          "description": "上级（父）部门编号，构成审批链层级",
+          "is_foreign_key": true,
+          "references": "Department"
+        },
+        {
+          "name": "manager_employee_id",
+          "type": "String",
+          "description": "部门负责人工号，审批链常出现",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "default_cost_center_id",
+          "type": "String",
+          "description": "部门默认成本中心编号，员工默认成本中心的来源",
+          "is_foreign_key": true,
+          "references": "Cost_Center"
+        },
+        {
+          "name": "department_name",
+          "type": "String",
+          "description": "部门名称，如销售二部"
+        },
+        {
+          "name": "business_line",
+          "type": "String",
+          "description": "部门归属业务条线，枚举：销售/研发/市场/交付/职能"
+        }
+      ]
+    },
+    {
+      "id": "Cost_Center",
+      "name": "成本中心",
+      "description": "预算与费用归集的最小核算单元，记录成本中心号、名称、归属部门、责任人、预算归口与启用状态，每笔费用最终都落到一个成本中心。",
+      "type": "data",
+      "relationship_description": "【成本中心 (Cost_Center)】归属于一个【部门 (Department)】，由一名【员工 (Employee)】作为责任人（财务 BP / 部门负责人）。它是【报销单 (Expense_Claim)】费用归集维度，并按成本中心×科目×期间三维定义【预算 (Budget)】，停用的成本中心不能挂费用。",
+      "primary_key": "cost_center_id",
+      "properties": [
+        {
+          "name": "cost_center_id",
+          "type": "String",
+          "description": "成本中心唯一编号，格式 CC+6 位（如 CC100210）"
+        },
+        {
+          "name": "department_id",
+          "type": "String",
+          "description": "成本中心归属的部门编号",
+          "is_foreign_key": true,
+          "references": "Department"
+        },
+        {
+          "name": "owner_employee_id",
+          "type": "String",
+          "description": "成本中心责任人工号（财务 BP / 部门负责人），承担预算责任，预警通知推给他",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "name",
+          "type": "String",
+          "description": "成本中心名称"
+        },
+        {
+          "name": "budget_owner_org",
+          "type": "String",
+          "description": "成本中心的预算管理归口，对接预算通"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "成本中心状态，枚举：启用/停用/待启用，停用的成本中心不能挂费用，责任人字段填齐才允许启用"
+        }
+      ]
+    },
+    {
+      "id": "Expense_Category",
+      "name": "费用科目",
+      "description": "费用科目主数据，与预算科目共用同一套编码（F1010~F5010），定义该笔费用花在什么类型上，是费用归集与预算占用对齐的关键维度。",
+      "type": "data",
+      "relationship_description": "【费用科目 (Expense_Category)】被【报销单明细行 (Expense_Claim_Line)】引用作为费用归类，与【预算 (Budget)】共用编码以保证费用归集与预算占用严丝合缝，也是【财务动作 (Financial_Action)】记账的科目维度。",
+      "primary_key": "expense_category_id",
+      "properties": [
+        {
+          "name": "expense_category_id",
+          "type": "String",
+          "description": "费用科目编码，格式 F+4 位（如 F1010），费用科目与预算科目共用同一套编码"
+        },
+        {
+          "name": "category_name",
+          "type": "String",
+          "description": "费用科目名称，如差旅费-城市间交通、业务招待费、办公费"
+        },
+        {
+          "name": "category_group",
+          "type": "String",
+          "description": "费用科目所属科目群，如差旅费群/业务与市场群/日常运营群/人才与团队群"
+        },
+        {
+          "name": "is_travel_category",
+          "type": "Boolean",
+          "description": "是否差旅类科目（F1010/F1011/F1020/F1030），差旅类明细行必须关联已批准的出差编号 BTA"
+        },
+        {
+          "name": "requires_invoice",
+          "type": "Boolean",
+          "description": "该科目是否需要发票，F1030 出差补助为按天定额无票科目"
+        },
+        {
+          "name": "typical_invoice_types",
+          "type": "List<String>",
+          "description": "该科目常见的发票类型清单，用于发票类型与科目匹配校验（RULE-INV-06）"
+        },
+        {
+          "name": "reimbursement_standard",
+          "type": "String",
+          "description": "该科目的报销标准说明，如住宿按职级城市标准、市内交通单日累计 200 元上限"
+        },
+        {
+          "name": "scope_description",
+          "type": "String",
+          "description": "该科目的核算口径说明，含什么与不含什么"
+        }
+      ]
+    },
+    {
+      "id": "Invoice",
+      "name": "发票",
+      "description": "发票主数据，即票夹云内 OCR 结构化的对象，记录票面字段、税局验真结果、OCR 置信度与来源，是费用真实性的凭据。",
+      "type": "data",
+      "relationship_description": "【发票 (Invoice)】被【报销单明细行 (Expense_Claim_Line)】关联，一张发票只能挂一条明细行（防一票多报）。它的价税合计是明细金额核对基准（RULE-INV-08），验真结果与置信度是直通分流判断的判据之一。",
+      "primary_key": "invoice_id",
+      "properties": [
+        {
+          "name": "invoice_id",
+          "type": "String",
+          "description": "票夹云内部票据 ID，格式 PIAO+12 位（如 PIAO260529000451），票一进系统就分配"
+        },
+        {
+          "name": "invoice_type",
+          "type": "String",
+          "description": "发票类型/票种，枚举：专票/普票/电子普票/数电票/火车票/机票行程单/出租车票/定额票/客运汽车票"
+        },
+        {
+          "name": "invoice_code",
+          "type": "String",
+          "description": "发票税控代码，10/12 位（数电票无）"
+        },
+        {
+          "name": "invoice_number",
+          "type": "String",
+          "description": "发票号码，唯一编号，8 位或 20 位（数电新规），关键字段"
+        },
+        {
+          "name": "issue_date",
+          "type": "Date",
+          "description": "发票开票日期，超 90 天或跨年度触发 RULE-INV-05"
+        },
+        {
+          "name": "seller_name",
+          "type": "String",
+          "description": "销售方（卖方）名称"
+        },
+        {
+          "name": "seller_tax_id",
+          "type": "String",
+          "description": "销售方税号，18 位（火车票无税号）"
+        },
+        {
+          "name": "buyer_name",
+          "type": "String",
+          "description": "购买方名称，须为公司主体或授权主体（抬头校验 RULE-INV-01）"
+        },
+        {
+          "name": "buyer_tax_id",
+          "type": "String",
+          "description": "购买方税号，18 位，抬头校验关键字段"
+        },
+        {
+          "name": "total_amount_with_tax",
+          "type": "Float",
+          "description": "价税合计含税总额，最关键字段，明细金额按它核（RULE-INV-08）"
+        },
+        {
+          "name": "amount_without_tax",
+          "type": "Float",
+          "description": "不含税金额，与税额、税率三者勾稽"
+        },
+        {
+          "name": "tax_amount",
+          "type": "Float",
+          "description": "税额，专票进项可抵扣触发 FA-06"
+        },
+        {
+          "name": "tax_rate",
+          "type": "String",
+          "description": "税率，百分比"
+        },
+        {
+          "name": "goods_or_service_name",
+          "type": "String",
+          "description": "商品/服务名称，开的什么，用于科目匹配参考（RULE-INV-06）"
+        },
+        {
+          "name": "check_code",
+          "type": "String",
+          "description": "发票校验码/防伪码，20 位（部分票种，数电票无）"
+        },
+        {
+          "name": "verification_status",
+          "type": "String",
+          "description": "税局验真结果，枚举：已验真/存疑/未查，存疑升 T6 转人工（RULE-INV-02）"
+        },
+        {
+          "name": "ocr_confidence",
+          "type": "Float",
+          "description": "OCR 关键字段（金额/发票号/税号/日期）的最低置信度，0~1，<0.95 转人工"
+        },
+        {
+          "name": "source",
+          "type": "String",
+          "description": "发票来源，枚举：电子上传/拍照 OCR/数电直连，数电直连验真与准确度最高"
+        }
+      ]
+    },
+    {
+      "id": "Expense_Claim",
+      "name": "报销单",
+      "description": "报销单主档（出差报销 ECA / 普通报销 OEP），三层结构的单头，记录报销人、部门、成本中心、出差编号、合计金额、合计可报金额与状态机当前态。",
+      "type": "data",
+      "relationship_description": "【报销单 (Expense_Claim)】由【员工 (Employee)】作为报销人提交，归属于一个【部门 (Department)】与一个【成本中心 (Cost_Center)】，含多条【报销单明细行 (Expense_Claim_Line)】。提交后一对一生成【费控审核案件 (Expense_Audit_Case)】，审批通过后绑定【审批流实例 (Approval_Instance)】。",
+      "primary_key": "expense_claim_id",
+      "properties": [
+        {
+          "name": "expense_claim_id",
+          "type": "String",
+          "description": "报销单唯一单号，出差报销 ECA+8 位日期+6 位流水（如 ECA20260529000128）/ 普通报销 OEP+8 位日期+6 位流水（如 OEP20260516000099）"
+        },
+        {
+          "name": "claimant_employee_id",
+          "type": "String",
+          "description": "报销人工号，默认当前登录人，可代他人报（需授权），须为在职且有报销权限",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "department_id",
+          "type": "String",
+          "description": "报销单所属部门编号，从启人HR 带出报销人默认部门，可改",
+          "is_foreign_key": true,
+          "references": "Department"
+        },
+        {
+          "name": "cost_center_id",
+          "type": "String",
+          "description": "报销单归属成本中心编号，填的是费用该由哪个成本中心承担，须为启用状态（RULE-BUD-03）",
+          "is_foreign_key": true,
+          "references": "Cost_Center"
+        },
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "报销单关联的费控审核案件编号，提交后一对一生成",
+          "is_foreign_key": true,
+          "references": "Expense_Audit_Case"
+        },
+        {
+          "name": "approval_instance_id",
+          "type": "String",
+          "description": "报销单关联的审批流实例编号，进审批流时绑定",
+          "is_foreign_key": true,
+          "references": "Approval_Instance"
+        },
+        {
+          "name": "claim_type",
+          "type": "String",
+          "description": "报销单类型，枚举：出差报销（ECA）/普通报销（OEP）"
+        },
+        {
+          "name": "business_trip_no",
+          "type": "String",
+          "description": "出差编号 BTA，差旅类报销必填，格式 BTA+8 位日期+5 位流水，须为已批准状态"
+        },
+        {
+          "name": "total_amount",
+          "type": "Float",
+          "description": "合计金额，各明细行金额之和，系统汇总不手填"
+        },
+        {
+          "name": "total_payable_amount",
+          "type": "Float",
+          "description": "合计可报金额，核减后金额，系统算，核减后小于合计时差额触发 FA-02/FA-12，分流判断用此值"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "报销单状态机当前态，枚举：DRAFT/SUBMITTED/OCR_RUNNING/VALIDATING/VALIDATED/AUTO_APPROVED/MANUAL_REVIEW/REVIEWED/RETURNED/REJECTED/APPROVING/APPROVED/PENDING_PAYMENT/PAYING/PAID/POSTED/ARCHIVED/SUSPENDED/VOID/PARTIAL"
+        },
+        {
+          "name": "create_time",
+          "type": "Timestamp",
+          "description": "报销单创建时间"
+        },
+        {
+          "name": "submit_time",
+          "type": "Timestamp",
+          "description": "报销单提交时间，触发事件 EXPENSE_SUBMITTED"
+        }
+      ]
+    },
+    {
+      "id": "Expense_Claim_Line",
+      "name": "报销单明细行",
+      "description": "报销单的费用明细行，每行一笔费用，记录费用科目、发生日期、金额（=关联票据价税合计）、关联票据与说明，是费用归集与校验的最小单位。",
+      "type": "data",
+      "relationship_description": "【报销单明细行 (Expense_Claim_Line)】属于一张【报销单 (Expense_Claim)】，引用一个【费用科目 (Expense_Category)】并关联一张【发票 (Invoice)】（一票只挂一行）。行金额必须等于关联发票价税合计（RULE-INV-08），差旅行发生日期须落在出差编号范围内。",
+      "primary_key": "expense_claim_line_id",
+      "properties": [
+        {
+          "name": "expense_claim_line_id",
+          "type": "String",
+          "description": "报销单明细行唯一编号"
+        },
+        {
+          "name": "expense_claim_id",
+          "type": "String",
+          "description": "明细行所属的报销单编号",
+          "is_foreign_key": true,
+          "references": "Expense_Claim"
+        },
+        {
+          "name": "expense_category_id",
+          "type": "String",
+          "description": "明细行选择的费用科目编号，差旅类需带出差编号 BTA（RULE-INV-06/RULE-BUD-01）",
+          "is_foreign_key": true,
+          "references": "Expense_Category"
+        },
+        {
+          "name": "invoice_id",
+          "type": "String",
+          "description": "明细行关联的票据编号，一票只能挂一行，提交时查重（RULE-INV-03），无票行（F1030）为空",
+          "is_foreign_key": true,
+          "references": "Invoice"
+        },
+        {
+          "name": "expense_date",
+          "type": "Date",
+          "description": "费用实际发生日期，不能晚于提报日，差旅类须落在 BTA 出差日期范围内（RULE-CMP-03/RULE-CMP-04），预算占用按此定位期间"
+        },
+        {
+          "name": "amount",
+          "type": "Float",
+          "description": "本行费用金额（含税价税合计），必须等于关联票据价税合计，无票行系统按定额算（RULE-INV-08）"
+        },
+        {
+          "name": "deducted_amount",
+          "type": "Float",
+          "description": "本行核减金额，超标/不合规时削减的额度，差额走 FA-02/FA-12"
+        },
+        {
+          "name": "payable_amount",
+          "type": "Float",
+          "description": "本行核减后可报金额，初始等于金额"
+        },
+        {
+          "name": "remark",
+          "type": "String",
+          "description": "本行费用事由与明细说明，招待/大额/超期/跨期等情形必填"
+        }
+      ]
+    },
+    {
+      "id": "Budget",
+      "name": "预算",
+      "description": "预算记录，按成本中心×科目×期间三维管理，含预算额、已占用、已冻结、已实际、可用余额与预警阈值六个核心金额字段。",
+      "type": "data",
+      "relationship_description": "【预算 (Budget)】绑定一个【成本中心 (Cost_Center)】与一个【费用科目 (Expense_Category)】（加期间构成三维主键）。它被【预算占用 (Budget_Occupation)】按 FA-01 占用、FA-03 冻结、FA-02 释放，可用余额不足时升风险 T5（RULE-BUD-02）。",
+      "primary_key": "budget_id",
+      "properties": [
+        {
+          "name": "budget_id",
+          "type": "String",
+          "description": "预算唯一编号"
+        },
+        {
+          "name": "cost_center_id",
+          "type": "String",
+          "description": "预算归属的成本中心编号，三维之一",
+          "is_foreign_key": true,
+          "references": "Cost_Center"
+        },
+        {
+          "name": "expense_category_id",
+          "type": "String",
+          "description": "预算归属的预算科目编号，与费用科目共用编码，三维之一",
+          "is_foreign_key": true,
+          "references": "Expense_Category"
+        },
+        {
+          "name": "budget_period",
+          "type": "String",
+          "description": "预算期间，年度/季度/月度，三维之一，占用按费用发生日期定位期间"
+        },
+        {
+          "name": "budget_amount",
+          "type": "Float",
+          "description": "预算额，这条预算一共批了多少钱，编制时定下"
+        },
+        {
+          "name": "occupied_amount",
+          "type": "Float",
+          "description": "已占用，审批通过确定要花的额度，FA-01 占用增、FA-02 释放减"
+        },
+        {
+          "name": "frozen_amount",
+          "type": "Float",
+          "description": "已冻结，审批途中临时锁住的额度，FA-03 冻结增、解冻减"
+        },
+        {
+          "name": "actual_amount",
+          "type": "Float",
+          "description": "已实际发生，真正付款记账落地的额度，FA-09 回写总账增"
+        },
+        {
+          "name": "available_amount",
+          "type": "Float",
+          "description": "可用余额，= 预算额 − 已占用 − 已冻结，占用减、释放还"
+        },
+        {
+          "name": "warning_threshold",
+          "type": "String",
+          "description": "预警阈值，默认 80% 预警 / 100% 超支，执行率=(已占用+已实际)/预算额"
+        }
+      ]
+    },
+    {
+      "id": "Approval_Rule",
+      "name": "审批规则",
+      "description": "审批规则配置，含两层含义：①报销规则校验规则库（RULE-* 四组 INV/STD/CMP/BUD），②审批权限/路由规则（按金额/科目/风险决定走几级、谁审）。",
+      "type": "data",
+      "relationship_description": "【审批规则 (Approval_Rule)】是规则引擎与审批路由的配置源。它被【规则校验结果 (Validation_Result)】命中（命中规则编码 RULE-*），被【风险事件 (Risk_Event)】引用为触发规则，并决定【审批建议 (Approval_Recommendation)】的路由方案。",
+      "primary_key": "approval_rule_id",
+      "properties": [
+        {
+          "name": "approval_rule_id",
+          "type": "String",
+          "description": "审批规则唯一编号，校验规则编码 RULE-*（如 RULE-STD-01、RULE-INV-03）"
+        },
+        {
+          "name": "rule_layer",
+          "type": "String",
+          "description": "规则层，枚举：报销规则校验规则库/审批权限路由规则"
+        },
+        {
+          "name": "rule_group",
+          "type": "String",
+          "description": "校验规则所属组，枚举：INV（发票）/STD（标准）/CMP（合规）/BUD（预算），引擎按 INV→STD→CMP→BUD 顺序跑"
+        },
+        {
+          "name": "rule_name",
+          "type": "String",
+          "description": "规则名称，如住宿超标、票据重复报销、成本中心归属错误"
+        },
+        {
+          "name": "rule_description",
+          "type": "String",
+          "description": "规则的判定逻辑与适用场景说明"
+        },
+        {
+          "name": "error_message",
+          "type": "String",
+          "description": "命中规则时系统侧的报错/提示文案"
+        },
+        {
+          "name": "default_action",
+          "type": "String",
+          "description": "命中规则的默认动作，枚举：提示/核减/退回/转人工/升风险/驳回"
+        },
+        {
+          "name": "mapped_risk_type",
+          "type": "String",
+          "description": "命中后映射的风险类型，T1~T8（如 RULE-INV-03→T1、RULE-STD-*→T3、RULE-BUD-02→T5）"
+        },
+        {
+          "name": "routing_dimension",
+          "type": "String",
+          "description": "审批路由规则的判定维度（金额/科目/风险）及分级阈值说明"
+        },
+        {
+          "name": "is_active",
+          "type": "Boolean",
+          "description": "该规则当前是否启用"
+        }
+      ]
+    },
+    {
+      "id": "Expense_Audit_Case",
+      "name": "费控审核案件",
+      "description": "费控审核案件（FK），智控核心产物，与报销单一对一，是穿全链路的主线索，落库报销单快照并引用风险事件、预算占用、审批流、ERP 回写等全链路产物号。",
+      "type": "data",
+      "relationship_description": "【费控审核案件 (Expense_Audit_Case)】与一张【报销单 (Expense_Claim)】一对一绑定，转人工后分派给一名【员工 (Employee)】作为承办人。它身上引用了【规则校验结果 (Validation_Result)】、【预算占用 (Budget_Occupation)】、【风险事件 (Risk_Event)】、【审批建议 (Approval_Recommendation)】与【财务动作 (Financial_Action)】，是全链路审计的主线索。",
+      "primary_key": "expense_audit_case_id",
+      "properties": [
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "费控审核案件唯一编号，格式 FK+8 位日期+5 位流水"
+        },
+        {
+          "name": "expense_claim_id",
+          "type": "String",
+          "description": "案件关联的报销单编号，建案时绑定，一对一",
+          "is_foreign_key": true,
+          "references": "Expense_Claim"
+        },
+        {
+          "name": "assignee_employee_id",
+          "type": "String",
+          "description": "案件承办人（审核员）工号，转人工后分案时写",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "total_amount",
+          "type": "Float",
+          "description": "案件合计金额，从报销单带"
+        },
+        {
+          "name": "total_payable_amount",
+          "type": "Float",
+          "description": "案件合计可报金额，核减后能报多少，随核减更新"
+        },
+        {
+          "name": "claim_snapshot",
+          "type": "String",
+          "description": "报销单快照，建案时点报销单全量字段冻结落库，供 L4 移送稽核还原"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "案件状态机当前态，与报销单共用状态机"
+        },
+        {
+          "name": "manual_review_reason",
+          "type": "String",
+          "description": "转人工原因标签，枚举：金额超阈/命中风险/低置信/超预算，分流时打标，可同时多个"
+        },
+        {
+          "name": "hit_rule_list",
+          "type": "List<String>",
+          "description": "规则命中清单，命中了哪些 RULE-*，校验阶段写"
+        },
+        {
+          "name": "sla_deadline",
+          "type": "Timestamp",
+          "description": "案件 SLA 倒计时/处理时限，按 SLA 策略算"
+        },
+        {
+          "name": "audit_timeline",
+          "type": "String",
+          "description": "审计时间线，全生命周期留痕，每步追加"
+        },
+        {
+          "name": "create_time",
+          "type": "Timestamp",
+          "description": "案件建案时间"
+        }
+      ]
+    },
+    {
+      "id": "Validation_Result",
+      "name": "规则校验结果",
+      "description": "四组规则（INV→STD→CMP→BUD）跑完生成的校验结果，挂在费控审核案件上，含总体结论、规则命中明细、判定依据与核减建议。",
+      "type": "data",
+      "relationship_description": "【规则校验结果 (Validation_Result)】归属于一个【费控审核案件 (Expense_Audit_Case)】，每条命中记录引用一条命中的【审批规则 (Approval_Rule)】。它是【审批建议 (Approval_Recommendation)】汇总的输入之一，命中升风险类规则时触发【风险事件 (Risk_Event)】。",
+      "primary_key": "validation_result_id",
+      "properties": [
+        {
+          "name": "validation_result_id",
+          "type": "String",
+          "description": "规则校验结果唯一编号"
+        },
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "校验结果所属的费控审核案件编号",
+          "is_foreign_key": true,
+          "references": "Expense_Audit_Case"
+        },
+        {
+          "name": "hit_rule_id",
+          "type": "String",
+          "description": "本条命中的审批规则编号 RULE-*",
+          "is_foreign_key": true,
+          "references": "Approval_Rule"
+        },
+        {
+          "name": "overall_conclusion",
+          "type": "String",
+          "description": "总体结论，枚举：通过/有核减/有风险/需退回/建议驳回"
+        },
+        {
+          "name": "hit_line_no",
+          "type": "String",
+          "description": "本条命中涉及的报销单明细行号"
+        },
+        {
+          "name": "standard_value",
+          "type": "String",
+          "description": "判定依据的标准值，如住宿标准 400"
+        },
+        {
+          "name": "actual_value",
+          "type": "String",
+          "description": "判定依据的实际值，如票面 480"
+        },
+        {
+          "name": "suggested_action",
+          "type": "String",
+          "description": "本条命中的建议动作，枚举：提示/核减/退回/转人工/升风险"
+        },
+        {
+          "name": "suggested_deduction_amount",
+          "type": "Float",
+          "description": "本条命中的建议核减金额"
+        },
+        {
+          "name": "total_suggested_deduction",
+          "type": "Float",
+          "description": "核减建议汇总，合计建议核减金额"
+        },
+        {
+          "name": "payable_after_deduction",
+          "type": "Float",
+          "description": "核减后合计可报金额"
+        },
+        {
+          "name": "validation_time",
+          "type": "Timestamp",
+          "description": "校验完成时间，触发事件 VALIDATION_COMPLETED"
+        }
+      ]
+    },
+    {
+      "id": "Budget_Occupation",
+      "name": "预算占用",
+      "description": "预算占用记录（BG 号），对接预算通，记录占用/冻结/释放的额度、动作类型、对预算字段的影响与占用结果，校验通过且预算够时生成。",
+      "type": "data",
+      "relationship_description": "【预算占用 (Budget_Occupation)】占用一条【预算 (Budget)】的额度，并挂在一个【费控审核案件 (Expense_Audit_Case)】上。它通过 FA-01 占用 / FA-03 冻结 / FA-02 释放改变预算六字段，占用失败（超预算）时升风险 T5 并升级审批建议。",
+      "primary_key": "budget_occupation_id",
+      "properties": [
+        {
+          "name": "budget_occupation_id",
+          "type": "String",
+          "description": "预算占用唯一编号，即 BG 号（预算占用号）"
+        },
+        {
+          "name": "budget_id",
+          "type": "String",
+          "description": "本次占用归属的预算编号",
+          "is_foreign_key": true,
+          "references": "Budget"
+        },
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "本次占用关联的费控审核案件编号",
+          "is_foreign_key": true,
+          "references": "Expense_Audit_Case"
+        },
+        {
+          "name": "occupation_amount",
+          "type": "Float",
+          "description": "本次占用/冻结的额度，按核减后可报金额"
+        },
+        {
+          "name": "action_type",
+          "type": "String",
+          "description": "对应的财务动作类型，枚举：FA-01 占用/FA-03 冻结/FA-02 释放"
+        },
+        {
+          "name": "occupation_period",
+          "type": "String",
+          "description": "占用对应的预算期间，按费用发生日期定位，不是提报日期"
+        },
+        {
+          "name": "occupation_result",
+          "type": "String",
+          "description": "占用结果，枚举：占用成功/预算不足，不足触发 BUDGET_INSUFFICIENT 升 T5"
+        },
+        {
+          "name": "available_before",
+          "type": "Float",
+          "description": "占用前预算可用余额（前值）"
+        },
+        {
+          "name": "available_after",
+          "type": "Float",
+          "description": "占用后预算可用余额（后值）"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "占用记录状态，枚举：冻结中/已占用/已释放/已转实际"
+        },
+        {
+          "name": "occupation_time",
+          "type": "Timestamp",
+          "description": "占用动作发生时间，触发事件 BUDGET_OCCUPIED"
+        }
+      ]
+    },
+    {
+      "id": "Risk_Event",
+      "name": "风险事件",
+      "description": "异常识别命中后生成的风险事件（RK），真相源在智控，记录风险类型 T1–T8、风险等级 L1–L4、命中规则、证据、处置动作与是否暂停付款/移送稽核。",
+      "type": "data",
+      "relationship_description": "【风险事件 (Risk_Event)】挂在一个【费控审核案件 (Expense_Audit_Case)】与其【报销单 (Expense_Claim)】上，由命中的【审批规则 (Approval_Rule)】映射风险类型，由一名【员工 (Employee)】作为处置人。L3/L4 触发案件 SUSPENDED 暂停付款，L4 强制移送稽核。",
+      "primary_key": "risk_event_id",
+      "properties": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "description": "风险事件唯一编号，格式 RK+8 位日期+5 位流水（如 RK2026052900007）"
+        },
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "风险事件关联的费控审核案件编号，命中时绑定",
+          "is_foreign_key": true,
+          "references": "Expense_Audit_Case"
+        },
+        {
+          "name": "expense_claim_id",
+          "type": "String",
+          "description": "风险事件关联的报销单编号（ECA/OEP）",
+          "is_foreign_key": true,
+          "references": "Expense_Claim"
+        },
+        {
+          "name": "hit_rule_id",
+          "type": "String",
+          "description": "触发本风险的命中规则编号 RULE-*",
+          "is_foreign_key": true,
+          "references": "Approval_Rule"
+        },
+        {
+          "name": "disposer_employee_id",
+          "type": "String",
+          "description": "风险事件处置人工号，处置时写",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "risk_type",
+          "type": "String",
+          "description": "风险类型，枚举：T1 重复报销/T2 虚开套票/T3 超标准报销/T4 拆分规避审批/T5 预算超支/T6 票据不实真伪存疑/T7 关联交易私人消费/T8 时间地点矛盾"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "description": "风险等级，枚举：L1 低/L2 中/L3 高/L4 严重，综合命中类型、规则数量、涉及金额、是否疑似舞弊定级"
+        },
+        {
+          "name": "evidence",
+          "type": "String",
+          "description": "证据/说明，判定依据，系统填命中详情人工可补"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "description": "处置动作，枚举：放行/退回/降额/驳回/转稽核/移送，处置时填"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "风险事件状态，枚举：待处置/处置中/已闭环/误报关闭"
+        },
+        {
+          "name": "is_payment_suspended",
+          "type": "Boolean",
+          "description": "是否暂停付款，L3 暂缓/L4 冻结时打标"
+        },
+        {
+          "name": "is_escalated_to_audit",
+          "type": "Boolean",
+          "description": "是否移送稽核/内审，L4 移送/L3 部分时打标"
+        },
+        {
+          "name": "raised_time",
+          "type": "Timestamp",
+          "description": "风险事件生成时间，触发事件 ANOMALY_DETECTED / RISK_EVENT_RAISED"
+        }
+      ]
+    },
+    {
+      "id": "Approval_Recommendation",
+      "name": "审批建议",
+      "description": "智控汇总校验结果、风险事件与预算占用结果生成的审批建议，含建议动作（核准/降额/退回/驳回）、核减后可报金额与审批路由方案。",
+      "type": "data",
+      "relationship_description": "【审批建议 (Approval_Recommendation)】挂在一个【费控审核案件 (Expense_Audit_Case)】上，是分流判断（直通 vs 转人工）与下游【审批流实例 (Approval_Instance)】路由的依据。它的路由方案由【审批规则 (Approval_Rule)】按金额/科目/风险三维算出。",
+      "primary_key": "approval_recommendation_id",
+      "properties": [
+        {
+          "name": "approval_recommendation_id",
+          "type": "String",
+          "description": "审批建议唯一编号"
+        },
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "审批建议所属的费控审核案件编号",
+          "is_foreign_key": true,
+          "references": "Expense_Audit_Case"
+        },
+        {
+          "name": "recommended_action",
+          "type": "String",
+          "description": "建议动作，枚举：建议核准/建议降额/建议退回/建议驳回"
+        },
+        {
+          "name": "payable_amount",
+          "type": "Float",
+          "description": "核减后可报金额，分流阈值与预算占用均用此值"
+        },
+        {
+          "name": "routing_plan",
+          "type": "String",
+          "description": "审批路由方案，该单走几级审批、每级是谁（直接主管→部门经理→部门总监→分管VP→CFO→CEO）"
+        },
+        {
+          "name": "routing_level_count",
+          "type": "Integer",
+          "description": "审批路由层级数，金额越大、命中风险越高层级越多"
+        },
+        {
+          "name": "dispatch_decision",
+          "type": "String",
+          "description": "分流判断结果，枚举：直通自动核准（AUTO_APPROVED）/转人工复核（MANUAL_REVIEW）"
+        },
+        {
+          "name": "is_escalated",
+          "type": "Boolean",
+          "description": "路由是否因命中风险（尤其 T5 预算超支、T3 超标）自动升级一级"
+        },
+        {
+          "name": "generated_time",
+          "type": "Timestamp",
+          "description": "审批建议生成时间，触发事件 APPROVAL_SUGGESTION_GENERATED"
+        }
+      ]
+    },
+    {
+      "id": "Approval_Instance",
+      "name": "审批流实例",
+      "description": "启流BPM 生成的审批流实例（AP），按审批建议的路由方案逐级跑，记录当前审批节点、各级审批人、审批结果与回避处理。",
+      "type": "data",
+      "relationship_description": "【审批流实例 (Approval_Instance)】绑定一张【报销单 (Expense_Claim)】，由各级【员工 (Employee)】作为审批人逐级审批。末级审批通过触发事件 APPROVAL_PASSED，案件进 APPROVED 状态进入回写 ERP。",
+      "primary_key": "approval_instance_id",
+      "properties": [
+        {
+          "name": "approval_instance_id",
+          "type": "String",
+          "description": "审批流实例唯一编号，格式 AP+8 位日期+6 位流水"
+        },
+        {
+          "name": "expense_claim_id",
+          "type": "String",
+          "description": "审批流实例关联的报销单编号",
+          "is_foreign_key": true,
+          "references": "Expense_Claim"
+        },
+        {
+          "name": "approver_employee_id",
+          "type": "String",
+          "description": "当前审批节点的审批人工号，若为报销人本人则自动跳上一级（回避）",
+          "is_foreign_key": true,
+          "references": "Employee"
+        },
+        {
+          "name": "current_node",
+          "type": "String",
+          "description": "当前审批流转节点，如直接主管审批/部门经理审批/部门总监审批/分管VP审批/CFO审批"
+        },
+        {
+          "name": "approval_chain",
+          "type": "String",
+          "description": "审批链各级审批人及顺序说明"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "审批流状态，枚举：APPROVING 审批中/APPROVED 审批通过/驳回"
+        },
+        {
+          "name": "approval_comments",
+          "type": "String",
+          "description": "各级审批人的批注或驳回意见"
+        },
+        {
+          "name": "start_time",
+          "type": "Timestamp",
+          "description": "审批流发起时间"
+        },
+        {
+          "name": "complete_time",
+          "type": "Timestamp",
+          "description": "审批流完成时间，末级通过触发事件 APPROVAL_PASSED"
+        }
+      ]
+    },
+    {
+      "id": "Financial_Action",
+      "name": "财务动作",
+      "description": "把费控决策落成对账、对预算、对资金真实变更的原子记录（FA-01~FA-12），记录动作类型、关联单据、金额、方向、操作主体、ERP 凭证号与留痕，是回写 ERP 与全链路审计的命根子。",
+      "type": "data",
+      "relationship_description": "【财务动作 (Financial_Action)】挂在一个【费控审核案件 (Expense_Audit_Case)】上，记账归集到一个【成本中心 (Cost_Center)】与一个【费用科目 (Expense_Category)】，占用/释放针对一条【预算 (Budget)】。每条都记操作主体（系统/人+工号），是 L4 移送稽核还原谁动过钱的依据。",
+      "primary_key": "financial_action_id",
+      "properties": [
+        {
+          "name": "financial_action_id",
+          "type": "String",
+          "description": "财务动作唯一编号，系统生成"
+        },
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "description": "财务动作关联的费控审核案件编号",
+          "is_foreign_key": true,
+          "references": "Expense_Audit_Case"
+        },
+        {
+          "name": "cost_center_id",
+          "type": "String",
+          "description": "财务动作记账归集的成本中心编号，从案件/报销单带",
+          "is_foreign_key": true,
+          "references": "Cost_Center"
+        },
+        {
+          "name": "expense_category_id",
+          "type": "String",
+          "description": "财务动作记账归集的费用科目编号，从案件/报销单带",
+          "is_foreign_key": true,
+          "references": "Expense_Category"
+        },
+        {
+          "name": "budget_id",
+          "type": "String",
+          "description": "财务动作占用/释放针对的预算编号（占用/冻结/释放类动作）",
+          "is_foreign_key": true,
+          "references": "Budget"
+        },
+        {
+          "name": "action_type",
+          "type": "String",
+          "description": "动作类型，枚举：FA-01 预算占用/FA-02 预算释放/FA-03 预算冻结/FA-04 生成应付单/FA-05 生成记账凭证/FA-06 进项税额认证抵扣/FA-07 发起支付/FA-08 支付完成回执/FA-09 回写总账/FA-10 冲销红冲/FA-11 计提预提/FA-12 差额退款个人补缴"
+        },
+        {
+          "name": "related_document",
+          "type": "String",
+          "description": "关联单据号，枚举来源：ECA/OEP/YF/PZ/PAY/BG"
+        },
+        {
+          "name": "amount",
+          "type": "Float",
+          "description": "本次动作的金额，按场景（占用额/记账额/付款额/释放额）"
+        },
+        {
+          "name": "direction",
+          "type": "String",
+          "description": "动作方向，枚举：占用/释放/借/贷/收/付"
+        },
+        {
+          "name": "operator",
+          "type": "String",
+          "description": "操作主体，系统自动跑记系统，人工触发记具体工号，全链路审计命根子"
+        },
+        {
+          "name": "erp_voucher_no",
+          "type": "String",
+          "description": "ERP 凭证号，关联的 PZ/YF，回写时写"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "动作状态，枚举：待执行/已执行/失败/已冲销"
+        },
+        {
+          "name": "change_log",
+          "type": "String",
+          "description": "留痕，记录改动/冲销时的前值、后值、理由"
+        },
+        {
+          "name": "action_time",
+          "type": "Timestamp",
+          "description": "动作发生时间，系统时间"
+        }
+      ]
+    }
+  ]
+}

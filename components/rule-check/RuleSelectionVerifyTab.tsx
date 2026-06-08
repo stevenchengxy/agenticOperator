@@ -4,6 +4,7 @@ import { Btn, Badge } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import { RuleDefinitionPanel } from "@/components/rule-check/RuleDefinitionPanel";
 import { CandidateProfileCard } from "@/components/rule-check/CandidateProfileCard";
+import { verdictLabel } from "@/components/rule-check/verdict-label";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type { RuleCheckAuditDetail } from "@/app/api/rule-check-audits/[auditId]/route";
@@ -18,7 +19,9 @@ import type {
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
 type Status = "idle" | "running" | "error";
-type VerifyError = { kind: "gateway" | "parse" | "llm" | "generic"; msg: string };
+// 'not_applicable' = deterministic rule-check (no LLM to cross-validate) — shown
+// as a neutral info panel, not a red error.
+type VerifyError = { kind: "gateway" | "parse" | "llm" | "generic" | "not_applicable"; msg: string };
 
 export type VerifyState = {
   status: Status;
@@ -150,7 +153,9 @@ export function RuleJudgmentTab({ detail, verify }: { detail: RuleCheckAuditDeta
     );
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
-      <CandidateProfileCard detail={detail} />
+      {/* Deterministic ontology audits (energy / 费控) have no candidate — skip the
+          recruitment profile card so the tab isn't dominated by an empty panel. */}
+      {!detail.deterministic && <CandidateProfileCard detail={detail} />}
       <AdaptedRules mode="full" detail={detail} verification={verify.result} verifying={verify.status === "running"} />
       {validation}
     </div>
@@ -164,7 +169,7 @@ export function RuleJudgmentTab({ detail, verify }: { detail: RuleCheckAuditDeta
 export function RuleSelectionTab({ detail, verify }: { detail: RuleCheckAuditDetail; verify: VerifyState }) {
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
-      <CandidateProfileCard detail={detail} />
+      {!detail.deterministic && <CandidateProfileCard detail={detail} />}
       <AdaptedRules mode="selection" detail={detail} verification={verify.result} verifying={verify.status === "running"} />
       <SelectionSummary verify={verify} />
     </div>
@@ -190,7 +195,10 @@ function nextActionLabel(a: string, t: (k: string) => string): string {
 function RuleResultStrip({ flags }: { flags: RuleCheckAuditDetail["flags"] }) {
   const { t } = useApp();
   const pass = flags.filter((f) => f.result === "PASS").length;
-  const fail = flags.filter((f) => f.result === "FAIL").length;
+  // 2026-06-01 fail-closed:信息不足 / 待复核(REVIEW)也计入「不通过」。
+  const fail = flags.filter(
+    (f) => f.result === "FAIL" || f.result === "INSUFFICIENT_INFO" || f.result === "REVIEW",
+  ).length;
   const na = flags.filter((f) => !f.applicable || f.result === "NOT_APPLICABLE" || f.result === "NOT_TRIGGERED").length;
   const seg = (icon: string, n: number, color: string) =>
     n > 0 ? (
@@ -233,16 +241,18 @@ function AdaptedRules({
 }) {
   const { t } = useApp();
   const [showFiltered, setShowFiltered] = React.useState(false);
+  // Defensive ?? [] — a non-recruitment detail (e.g. energy ontology audit) may
+  // omit these arrays; degrade gracefully instead of crashing on .map/.length.
   const provById = React.useMemo(
-    () => new Map(detail.rule_provenance.map((p) => [p.rule_id, p])),
+    () => new Map((detail.rule_provenance ?? []).map((p) => [p.rule_id, p])),
     [detail.rule_provenance],
   );
   const opinionById = React.useMemo(
     () => new Map((verification?.rule_opinions ?? []).map((o) => [o.rule_id, o])),
     [verification],
   );
-  const selected = detail.flags;
-  const filtered = detail.filtered_out_rules;
+  const selected = detail.flags ?? [];
+  const filtered = detail.filtered_out_rules ?? [];
   const total = detail.rules_total_in_ontology;
 
   return (
@@ -363,8 +373,11 @@ function AdaptedRuleCard({
   const { t } = useApp();
   const [open, setOpen] = React.useState(false);
   const tierKey = prov ? TIER_KEY[prov.tier] : undefined;
+  // 2026-06-01:FAIL / INSUFFICIENT_INFO / REVIEW 都是「不通过」→ 红;PASS → 绿;NOT_TRIGGERED → 灰。
+  const blocking =
+    flag.result === "FAIL" || flag.result === "INSUFFICIENT_INFO" || flag.result === "REVIEW";
   const resultVariant: "ok" | "err" | "default" =
-    flag.result === "PASS" ? "ok" : flag.result === "FAIL" ? "err" : "default";
+    flag.result === "PASS" ? "ok" : blocking ? "err" : "default";
   const agreeColor = opinion ? (opinion.agrees ? "var(--c-ok)" : "var(--c-err)") : null;
 
   return (
@@ -392,7 +405,7 @@ function AdaptedRuleCard({
             <Badge variant={flag.severity === "flag_only" ? "default" : "err"}>
               {flag.severity === "flag_only" ? t("rc_flag_severity_tip") : t("rc_flag_severity_bottomline")}
             </Badge>
-            <Badge variant={resultVariant}>{flag.result}</Badge>
+            <Badge variant={resultVariant}>{verdictLabel(flag.result, t)}</Badge>
             <Badge variant={flag.next_action === "block" ? "err" : flag.next_action === "continue" ? "ok" : "default"}>
               {nextActionLabel(flag.next_action, t)}
             </Badge>
@@ -521,7 +534,7 @@ function AdaptedRuleCard({
                   {t("rc_sel_llm_title")}
                 </div>
                 <div className="flex items-center gap-2" style={{ marginBottom: 5, flexWrap: "wrap" }}>
-                  <Badge variant={resultVariant}>{flag.result}</Badge>
+                  <Badge variant={resultVariant}>{verdictLabel(flag.result, t)}</Badge>
                   <Badge variant={flag.severity === "flag_only" ? "default" : "err"}>
                     {flag.severity === "flag_only" ? t("rc_flag_severity_tip") : t("rc_flag_severity_bottomline")}
                   </Badge>
@@ -581,8 +594,18 @@ function SecondOpinionBlock({ o }: { o: RuleOpinion }) {
         <span className="hint" style={{ fontSize: 10 }}>
           {t("rc_verify_orig")}
         </span>
-        <Badge variant={o.original_result === "PASS" ? "ok" : o.original_result === "FAIL" ? "err" : "default"}>
-          {o.original_result}
+        <Badge
+          variant={
+            o.original_result === "PASS"
+              ? "ok"
+              : o.original_result === "FAIL" ||
+                  o.original_result === "INSUFFICIENT_INFO" ||
+                  o.original_result === "REVIEW"
+                ? "err"
+                : "default"
+          }
+        >
+          {verdictLabel(o.original_result, t)}
         </Badge>
         <span className="text-ink-4" style={{ fontSize: 10 }}>
           →
@@ -647,9 +670,11 @@ function mapReason(
   err: string | undefined,
   t: (k: string) => string,
 ): VerifyError {
+  if (reason === "not_applicable") return { kind: "not_applicable", msg: t("rc_verify_deterministic") };
   if (reason === "gateway_unavailable") return { kind: "gateway", msg: t("rc_verify_err_gateway") };
   if (reason === "parse_error") return { kind: "parse", msg: err || t("rc_verify_err_parse") };
   if (reason === "llm_error") return { kind: "llm", msg: err || t("rc_verify_err_llm") };
+  if (reason === "not_found") return { kind: "generic", msg: t("rc_verify_err_not_found") };
   return { kind: "generic", msg: err || t("rc_verify_err_generic") };
 }
 
@@ -728,29 +753,34 @@ function RunningState({ stage }: { stage: number }) {
 // ── error ──────────────────────────────────────────────────────────────────
 function ErrorState({ error, onRetry }: { error: VerifyError; onRetry: () => void }) {
   const { t } = useApp();
+  // not_applicable = deterministic rule-check (energy) → neutral info, no retry.
+  // gateway = warn, no retry. everything else = error, retry.
+  const isNA = error.kind === "not_applicable";
   const isGateway = error.kind === "gateway";
+  const accent = isNA ? "var(--c-accent)" : isGateway ? "oklch(0.5 0.14 75)" : "var(--c-err)";
+  const bg = isNA ? "var(--c-accent-bg)" : isGateway ? "var(--c-warn-bg)" : "var(--c-err-bg)";
   return (
     <div
       className="rc-fade-in border rounded-md flex flex-col items-center text-center"
-      style={{
-        padding: "34px 28px",
-        borderColor: "var(--c-line)",
-        borderLeft: `3px solid ${isGateway ? "oklch(0.5 0.14 75)" : "var(--c-err)"}`,
-        background: isGateway ? "var(--c-warn-bg)" : "var(--c-err-bg)",
-      }}
+      style={{ padding: "34px 28px", borderColor: "var(--c-line)", borderLeft: `3px solid ${accent}`, background: bg }}
     >
-      <div style={{ color: isGateway ? "oklch(0.45 0.14 75)" : "var(--c-err)", marginBottom: 10 }}>
-        <Ic.alert />
+      <div style={{ color: isNA ? "var(--c-accent)" : isGateway ? "oklch(0.45 0.14 75)" : "var(--c-err)", marginBottom: 10 }}>
+        {isNA ? <Ic.shield /> : <Ic.alert />}
       </div>
       <div className="text-ink-1" style={{ fontSize: 13.5, fontWeight: 500, maxWidth: 480 }}>
         {error.msg}
       </div>
+      {isNA ? (
+        <div className="text-ink-3" style={{ fontSize: 11.5, marginTop: 8, maxWidth: 460, lineHeight: 1.6 }}>
+          {t("rc_verify_deterministic_hint")}
+        </div>
+      ) : null}
       {isGateway ? (
         <div className="mono text-ink-3" style={{ fontSize: 11, marginTop: 8 }}>
           {t("rc_verify_err_gateway_hint")}
         </div>
       ) : null}
-      {!isGateway ? (
+      {!isGateway && !isNA ? (
         <Btn size="sm" onClick={onRetry} style={{ marginTop: 16 }}>
           🔁 {t("rc_verify_retry")}
         </Btn>
@@ -1055,6 +1085,7 @@ const SV_META: Record<SecondVerdict, { key: string; variant: "ok" | "err" | "def
   PASS: { key: "rc_sv_pass", variant: "ok" },
   FAIL: { key: "rc_sv_fail", variant: "err" },
   NOT_APPLICABLE: { key: "rc_sv_na", variant: "default" },
+  INSUFFICIENT_INFO: { key: "rc_sv_insufficient", variant: "err" },
   UNSURE: { key: "rc_sv_unsure", variant: "default" },
 };
 

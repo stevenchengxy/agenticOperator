@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import { fetchRulesForMatchResume } from '@/lib/rule-check/ontology-source';
 import { fetchDomainOntology } from '@/lib/ontology-generator/ontology-source';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import { normalizeOntologyRule } from '@/lib/rule-check/normalize-ontology-rule';
 import type { Rule } from '@/lib/rule-check/types';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,10 @@ export const dynamic = 'force-dynamic';
 type Success = {
   ok: true;
   rules: Rule[];
-  source: 'ontology-api' | 'json-fallback';
+  // 'ontology-api' = live Allmeta; 'snapshot' = AO-shipped curated in-repo
+  // ontology (authoritative for runnable domains like 能源调度-v1 — NOT a
+  // degradation); 'json-fallback' = recruitment's degraded lib/rules.json path.
+  source: 'ontology-api' | 'json-fallback' | 'snapshot';
   fetched_at: string;
   drift?: { only_in_api: string[]; only_in_json: string[] };
   api_error?: string;
@@ -29,52 +33,6 @@ type Failure = { ok: false; error: string };
 
 function isRecruitmentDomain(domain: string): boolean {
   return !domain || domain === RECRUITMENT_DOMAIN_ID || domain === 'RAAS-v1' || domain === 'raas';
-}
-
-function parseEntities(v: unknown): string[] {
-  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string');
-  if (typeof v === 'string') {
-    try {
-      const p = JSON.parse(v);
-      return Array.isArray(p) ? p.filter((x): x is string => typeof x === 'string') : [];
-    } catch {
-      return v ? [v] : [];
-    }
-  }
-  return [];
-}
-
-/** Map an ontology rule node (snapshot camelCase OR Allmeta snake_case) → Rule. */
-function toRuleCheckRule(n: Record<string, unknown>): Rule {
-  const s = (snake: string, camel: string): string => {
-    const v = n[snake] ?? n[camel];
-    return typeof v === 'string' ? v : v == null ? '' : String(v);
-  };
-  return {
-    id: s('rule_id', 'id'),
-    specificScenarioStage: s('scenario_stage', 'specificScenarioStage'),
-    businessLogicRuleName: s('rule_name', 'businessLogicRuleName'),
-    applicableClient: s('applicable_client', 'applicableClient') || '通用',
-    applicableDepartment: s('applicable_department', 'applicableDepartment'),
-    submissionCriteria: s('submission_criteria', 'submissionCriteria'),
-    standardizedLogicRule: s('standardized_logic', 'standardizedLogicRule'),
-    relatedEntities: parseEntities(n.related_entities ?? n.relatedEntities),
-    businessBackgroundReason: s('business_reason', 'businessBackgroundReason'),
-    ruleSource: s('rule_source', 'ruleSource'),
-    executor: n.executor === 'Human' ? 'Human' : 'Agent',
-    enforcementLevel:
-      n.enforcementLevel === 'optional' || n.enforcement_level === 'optional'
-        ? 'optional'
-        : n.enforcementLevel === 'mandatory' || n.enforcement_level === 'mandatory'
-          ? 'mandatory'
-          : undefined,
-    failurePolicy:
-      n.failurePolicy === 'warn' || n.failure_policy === 'warn'
-        ? 'warn'
-        : n.failurePolicy === 'block' || n.failure_policy === 'block'
-          ? 'block'
-          : undefined,
-  };
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -93,13 +51,17 @@ export async function GET(req: Request): Promise<Response> {
       });
     }
 
-    // Other domains: read this domain's rules from Allmeta (or snapshot).
+    // Other domains: read this domain's rules from Allmeta, else the in-repo
+    // snapshot (the curated, authoritative ontology AO ships for runnable
+    // domains — Allmeta's copy of a new domain is often empty by design). A
+    // snapshot read is NOT an error, so it gets its own 'snapshot' source
+    // rather than being flattened into the degraded 'json-fallback'.
     const onto = await fetchDomainOntology(domain);
-    const rules = onto.rules.map((r) => toRuleCheckRule(r as Record<string, unknown>));
+    const rules = onto.rules.map((r) => normalizeOntologyRule(r as Record<string, unknown>));
     return NextResponse.json<Success>({
       ok: true,
       rules,
-      source: onto.source === 'allmeta' ? 'ontology-api' : 'json-fallback',
+      source: onto.source === 'allmeta' ? 'ontology-api' : 'snapshot',
       fetched_at: new Date().toISOString(),
     });
   } catch (e) {

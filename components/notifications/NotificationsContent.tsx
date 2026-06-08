@@ -1,8 +1,10 @@
 "use client";
 import React from "react";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import { Ic, IcName } from "@/components/shared/Ic";
 import { fetchJson } from "@/lib/api/client";
+import { NotificationDetailDrawer } from "@/components/notifications/NotificationDetailDrawer";
 
 // ── shapes (mirror /api/notifications) ──────────────────────────────────────
 type Kind = "message" | "alert";
@@ -75,6 +77,7 @@ function useRelativeTime() {
 
 export function NotificationsContent() {
   const { t } = useApp();
+  const { domain } = useDomain();
   const rel = useRelativeTime();
 
   const [tab, setTab] = React.useState<"notify" | "todo" | "oncall">("notify");
@@ -83,6 +86,7 @@ export function NotificationsContent() {
   const [onlyMine, setOnlyMine] = React.useState(false);
   const [data, setData] = React.useState<NotificationsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [openId, setOpenId] = React.useState<string | null>(null);
 
   const needsHumanFilter = tab === "todo" || onlyMine;
 
@@ -91,6 +95,7 @@ export function NotificationsContent() {
     if (kind !== "all") qs.set("kind", kind);
     if (category !== "all") qs.set("category", category);
     if (needsHumanFilter) qs.set("needsHuman", "1");
+    if (domain) qs.set("domain", domain); // scope to active 业务领域 (system always shows)
     qs.set("limit", "60");
     try {
       const res = await fetchJson<NotificationsResponse>(`/api/notifications?${qs.toString()}`);
@@ -100,7 +105,7 @@ export function NotificationsContent() {
     } finally {
       setLoading(false);
     }
-  }, [kind, category, needsHumanFilter]);
+  }, [kind, category, needsHumanFilter, domain]);
 
   React.useEffect(() => {
     setLoading(true);
@@ -116,6 +121,15 @@ export function NotificationsContent() {
     } catch {
       /* ignore */
     }
+  };
+
+  // Opening a notification reveals its detail (AI analysis + raw logs) and
+  // marks it read. The drawer is the home for "看详细日志、定位问题".
+  const openDetail = (id: string) => {
+    setOpenId(id);
+    void fetchJson(`/api/notifications`, { method: "POST", body: JSON.stringify({ action: "read", id }) })
+      .then(() => load())
+      .catch(() => {});
   };
 
   const counts = data?.counts;
@@ -244,12 +258,14 @@ export function NotificationsContent() {
           ) : (
             <div className="flex flex-col gap-2.5">
               {rows.map((n) => (
-                <NotifCard key={n.id} n={n} rel={rel} t={t} />
+                <NotifCard key={n.id} n={n} rel={rel} t={t} onOpen={() => openDetail(n.id)} />
               ))}
             </div>
           )}
         </>
       )}
+
+      {openId && <NotificationDetailDrawer id={openId} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
@@ -288,19 +304,20 @@ function NotifCard({
   n,
   rel,
   t,
+  onOpen,
 }: {
   n: NotificationRow;
   rel: (iso: string) => string;
   t: (k: string) => string;
+  onOpen: () => void;
 }) {
   const sev = SEV[n.severity];
   const CatIcon = Ic[CAT_ICON[n.category]];
   const isCritical = n.kind === "alert" && n.severity === "critical";
+  const unread = n.readAt === null;
   const inner = (
     <div
-      className={`rounded-xl border border-line bg-surface px-4 py-3 transition-colors ${
-        n.href ? "hover:bg-raised cursor-pointer" : ""
-      }`}
+      className="rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-raised cursor-pointer"
       style={isCritical ? { borderColor: "color-mix(in oklch, var(--c-err) 35%, var(--c-line))" } : undefined}
     >
       <div className="flex items-start gap-3">
@@ -312,7 +329,8 @@ function NotifCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-ink-1 truncate">{n.title}</span>
+            {unread && <span className="h-1.5 w-1.5 rounded-full bg-accent shrink-0" title="未读" />}
+            <span className={`text-sm truncate ${unread ? "font-semibold text-ink-1" : "font-medium text-ink-2"}`}>{n.title}</span>
             <span
               className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
               style={{ background: sev.bg, color: sev.ink }}
@@ -349,11 +367,9 @@ function NotifCard({
       </div>
     </div>
   );
-  return n.href ? (
-    <a href={n.href} className="block">
+  return (
+    <button type="button" onClick={onOpen} className="block w-full text-left">
       {inner}
-    </a>
-  ) : (
-    inner
+    </button>
   );
 }

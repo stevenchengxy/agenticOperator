@@ -9,7 +9,7 @@
 // now derived 1:1 from the real ontology actions, with real trigger→emit edges.
 
 import type { DomainOntology, OntologyAction, OntologyEvent } from "./ontology-source";
-import { ENERGY_DOMAIN_ID } from "@/lib/domain-ids";
+import { ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID } from "@/lib/domain-ids";
 
 export type DerivedAgentKind = "llm" | "simulated-human";
 
@@ -48,6 +48,7 @@ export type DerivedAgent = {
 // prefix that matches their registered Inngest function ids.
 const SLUG_PREFIX: Record<string, string> = {
   [ENERGY_DOMAIN_ID]: "energy",
+  [COST_CONTROL_DOMAIN_ID]: "feikong",
 };
 
 /** Short deterministic hash of a string → stable hex, for unique ASCII slugs. */

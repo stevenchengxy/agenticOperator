@@ -11,6 +11,7 @@
 import { byShortFunction } from "@/lib/agent-functions";
 import { displayNameFor } from "@/lib/agent-display-names";
 import type { AgentBreakdownRow } from "./prompt";
+import { classifyStep } from "./step-classify";
 
 // Localize any agent identifier to its Chinese business name — the deterministic
 // (gateway-down) path must never leak a raw Inngest slug or English code either.
@@ -19,7 +20,12 @@ const zh = (idOrShort: string) => displayNameFor(idOrShort, "zh");
 export function deterministicSummary(
   run: { triggerEvent: string; status: string; suspendedReason: string | null },
   breakdown: AgentBreakdownRow[],
-  steps: Array<{ nodeId: string; status: string; error: string | null }>,
+  steps: Array<{
+    nodeId: string;
+    status: string;
+    error: string | null;
+    attempts?: number | null;
+  }>,
   activities: Array<{ agentName: string; narrative: string }>,
 ): string {
   const lines: string[] = [];
@@ -36,25 +42,45 @@ export function deterministicSummary(
       const fn = byShortFunction(r.agentName);
       const lastBit = r.lastNarrative ? `；最近一次：${truncate(r.lastNarrative, 80)}` : "";
       const fnBit = fn ? `（${fn.summary}）` : "";
+      const failBits: string[] = [];
+      if (r.businessFailed > 0) failBits.push(`**业务失败 ${r.businessFailed}**`);
+      if (r.infraFailed > 0) failBits.push(`基础设施故障 ${r.infraFailed}（已重试/重放）`);
+      if (r.recovered > 0) failBits.push(`重试后成功 ${r.recovered}`);
+      const failBit = failBits.length > 0 ? `，${failBits.join("、")}` : "";
       lines.push(
-        `- **${zh(r.agentName)}** ${fnBit}：执行 ${r.steps} 个环节，累计 ${r.totalDurationMs} ms${r.failed > 0 ? `，**${r.failed} 个失败**` : ""}${lastBit}`,
+        `- **${zh(r.agentName)}** ${fnBit}：执行 ${r.steps} 个环节，累计 ${r.totalDurationMs} ms${failBit}${lastBit}`,
       );
     }
   }
   lines.push("");
   lines.push("## 异常 / 关注点");
-  const failed = steps.filter((s) => s.status === "failed" || s.error);
-  if (failed.length === 0) {
+  // Split infra-vs-business so a gateway blip never reads as a candidate
+  // rejection; retry-recoveries are not listed as failures.
+  const classified = steps.map((s) => ({ s, c: classifyStep(s) }));
+  const bizFails = classified.filter(({ c }) => c.outcome === "business-failed");
+  const infraFails = classified.filter(({ c }) => c.outcome === "infra-failed");
+  const recovered = classified.filter(({ c }) => c.outcome === "recovered");
+  if (bizFails.length === 0 && infraFails.length === 0) {
     lines.push("- 未发现失败环节。");
   } else {
-    for (const s of failed) {
-      lines.push(`- **${zh(s.nodeId)}**：${s.error ?? "该环节执行失败"}`);
+    for (const { s, c } of bizFails) {
+      lines.push(`- **${zh(s.nodeId)}（业务失败）**：${c.message ?? "判定未通过"}`);
     }
+    for (const { s, c } of infraFails) {
+      lines.push(
+        `- **${zh(s.nodeId)}（基础设施故障·已重试/重放，候选人未被拒绝）**：${c.message ?? "基础设施故障"}`,
+      );
+    }
+  }
+  if (recovered.length > 0) {
+    lines.push(`- 另有 ${recovered.length} 个环节在重试后成功，已恢复，不计为失败。`);
   }
   lines.push("");
   lines.push("## 下一步建议");
-  if (failed.length > 0) {
-    lines.push("- 建议人工复核失败环节涉及的候选人 / 职位数据，确认是数据缺失还是匹配规则需要调整。");
+  if (bizFails.length > 0) {
+    lines.push("- 建议人工复核业务失败环节涉及的候选人 / 职位数据，确认是数据缺失还是匹配规则需要调整。");
+  } else if (infraFails.length > 0) {
+    lines.push("- 本次失败均为基础设施故障，候选人未被拒绝；请关注依赖健康，系统会在依赖恢复后自动重放，无需人工复核候选人。");
   } else if (run.status === "suspended" || run.status === "paused") {
     lines.push("- 该流程已暂停，请确认暂停原因并决定是否继续推进该候选人。");
   } else if (run.status === "running") {

@@ -126,10 +126,19 @@ export async function GET(_req: Request): Promise<Response> {
   const knownShorts = new Set(AGENT_MAP.map((a) => a.short));
   for (const r of registry) {
     if (knownShorts.has(r.short)) continue;
-    // Skip ontology agents — they're surfaced from AgentVersion under their own
-    // domain (and managed as shells), not here under the recruitment default.
-    // The registry exposes the ontology function id as `short`/`fnId` (= the
-    // AgentVersion.slug, e.g. "energy-forecast-output"), so match all of them.
+    // Skip ANY per-domain app function (`agentic-operator-<domainId>-…`, domain ≠
+    // main): each business domain runs its own Inngest app (energy / 费控 / …),
+    // and those agents are surfaced below from AgentVersion under their OWN
+    // domain. Without this they'd leak into the recruitment default here —
+    // especially since the monitor now lists all `agentic-operator-*` apps, so
+    // the registry exposes domain-app functions whose CJK-prefixed slug (e.g.
+    // `agentic-operator-能源调度-v1-energy-…`) never matched the bare ontology
+    // slug set below.
+    const slugStr = String(r.slug ?? r.short ?? '');
+    if (slugStr.startsWith('agentic-operator-') && !slugStr.startsWith('agentic-operator-main-')) continue;
+    // Belt-and-suspenders: also skip ontology agents matched by bare slug (covers
+    // the legacy case where a pack was registered on the MAIN app, slug
+    // `agentic-operator-main-energy-…` → short/fnId = bare `energy-forecast-output`).
     const candidateSlugs = [r.slug, r.short, (r as { fnId?: string }).fnId].filter(Boolean) as string[];
     if (candidateSlugs.some((s) => ontologyShellSlugs.has(s))) continue;
     agents.push({

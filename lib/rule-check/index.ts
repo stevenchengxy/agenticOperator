@@ -1,4 +1,4 @@
-export { buildRuleCheckInput, runRuleCheck } from './runner';
+export { buildRuleCheckInput, runRuleCheck, formatExplanation, explanationTag } from './runner';
 export type {
   MatchResumeCheckResult,
   MatchResumeCheckStats,

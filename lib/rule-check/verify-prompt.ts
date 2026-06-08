@@ -32,7 +32,7 @@ export type VerifierDimension = {
   reasoning: string;
 };
 
-export type SecondVerdict = 'PASS' | 'FAIL' | 'NOT_APPLICABLE' | 'UNSURE';
+export type SecondVerdict = 'PASS' | 'FAIL' | 'NOT_APPLICABLE' | 'INSUFFICIENT_INFO' | 'UNSURE';
 
 /** Fixed per-rule confidence dimensions (FE maps key → i18n label). */
 export const RULE_DIMENSION_KEYS = [
@@ -159,7 +159,8 @@ C. 多维度置信(confidence + dimensions)—— 给这条规则 0-100 的整�
 严格约束:
 - 只能引用提供的 候选人 / 岗位 / 规则定义 信息;缺字段就说证据不足,不要编造。
 - 一律用中文。judgment_reasoning 写成连贯的一段话(60–180 字),其余 reasoning ≤ 120 字。
-- second_verdict 只能是 PASS / FAIL / NOT_APPLICABLE / UNSURE;对原模型标 applicable=false / NOT_TRIGGERED 的规则,通常给 NOT_APPLICABLE。
+- second_verdict 只能是 PASS / FAIL / NOT_APPLICABLE / INSUFFICIENT_INFO / UNSURE;对原模型标 applicable=false / NOT_TRIGGERED 的规则,通常给 NOT_APPLICABLE。
+- 评分政策(2026-06-01 fail-closed):强制规则(底线/需人工)若所需信息缺失或无法自动确认 → 应判**不通过**(原模型会标 INSUFFICIENT_INFO)。请认可这类「信息不足 → 不通过」为**正确**结论,**不要**因此判原模型错;若你也认为信息不足,second_verdict 用 INSUFFICIENT_INFO,judgment_reasoning 写明「因信息不足而不通过,建议人工复核」。
 - **rule_opinions 必须逐条对应"原模型已评估的规则":每条规则恰好一条意见。rule_id 必须原样照抄(形如 10-25),严禁自创 id、用规则名/英文 slug 当 id、拆分或合并规则。** 本该有却缺失的规则放进 missing_rules,不要塞进 rule_opinions。
 - 必须输出**合法 JSON**,不要在 JSON 外写任何文字(包括 markdown code fence)。
 
@@ -179,7 +180,7 @@ C. 多维度置信(confidence + dimensions)—— 给这条规则 0-100 的整�
       "rule_id":"<原样复制,如 10-25>",
       "selection_ok": true|false,
       "selection_reasoning":"<这条规则该不该为此候选人×岗位纳入,为什么>",
-      "second_verdict":"PASS|FAIL|NOT_APPLICABLE|UNSURE",
+      "second_verdict":"PASS|FAIL|NOT_APPLICABLE|INSUFFICIENT_INFO|UNSURE",
       "judgment_reasoning":"<一段自然语言:点名候选人姓名+岗位,引用具体证据,说明为何此结论,并评价原模型证据是否正确充分>",
       "confidence": <0-100 本条整体置信>,
       "dimensions": [
@@ -344,19 +345,25 @@ function normVerdict(v: unknown): VerifierVerdict {
 
 function normSecondVerdict(v: unknown): SecondVerdict {
   const s = asString(v).toUpperCase().replace(/[^A-Z_]/g, '');
-  if (s === 'PASS' || s === 'FAIL' || s === 'NOT_APPLICABLE') return s;
+  if (s === 'PASS' || s === 'FAIL' || s === 'NOT_APPLICABLE' || s === 'INSUFFICIENT_INFO') return s;
   if (s === 'NA' || s === 'NOTAPPLICABLE') return 'NOT_APPLICABLE';
+  if (s === 'INSUFFICIENTINFO' || s === 'INSUFFICIENT' || s === 'INSUFFICIENT_INFORMATION') {
+    return 'INSUFFICIENT_INFO';
+  }
   return 'UNSURE';
 }
 
 /**
  * Did the second model's verdict agree with the original audit result?
- * Compares on the PASS/FAIL/NOT_APPLICABLE axis; UNSURE never counts as agreement.
+ * Compares on the PASS/FAIL/NOT_APPLICABLE/INSUFFICIENT_INFO axis; UNSURE never
+ * counts as agreement. INSUFFICIENT_INFO agrees only with the original
+ * INSUFFICIENT_INFO (both mean "信息不足 → 不通过" under the 2026-06-01 policy).
  */
 function verdictsAgree(second: SecondVerdict, original: string): boolean {
   if (second === 'UNSURE') return false;
   const o = original.toUpperCase();
   if (second === 'NOT_APPLICABLE') return o === 'NOT_APPLICABLE' || o === 'NOT_TRIGGERED';
+  if (second === 'INSUFFICIENT_INFO') return o === 'INSUFFICIENT_INFO';
   return o === second;
 }
 

@@ -6,27 +6,28 @@ import { fetchJson } from "@/lib/api/client";
 import type { RunsResponse, HumanTaskCard, HumanTasksResponse } from "@/lib/api/types";
 import type { ActivityResponse, LogEntry, LogKind } from "@/lib/api/activity-types";
 import { useAgentsHealth } from "@/lib/api/agents-health";
-import type { AgentHealth } from "@/app/api/agents/health/route";
 import { useInngestEventsStream } from "@/lib/api/inngest-events-stream";
 import type { InngestEventRow } from "@/lib/api/inngest-events";
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
-import { useInngestLiveOverlay } from "@/lib/api/inngest-live-overlay";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
 import { useDisplayNameResolver } from "@/lib/agent-names";
+import {
+  buildOverviewAgentCards,
+  agentStatus,
+  type OverviewAgentCard,
+} from "@/lib/overview-agent-cards";
 
 // /overview — operations dashboard, redesigned 2026-06-01.
 //
 // Sections:
-//   A. Hero — overline, time-of-day greeting, status sentence, refresh.
-//   B. KPI strip — 3 inline numbers (active runs / today's success rate
-//      / pending HITL). No cards.
-//   C. 2-column body — left: HITL list (待我处理); right: live event
+//   A. Hero — overline, time-of-day greeting, refresh.
+//   B. 2-column body — left: HITL list (待我处理); right: live event
 //      stream via SSE (实时事件流). Stream falls back to polling.
-//   D. Agent runtime monitor — compact full-width strip showing recent
+//   C. Agent runtime monitor — compact full-width strip showing recent
 //      step-level activity from agents (started/completed/failed/anomaly).
-//   E. Agent health grid — deployed agents in the active domain, one
+//   D. Agent health grid — deployed agents in the active domain, one
 //      card each. Status badge (上线/下线/暂停) + invocations + success.
 //      Hides metrics row when there are no runs.
 
@@ -38,46 +39,32 @@ export function OverviewContent() {
   const { t } = useApp();
   const { domain } = useDomain();
   const health = useAgentsHealth(4_000);
-  const { byWsId: liveByWsId } = useInngestLiveOverlay();
-  const { realness: realnessMap } = useDeploymentMap();
+  const { rows: agentRows } = useDeploymentMap();
   const resolveName = useDisplayNameResolver();
 
   // SSE-backed Inngest event stream (real-time). Falls back to 2s polling.
   const eventStream = useInngestEventsStream();
 
   // KPI + activity (still polled every 8s — these are aggregate snapshots).
-  const [activeCount, setActiveCount] = React.useState<number | null>(null);
   const [failed1hCount, setFailed1hCount] = React.useState<number | null>(null);
-  const [todayRuns, setTodayRuns] = React.useState<{ total: number; completed: number } | null>(null);
   const [hitlTasks, setHitlTasks] = React.useState<HumanTaskCard[] | null>(null);
   const [activity, setActivity] = React.useState<LogEntry[] | null>(null);
   const [alertsActive, setAlertsActive] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
-    const today0 = new Date();
-    today0.setHours(0, 0, 0, 0);
     const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [active, failed, activityRes, todayFinished, hitl, alerts] = await Promise.all([
-        fetchJson<RunsResponse>("/api/runs?status=running,paused&limit=20"),
+      const [failed, activityRes, hitl, alerts] = await Promise.all([
         fetchJson<RunsResponse>(
           `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
         ),
         fetchJson<ActivityResponse>("/api/activity/recent?windowMs=1800000&limit=18"),
-        fetchJson<RunsResponse>(
-          `/api/runs?status=completed,failed,timed_out,interrupted&since=${encodeURIComponent(today0.toISOString())}&limit=1000`,
-        ),
         fetchJson<HumanTasksResponse>("/api/human-tasks?status=pending"),
         fetchJson<{ alerts: Array<{ acked: boolean }> }>("/api/alerts"),
       ]);
-      setActiveCount(active.runs.length);
       setFailed1hCount(failed.runs.length);
       setActivity(activityRes.entries);
-      setTodayRuns({
-        total: todayFinished.runs.length,
-        completed: todayFinished.runs.filter((r) => r.status === "completed").length,
-      });
       setHitlTasks(hitl.recent ?? []);
       setAlertsActive(alerts.alerts.filter((a) => !a.acked).length);
       setError(null);
@@ -92,10 +79,12 @@ export function OverviewContent() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Set of agent shorts in the current domain.
+  // Set of agent shorts in the current domain — sourced from the live
+  // /api/agents roster (not AGENT_MAP), so non-recruitment domains (energy /
+  // 费控) scope their HITL + activity correctly too.
   const shortsInDomain = React.useMemo(
-    () => new Set(AGENT_MAP.filter((a) => a.domain === domain).map((a) => a.short)),
-    [domain],
+    () => new Set(agentRows.filter((a) => a.domain === domain).map((a) => a.short)),
+    [agentRows, domain],
   );
 
   const hitlInDomain = React.useMemo<HumanTaskCard[] | null>(
@@ -109,28 +98,12 @@ export function OverviewContent() {
   );
 
   // Deployed agents in domain, sorted by recent activity (most active first).
-  const agentCards = React.useMemo<AgentCard[]>(() => {
-    return AGENT_MAP
-      .filter((a) => a.domain === domain && a.short !== "Chatbot")
-      .map((a) => ({
-        agent: a,
-        kind: realnessMap.get(a.short) ?? ("unbuilt" as const),
-        paused: liveByWsId.get(a.wsId)?.paused ?? false,
-        health: health.byShort.get(a.short) ?? null,
-      }))
-      .sort((x, y) => {
-        // online > paused > unbuilt; within online, more runs first
-        const rx = statusOrder(x);
-        const ry = statusOrder(y);
-        if (rx !== ry) return rx - ry;
-        return (y.health?.counts.started ?? 0) - (x.health?.counts.started ?? 0);
-      });
-  }, [domain, realnessMap, liveByWsId, health.byShort]);
-
-  const successRate =
-    todayRuns && todayRuns.total > 0
-      ? Math.round((todayRuns.completed / todayRuns.total) * 1000) / 10
-      : null;
+  // Sourced from the live /api/agents roster so every business domain's agents
+  // appear — including energy / 费控, registered as their own Inngest apps.
+  const agentCards = React.useMemo<OverviewAgentCard[]>(
+    () => buildOverviewAgentCards(agentRows, domain, health.byShort, resolveName),
+    [agentRows, domain, health.byShort, resolveName],
+  );
 
   const tone: OverallTone = computeTone(
     failed1hCount ?? 0,
@@ -141,8 +114,6 @@ export function OverviewContent() {
     <div className="flex-1 flex flex-col min-h-0 overflow-auto">
       <HeroHeader
         t={t}
-        activeCount={activeCount}
-        hitlCount={hitlInDomain?.length ?? null}
         alertsActive={alertsActive}
         tone={tone}
         fetchedAt={health.fetchedAt}
@@ -154,15 +125,8 @@ export function OverviewContent() {
           className="mx-auto ao-fade-rise"
           style={{ padding: "20px 32px 48px", maxWidth: 1280 }}
         >
-          <KpiStrip
-            t={t}
-            activeCount={activeCount}
-            successRate={successRate}
-            todayRuns={todayRuns}
-            hitlCount={hitlInDomain?.length ?? null}
-          />
           <div
-            className="grid mt-6"
+            className="grid"
             style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}
           >
             <TodoPanel t={t} tasks={hitlInDomain} resolveName={resolveName} />
@@ -181,7 +145,7 @@ export function OverviewContent() {
             />
           </div>
           <div className="mt-6">
-            <AgentHealthGrid t={t} cards={agentCards} resolveName={resolveName} />
+            <AgentHealthGrid t={t} cards={agentCards} />
           </div>
         </div>
       </div>
@@ -193,38 +157,24 @@ export function OverviewContent() {
 
 function HeroHeader({
   t,
-  activeCount,
-  hitlCount,
   alertsActive,
   tone,
   fetchedAt,
   onRefresh,
 }: {
   t: (k: string) => string;
-  activeCount: number | null;
-  hitlCount: number | null;
   alertsActive: number | null;
   tone: OverallTone;
   fetchedAt: Date | null;
   onRefresh: () => void;
 }) {
   const greeting = greetingForHour(new Date().getHours(), t);
-  const toneKey =
-    tone === "calm"
-      ? "overview_status_calm"
-      : tone === "tense"
-        ? "overview_status_tense"
-        : "overview_status_alarm";
   const toneAccent =
     tone === "calm"
       ? "var(--c-ok)"
       : tone === "tense"
         ? "oklch(0.6 0.14 75)"
         : "var(--c-err)";
-  const sentence = t("overview_status_sentence")
-    .replace("{active}", activeCount === null ? "…" : String(activeCount))
-    .replace("{hitl}", hitlCount === null ? "…" : String(hitlCount))
-    .replace("{tone}", t(toneKey));
   const statusStrip = t("overview_status_strip")
     .replace("{alerts}", alertsActive === null ? "…" : String(alertsActive));
 
@@ -256,12 +206,6 @@ function HeroHeader({
         >
           {greeting}，{t("overview_team_label")}
         </h1>
-        <div
-          className="text-ink-2 mt-2"
-          style={{ fontSize: 13.5, lineHeight: 1.55, maxWidth: 720 }}
-        >
-          {sentence}
-        </div>
       </div>
       <div className="flex flex-col items-end gap-3" style={{ minWidth: 220 }}>
         <div className="flex items-center gap-2">
@@ -310,97 +254,6 @@ function ErrorBar({ message }: { message: string }) {
       }}
     >
       ⚠ 加载部分失败:{message}
-    </div>
-  );
-}
-
-// ── KPI strip ───────────────────────────────────────────────────────────
-
-function KpiStrip({
-  t,
-  activeCount,
-  successRate,
-  todayRuns,
-  hitlCount,
-}: {
-  t: (k: string) => string;
-  activeCount: number | null;
-  successRate: number | null;
-  todayRuns: { total: number; completed: number } | null;
-  hitlCount: number | null;
-}) {
-  return (
-    <div className="flex items-baseline gap-10 flex-wrap" style={{ paddingTop: 4 }}>
-      <Kpi
-        valueColor="var(--c-accent)"
-        value={activeCount === null ? "…" : String(activeCount)}
-        label={t("overview_kpi_active")}
-      />
-      <Kpi
-        valueColor={
-          successRate === null
-            ? "var(--c-ink-3)"
-            : successRate >= 95
-              ? "var(--c-ok)"
-              : successRate >= 85
-                ? "oklch(0.6 0.14 75)"
-                : "var(--c-err)"
-        }
-        value={successRate === null ? "—" : `${successRate}%`}
-        label={t("overview_kpi_success_label")}
-        sub={todayRuns ? `${todayRuns.completed} / ${todayRuns.total} 次运行` : undefined}
-      />
-      <Kpi
-        valueColor={
-          hitlCount === null
-            ? "var(--c-ink-3)"
-            : hitlCount > 0
-              ? "oklch(0.6 0.14 75)"
-              : "var(--c-ink-2)"
-        }
-        value={hitlCount === null ? "…" : String(hitlCount)}
-        label={t("overview_kpi_hitl_label")}
-      />
-    </div>
-  );
-}
-
-function Kpi({
-  value,
-  label,
-  sub,
-  valueColor,
-}: {
-  value: string;
-  label: string;
-  sub?: string;
-  valueColor: string;
-}) {
-  return (
-    <div className="flex items-baseline gap-2.5">
-      <span
-        className="tabular-nums"
-        style={{
-          fontFamily: SERIF,
-          fontWeight: 500,
-          fontSize: 30,
-          letterSpacing: "-0.02em",
-          lineHeight: 1,
-          color: valueColor,
-        }}
-      >
-        {value}
-      </span>
-      <div className="flex flex-col">
-        <span className="text-ink-1" style={{ fontSize: 13 }}>
-          {label}
-        </span>
-        {sub && (
-          <span className="text-ink-3 mono" style={{ fontSize: 10.5 }}>
-            {sub}
-          </span>
-        )}
-      </div>
     </div>
   );
 }
@@ -817,34 +670,15 @@ function RuntimeRow({
 }
 
 // ── Agent health grid ───────────────────────────────────────────────────
-
-type AgentCard = {
-  agent: (typeof AGENT_MAP)[number];
-  kind: "real" | "shell" | "unbuilt";
-  paused: boolean;
-  health: AgentHealth | null;
-};
-
-function statusOrder(c: AgentCard): number {
-  if (c.kind === "unbuilt") return 2;
-  if (c.paused) return 1;
-  return 0;
-}
-
-function agentStatus(c: AgentCard): "online" | "offline" | "paused" {
-  if (c.kind === "unbuilt") return "offline";
-  if (c.paused) return "paused";
-  return "online";
-}
+// Card shape + status/sort helpers live in lib/overview-agent-cards.ts
+// (pure + unit-tested); the grid below is presentation only.
 
 function AgentHealthGrid({
   t,
   cards,
-  resolveName,
 }: {
   t: (k: string) => string;
-  cards: AgentCard[];
-  resolveName: (short: string) => string;
+  cards: OverviewAgentCard[];
 }) {
   const onlineCount = cards.filter((c) => agentStatus(c) === "online").length;
   return (
@@ -885,13 +719,7 @@ function AgentHealthGrid({
           }}
         >
           {cards.map((c, i) => (
-            <AgentHealthCard
-              key={c.agent.short}
-              card={c}
-              index={i}
-              t={t}
-              resolveName={resolveName}
-            />
+            <AgentHealthCard key={c.short} card={c} index={i} t={t} />
           ))}
         </div>
       )}
@@ -903,16 +731,13 @@ function AgentHealthCard({
   card,
   index,
   t,
-  resolveName,
 }: {
-  card: AgentCard;
+  card: OverviewAgentCard;
   index: number;
   t: (k: string) => string;
-  resolveName: (short: string) => string;
 }) {
-  const { agent, health } = card;
+  const { name, health } = card;
   const status = agentStatus(card);
-  const name = resolveName(agent.short);
   const runs = health?.counts.started ?? 0;
   const denom =
     (health?.counts.started ?? 0) +
@@ -923,14 +748,14 @@ function AgentHealthCard({
     denom > 0
       ? Math.round((1 - (health?.errorRate ?? 0)) * 1000) / 10
       : null;
-  const glyph = stageGlyph(agent.stage);
+  const glyph = stageGlyph(card.stage);
 
   const statusMeta = STATUS_META[status];
   const showMetrics = runs > 0 || (health?.counts.completed ?? 0) > 0;
 
   return (
     <Link
-      href={`/fleet/${encodeURIComponent(agent.short)}`}
+      href={`/fleet/${encodeURIComponent(card.short)}`}
       className="ao-fade-rise ao-hover-lift flex flex-col gap-2 rounded-md border border-line cursor-pointer"
       style={
         {
@@ -960,7 +785,7 @@ function AgentHealthCard({
             className="mono text-ink-4 truncate"
             style={{ fontSize: 10, marginTop: 1, letterSpacing: "0.02em" }}
           >
-            {agent.short}
+            {card.short}
           </div>
         </div>
         <span

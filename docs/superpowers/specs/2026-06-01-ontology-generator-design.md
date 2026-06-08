@@ -255,3 +255,53 @@ pages hardcode domain copy.
 - Route `/behavior/ontology-generator`, nav icon `branch`.
 - Drafts persist to `AgentVersion` with `capturedFrom:"ontology-gen"`.
 - "前往舰队部署 →" navigates to `/fleet`; fleet listing is not modified.
+
+## Part 9 — Agent lifecycle (Phase 2, added 2026-06-01)
+
+Extension: generated agents persist per business domain as drafts, are managed
+from the Fleet「部署智能体」store, and move through a deploy → online/offline →
+back-to-draft lifecycle. Real-runtime intervention is allowed for the genuine
+agents, but generated agents are **sandboxed shells** that can never affect the
+real production runtime.
+
+**Sandboxing.** Every generated agent's `slug` is `og-…` (e.g. `og-match-resume`)
+— never a real Inngest function id. Its `short` is the display agent id
+(`MatchResumeAgent`). So deploying / onlining / offlining a shell writes only its
+own `AgentVersion` row; it never matches a real function and never touches a real
+`AgentConfig`. Verified: shell ops create no `AgentConfig` row and leave the real
+`match-resume-agent` config untouched.
+
+**Schema.** `AgentVersion` gains `domain String?` (set for shells) and a
+`status` value `offline` (draft | active | offline | archived), plus an
+`@@index([capturedFrom, domain, status])`.
+
+**Persistence.** `POST /api/ontology-generator/generate` writes every selected
+candidate as `status:"draft"`, `capturedFrom:"ontology-gen"`, `domain:<profile>`,
+with the display card stashed as JSON in `configJson`. All domains persist
+(the earlier curated-domain in-session fallback is removed).
+
+**Lifecycle API** (`/api/agent-drafts`, guarded to `capturedFrom='ontology-gen'`
++ `domain != null`):
+- `GET /api/agent-drafts[?domain=X]` → `{ rows }` of shells (drafts + deployed).
+- `POST /api/agent-drafts/[id]/transition { to: 'draft'|'active'|'offline' }` →
+  updates only `AgentVersion.status` (+ `deployedAt` on activate). 403 if the row
+  isn't an ontology-gen shell.
+
+**Fleet UI.** The existing top-right `部署智能体` button now opens
+`DraftStorePanel` (a right drawer): a 草稿 section (deploy) and a 已部署 section
+(online/offline + 放回草稿), each card tagged with its business domain. The
+generator's "前往舰队部署 →" routes to `/fleet?drafts=open`, which auto-opens it.
+
+**Real-agent online/offline** reuses the existing Fleet per-row pause/resume
+(`/api/inngest-admin/functions/[slug]/toggle`) — that is the real, reversible
+runtime intervention for the genuine agents. No new real-toggle endpoint is
+added. `放回草稿` applies only to shells (real agents are not drafts).
+
+**Placement note.** Per-agent lifecycle controls live in the Fleet (the agent
+registry), not `/monitor` (which is runs-only by IA: "no agent registry →
+/fleet"). Mirroring controls onto `/monitor` is a follow-up if desired.
+
+**Operational note.** The `domain` column is a schema change — the dev server
+must be restarted (`npm run dev`) to load the regenerated Prisma client before
+the HTTP routes persist. Data-layer + sandbox safety verified directly via the
+fresh client; production `npm run build` is green.

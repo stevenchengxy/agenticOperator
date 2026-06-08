@@ -21,21 +21,15 @@
 // 模拟数据流。Stub 收事件 → 写 AgentActivity → sleep → emit 下游事件 →
 // HITL 节点 5s 后自动 resolve。要开演示设 STUB_AGENTS=1（npm run dev 已自动设）。
 //
-// Behavior 轴（2 个）—— Monitor Agent cron 检测异常 + Manager Agent 决策
-// 响应。default OFF for v0_1_010；要开设 BEHAVIOR_AGENTS=1。
-//
 // Env gates:
 //   STUB_AGENTS=1        — 开启 demo stub agents（默认关：生产只跑 5 real）
 //   STUB_SUCCESS_RATE    — default 0.9（90% take happy path）
 //   STUB_HITL_DELAY_MS   — default 5000ms（HITL auto-resolve delay）
 //   STUB_RPA_OWNED=1     — 让 stub-factory 也为 wsId 4/9-1/10 生成 stub
 //                          （会跟 real agent 抢同名事件，仅 dev 隔离测试用）
-//   BEHAVIOR_AGENTS=1    — 开启 Monitor + Manager Agent（默认 0）
 
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { createStubAgent } from "./agents/stub-factory";
-import { monitorAgent } from "./agents/monitor-agent";
-import { managerAgent } from "./agents/manager-agent";
 
 // Real production agents — 3 functions that actually call RAAS / LLM /
 // MinIO. Live in server/inngest/agents/ after kenny/steven's RPA merge.
@@ -45,10 +39,14 @@ import { matchResumeAgent } from "./agents/match-resume-agent";
 import { ruleCheckAgent } from "./agents/rule-check-agent";  // NEW PR-4
 import { interviewInviterAgent } from "./agents/interview-inviter-agent"; // 2026-05-25
 
-// Ontology-generated energy dispatch agents (nengyuandiaodu-v1). Importing only
-// builds function objects + reads the in-repo snapshot once; they are not served
-// unless added to allFunctions below (ENERGY_AGENTS=1). 2026-06-02.
-import { energyFunctions as energyAgentFunctions } from "./domains/energy";
+// Energy-dispatch agents are intentionally NOT registered into this app.
+// agentic-operator-main is the RECRUITMENT app — it must only ever serve the real
+// recruitment agents. Energy (能源调度-v1) has its OWN per-domain Inngest app,
+// `agentic-operator-能源调度-v1`, served at /api/inngest/<domain> (see
+// server/inngest/domain-app.ts). This was previously gated behind ENERGY_AGENTS=1
+// which double-registered energy into BOTH apps and polluted the recruitment app;
+// the registration is removed here so a restart / re-sync can never bring it back,
+// regardless of the ENERGY_AGENTS env flag. 2026-06-02.
 
 // wsIds owned by the real agents above. Stub-factory MUST skip these to
 // avoid double-handling of trigger events (race condition).
@@ -66,7 +64,6 @@ const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
 // useful for /fleet · /monitor · /workflow visualisation demos. Opt in with
 // STUB_AGENTS=1 (npm run dev sets this; production `next start` leaves it off).
 const STUB_AGENTS_ENABLED = process.env.STUB_AGENTS === "1";
-const BEHAVIOR_AGENTS_ENABLED = process.env.BEHAVIOR_AGENTS === "1";
 
 // Build a stub per business agent with at least one trigger event.
 // Chatbot has triggersEvents=[] so it is naturally excluded.
@@ -83,18 +80,6 @@ const stubFunctions = STUB_AGENTS_ENABLED
       .filter((fn): fn is NonNullable<typeof fn> => fn !== null)
   : [];
 
-const behaviorFunctions = BEHAVIOR_AGENTS_ENABLED
-  ? [monitorAgent, managerAgent]
-  : [];
-
-// Ontology-generated domain agents (energy dispatch). Default OFF; set
-// ENERGY_AGENTS=1 to register the 28 nengyuandiaodu-v1 functions. They are
-// additionally self-gated on AgentVersion.status (deploy = activate), so a
-// registered-but-undeployed agent no-ops. See
-// docs/superpowers/specs/2026-06-02-ontology-agent-generator-runnable-design.md
-const ENERGY_AGENTS_ENABLED = process.env.ENERGY_AGENTS === "1";
-const energyFunctions = ENERGY_AGENTS_ENABLED ? energyAgentFunctions : [];
-
 const realFunctions = [
   resumeParserAgent,
   createJdAgent,
@@ -106,15 +91,14 @@ const realFunctions = [
 export const allFunctions = [
   ...realFunctions,
   ...stubFunctions,
-  ...behaviorFunctions,
-  ...energyFunctions,
 ];
 
 // Server-side startup log so operators can confirm registration count.
+// (energy-dispatch agents are NOT part of this app — see note above.)
 if (typeof window === "undefined") {
   // eslint-disable-next-line no-console
   console.log(
-    `[inngest] registered ${realFunctions.length} real + ${stubFunctions.length} stub + ${behaviorFunctions.length} behavior + ${energyFunctions.length} energy = ${allFunctions.length} total ` +
-      `(STUB_AGENTS=${STUB_AGENTS_ENABLED ? "1" : "0"} BEHAVIOR_AGENTS=${BEHAVIOR_AGENTS_ENABLED ? "1" : "0"} ENERGY_AGENTS=${ENERGY_AGENTS_ENABLED ? "1" : "0"})`,
+    `[inngest] registered ${realFunctions.length} real + ${stubFunctions.length} stub = ${allFunctions.length} total ` +
+      `(STUB_AGENTS=${STUB_AGENTS_ENABLED ? "1" : "0"})`,
   );
 }

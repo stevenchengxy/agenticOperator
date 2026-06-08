@@ -105,7 +105,7 @@ export function buildInferResult(onto: DomainOntology): InferResult {
       dataObjects: onto.objects.length,
       actions: onto.actions.length,
       events: onto.events.length,
-      workflow: onto.workflow ? 1 : 0,
+      workflow: onto.workflow.length,
     },
     candidates: specs.map(toCandidate),
     danglingEvents: danglingFromOntology(onto),

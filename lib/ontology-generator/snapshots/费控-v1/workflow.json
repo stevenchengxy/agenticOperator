@@ -1,0 +1,496 @@
+{
+  "metadata": {
+    "domain": "费控-v1",
+    "source": "imported from Downloads/费控/费控-ontology/workflow_v0_1_001.json",
+    "workflow_count": 14,
+    "message": "费控领域 workflow 蓝图,从交付物导入 AO 快照供智能体生成器读取。"
+  },
+  "workflows": [
+    {
+      "id": "1",
+      "name": "submitExpenseClaim",
+      "description": "员工在启费通发起报销提报，是费控流水线的人工起点。报销人拍票/传票、核对OCR带出的发票字段、补录费用明细行（科目/日期/金额/票据/说明）、差旅类关联出差编号BTA，自检合计后提交。提交时报销单由DRAFT转SUBMITTED，智控生成费控审核案件FK，正式进入OCR识别与后续校验流程。被退回补正的单据修正后也由本节点重新提交。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "RETURNED_FOR_FIX"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "captureInvoice",
+          "description": "报销人在启费通新建报销单，通过拍照OCR、电子发票上传或数电直连把发票弄进票夹云，归档生成内部票据ID（PIAO号）并进票据池查重；优先电子票以提高OCR置信度，关键字段（金额/发票号/税号/日期）拍清拍全。",
+          "type": "manual",
+          "condition": "费用已实际发生且票据齐备；被退回的单据则在DRAFT状态打开重填"
+        },
+        {
+          "order": "2",
+          "name": "fillExpenseLines",
+          "description": "核对OCR自动带出的票面字段（价税合计、抬头税号、开票日期、发票类型），就地修正识别偏差；逐条补录费用明细行，每行选对费用科目F、填发生日期、金额、关联票据PIAO与说明，无票的出差补助按天定额单独建行。",
+          "type": "manual",
+          "condition": "票据已进票夹云、OCR已带出票面字段"
+        },
+        {
+          "order": "3",
+          "name": "linkTravelApplication",
+          "description": "差旅类明细（城市间交通/市内交通/住宿/出差补助）关联事前申请的出差编号BTA，使系统能按目的地城市分级与职级套差旅标准、按出差起止日期比对消费时间地点；选对成本中心CC到费用归集的最小单元。",
+          "type": "manual",
+          "condition": "报销单含差旅类明细行"
+        },
+        {
+          "order": "4",
+          "name": "selfCheckAndSubmit",
+          "description": "按提交前自检清单复核抬头税号、票据90天时效、科目与票据匹配、成本中心归属、BTA关联、超标项、招待要素、明细与票面金额一致、合计无误后点提交。报销单状态DRAFT转SUBMITTED，智控建FK案件，单据进入OCR识别。",
+          "type": "manual",
+          "condition": "全部明细补录完成、自检清单逐项通过"
+        }
+      ],
+      "triggered_event": [
+        "EXPENSE_SUBMITTED"
+      ]
+    },
+    {
+      "id": "2",
+      "name": "runInvoiceOCR",
+      "description": "票夹云OCR引擎对提交报销单关联的每张发票影像做结构化抽取：先版式分类判断票种，再定位并识别发票类型、代码、号码、开票日期、销售方/购买方名称税号、价税合计、不含税金额、税额、税率、商品服务名称、校验码等字段，并对每个关键字段（金额/发票号/税号/日期）打0~1置信度分。结构化结果回写票夹云票据记录供规则引擎读取，识别完成发出OCR完成事件；影像糊到机器无法识别关键字段则判OCR失败退回重传。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "EXPENSE_SUBMITTED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "classifyAndExtractFields",
+          "description": "对每张发票影像先做版式分类（数电票/专票/普票/电子普票/纸票/火车票/机票行程单），再按票种字段集定位字符识别，抽出发票类型、代码、号码、开票日期、销售方/购买方名称税号、不含税金额、税额、税率、价税合计、商品服务名称、校验码，按票种适配层豁免不存在的字段（火车票无销方税号、数电票无代码与校验码）。",
+          "type": "tool",
+          "condition": "已收到报销提交事件、关联发票影像已入票夹云"
+        },
+        {
+          "order": "2",
+          "name": "scoreFieldConfidence",
+          "description": "对每个字段逐项打0~1置信度分，重点标记关键字段（价税合计/发票号码/购买方税号/开票日期）；置信度低于0.95的关键字段标红、0.90~0.95标黄提示，作为后续分流是否转人工核对的依据。",
+          "type": "tool",
+          "condition": "票面字段抽取完成"
+        },
+        {
+          "order": "3",
+          "name": "writeBackStructuredResult",
+          "description": "将结构化字段与各字段置信度回写票夹云对应票据记录（PIAO），并回填到报销单明细行供规则引擎读取。若关键字段影像本身糊到无法识别，判OCR失败发出失败事件退回人工重拍；否则发出OCR完成事件继续流转。",
+          "type": "logic",
+          "condition": "字段抽取与置信度打分完成"
+        }
+      ],
+      "triggered_event": [
+        "OCR_COMPLETED",
+        "OCR_FAILED"
+      ]
+    },
+    {
+      "id": "3",
+      "name": "fixInvoice",
+      "description": "OCR失败或关键字段置信度过低、影像无法自动识别时，由影像岗或分到名下的费控审核员人工兜底校正发票字段。审核员点开案件详情，左影像右OCR结构化字段对照，对标红/标黄字段逐字核对：一致则确认采用，不一致则改正该字段值。每次校正记审计留痕（字段名/前值/后值/操作人工号/时间），改动关键字段后触发相关规则重跑；影像糊到人工也认不出则退回员工重新拍清传上，校正完成后重新进入OCR完成流转。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "OCR_FAILED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "reviewImageAndCorrectFields",
+          "description": "审核员/影像岗点开案件影像区，左影像右OCR结构化字段对照，对标红/标黄的关键字段（价税合计/发票号码/购买方税号/开票日期）逐字核对；与影像一致的确认采用，识别错误的人工改正字段值，每次改动留前值/后值/操作人工号/理由/时间审计痕迹。影像本身无法辨认的不瞎填，转退回让员工重拍重传。",
+          "type": "manual",
+          "condition": "收到OCR失败事件、案件已转人工"
+        }
+      ],
+      "triggered_event": [
+        "OCR_COMPLETED"
+      ]
+    },
+    {
+      "id": "4",
+      "name": "validateExpenseRules",
+      "description": "智控规则校验引擎对报销单按固定顺序跑四组规则——票据组RULE-INV-*（抬头/真伪/重复/连号/超期/类型科目匹配/进项抵扣/票面与明细一致）、标准组RULE-STD-*（住宿/补助/招待人均/陪同人数/舱位/市内交通超标）、合规组RULE-CMP-*（拆分/凑数/节假日/行程不符/同商户高频/私人关联方）、预算组RULE-BUD-*（科目错配/余额/成本中心归属/期间）。生成校验结果与核减建议（标准组核减先于预算组占用），并将税局验真四要素送外联核底账。命中升风险类规则的，按规则到风险类型T1-T8映射收口成风险事件并定级，发出异常事件；否则发出校验完成事件。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "OCR_COMPLETED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "runInvoiceRules",
+          "description": "先跑票据组RULE-INV-*：校抬头税号是否为启明主体（INV-01）、送税局查验四要素验真伪（INV-02）、票夹云指纹查重防重复报销（INV-03）、连号预警（INV-04）、开票日期是否90天内（INV-05）、发票类型与费用科目是否匹配（INV-06）、专票进项可抵扣识别（INV-07）、票面价税合计与明细金额一致性（INV-08）。",
+          "type": "logic",
+          "condition": "已收到OCR完成事件、发票结构化字段与置信度齐备"
+        },
+        {
+          "order": "2",
+          "name": "runStandardRules",
+          "description": "再跑标准组RULE-STD-*：按BTA目的地城市分级与报销人职级核住宿超标（STD-01）、出差补助超标（STD-02）、招待人均超标（STD-03）、我方陪同人数超被招待方（STD-04）、交通舱位超职级（STD-05）、市内交通超限（STD-06）。对超标项生成核减建议并算出核减后可报金额，核减必须在预算占用前完成。",
+          "type": "logic",
+          "condition": "票据组规则执行完毕"
+        },
+        {
+          "order": "3",
+          "name": "runComplianceRules",
+          "description": "跑合规组RULE-CMP-*：识别大额拆分规避审批（CMP-01）、凑数金额异常（CMP-02）、节假日消费不符（CMP-03）、消费时间地点与出差行程不符（CMP-04）、同商户高频（CMP-05）、疑似私人消费/关联方交易（CMP-06）等合规疑点。",
+          "type": "logic",
+          "condition": "标准组规则执行完毕"
+        },
+        {
+          "order": "4",
+          "name": "consolidateValidationAndRaiseRisk",
+          "description": "汇总四组规则命中清单生成校验结果（含核减明细与核减后可报金额），按命中动作分档（提示/核减/需说明/退回/升风险）。对升风险类命中按规则到风险类型T1-T8映射收口成一个或多个风险事件RK并定级L1-L4：无升风险命中则发出校验完成事件，有升风险命中则在写入校验结果的同时发出异常事件移交风险处置。",
+          "type": "logic",
+          "condition": "票据/标准/合规三组规则执行完毕，待预算组占用"
+        }
+      ],
+      "triggered_event": [
+        "VALIDATION_COMPLETED",
+        "ANOMALY_DETECTED"
+      ]
+    },
+    {
+      "id": "5",
+      "name": "occupyBudget",
+      "description": "校验通过后，智控按预算组规则RULE-BUD-*调预算通占用预算（财务动作FA-01）。占用按成本中心CC×预算科目F×期间三维，且金额取标准组核减后的可报金额而非员工填的原始金额。占用成功由预算通生成预算占用号BG回写费控案件、可用余额减少，并配合审批期间FA-03冻结防超占，发出预算占用成功事件。若占用后会超预算则命中RULE-BUD-02占用失败、升风险T5预算超支，发出预算不足事件转人工并提级审批。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "VALIDATION_COMPLETED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "resolveBudgetDimensions",
+          "description": "按预算组RULE-BUD-*确定占用三维：从报销单读成本中心CC、费用科目F、费用所属期间，校验科目是否错配（BUD-01）、成本中心归属是否正确（BUD-03）、期间是否正确（BUD-04）；占用金额取标准组核减后的可报金额，不用员工填的原始合计。",
+          "type": "logic",
+          "condition": "已收到校验完成事件、核减后可报金额已确定"
+        },
+        {
+          "order": "2",
+          "name": "callBudgetOccupation",
+          "description": "向预算通发出占用指令（CC+科目F+期间+核减后可报金额），由预算通校验可用余额：余额足则占用成功并生成预算占用号BG（FA-01）、可用余额减少，同时审批期间FA-03冻结额度防超占；余额不足则占用失败并回当前可用余额。",
+          "type": "tool",
+          "condition": "占用三维已解析、待调用预算通"
+        },
+        {
+          "order": "3",
+          "name": "writeBackOccupationResult",
+          "description": "占用成功则把预算通回的BG号写进费控案件的预算占用引用字段（智控侧只读），生成财务动作FA-01记录，发出预算占用成功事件继续流转；占用失败则命中RULE-BUD-02、升风险T5预算超支、发出预算不足事件，转人工并通知费控与财务BP走预算调剂或提级审批。",
+          "type": "logic",
+          "condition": "预算通返回占用结果"
+        }
+      ],
+      "triggered_event": [
+        "BUDGET_OCCUPIED",
+        "BUDGET_INSUFFICIENT"
+      ]
+    },
+    {
+      "id": "6",
+      "name": "generateApprovalSuggestion",
+      "description": "智控把前序产物汇总成审批建议：综合校验结果（规则命中清单+核减建议+核减后可报金额）、风险事件（有无RK、类型T、等级L）、预算占用结果（BG成功或占用失败），生成建议动作（建议核准/建议降额/建议退回/建议驳回）与审批路由方案。路由按金额×科目×风险三维定（金额提级、敏感科目提前提级、命中风险自动升一级、审批人为本人则跳过回避），结果写入审批建议实体并推启流BPM。审批建议是给人省时间的参考，最终决定权在直通时的系统或转人工时的审核员。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "BUDGET_OCCUPIED",
+        "BUDGET_INSUFFICIENT"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "aggregateDecisionInputs",
+          "description": "汇总三摊输入：校验结果（命中清单+核减建议+核减后可报金额）、风险事件（有无RK及其类型T与等级L）、预算占用结果（占成功BG或占用失败BUDGET_INSUFFICIENT），作为审批建议的综合判断依据。",
+          "type": "logic",
+          "condition": "已收到预算占用成功或预算不足事件"
+        },
+        {
+          "order": "2",
+          "name": "deriveSuggestedAction",
+          "description": "据汇总结果定建议动作：无核减无L2+风险预算够则建议核准；命中标准组核减其余正常则建议降额；命中抬头/超期/科目/成本中心等退回类规则则建议退回；命中重复、虚开或坐实高风险则建议驳回。",
+          "type": "logic",
+          "condition": "决策输入汇总完成"
+        },
+        {
+          "order": "3",
+          "name": "computeApprovalRoute",
+          "description": "按审批规则Approval_Rule以金额×科目×风险三维算审批路由方案（直接主管→部门经理→总监→分管VP→CFO逐级）：金额越大层级越高，招待/市场会议等敏感科目门槛更低更早提级，命中T5预算超支/T3超标等风险自动升一级，审批人为报销人本人则跳到上级回避。生成审批建议实体并推启流BPM，发出审批建议生成事件。",
+          "type": "logic",
+          "condition": "建议动作已确定"
+        }
+      ],
+      "triggered_event": [
+        "APPROVAL_SUGGESTION_GENERATED"
+      ]
+    },
+    {
+      "id": "7",
+      "name": "routeOrAutoApprove",
+      "description": "智控做整条流水线最关键的分流判断：用核减后可报金额、最大单票价税合计、最高风险等级、最低关键字段置信度、税局验真状态、预算占用结果六个判据，套直通自动核准五条件（合计≤2万、单票≤5千、无L2及以上风险、关键字段置信度均≥0.95且验真通过、预算占用成功）。五条件全满足则直通，按建议核准自动核准、发出自动核准事件、直接推启流BPM；任一不满足则转人工复核，发出转人工事件、打转人工原因标签（金额超阈/命中风险/低置信/超预算）落审核员名下。人工确认的主因是金额超阈，其余为风险/置信度/预算兜底。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "APPROVAL_SUGGESTION_GENERATED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "readRoutingCriteria",
+          "description": "读取分流六判据：合计金额取费控案件的核减后可报金额（非原始合计）、最大单票取各发票价税合计最大值、最高风险等级取各风险事件L等级最大值（无RK视为L0）、最低关键字段置信度取各票金额/发票号/税号/日期置信度最小值、验真状态是否全部已验真、预算是否占用成功（有BG号）。",
+          "type": "logic",
+          "condition": "已收到审批建议生成事件、状态VALIDATED"
+        },
+        {
+          "order": "2",
+          "name": "evaluateStraightThroughConditions",
+          "description": "套直通自动核准五条件（全满足才直通，木桶效应按最短板算）：合计可报金额≤20000、最大单票价税合计≤5000、最高风险<L2、最低关键字段置信度≥0.95且税局验真全通过、预算占用成功；逐条比对得出是否全部满足。",
+          "type": "logic",
+          "condition": "分流六判据已读取"
+        },
+        {
+          "order": "3",
+          "name": "dispatchOrAutoApprove",
+          "description": "五条件全满足则直通：报销单状态转AUTO_APPROVED、按建议核准自动核准、发出自动核准事件并直接推启流BPM进审批流（走主管一道）。任一不满足则转人工：状态转MANUAL_REVIEW、发出转人工事件、按金额超阈/命中风险/低置信/超预算打转人工原因标签并进分案落审核员名下。",
+          "type": "logic",
+          "condition": "直通五条件评估完成"
+        }
+      ],
+      "triggered_event": [
+        "AUTO_APPROVED",
+        "ROUTED_TO_MANUAL"
+      ]
+    },
+    {
+      "id": "8",
+      "name": "manualReview",
+      "description": "转人工的报销单落到费控审核员人工复核工作台。审核员对照工作台上的OCR结构化结果与原票影像、四组规则命中清单、风险事件RK及等级、预算占用情况、机器审批建议，并按转人工原因标签重点核对（金额超阈核金额事由、命中风险查异常、低置信逐字核标红字段、超预算协同财务BP）。处置动作含确认核准、降额核减、退回补正、驳回，核减写理由、不采纳机器建议要写理由，每个动作留操作人工号/时间/理由审计痕迹；确认后推进审批流，退回则释放预算让员工改重提，驳回为终态释放预算。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "ROUTED_TO_MANUAL"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "reviewCaseEvidence",
+          "description": "审核员点开案件，按工作台第一列转人工原因标签定重点：金额超阈则核对金额对不对、事由合不合理；命中风险则查那条风险（重复/超标/行程不符等）；低置信则点开影像逐字核对标红标黄字段；超预算则协同财务BP走预算调剂或提级审批。对照OCR结构化结果与原票影像、规则命中清单、风险事件、预算占用与机器审批建议综合判定。",
+          "type": "manual",
+          "condition": "已收到转人工事件、案件已分到名下"
+        },
+        {
+          "order": "2",
+          "name": "decideDisposition",
+          "description": "据复核结论做处置并留痕（操作人工号/时间/理由，不采纳机器建议须写理由）：复核无问题则确认核准（MANUAL_CONFIRMED）推进审批流；超标部分核减走差额核准并FA-02释放差额；有可改问题退回补正（RETURNED_FOR_FIX）并释放预算让员工改重提；不该报或严重问题则驳回（REJECTED）释放预算。",
+          "type": "manual",
+          "condition": "案件证据复核完成"
+        }
+      ],
+      "triggered_event": [
+        "MANUAL_CONFIRMED",
+        "RETURNED_FOR_FIX",
+        "REJECTED"
+      ]
+    },
+    {
+      "id": "9",
+      "name": "runApprovalFlow",
+      "description": "自动核准或人工确认通过的报销单进启流BPM逐级审批。BPM按智控生成的审批路由方案生成审批流实例AP，从报销人直接主管起，依金额×科目×风险定级逐级流转（金额大走到经理、总监、分管VP甚至CFO，敏感科目与命中风险提级，审批人为本人则回避跳级），各级审批人在BPM点同意/退回/驳回/加签。末级审批通过后报销单状态转APPROVED，发出审批通过事件，触发回写启账ERP。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "AUTO_APPROVED",
+        "MANUAL_CONFIRMED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "instantiateApprovalFlow",
+          "description": "审批在启流BPM按智控推来的审批路由方案立案：生成审批流实例AP并按金额×科目×风险定级展开审批链，从报销人直接主管起，金额越大层级越高，敏感科目与命中风险提级，审批人若为报销人本人则跳到上级回避，报销单状态进APPROVING，待各级审批人接单。",
+          "type": "manual",
+          "condition": "已收到自动核准或人工确认事件"
+        },
+        {
+          "order": "2",
+          "name": "approveLevelByLevel",
+          "description": "各级审批人在启流BPM按权限矩阵逐级核准，点同意/退回/驳回/加签；走完末级审批且全部同意后报销单状态转APPROVED，发出审批通过事件并通知启账ERP回写。",
+          "type": "manual",
+          "condition": "审批流实例已生成、状态APPROVING"
+        }
+      ],
+      "triggered_event": [
+        "APPROVAL_PASSED"
+      ]
+    },
+    {
+      "id": "10",
+      "name": "postToERP",
+      "description": "审批通过后智控通知启账ERP做回写事务（先审批后记账内控铁律）：生成应付单YF（FA-04，挂报销人对私收款或对公供应商、金额取合计可报金额、CC与科目F）、生成记账凭证PZ（FA-05，借费用/进项税额、贷应付/银行）、对命中RULE-INV-07的专票明细做进项税额认证抵扣（FA-06）。应付、凭证、认证三动作在ERP一气呵成的一个事务，全成或全不成。回写完成报销单状态转待付款，发出ERP回写事件进入资金支付环节。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "APPROVAL_PASSED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "generatePayable",
+          "description": "智控通知启账ERP按FA-04生成应付单YF，挂报销人对私收款（其他应付款-员工）或对公供应商（应付账款-供应商V号），金额取合计可报金额，带成本中心CC与费用科目F。",
+          "type": "tool",
+          "condition": "已收到审批通过事件、报销单状态APPROVED"
+        },
+        {
+          "order": "2",
+          "name": "generateVoucherAndDeductInput",
+          "description": "按FA-05生成记账凭证PZ（借费用按CC+科目F入账/进项税额、贷其他应付款或应付账款），对命中RULE-INV-07的专票明细按FA-06拆出进项税额单独认证抵扣勾选；应付YF、凭证PZ、进项认证三动作在ERP作为一个回写事务一气呵成。",
+          "type": "tool",
+          "condition": "应付单YF已生成"
+        },
+        {
+          "order": "3",
+          "name": "writeBackPostingResult",
+          "description": "回写事务完成后生成FA-04/FA-05/FA-06财务动作记录，把应付单号YF与凭证号PZ回写费控案件与报销单，报销单状态转PENDING_PAYMENT待付款，发出ERP回写事件进入资金组排款。",
+          "type": "logic",
+          "condition": "应付单、记账凭证、进项认证回写事务完成"
+        }
+      ],
+      "triggered_event": [
+        "ERP_POSTED"
+      ]
+    },
+    {
+      "id": "11",
+      "name": "initiatePayment",
+      "description": "进待付款的报销单排进资金组付款队列，由银企直连按批次集中付款发起支付指令PAY（FA-07，对私走报销人启人HR登记的报销收款银行卡、对公走供应商通道），报销单状态转付款中、发出支付发起事件。对私普通报销T+2、对私大额T+3、对公按合同账期，跨行异地到账再加延时。发起支付与到账确认是两步，本环节只管发起、到账确认交由确认付款环节承接。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "ERP_POSTED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "initiatePayment",
+          "description": "报销单排进资金组付款队列后，银企直连按付款批次发起支付指令PAY（FA-07）：对私把合计可报金额打到报销人启人HR主数据登记的报销收款银行卡，对公走供应商通道，报销单状态转PAYING付款中，发出支付发起事件。",
+          "type": "tool",
+          "condition": "已收到ERP回写事件、报销单状态待付款且已排入付款批次"
+        }
+      ],
+      "triggered_event": [
+        "PAYMENT_INITIATED"
+      ]
+    },
+    {
+      "id": "11-2",
+      "name": "confirmPayment",
+      "description": "支付指令发起后，银行处理完成回单回写支付完成（FA-08），确认钱到账、报销单状态转已付款、发出支付完成事件；涉及核减差额且员工已垫全款的按FA-12做差额退款/个人补缴，进入回写总账与归档收尾。本环节承接发起付款环节经支付发起事件传入的PAY号做到账确认。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "PAYMENT_INITIATED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "confirmPaymentReceipt",
+          "description": "银行处理完成回单后按FA-08回写支付完成回执，确认款项到账，报销单状态转PAID已付款，生成FA-07/FA-08财务动作记录；收款卡过期销户被退票的，通知报销人更新启人HR银行卡后重新付款。发出支付完成事件进入收尾。",
+          "type": "tool",
+          "condition": "支付指令PAY已发起、待银行回单"
+        },
+        {
+          "order": "2",
+          "name": "settleDeductionRefund",
+          "description": "涉及核减差额（PARTIAL）且员工已垫全款的，按FA-12做差额退款/个人补缴：按核减后可报金额退款给个人，被削掉的差额由员工承担。无核减或对公付款则不适用。",
+          "type": "logic",
+          "condition": "款项已确认到账、案件为差额核准且存在个人垫付差额"
+        }
+      ],
+      "triggered_event": [
+        "PAYMENT_COMPLETED"
+      ]
+    },
+    {
+      "id": "12",
+      "name": "disposeRiskEvent",
+      "description": "校验阶段升风险命中或预算占用失败时，由智控自动定类定级、并按等级协同人工处置风险事件。按规则到风险类型映射定T1重复报销/T2虚开套票/T3超标准/T4拆分规避/T5预算超支/T6票据不实/T7关联交易私人消费/T8时间地点矛盾，再综合风险类型、命中规则数量、涉及金额、是否疑似主观舞弊定级L1-L4。L1记录放行，L2转费控审核员复核，L3转费控主管并暂缓付款，L4疑似舞弊强制脱离普通池移送稽核/内审并冻结暂停付款。风险事件登记RK号、关联单据、命中规则、证据、处置动作、是否暂停付款、是否移送等字段，发出风险事件登记事件，并走待处置→处置中→已闭环/误报关闭闭环。",
+      "actor": [
+        "Agent",
+        "Human"
+      ],
+      "trigger": [
+        "ANOMALY_DETECTED",
+        "BUDGET_INSUFFICIENT"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "classifyRiskType",
+          "description": "按规则到风险类型映射给风险事件定类：RULE-INV-03→T1重复报销、RULE-INV-02多规则叠加→T2虚开套票、RULE-STD-*→T3超标准、RULE-CMP-01→T4拆分规避、RULE-BUD-02→T5预算超支、RULE-INV-02→T6票据不实、RULE-CMP-06→T7关联交易私人消费、RULE-CMP-04/CMP-03→T8时间地点矛盾；单条验真存疑按T6、叠加连号/凑数/拆分多条升级T2。",
+          "type": "logic",
+          "condition": "已收到异常或预算不足事件"
+        },
+        {
+          "order": "2",
+          "name": "gradeAndRegisterRiskEvent",
+          "description": "综合风险类型、命中规则数量、涉及金额、是否疑似主观舞弊定级L1-L4，生成风险事件RK号并登记字段（关联报销单/案件、风险类型T、等级L、命中规则、证据说明、是否暂停付款、是否移送稽核、状态待处置）；L3/L4打暂停付款标、L4打移送稽核标，发出风险事件登记事件。",
+          "type": "logic",
+          "condition": "风险类型已映射确定"
+        },
+        {
+          "order": "3",
+          "name": "disposeByLevel",
+          "description": "按等级处置并留痕：L1记录后自动放行；L2转费控审核员复核确认；L3转费控主管、报销单进SUSPENDED暂缓付款、预算保持FA-03冻结；L4疑似舞弊强制脱离普通审核员池移送稽核/内审、冻结暂停付款、调阅全链路审计与FK快照核实。处置结论分误报关闭（恢复案件）、坐实可整改（降额/退回继续）、坐实违规（驳回作废+FA-02释放预算，L4移送问责），风险事件走至已闭环或误报关闭终态。",
+          "type": "manual",
+          "condition": "风险事件已生成并定级"
+        }
+      ],
+      "triggered_event": [
+        "RISK_EVENT_RAISED"
+      ]
+    },
+    {
+      "id": "13",
+      "name": "archiveCase",
+      "description": "支付完成后智控做全流程收尾归档。先按FA-09回写启账ERP总账、把预算池里的已占用/已冻结转已实际发生（费用真正花掉、报销单状态转已回写ERP）；再把报销单、发票影像、OCR结构化结果、四组规则命中清单、风险事件、审批留痕、各财务动作FA-01~FA-12的前值后值理由等全链路审计日志归档进票夹云。归档完成报销单进ARCHIVED终态，发出审计归档事件，整张单据从拍票到记账付款的一生走完，全程可被稽核内审随时调阅追溯。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "PAYMENT_COMPLETED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "writeBackActualExpense",
+          "description": "付款完成后按FA-09回写启账ERP总账，把预算池里的已占用/已冻结额度转为已实际发生（费用正式入账、真正从预算扣除），报销单状态转POSTED已回写ERP。",
+          "type": "tool",
+          "condition": "已收到支付完成事件、报销单状态已付款"
+        },
+        {
+          "order": "2",
+          "name": "archiveFullAuditTrail",
+          "description": "把报销单、发票影像、OCR结构化结果、四组规则命中清单、风险事件RK、审批留痕、财务动作FA-01~FA-12的前值/后值/理由等全链路审计日志归档进票夹云，报销单状态转ARCHIVED终态，发出审计归档事件，供稽核内审随时调阅追溯。",
+          "type": "logic",
+          "condition": "总账回写完成、状态POSTED"
+        }
+      ],
+      "triggered_event": [
+        "AUDIT_ARCHIVED"
+      ]
+    }
+  ]
+}

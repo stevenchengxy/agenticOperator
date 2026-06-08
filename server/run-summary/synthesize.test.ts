@@ -97,14 +97,24 @@ vi.mock("@/server/db", () => ({
 
 // LLM gateway mock — we control isGatewayConfigured per test and chatComplete
 // return value.
+type ChatCompleteResult = {
+  text: string;
+  modelUsed: string;
+  durationMs: number;
+  toolUseIterations: number;
+  usage?: { promptTokens: number; completionTokens: number };
+};
+
 const gatewayMock = vi.hoisted(() => ({
   isGatewayConfigured: vi.fn(() => true),
-  chatComplete: vi.fn(async () => ({
-    text: "DEFAULT_LLM_TEXT",
-    modelUsed: "gpt-test-1",
-    durationMs: 123,
-    toolUseIterations: 0,
-  })),
+  chatComplete: vi.fn(
+    async (): Promise<ChatCompleteResult> => ({
+      text: "DEFAULT_LLM_TEXT",
+      modelUsed: "gpt-test-1",
+      durationMs: 123,
+      toolUseIterations: 0,
+    }),
+  ),
   GatewayUnavailableError: class GatewayUnavailableError extends Error {
     constructor() {
       super("gateway unavailable");
@@ -294,5 +304,37 @@ describe("synthesizeRunSummary", () => {
     expect(row.summary_text).toBe("MOCK_LLM_OUTPUT_42");
     expect(row.llm_model).toBe("gpt-test-1");
     expect(row.llm_duration_ms).toBe(777);
+  });
+
+  it("infra-failure step → prompt frames it as infra, not a candidate rejection", async () => {
+    seedRun({
+      steps: [
+        {
+          nodeId: "rule-check",
+          status: "failed",
+          durationMs: 50,
+          error:
+            "[Rule Check Agent] rule-check infra failure (jr=JR1, reason=llm-call-error) — retrying; candidate NOT rejected",
+        },
+      ],
+      activities: [
+        {
+          agentName: "rule-check",
+          narrative: "evaluating rules",
+          createdAt: new Date("2026-05-31T11:30:00Z"),
+        },
+      ],
+    });
+
+    const row = await synthesizeRunSummary({
+      runId: RUN_ID,
+      triggerPath: "lazy-on-view",
+    });
+
+    // The prompt the LLM saw must carry the infra framing + guardrail.
+    expect(row.user_prompt).toContain("基础设施故障");
+    expect(row.user_prompt).toContain("候选人未被拒绝");
+    // And it is counted as a (terminal) failure for the run stats.
+    expect(row.steps_failed).toBe(1);
   });
 });

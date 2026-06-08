@@ -15,7 +15,9 @@ import type { AgentHealth, AgentHealthStatus } from "@/app/api/agents/health/rou
 import { NeighborhoodPanel } from "./NeighborhoodPanel";
 import { RecentEntitiesPanel } from "./RecentEntitiesPanel";
 import { AgentChatbot } from "./AgentChatbot";
-import { NODES, EDGES, GRAPH_WIDTH, GRAPH_HEIGHT, CANONICAL_WORKFLOW, type WorkflowNode } from "@/lib/workflow-graph-meta";
+import { CANONICAL_WORKFLOW, type WorkflowNode } from "@/lib/workflow-graph-meta";
+import { useWorkflowGraph } from "@/lib/api/workflow-graph";
+import { friendlyDomainName } from "@/lib/domain-ids";
 import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from "@/lib/api/inngest-live-overlay";
 import { LiveAgentPanel } from "./LiveAgentPanel";
 import Link from "next/link";
@@ -25,17 +27,26 @@ import Link from "next/link";
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 3;
 
+// Stable empty live-overlay map for non-recruitment domains (see liveByWsId).
+const EMPTY_LIVE_OVERLAY: ReadonlyMap<string, LiveAgentState> = new Map();
+
 // Fit the canvas to the actual node bounding box (+ padding) instead of the raw
-// GRAPH_WIDTH×GRAPH_HEIGHT box. The raw box left a ~100px gap on the left AND
-// clipped the rightmost node (origin x=2230 + its width spilled past
-// GRAPH_WIDTH=2350), so the graph opened off-center with a node cut off. Fitting
-// the real bbox centers the graph and shows every node on first paint. We keep
-// the GRAPH_WIDTH:GRAPH_HEIGHT window aspect that the pan/zoom math relies on.
-function fitViewForNodes(nodes: WorkflowNode[]): { x: number; y: number; scale: number } {
+// window box. The raw box left a ~100px gap on the left AND clipped the
+// rightmost node, so the graph opened off-center with a node cut off. Fitting
+// the real bbox centers the graph and shows every node on first paint. The
+// `winW`/`winH` window dims (aspect + scale baseline) are per-domain: recruitment
+// uses 2350×800, other domains pass their own generated graph's bbox dims.
+function fitViewForNodes(
+  nodes: WorkflowNode[],
+  winW: number,
+  winH: number,
+  t: (k: string) => string,
+  lang: string,
+): { x: number; y: number; scale: number } {
   const PAD = 90;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const n of nodes) {
-    const w = computeNodeWidth(nodeTitleLabel(n));
+    const w = computeNodeWidth(nodeTitleLabel(n, t, lang));
     if (n.x < minX) minX = n.x;
     if (n.y < minY) minY = n.y;
     if (n.x + w > maxX) maxX = n.x + w;
@@ -46,27 +57,56 @@ function fitViewForNodes(nodes: WorkflowNode[]): { x: number; y: number; scale: 
   const by = minY - PAD;
   const bw = maxX - minX + PAD * 2;
   const bh = maxY - minY + PAD * 2;
-  // The visible window is GRAPH_WIDTH/scale × GRAPH_HEIGHT/scale; pick the scale
-  // that makes it just contain the bbox, then center the window on the bbox.
+  // The visible window is winW/scale × winH/scale; pick the scale that makes it
+  // just contain the bbox, then center the window on the bbox.
   const scale = Math.max(
     MIN_SCALE,
-    Math.min(MAX_SCALE, Math.min(GRAPH_WIDTH / bw, GRAPH_HEIGHT / bh)),
+    Math.min(MAX_SCALE, Math.min(winW / bw, winH / bh)),
   );
-  const winW = GRAPH_WIDTH / scale;
-  const winH = GRAPH_HEIGHT / scale;
   const cx = bx + bw / 2;
   const cy = by + bh / 2;
-  return { x: cx - winW / 2, y: cy - winH / 2, scale };
+  return { x: cx - winW / scale / 2, y: cy - winH / scale / 2, scale };
 }
 
 export function WorkflowContent() {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   // "trig" matches NODE_LAYOUT[0].id. Previous default "jd" never matched any
   // node, which left the canvas with no highlighted card on first render.
   const [selectedId, setSelectedId] = React.useState("trig");
 
-  const baseNodes = NODES;
-  const edges = EDGES;
+  // Canvas view mode:
+  //   "overview" (全局) — the whole graph rendered at full clarity; selecting a
+  //                       node just rings it (and lights its edges), nothing dims.
+  //   "focus"    (聚焦) — spotlight the selected node + its immediate up/downstream
+  //                       neighbors; everything else dims back.
+  // Defaults to overview so the graph reads clearly on open.
+  const [viewMode, setViewMode] = React.useState<"overview" | "focus">("overview");
+  const focusMode = viewMode === "focus";
+
+  // ── Per-domain graph ──────────────────────────────────────────────
+  // Recruitment (招聘) renders the authoritative hand-tuned graph; every other
+  // business domain renders its ontology auto-laid-out by /api/workflow/graph.
+  // Switching the top-right domain swaps the whole canvas.
+  const graph = useWorkflowGraph();
+  const baseNodes = graph.nodes;
+  const edges = graph.edges;
+
+  // Per-domain pan/zoom WINDOW dims (aspect + scale baseline). Recruitment is
+  // 2350×800; other domains carry their generated bbox. A ref mirrors it so the
+  // once-registered wheel handler reads the current value, not a stale closure.
+  const [graphDims, setGraphDims] = React.useState<{ w: number; h: number }>({
+    w: graph.width,
+    h: graph.height,
+  });
+  const graphDimsRef = React.useRef(graphDims);
+  React.useEffect(() => {
+    graphDimsRef.current = graphDims;
+  }, [graphDims]);
+
+  // While a non-recruitment domain is loading / errored / empty there is nothing
+  // to pan; block canvas interaction so the status overlay isn't pannable.
+  const canvasBlocked =
+    !graph.isRecruitment && (graph.loading || !!graph.error || baseNodes.length === 0);
 
   // ── Draggable node positions ──────────────────────────────────────
   // Static NODES carries the initial layout; positions overrides x/y when
@@ -92,12 +132,28 @@ export function WorkflowContent() {
   // viewBox is derived from `view`: scale shrinks the visible window
   // (zoom in), and (x, y) shifts its top-left corner (pan).
   const [view, setView] = React.useState<{ x: number; y: number; scale: number }>(
-    () => fitViewForNodes(NODES),
+    () => fitViewForNodes(baseNodes, graph.width, graph.height, t, lang),
   );
   const viewRef = React.useRef(view);
   React.useEffect(() => {
     viewRef.current = view;
   }, [view]);
+
+  // Re-seed layout whenever the graph changes (domain switch / async load).
+  // positions + view are otherwise initialized once, so without this a fetched
+  // per-domain graph would render at stale coordinates and resist dragging.
+  React.useEffect(() => {
+    if (baseNodes.length === 0) return;
+    const m = new Map<string, { x: number; y: number }>();
+    for (const n of baseNodes) m.set(n.id, { x: n.x, y: n.y });
+    setPositions(m);
+    setGraphDims({ w: graph.width, h: graph.height });
+    setView(fitViewForNodes(baseNodes, graph.width, graph.height, t, lang));
+    setSelectedId((prev) => (baseNodes.some((n) => n.id === prev) ? prev : "trig"));
+    // Intentionally NOT keyed on `t`: a language switch should relabel cards
+    // (via the nodeWidths memo) without resetting the user's pan/zoom/drags.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseNodes, graph.width, graph.height]);
   const panRef = React.useRef<{
     startClientX: number;
     startClientY: number;
@@ -208,13 +264,15 @@ export function WorkflowContent() {
     const m = new Map<string, { x: number; y: number }>();
     for (const n of baseNodes) m.set(n.id, { x: n.x, y: n.y });
     setPositions(m);
-    setView(fitViewForNodes(baseNodes));
-  }, [baseNodes]);
+    setGraphDims({ w: graph.width, h: graph.height });
+    setView(fitViewForNodes(baseNodes, graph.width, graph.height, t, lang));
+  }, [baseNodes, graph.width, graph.height, t, lang]);
 
   // SVG-level pointerdown — fires only when the pointer is on empty canvas
   // (nodes call stopPropagation so they don't initiate a pan).
   const handleSvgPointerDown = React.useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      if (canvasBlocked) return; // status overlay is showing; nothing to pan
       if (e.button !== 0) return;
       if (dragRef.current) return; // a node drag is in progress
       const svg = svgRef.current;
@@ -234,7 +292,7 @@ export function WorkflowContent() {
       };
       setPanning(true);
     },
-    [],
+    [canvasBlocked],
   );
 
   React.useEffect(() => {
@@ -280,17 +338,18 @@ export function WorkflowContent() {
       const nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * factor));
       if (nextScale === v.scale) return;
       const rect = svg!.getBoundingClientRect();
+      const { w: gW, h: gH } = graphDimsRef.current;
       // Graph point under cursor BEFORE the zoom (using current viewBox).
-      const vw = GRAPH_WIDTH / v.scale;
-      const vh = GRAPH_HEIGHT / v.scale;
+      const vw = gW / v.scale;
+      const vh = gH / v.scale;
       const s = Math.min(rect.width / vw, rect.height / vh); // preserveAspectRatio="meet"
       const padX = (rect.width - vw * s) / 2;
       const padY = (rect.height - vh * s) / 2;
       const graphX = v.x + (e.clientX - rect.left - padX) / s;
       const graphY = v.y + (e.clientY - rect.top - padY) / s;
       // Compute new viewBox so the same graph point stays under the cursor.
-      const vwNew = GRAPH_WIDTH / nextScale;
-      const vhNew = GRAPH_HEIGHT / nextScale;
+      const vwNew = gW / nextScale;
+      const vhNew = gH / nextScale;
       const sNew = Math.min(rect.width / vwNew, rect.height / vhNew);
       const padXNew = (rect.width - vwNew * sNew) / 2;
       const padYNew = (rect.height - vhNew * sNew) / 2;
@@ -307,27 +366,54 @@ export function WorkflowContent() {
       const nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * factor));
       if (nextScale === v.scale) return v;
       // Anchor zoom-around-center: keep the canvas center fixed.
-      const cx = v.x + GRAPH_WIDTH / v.scale / 2;
-      const cy = v.y + GRAPH_HEIGHT / v.scale / 2;
-      const nextX = cx - GRAPH_WIDTH / nextScale / 2;
-      const nextY = cy - GRAPH_HEIGHT / nextScale / 2;
+      const { w: gW, h: gH } = graphDimsRef.current;
+      const cx = v.x + gW / v.scale / 2;
+      const cy = v.y + gH / v.scale / 2;
+      const nextX = cx - gW / nextScale / 2;
+      const nextY = cy - gH / nextScale / 2;
       return { x: nextX, y: nextY, scale: nextScale };
     });
   }, []);
 
   const fitView = React.useCallback(() => {
-    setView(fitViewForNodes(nodes));
-  }, [nodes]);
+    setView(fitViewForNodes(nodes, graphDims.w, graphDims.h, t, lang));
+  }, [nodes, graphDims, t, lang]);
 
-  const viewBox = `${view.x} ${view.y} ${GRAPH_WIDTH / view.scale} ${GRAPH_HEIGHT / view.scale}`;
+  const viewBox = `${view.x} ${view.y} ${graphDims.w / view.scale} ${graphDims.h / view.scale}`;
+
+  // Agent palette: recruitment shows its curated roster; other domains derive
+  // the list from the live graph's agent/HITL nodes so the palette matches the
+  // ontology on the canvas instead of recruitment names.
+  const agentPaletteItems = React.useMemo<{ icon: IcName; label: string }[]>(() => {
+    if (graph.isRecruitment) {
+      const roster: { icon: IcName; short: string }[] = [
+        { icon: "db", short: "ReqSync" },
+        { icon: "sparkle", short: "ReqAnalyzer" },
+        { icon: "sparkle", short: "JDGenerator" },
+        { icon: "plug", short: "Publisher" },
+        { icon: "db", short: "ResumeCollector" },
+        { icon: "cpu", short: "ResumeParser" },
+        { icon: "cpu", short: "Matcher" },
+        { icon: "sparkle", short: "AIInterviewer" },
+        { icon: "cpu", short: "Evaluator" },
+        { icon: "book", short: "PackageBuilder" },
+        { icon: "mail", short: "PortalSubmitter" },
+      ];
+      return roster.map((r) => ({ icon: r.icon, label: localizedAgentLabel(r.short, t) }));
+    }
+    return baseNodes
+      .filter((n) => n.kind !== "trigger")
+      .slice(0, 14)
+      .map((n) => ({ icon: n.icon, label: nodeTitleLabel(n, t, lang) }));
+  }, [graph.isRecruitment, baseNodes, t, lang]);
 
   // Dynamic per-node width — fits the rendered label so long names like
   // "Interview Inviter Agent" don't overflow the card.
   const nodeWidths = React.useMemo(() => {
     const m = new Map<string, number>();
-    for (const n of nodes) m.set(n.id, computeNodeWidth(nodeTitleLabel(n)));
+    for (const n of nodes) m.set(n.id, computeNodeWidth(nodeTitleLabel(n, t, lang)));
     return m;
-  }, [nodes]);
+  }, [nodes, t, lang]);
 
   // Neighbor index — for highlighting the selected node + its immediate
   // upstream/downstream cards when the user clicks one.
@@ -359,9 +445,9 @@ export function WorkflowContent() {
       const target = nodes.find((n) => nodeAgentShort(n) === short);
       if (target) setSelectedId(target.id);
     },
-    // `nodes` is a stable literal in this component body — refs only on `t`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    // `nodes` identity changes on drag AND on domain switch — depend on it so the
+    // jump always searches the current graph.
+    [nodes],
   );
 
   // Real-time health from /api/agents/health (5-min window).
@@ -373,6 +459,11 @@ export function WorkflowContent() {
   // wsId "4" (JDGenerator) / "9-1" (ResumeParser) / "10" (Matcher) become "live".
   // All other nodes are static blueprints (stub agents, not deployed).
   const liveOverlay = useInngestLiveOverlay();
+  // The live overlay is keyed by recruitment wsIds (and reflects the recruitment
+  // Inngest registry). Generated per-domain nodes reuse plain ontology ids that
+  // can numerically collide with recruitment wsIds (e.g. "2"/"3"), so consulting
+  // the overlay for other domains would falsely light them up. Gate it off.
+  const liveByWsId = graph.isRecruitment ? liveOverlay.byWsId : EMPTY_LIVE_OVERLAY;
 
   // Aggregate counts for the sub-header summary. `nodes` is a stable
   // literal in this component body — the only thing that changes between
@@ -399,13 +490,25 @@ export function WorkflowContent() {
       {/* sub-header */}
       <div className="flex items-center gap-3 border-b border-line bg-surface" style={{ padding: "14px 22px" }}>
         <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-semibold tracking-tight">{t("wf_title")}</div>
-          <div className="text-ink-3 text-[12px] mt-px">{t("wf_sub")}</div>
+          <div className="text-[15px] font-semibold tracking-tight">
+            {graph.isRecruitment
+              ? t("wf_title")
+              : `${friendlyDomainName(graph.domain)} · ${t("wfx_workflowWord")}`}
+          </div>
+          <div className="text-ink-3 text-[12px] mt-px">
+            {graph.isRecruitment ? t("wf_sub") : t("wfx_domainWorkflowSub")}
+          </div>
         </div>
         {/* Status cluster — health + version + registration counts read as one block */}
         <div className="flex items-center gap-2.5 shrink-0">
           <HeaderHealthSummary summary={summary} />
-          <Badge variant="info">{WORKFLOW_META.version} · {WORKFLOW_META.status}</Badge>
+          {graph.isRecruitment ? (
+            <Badge variant="info">{WORKFLOW_META.version} · {WORKFLOW_META.status}</Badge>
+          ) : (
+            <Badge variant="default">
+              {graph.source === "allmeta" ? t("wfx_graphSrcOntology") : t("wfx_graphSrcSnapshot")}
+            </Badge>
+          )}
           <Link
             href="/monitor"
             className="text-[12px] text-accent hover:underline flex items-center gap-1"
@@ -414,8 +517,18 @@ export function WorkflowContent() {
             <Ic.pulse /> {t("wfx_liveMonitor")}
           </Link>
           <div className="text-[11px] text-ink-3 mono">
-            <span className="text-ok font-semibold">{liveOverlay.byWsId.size}</span> {t("wfx_registered")} ·{" "}
-            <span className="text-ink-4">{nodes.filter(n => n.kind === "agent" && !liveOverlay.byWsId.get(n.wsId)).length}</span> {t("wfx_blueprint")}
+            {graph.isRecruitment ? (
+              <>
+                <span className="text-ok font-semibold">{liveByWsId.size}</span> {t("wfx_registered")} ·{" "}
+                <span className="text-ink-4">{nodes.filter(n => n.kind === "agent" && !liveByWsId.get(n.wsId)).length}</span> {t("wfx_blueprint")}
+              </>
+            ) : (
+              // Other domains have no live recruitment registry; report the
+              // ontology-derived node count instead of a misleading "registered".
+              <>
+                <span className="text-ink-4">{nodes.filter((n) => n.kind !== "trigger").length}</span> {t("wfx_blueprint")}
+              </>
+            )}
           </div>
         </div>
         <div className="w-px h-5 bg-line shrink-0" />
@@ -439,20 +552,7 @@ export function WorkflowContent() {
             { icon: "calendar", label: t("wfx_trigRescan") },
             { icon: "mail", label: t("wfx_trigHsmManual") },
           ]} />
-          <PaletteSection title={t("wfx_paletteAgents")} items={[
-            { icon: "db", label: "ReqSync" },
-            { icon: "sparkle", label: "ReqAnalyzer" },
-            { icon: "sparkle", label: agentDisplayName("JDGenerator") },
-            { icon: "plug", label: "Publisher" },
-            { icon: "db", label: "ResumeCollector" },
-            { icon: "cpu", label: agentDisplayName("ResumeParser") },
-            { icon: "cpu", label: "DupeChecker" },
-            { icon: "cpu", label: agentDisplayName("Matcher") },
-            { icon: "sparkle", label: "AIInterviewer" },
-            { icon: "cpu", label: "Evaluator" },
-            { icon: "book", label: "PackageBuilder" },
-            { icon: "mail", label: "PortalSubmitter" },
-          ]} />
+          <PaletteSection title={t("wfx_paletteAgents")} items={agentPaletteItems} />
           <PaletteSection title={t("wfx_paletteLogic")} items={[
             { icon: "branch", label: t("wfx_logicBranch") },
             { icon: "clock", label: t("wfx_logicWaitRetry") },
@@ -500,10 +600,17 @@ export function WorkflowContent() {
               <marker id="arrowhead-b-accent" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
                 <path d="M0,0 L0,6 L9,3 z" fill="var(--c-accent)" />
               </marker>
+              <marker id="arrowhead-b-warn" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L9,3 z" fill="var(--c-warn)" />
+              </marker>
+              <marker id="arrowhead-b-ok" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L9,3 z" fill="var(--c-ok)" />
+              </marker>
             </defs>
 
-            {/* Stage column bands — visual grouping (one column = one workflow stage) */}
-            <StageBands width={GRAPH_WIDTH} height={GRAPH_HEIGHT} />
+            {/* Stage column bands — recruitment-specific hand-tuned columns; the
+                stage labels/positions only make sense for the 招聘 layout. */}
+            {graph.isRecruitment && <StageBands width={graphDims.w} height={graphDims.h} />}
 
             {edges.map((e, i) => {
               const a = nodes.find((n) => n.id === e.from);
@@ -521,23 +628,29 @@ export function WorkflowContent() {
               // a living pipeline. Active edges (leading into a live agent that
               // currently has running steps) flow faster + green; fallback
               // (e.dashed) edges flow slower and dimmer.
-              const destLive = liveOverlay.byWsId.get(b.wsId);
+              const destLive = liveByWsId.get(b.wsId);
               const isActive = !!destLive && destLive.running > 0 && !destLive.paused;
               const isFallback = !!e.dashed;
               // Edge is in the selected node's "neighborhood" if either endpoint
-              // is the selected node. Used to spotlight the path through the
-              // graph when the user clicks a card.
+              // is the selected node — it is always emphasized (in both modes).
               const isInNeighborhood = e.from === selectedId || e.to === selectedId;
+              // Only focus mode fades the edges outside that neighborhood; overview
+              // shows the full wiring at readable strength.
+              const isFaded = focusMode && !isInNeighborhood;
               const strokeColor = isInNeighborhood
                 ? "var(--c-accent)"
                 : isActive
                   ? "var(--c-ok)"
                   : isFallback
-                    ? "var(--c-ink-4)"
+                    ? "var(--c-warn)"
                     : "var(--c-ink-3)";
-              const baseOpacity = isActive ? 0.9 : isFallback ? 0.45 : 0.65;
-              const strokeOpacity = isInNeighborhood ? 0.95 : baseOpacity * 0.45;
-              const strokeWidth = isInNeighborhood ? 1.8 : isActive ? 1.6 : 1.1;
+              const baseOpacity = isActive ? 0.95 : isFallback ? 0.7 : 0.78;
+              const strokeOpacity = isInNeighborhood
+                ? 0.98
+                : isFaded
+                  ? baseOpacity * 0.32
+                  : baseOpacity;
+              const strokeWidth = isInNeighborhood ? 2 : isActive ? 1.8 : isFallback ? 1.4 : 1.4;
               const dashPattern = isActive ? "8 4" : isFallback ? "3 5" : "6 5";
               // animation length = 2× cycle length → seamless wrap
               const dashTo = isActive ? -24 : isFallback ? -16 : -22;
@@ -562,8 +675,10 @@ export function WorkflowContent() {
                       isInNeighborhood
                         ? "url(#arrowhead-b-accent)"
                         : isFallback
-                          ? "url(#arrowhead-b-dim)"
-                          : "url(#arrowhead-b)"
+                          ? "url(#arrowhead-b-warn)"
+                          : isActive
+                            ? "url(#arrowhead-b-ok)"
+                            : "url(#arrowhead-b)"
                     }
                   >
                     <animate
@@ -577,7 +692,7 @@ export function WorkflowContent() {
                   {e.label && (
                     <g
                       transform={`translate(${mid} ${(ay + by) / 2 - 2})`}
-                      opacity={isInNeighborhood ? 1 : 0.55}
+                      opacity={isInNeighborhood ? 1 : isFaded ? 0.4 : 0.85}
                     >
                       <rect
                         x="-18" y="-8" width="36" height="14" rx="7"
@@ -586,7 +701,13 @@ export function WorkflowContent() {
                       <text
                         x="0" y="3" textAnchor="middle" fontSize="9"
                         fontFamily="var(--f-sans)"
-                        fill={isInNeighborhood ? "var(--c-accent)" : "var(--c-ink-3)"}
+                        fill={
+                          isInNeighborhood
+                            ? "var(--c-accent)"
+                            : isFallback
+                              ? "var(--c-warn)"
+                              : "var(--c-ink-3)"
+                        }
                       >
                         {e.label}
                       </text>
@@ -601,16 +722,23 @@ export function WorkflowContent() {
               const liveHealth = short ? health.byShort.get(short) ?? null : null;
               // ★ Inngest live overlay — only 3 nodes match (wsId 4/9-1/10).
               // Others get rendered as "蓝图 / blueprint" (dimmed).
-              const liveAgent = liveOverlay.byWsId.get(n.wsId) ?? null;
+              const liveAgent = liveByWsId.get(n.wsId) ?? null;
+              // "Blueprint stub" (not-yet-deployed) is only a meaningful state for
+              // recruitment, which has a live registry to compare against. For
+              // generated domains every node is a blueprint, so don't fade them.
               const isBlueprintStub =
-                n.kind === "agent" && !liveAgent;
+                graph.isRecruitment && n.kind === "agent" && !liveAgent;
               const isSelected = n.id === selectedId;
               const isNeighbor = neighborIds.has(n.id);
+              // In overview every non-selected node stays at full strength; only
+              // focus mode dims the cards outside the selected neighborhood.
               const highlight: NodeHighlight = isSelected
                 ? "selected"
-                : isNeighbor
-                  ? "neighbor"
-                  : "dim";
+                : focusMode
+                  ? isNeighbor
+                    ? "neighbor"
+                    : "dim"
+                  : "normal";
               return (
                 <WFNode
                   key={n.id}
@@ -626,6 +754,56 @@ export function WorkflowContent() {
               );
             })}
           </svg>
+
+          {/* Per-domain graph status overlay — loading / load error / empty
+              ontology. Recruitment never hits these (static graph). */}
+          {!graph.isRecruitment && (graph.loading || graph.error || baseNodes.length === 0) && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="flex flex-col items-center gap-2 bg-surface/90 border border-line rounded-lg px-5 py-4 shadow-sh-1 pointer-events-auto">
+                {graph.loading ? (
+                  <>
+                    <span className="animate-spin inline-block text-ink-3"><Ic.gear /></span>
+                    <div className="text-[12.5px] text-ink-2">{t("wfx_graphLoading")}</div>
+                  </>
+                ) : graph.error ? (
+                  <>
+                    <span className="text-warn"><Ic.alert /></span>
+                    <div className="text-[12.5px] text-ink-2">{t("wfx_graphError")}</div>
+                    <div className="text-[11px] text-ink-4 mono max-w-[280px] truncate">{graph.error}</div>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-ink-3"><Ic.workflow /></span>
+                    <div className="text-[12.5px] text-ink-2">{t("wfx_graphEmpty")}</div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* view-mode toggle — 全局 (whole graph) vs 聚焦 (selected neighborhood) */}
+          <div className="absolute top-3 right-3 flex gap-0.5 bg-surface border border-line rounded-md p-[3px] shadow-sh-1">
+            <button
+              type="button"
+              onClick={() => setViewMode("overview")}
+              title={t("wfx_viewGlobalTip")}
+              className={`rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors cursor-pointer border-0 ${
+                !focusMode ? "bg-accent-bg text-accent" : "bg-transparent text-ink-3 hover:text-ink-1"
+              }`}
+            >
+              {t("wfx_viewGlobal")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("focus")}
+              title={t("wfx_viewFocusTip")}
+              className={`rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors cursor-pointer border-0 ${
+                focusMode ? "bg-accent-bg text-accent" : "bg-transparent text-ink-3 hover:text-ink-1"
+              }`}
+            >
+              {t("wfx_viewFocus")}
+            </button>
+          </div>
 
           {/* canvas chrome */}
           <div className="absolute top-3 left-3 flex gap-1.5 bg-surface border border-line rounded-md p-[3px] shadow-sh-1">
@@ -677,7 +855,7 @@ export function WorkflowContent() {
           </div>
           <div className="absolute bottom-3 right-3 bg-surface border border-line rounded-md text-[11px] text-ink-3 shadow-sh-1 flex gap-2.5 items-center" style={{ padding: "6px 10px" }}>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-accent-bg border border-accent-line" /> {t("wfx_legendTrigger")}</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-white border border-line-strong" /> {t("wfx_legendAgent")}</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:color-mix(in_oklab,var(--c-accent)_15%,var(--c-surface))] border border-[color:color-mix(in_oklab,var(--c-accent)_45%,var(--c-line-strong))]" /> {t("wfx_legendAgent")}</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:var(--c-warn-bg)] border border-[color:color-mix(in_oklab,var(--c-warn)_40%,transparent)]" /> {t("wfx_legendHuman")}</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-[color:var(--c-ok-bg)] border border-[color:color-mix(in_oklab,var(--c-ok)_30%,transparent)]" /> {t("wfx_legendGuard")}</span>
           </div>
@@ -685,17 +863,19 @@ export function WorkflowContent() {
 
         {/* inspector */}
         <aside className="border-l border-line bg-surface flex flex-col min-h-0">
-          <Inspector
-            node={sel}
-            liveHealth={
-              sel.kind === "agent"
-                ? health.byShort.get(nodeAgentShort(sel) ?? "") ?? null
-                : null
-            }
-            liveAgent={liveOverlay.byWsId.get(sel.wsId) ?? null}
-            isBlueprintStub={sel.kind === "agent" && !liveOverlay.byWsId.get(sel.wsId)}
-            onJumpToAgent={jumpToAgent}
-          />
+          {sel && (
+            <Inspector
+              node={sel}
+              liveHealth={
+                sel.kind === "agent"
+                  ? health.byShort.get(nodeAgentShort(sel) ?? "") ?? null
+                  : null
+              }
+              liveAgent={liveByWsId.get(sel.wsId) ?? null}
+              isBlueprintStub={sel.kind === "agent" && !liveByWsId.get(sel.wsId)}
+              onJumpToAgent={jumpToAgent}
+            />
+          )}
         </aside>
       </div>
     </div>
@@ -756,17 +936,47 @@ function computeNodeWidth(labelText: string): number {
   return Math.max(NODE_BASE_WIDTH, Math.min(NODE_MAX_WIDTH, w));
 }
 
-// Human label for a node — prefers the Inngest function name so the canvas
-// matches the Fleet / Monitor / Events UIs. Falls back to the raw title for
-// non-agent nodes (triggers, terminals, etc.).
-function nodeTitleLabel(node: WorkflowNode): string {
-  const short = nodeAgentShort(node);
-  if (!short) return node.title;
-  const inngestLabel = agentDisplayName(short);
-  // If the raw title carries extra decoration like "ResumeParser + DupeCheck",
-  // splice the inngest label in for the short while preserving the rest.
-  if (node.title === short) return inngestLabel;
-  return node.title.replace(short, inngestLabel);
+// Bilingual display name for a known agent/step short. The display_<short>
+// i18n keys (zh + en) are the source of truth; fall back to the English Inngest
+// name when no key exists.
+function localizedAgentLabel(short: string, t: (k: string) => string): string {
+  const key = `display_${short.toLowerCase()}`;
+  const v = t(key);
+  return v !== key ? v : agentDisplayName(short);
+}
+
+// Bilingual node description (display_<short>_desc) for recruitment nodes; falls
+// back to the supplied raw text (ontology description / node.sub) otherwise.
+function localizedNodeDesc(
+  node: WorkflowNode,
+  t: (k: string) => string,
+  fallback: string,
+): string {
+  const key = `display_${node.title.toLowerCase()}_desc`;
+  const v = t(key);
+  return v !== key ? v : fallback;
+}
+
+// Human label for a node, localized to the active language.
+//   - trigger node       → t("wfx_externalTrigger")
+//   - recruitment node   → its title IS a known short ("Matcher", "JDReviewer"),
+//                          so the bilingual display_<short> key applies.
+//   - generated node     → the ontology action name (no i18n key) is kept as-is;
+//                          it's domain data, not translatable UI chrome.
+function nodeTitleLabel(
+  node: WorkflowNode,
+  t: (k: string) => string,
+  lang: string,
+): string {
+  if (node.kind === "trigger") return t("wfx_externalTrigger");
+  // Recruitment nodes carry a known short as their title → bilingual display_<short>.
+  const key = `display_${node.title.toLowerCase()}`;
+  const localized = t(key);
+  if (localized !== key) return localized;
+  // Generated-domain nodes: the builder humanizes the English `title` and, where
+  // derivable, supplies a Chinese `titleZh`. Pick by language.
+  if (lang === "zh" && node.titleZh) return node.titleZh;
+  return node.title;
 }
 
 const HEALTH_TONE: Record<AgentHealthStatus, { color: string; label: string; pulse: boolean }> = {
@@ -777,7 +987,7 @@ const HEALTH_TONE: Record<AgentHealthStatus, { color: string; label: string; pul
   failed: { color: "var(--c-err)", label: "failed", pulse: true },
 };
 
-type NodeHighlight = "selected" | "neighbor" | "dim";
+type NodeHighlight = "selected" | "neighbor" | "normal" | "dim";
 
 function WFNode({
   node,
@@ -798,28 +1008,32 @@ function WFNode({
   dragging: boolean;
   onPointerDown: (e: React.PointerEvent<SVGGElement>) => void;
 }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const w = width;
   const h = NODE_HEIGHT;
   const selected = highlight === "selected";
   const isNeighbor = highlight === "neighbor";
   const isDim = highlight === "dim";
-  // Dim blueprint stubs visually — they're not deployed, so don't pretend
-  // they have status. When the user has selected another node + that node's
-  // neighbors, push non-neighbor cards further down so the highlighted path
-  // reads clearly.
-  const stubOpacity = isBlueprintStub ? 0.55 : 1;
-  const highlightOpacity = isDim ? 0.32 : 1;
+  // Blueprint stubs (recruitment, not-yet-deployed) read slightly softer so the
+  // deployed agents stand out — but still clearly legible. Focus mode is the only
+  // thing that meaningfully fades a card (the rest of the graph behind the
+  // selected neighborhood).
+  const stubOpacity = isBlueprintStub ? 0.7 : 1;
+  const highlightOpacity = isDim ? 0.4 : 1;
   const renderOpacity = stubOpacity * highlightOpacity;
   const isLive = !!liveAgent && !liveAgent.paused;
+  // Each kind gets a tinted fill, a saturated kind-colored border, an `accent`
+  // (icon + chip color) and a `chip` (the rounded swatch behind the icon). The
+  // chip is the main "更醒目" cue: every node type is identifiable at a glance,
+  // even the agent cards that used to be plain white.
   const style = (() => {
     switch (node.kind) {
-      case "trigger": return { fill: "var(--c-accent-bg)", stroke: "var(--c-accent-line)", accent: "var(--c-accent)" };
-      case "hitl": return { fill: "var(--c-warn-bg)", stroke: "color-mix(in oklab, var(--c-warn) 30%, transparent)", accent: "oklch(0.5 0.14 75)" };
-      case "guard": return { fill: "var(--c-ok-bg)", stroke: "color-mix(in oklab, var(--c-ok) 25%, transparent)", accent: "var(--c-ok)" };
-      case "branch": return { fill: "var(--c-panel)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-2)" };
-      case "done": return { fill: "var(--c-raised)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-3)" };
-      default: return { fill: "var(--c-surface)", stroke: isLive ? "color-mix(in oklab, var(--c-ok) 35%, var(--c-line-strong))" : "var(--c-line-strong)", accent: "var(--c-ink-1)" };
+      case "trigger": return { fill: "var(--c-accent-bg)", stroke: "color-mix(in oklab, var(--c-accent) 55%, var(--c-line-strong))", accent: "var(--c-accent)", chip: "color-mix(in oklab, var(--c-accent) 22%, var(--c-surface))" };
+      case "hitl": return { fill: "var(--c-warn-bg)", stroke: "color-mix(in oklab, var(--c-warn) 50%, var(--c-line-strong))", accent: "oklch(0.5 0.14 75)", chip: "color-mix(in oklab, var(--c-warn) 26%, var(--c-surface))" };
+      case "guard": return { fill: "var(--c-ok-bg)", stroke: "color-mix(in oklab, var(--c-ok) 48%, var(--c-line-strong))", accent: "var(--c-ok)", chip: "color-mix(in oklab, var(--c-ok) 26%, var(--c-surface))" };
+      case "branch": return { fill: "var(--c-panel)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-2)", chip: "color-mix(in oklab, var(--c-ink-3) 16%, var(--c-surface))" };
+      case "done": return { fill: "var(--c-raised)", stroke: "var(--c-line-strong)", accent: "var(--c-ink-3)", chip: "color-mix(in oklab, var(--c-ink-4) 16%, var(--c-surface))" };
+      default: return { fill: isLive ? "color-mix(in oklab, var(--c-ok) 7%, var(--c-surface))" : "color-mix(in oklab, var(--c-accent) 5%, var(--c-surface))", stroke: isLive ? "color-mix(in oklab, var(--c-ok) 45%, var(--c-line-strong))" : "color-mix(in oklab, var(--c-accent) 32%, var(--c-line-strong))", accent: "var(--c-accent)", chip: "color-mix(in oklab, var(--c-accent) 15%, var(--c-surface))" };
     }
   })();
   // ★ Live overlay tone takes priority over the legacy /api/agents/health.
@@ -868,11 +1082,11 @@ function WFNode({
           pointerEvents="none"
         />
       )}
-      {/* Selection: subtle dark border ring */}
+      {/* Selection: solid accent border ring — the strongest highlight. */}
       {selected && (
         <rect
           x="-3" y="-3" width={w + 6} height={h + 6} rx="9"
-          fill="none" stroke="var(--c-ink-1)" strokeWidth="1.5" opacity="0.9"
+          fill="none" stroke="var(--c-accent)" strokeWidth="2.25" opacity="0.95"
           pointerEvents="none"
         />
       )}
@@ -885,8 +1099,18 @@ function WFNode({
         x="0" y="0" width={w} height={h} rx="6"
         fill={style.fill}
         stroke={style.stroke}
-        strokeWidth="1"
+        strokeWidth="1.25"
         filter={isLive ? "drop-shadow(0 1px 3px color-mix(in oklab, var(--c-ok) 25%, transparent))" : undefined}
+      />
+
+      {/* Kind-colored icon chip — the at-a-glance type cue. */}
+      <rect
+        x="7" y={(h - 24) / 2} width="24" height="24" rx="7"
+        fill={style.chip}
+        stroke={style.accent}
+        strokeOpacity="0.4"
+        strokeWidth="1"
+        pointerEvents="none"
       />
 
       {/* Icon — foreignObject was leaking pointer events; force them off so the
@@ -916,7 +1140,7 @@ function WFNode({
         dominantBaseline="middle"
         pointerEvents="none"
       >
-        {nodeTitleLabel(node)}
+        {nodeTitleLabel(node, t, lang)}
       </text>
 
       {/* Status dot (top-right) — pulse uses a soft breathing ripple */}
@@ -1031,7 +1255,7 @@ function Inspector({
   isBlueprintStub: boolean;
   onJumpToAgent: (short: string) => void;
 }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const Icon = Ic[node.icon];
   const agentShort = nodeAgentShort(node);
   return (
@@ -1046,7 +1270,7 @@ function Inspector({
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[13px] font-semibold">{nodeTitleLabel(node)}</span>
+              <span className="text-[13px] font-semibold">{nodeTitleLabel(node, t, lang)}</span>
               {liveAgent && !liveAgent.paused && (
                 <span className="text-[9px] mono font-bold px-1.5 py-0.5 rounded bg-ok-bg text-ok">● LIVE</span>
               )}
@@ -1057,7 +1281,7 @@ function Inspector({
                 <span className="text-[9px] mono font-medium px-1.5 py-0.5 rounded border border-line text-ink-4">{t("wfx_blueprintNotDeployed")}</span>
               )}
             </div>
-            <div className="text-ink-3 text-[11px]">{node.sub}</div>
+            <div className="text-ink-3 text-[11px]">{localizedNodeDesc(node, t, node.sub)}</div>
           </div>
           <Btn size="sm" variant="ghost" style={{ padding: "0 6px" }}><Ic.dots /></Btn>
         </div>
@@ -1104,7 +1328,9 @@ function Inspector({
 // synthetic trigger (wsId='trig').
 function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
   const { t } = useApp();
-  const canonical = CANONICAL_WORKFLOW.find((n) => n.id === node.wsId);
+  // Generated per-domain nodes carry their own canonical (built from the
+  // ontology action); recruitment nodes look theirs up in CANONICAL_WORKFLOW.
+  const canonical = node.canonical ?? CANONICAL_WORKFLOW.find((n) => n.id === node.wsId);
 
   // Trigger node — no canonical entry; render a friendly summary so the panel
   // doesn't look blank.
@@ -1125,7 +1351,7 @@ function CanonicalDetailsPanel({ node }: { node: WorkflowNode }) {
       <div className="border-b border-line" style={{ padding: "12px 16px" }}>
         <SectionLabel>{t("wfx_secDescription")}</SectionLabel>
         <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.6 }}>
-          {canonical.description}
+          {localizedNodeDesc(node, t, canonical.description)}
         </div>
       </div>
 

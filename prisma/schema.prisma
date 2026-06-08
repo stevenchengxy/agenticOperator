@@ -1242,3 +1242,44 @@ model MonitorConfig {
 
   @@map("monitor_config")
 }
+
+// 流程追踪 · 事件 AI 分析缓存。on-demand 生成（observability，不上 Inngest），
+// 按 eventId 缓存，避免每次开抽屉都重打 LLM。一个事件 → 一条分析。
+model FunnelEventAnalysis {
+  eventId          String   @id @map("event_id")
+  candidateId      String   @map("candidate_id")
+  eventName        String   @map("event_name")
+  model            String
+  summary          String                 // 事件解读（业务语言）
+  chainRole        String   @map("chain_role")   // 在整条链路上的定位
+  reasoning        String                 // 背后 LLM 推理判断摘要
+  risksJson        String   @map("risks_json")   // JSON string[]
+  nextStep         String   @map("next_step")
+  rawJson          String   @map("raw_json")     // 完整结构化分析 JSON
+  promptTokens     Int?     @map("prompt_tokens")
+  completionTokens Int?     @map("completion_tokens")
+  durationMs       Int?     @map("duration_ms")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([candidateId])
+  @@map("funnel_event_analysis")
+}
+
+// 流程追踪 · 岗位漏斗 AI 诊断缓存。对一个岗位的整条漏斗（预筛通过/拦截 +
+// 拦截原因）做 AI 诊断：流失在哪、典型拦截原因聚类、亮点、建议。
+model FunnelJobAnalysis {
+  jobId            String   @id @map("job_id")
+  model            String
+  diagnosis        String                            // 漏斗诊断（流失/瓶颈）
+  failureClusters  String   @map("failure_clusters") // JSON [{reason, count}]
+  highlights       String                            // 亮点
+  recommendations  String                            // JSON string[]
+  rawJson          String   @map("raw_json")
+  candidateCount   Int      @map("candidate_count")
+  promptTokens     Int?     @map("prompt_tokens")
+  completionTokens Int?     @map("completion_tokens")
+  durationMs       Int?     @map("duration_ms")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("funnel_job_analysis")
+}

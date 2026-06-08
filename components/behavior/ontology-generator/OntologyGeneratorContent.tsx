@@ -14,13 +14,13 @@ import { StepRail } from "./StepRail";
 import { OntologyPanel } from "./OntologyPanel";
 import { InferIntro } from "./InferIntro";
 import { RunningStage } from "./RunningStage";
+import { InferReasoning } from "./InferReasoning";
 import { InferredAgentCard } from "./InferredAgentCard";
 import { DeployResult } from "./DeployResult";
 import { DomainChip } from "./DomainChip";
 
 type Phase = "idle" | "inferring" | "inferred" | "generating" | "deployed";
 
-const INFER_MIN_MS = 2000;
 const GENERATE_MIN_MS = 2500;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -53,6 +53,10 @@ export function OntologyGeneratorContent() {
   const [candidates, setCandidates] = React.useState<InferredAgentCandidate[]>([]);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [drafts, setDrafts] = React.useState<GeneratedDraft[]>([]);
+  // The idle/domain-switch effect pre-fetches the full InferResult; `ready`
+  // signals the candidates are loaded so clicking 推断 can start the reasoning
+  // animation instantly (no network wait baked into the 20s timeline).
+  const [ready, setReady] = React.useState(false);
 
   const currentStep: 0 | 1 | 2 = phase === "generating" ? 1 : phase === "deployed" ? 2 : 0;
 
@@ -65,6 +69,7 @@ export function OntologyGeneratorContent() {
     setCandidates([]);
     setSelected(new Set());
     setDrafts([]);
+    setReady(false);
     let alive = true;
     (async () => {
       try {
@@ -72,7 +77,12 @@ export function OntologyGeneratorContent() {
           domainId: domain,
           domainName,
         });
-        if (alive) setCounts(res.counts);
+        if (!alive) return;
+        // Stash the WHOLE result (not just counts) so the reasoning animation has
+        // real candidates to think about the instant 推断 is clicked.
+        setCounts(res.counts);
+        setCandidates(res.candidates);
+        setReady(true);
       } catch {
         /* keep zeros */
       }
@@ -84,15 +94,18 @@ export function OntologyGeneratorContent() {
   }, [domain]);
 
   async function runInfer() {
+    // Candidates are pre-fetched at idle; only hit the network if they aren't
+    // ready yet (fast double-click before the idle fetch settled).
+    let cands = candidates;
+    if (!ready) {
+      const res = await postJson<InferResult>("/api/ontology-generator/infer", { domainId: domain, domainName });
+      cands = res.candidates;
+      setCounts(res.counts);
+      setCandidates(cands);
+      setReady(true);
+    }
+    setSelected(new Set(cands.map((c) => c.key)));
     setPhase("inferring");
-    const [res] = await Promise.all([
-      postJson<InferResult>("/api/ontology-generator/infer", { domainId: domain, domainName }),
-      sleep(INFER_MIN_MS),
-    ]);
-    setCounts(res.counts);
-    setCandidates(res.candidates);
-    setSelected(new Set(res.candidates.map((c) => c.key)));
-    setPhase("inferred");
   }
 
   async function runGenerate() {
@@ -161,13 +174,7 @@ export function OntologyGeneratorContent() {
       )}
 
       {phase === "inferring" && (
-        <RunningStage
-          title={t("og_inferring_title")}
-          subtitle={t("og_inferring_sub")
-            .replace("{domain}", domainName)
-            .replace("{n}", String(counts.rules + counts.dataObjects + counts.actions + counts.events + counts.workflow))}
-          ticker={t("og_inferring_ticker")}
-        />
+        <InferReasoning candidates={candidates} counts={counts} onDone={() => setPhase("inferred")} />
       )}
 
       {phase === "inferred" && (

@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
+import { hasOntologyRuleChecks, ontologyAuditList } from '@/lib/rule-check/ontology-audit-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,8 +51,15 @@ export async function GET(req: Request) {
   const jrId = searchParams.get('jrId') ?? '';
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 200);
 
-  // A domain with no recorded rule-check audits gets an empty list.
-  if (!isRuleCheckDomain(searchParams.get('domain'))) {
+  // Non-recruitment domains: serve from the generic ontology rule-check store.
+  const domain = searchParams.get('domain');
+  if (!isRuleCheckDomain(domain)) {
+    if (await hasOntologyRuleChecks(domain)) {
+      let rows = await ontologyAuditList(domain!.trim(), limit);
+      if (decision === 'PASS' || decision === 'FAIL') rows = rows.filter((r) => r.decision === decision);
+      if (client) rows = rows.filter((r) => r.client_name === client);
+      return NextResponse.json<RuleCheckAuditListResponse>({ rows, total: rows.length, meta: { empty: rows.length === 0, generatedAt: new Date().toISOString() } });
+    }
     return NextResponse.json<RuleCheckAuditListResponse>({
       rows: [],
       total: 0,

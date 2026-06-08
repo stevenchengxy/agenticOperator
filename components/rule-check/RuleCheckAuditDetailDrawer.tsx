@@ -9,6 +9,7 @@ import {
   useVerifyRun,
 } from "@/components/rule-check/RuleSelectionVerifyTab";
 import { CandidateProfileCard } from "@/components/rule-check/CandidateProfileCard";
+import { verdictLabel } from "@/components/rule-check/verdict-label";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type {
@@ -330,7 +331,9 @@ function DetailHeader({
                 ? t("rc_src_live")
                 : detail.rule_source === "json-fallback"
                   ? t("rc_src_fallback")
-                  : detail.rule_source}
+                  : detail.rule_source === "snapshot"
+                    ? t("rc_src_snapshot")
+                    : detail.rule_source}
             </Badge>
           </Kv>
         </div>
@@ -408,6 +411,7 @@ function DecisionBanner({
   detail: RuleCheckAuditDetail;
   summary: string;
 }) {
+  const { t } = useApp();
   const pass = detail.decision === "PASS";
   const accent = pass ? "var(--c-ok)" : "var(--c-err)";
   return (
@@ -433,7 +437,7 @@ function DecisionBanner({
           textShadow: `0 0 22px color-mix(in oklab, ${accent} 35%, transparent)`,
         }}
       >
-        {detail.decision}
+        {verdictLabel(detail.decision, t)}
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-ink-1" style={{ fontSize: 14, lineHeight: 1.55 }}>
@@ -515,6 +519,17 @@ function TabBtn({
 function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
   const [view, setView] = React.useState<"rendered" | "raw">("rendered");
+  // Deterministic ontology rule-check (energy / 费控): no LLM, no user prompt.
+  if (detail.deterministic) {
+    return (
+      <EmptyState
+        icon={<Ic.shield />}
+        title={t("rc_tab_prompt")}
+        hint={t("rc_deterministic_prompt")}
+        variant="info"
+      />
+    );
+  }
   if (!detail.user_prompt) {
     return (
       <EmptyState
@@ -612,6 +627,33 @@ function ViewToggle({
 
 function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
+  // Deterministic ontology rule-check (energy / 费控): no LLM response. Show the
+  // synthesized verdict + hit rules instead of the recruitment candidate card.
+  if (detail.deterministic) {
+    return (
+      <div className="flex flex-col gap-4">
+        <EmptyState
+          icon={<Ic.shield />}
+          title={t("rc_tab_response")}
+          hint={t("rc_deterministic_response")}
+          variant="info"
+        />
+        {detail.failure_reasons.length > 0 ? (
+          <div
+            className="border border-line rounded-sm"
+            style={{ padding: "12px 14px", borderLeft: "3px solid var(--c-err)", background: "var(--c-err-bg)" }}
+          >
+            <div className="hint" style={{ color: "var(--c-err)", marginBottom: 6 }}>
+              {t("rc_failure_reasons_label")}
+            </div>
+            <div className="mono text-[12px] text-err" style={{ lineHeight: 1.6 }}>
+              {detail.failure_reasons.join("、")}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-4">
       <CandidateProfileCard detail={detail} />
@@ -650,8 +692,66 @@ function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
   );
 }
 
+// Deterministic ontology rule-check (energy / 费控) instance view: the actual
+// values each rule read/compared, drawn from the per-rule evals — NOT the
+// recruitment Candidate/Resume/JD graph (there is no candidate here).
+function DeterministicInstances({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
+  const flags = detail.flags ?? [];
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <div className="hint" style={{ marginBottom: 8 }}>{t("rc_deterministic_instances_title")}</div>
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "10px 22px", marginBottom: 8 }}
+        >
+          <Kv label={t("rc_kv_candidate_id")}>
+            <span className="mono text-[11.5px]">{detail.candidate_id || "—"}</span>
+          </Kv>
+          <Kv label={t("rc_kv_client_bg_studio")}>
+            <span className="text-[12px]">
+              {detail.client_name || "—"}
+              {detail.business_group ? ` · ${detail.business_group}` : ""}
+            </span>
+          </Kv>
+          <Kv label={t("rc_kv_rules_evaluated")}>
+            <span className="mono text-[11.5px]">
+              {detail.rules_evaluated} / {detail.rules_total_in_ontology}
+            </span>
+          </Kv>
+        </div>
+        <div className="hint" style={{ fontSize: 11 }}>{t("rc_deterministic_instances_hint")}</div>
+      </div>
+      <div className="flex flex-col" style={{ gap: 6 }}>
+        {flags.map((f) => (
+          <div
+            key={f.flag_id}
+            className="border border-line rounded-sm"
+            style={{ padding: "8px 10px", background: "var(--c-bg)" }}
+          >
+            <div className="flex items-center gap-2" style={{ marginBottom: f.evidence ? 4 : 0 }}>
+              <span className="mono text-[11.5px] text-ink-1 font-semibold flex-none">{f.rule_id}</span>
+              <span className="text-[12px] text-ink-2 flex-1 truncate">{f.rule_name_snapshot}</span>
+              <Badge variant={f.result === "PASS" ? "ok" : f.result === "NOT_APPLICABLE" ? "default" : "err"}>
+                {verdictLabel(f.result, t)}
+              </Badge>
+            </div>
+            {f.evidence ? (
+              <div className="text-[11.5px] text-ink-2" style={{ lineHeight: 1.55 }}>{f.evidence}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
+  if (detail.deterministic) {
+    return <DeterministicInstances detail={detail} />;
+  }
   const fullMissing =
     detail.parsed_resume_full === null && detail.job_requisition_full === null;
   return (

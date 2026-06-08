@@ -561,3 +561,134 @@ body {
   .ao-bar-grow, .ao-hover-lift, .ao-tab-underline { transition: none; }
   .ao-hover-lift:hover { transform: none; }
 }
+
+/* ── Ontology Generator (本体智能体生成器) ───────────────────────────────
+   The "agents running" stages. Minimal + cool: a faint grid backdrop, orbiting
+   satellites around a central node, a horizontal scan sweep, and a flowing
+   progress bar. All gated by prefers-reduced-motion below. */
+
+/* Faint grid backdrop breathing on the running stages. */
+@keyframes ogGridPulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.6; }
+}
+.og-grid {
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--c-line) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--c-line) 70%, transparent) 1px, transparent 1px);
+  background-size: 38px 38px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 45%, #000 35%, transparent 78%);
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 45%, #000 35%, transparent 78%);
+  animation: ogGridPulse 4.2s ease-in-out infinite;
+}
+
+/* Central node halo — soft expanding pulse. */
+@keyframes ogHalo {
+  0%   { transform: scale(0.85); opacity: 0.5; }
+  70%  { opacity: 0; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+.og-halo { animation: ogHalo 2.8s ease-out infinite; }
+
+/* Two satellites orbiting the central node at different radii / phases. */
+@keyframes ogOrbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.og-orbit { animation: ogOrbit 5.5s linear infinite; transform-origin: center; }
+.og-orbit-rev { animation: ogOrbit 7.5s linear infinite reverse; transform-origin: center; }
+
+/* Central icon gentle float + breathe. */
+@keyframes ogFloat {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-4px) scale(1.03); }
+}
+.og-core { animation: ogFloat 3.4s ease-in-out infinite; }
+
+/* Horizontal scan sweep crossing the stage. */
+@keyframes ogScan {
+  0%   { transform: translateX(-120%); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+.og-scan { animation: ogScan 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+/* Flowing sheen on the bottom progress bar. */
+@keyframes ogFlow {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.og-flow { animation: ogFlow 1.4s ease-in-out infinite; }
+
+/* Ticker dot pulse under the progress bar. */
+@keyframes ogTick {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 1; }
+}
+.og-tick { animation: ogTick 1.2s ease-in-out infinite; }
+
+/* Inferred-agent card entrance (staggered via --og-i). */
+@keyframes ogCardIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.og-card-in {
+  animation: ogCardIn 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--og-i, 0) * 90ms);
+}
+
+/* Right-side detail drawer — slide in from the right edge + backdrop fade. */
+@keyframes aoDrawerIn {
+  from { opacity: 0.5; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.ao-drawer-in { animation: aoDrawerIn 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes aoBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+.ao-backdrop-in { animation: aoBackdropIn 220ms ease both; }
+
+/* Confidence ring stroke draw. */
+.og-ring-arc { transition: stroke-dashoffset 900ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Final deploy check — scale-up with overshoot. */
+@keyframes ogCheckPop {
+  0%   { opacity: 0; transform: scale(0.5); }
+  60%  { opacity: 1; transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.og-check-pop { animation: ogCheckPop 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* ── Reasoning stage (InferReasoning) ─────────────────────────────────────── */
+
+/* Each reasoning line streams in: fade + slide up. */
+@keyframes ogLineIn {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.og-line-in { animation: ogLineIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Emergent agent card materialises on the right. */
+@keyframes ogEmerge {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.og-emerge { animation: ogEmerge 420ms cubic-bezier(0.34, 1.4, 0.64, 1) both; }
+
+/* Header core — gentle breathe; status dot + count badge pulse. */
+@keyframes ogReasonCore {
+  0%, 100% { box-shadow: 0 6px 20px color-mix(in oklab, var(--c-accent) 40%, transparent); }
+  50%      { box-shadow: 0 8px 30px color-mix(in oklab, var(--c-accent) 65%, transparent); }
+}
+.og-reason-core { animation: ogReasonCore 2.6s ease-in-out infinite; }
+.og-reason-dot { animation: ogTick 1.1s ease-in-out infinite; }
+@keyframes ogCountPop { 0% { transform: scale(0.6); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.og-reason-count { animation: ogCountPop 360ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .og-grid, .og-halo, .og-orbit, .og-orbit-rev, .og-core,
+  .og-scan, .og-flow, .og-tick, .og-card-in, .og-check-pop,
+  .og-line-in, .og-emerge, .og-reason-core,
+  .og-reason-dot, .og-reason-count,
+  .ao-drawer-in, .ao-backdrop-in { animation: none; }
+  .og-ring-arc { transition: none; }
+}

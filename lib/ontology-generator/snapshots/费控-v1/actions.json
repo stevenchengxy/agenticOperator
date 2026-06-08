@@ -1,0 +1,2421 @@
+[
+  {
+    "id": "1",
+    "name": "submitExpenseClaim",
+    "description": "负责承接报销人在启费通填报的报销单(出差报销 ECA / 普通报销 OEP)，将单头、明细行与关联票据落库，并由智控一对一生成费控审核案件(FK)，驱动后续全链路自动处理。该动作是费控流水线的人工起点：报销人初次提交无事件触发，单子被退回补正后再次提交则由 RETURNED_FOR_FIX 事件重新进入。提交即冻结报销单快照、校验报销人权限与差旅类必填出差编号。",
+    "submission_criteria": "1. 报销人(Employee)记录存在且 is_active 为 true、expense_permission 为 true\n2. 报销单(Expense_Claim)至少含一条报销单明细行(Expense_Claim_Line)\n3. 差旅类明细(费用科目 is_travel_category 为 true)已关联已批准的出差编号 business_trip_no\n4. 报销单归属成本中心(Cost_Center)的 status 为\"启用\"\n5. 每条非无票明细行已关联一张已入票夹云的发票(Invoice)",
+    "object_type": "action",
+    "category": "报销单提交建案",
+    "actor": [
+      "Human"
+    ],
+    "trigger": [
+      "RETURNED_FOR_FIX"
+    ],
+    "target_objects": [
+      "Expense_Claim",
+      "Expense_Claim_Line",
+      "Invoice",
+      "Expense_Audit_Case"
+    ],
+    "inputs": [
+      {
+        "name": "claimant_employee_id",
+        "type": "String",
+        "description": "报销人工号，默认当前登录人。系统据此校验报销人是否在职且开通报销权限，并带出默认部门与成本中心。代他人报销时须为被授权人。该值必须在系统中存在对应的 Employee 记录。",
+        "source_object": "Expense_Claim.claimant_employee_id",
+        "required": true
+      },
+      {
+        "name": "claim_type",
+        "type": "String",
+        "description": "报销单类型。值为\"出差报销\"(单号 ECA)或\"普通报销\"(单号 OEP)。出差报销必须关联出差编号 BTA。系统据此决定单号前缀与差旅类校验分支。",
+        "source_object": "Expense_Claim.claim_type",
+        "required": true
+      },
+      {
+        "name": "cost_center_id",
+        "type": "String",
+        "description": "报销单归属成本中心编号，填的是费用该由哪个成本中心承担。默认带出报销人部门成本中心，可改。该成本中心 status 必须为\"启用\"，否则提交被拦(对应 RULE-BUD-03 归属校验)。",
+        "source_object": "Expense_Claim.cost_center_id",
+        "required": true
+      },
+      {
+        "name": "business_trip_no",
+        "type": "String",
+        "description": "出差编号 BTA。出差报销及任何差旅类明细行必填，须为已批准状态。系统据此在后续校验中比对消费时间地点(RULE-CMP-04)与套用差旅标准(RULE-STD-01/02)。普通报销且无差旅明细时为空。",
+        "source_object": "Expense_Claim.business_trip_no",
+        "required": false
+      },
+      {
+        "name": "claim_lines",
+        "type": "List<JSON>",
+        "description": "报销单明细行集合。每条含费用科目编号(expense_category_id)、费用发生日期(expense_date)、本行金额(amount)、关联票据编号(invoice_id)、本行事由说明(remark)。系统据此创建 Expense_Claim_Line 记录并关联对应发票。无票行(如出差补助 F1030)的 invoice_id 为空。",
+        "source_object": "Expense_Claim_Line.expense_claim_line_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "提交成功的报销单唯一单号。出差报销 ECA+8 位日期+6 位流水，普通报销 OEP+8 位日期+6 位流水。供下游 EXPENSE_SUBMITTED 事件消费方定位报销单记录。"
+      },
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "提交后智控一对一生成的费控审核案件编号，格式 FK+8 位日期+5 位流水。是穿全链路的主线索，供 OCR、校验、风险、预算、审批、回写各阶段引用其产物号。"
+      },
+      {
+        "name": "submit_result",
+        "type": "String",
+        "description": "提交执行结果。值为\"提交成功\"表示报销单落库、明细行与票据关联完成、案件已建立并发出 EXPENSE_SUBMITTED；值为\"提交失败\"时含失败原因(权限不足/成本中心停用/差旅缺 BTA/明细缺票等)明细。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "validateClaimantAndHeader",
+        "description": "校验报销人在职与报销权限、报销单类型与单头一致性、归属成本中心是否启用，差旅类报销是否已关联已批准的出差编号 BTA，确认单子具备提交资格。",
+        "object_type": "logic",
+        "condition": "报销人在启费通点击提交",
+        "rules": [
+          {
+            "id": "RULE-BUD-03",
+            "submission_criteria": "报销单已选成本中心 CC，可比对报销人启人 HR 主数据默认成本中心。",
+            "description": "系统比对报销单所选成本中心 CC 与报销人在启人 HR 主数据中的部门/默认成本中心，明显不符且无合理跨成本中心承担说明的，命中。命中默认动作：退回修改。确有费用由他部门承担的合理场景，须在说明栏写明并经被承担成本中心责任人确认，引擎放行转人工。本步骤在提交闸口先行做归属与启用校验，停用成本中心不允许挂费用。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "claimant_employee_id",
+            "type": "String",
+            "description": "报销人工号。本步骤据此读取 Employee 记录校验 is_active(是否在职)与 expense_permission(是否开通报销权限)，离职或无权限不允许提交。",
+            "source_object": "Expense_Claim.claimant_employee_id"
+          },
+          {
+            "name": "cost_center_id",
+            "type": "String",
+            "description": "报销单归属成本中心编号。本步骤校验该成本中心 status 是否为\"启用\"，停用/待启用的成本中心不允许挂费用。",
+            "source_object": "Expense_Claim.cost_center_id"
+          },
+          {
+            "name": "business_trip_no",
+            "type": "String",
+            "description": "出差编号 BTA。本步骤校验出差报销及差旅类明细是否已关联已批准的 BTA，差旅类无 BTA 无法提交。",
+            "source_object": "Expense_Claim.business_trip_no"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "header_validation_result",
+            "type": "String",
+            "description": "单头校验结果。值为\"通过\"表示报销人权限、成本中心启用、差旅 BTA 关联均满足可继续建行；值为\"拦截\"时含拦截原因(权限不足/成本中心停用/差旅缺 BTA)明细。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "persistClaimAndLinkInvoices",
+        "description": "生成报销单单号(ECA/OEP)，将单头与各明细行写入数据库，按 invoice_id 把每条明细行与票夹云内已结构化的发票一对一关联(一票只挂一行)，并汇总合计金额。",
+        "object_type": "tool",
+        "condition": "单头校验通过",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "claim_lines",
+            "type": "List<JSON>",
+            "description": "报销单明细行集合。本步骤逐行写入 Expense_Claim_Line 记录(费用科目/发生日期/金额/事由)并按 invoice_id 关联发票，无票行 invoice_id 留空。",
+            "source_object": "Expense_Claim_Line.expense_claim_line_id"
+          },
+          {
+            "name": "claim_type",
+            "type": "String",
+            "description": "报销单类型。本步骤据此决定生成的单号前缀(出差报销 ECA / 普通报销 OEP)。",
+            "source_object": "Expense_Claim.claim_type"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "生成的报销单唯一单号。后续建案与明细行落库均基于此单号。"
+          },
+          {
+            "name": "total_amount",
+            "type": "Float",
+            "description": "合计金额，各明细行金额之和，系统汇总不手填。写入报销单 total_amount 字段，初始合计可报金额等于此值。"
+          }
+        ]
+      },
+      {
+        "order": "3",
+        "name": "createAuditCaseAndEmit",
+        "description": "由智控一对一生成费控审核案件 FK，冻结报销单全量字段为案件快照，把报销单状态由 DRAFT 推进至 SUBMITTED，发出 EXPENSE_SUBMITTED 事件驱动发票 OCR 流程。",
+        "object_type": "tool",
+        "condition": "报销单与明细行已落库",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "已落库的报销单单号。本步骤据此建立一对一的费控审核案件并将报销单全量字段快照冻结落库。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          },
+          {
+            "name": "total_amount",
+            "type": "Float",
+            "description": "报销单合计金额。本步骤带入费控审核案件 total_amount 与 total_payable_amount 初值。",
+            "source_object": "Expense_Claim.total_amount"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "生成的费控审核案件编号 FK。已绑定报销单并落快照，供全链路引用。发出 EXPENSE_SUBMITTED 事件携带此案件号与报销单号。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Expense_Claim",
+          "action": "CREATE_OR_MODIFY",
+          "property_impacted": [
+            "expense_claim_id",
+            "claimant_employee_id",
+            "department_id",
+            "cost_center_id",
+            "claim_type",
+            "business_trip_no",
+            "total_amount",
+            "total_payable_amount",
+            "status",
+            "create_time",
+            "submit_time"
+          ],
+          "description": "初次提交创建报销单记录并写入报销人/部门/成本中心/类型/出差编号/合计金额，状态置 SUBMITTED 并记录提交时间；退回补正后再次提交时更新明细与状态由 DRAFT 回到 SUBMITTED。total_payable_amount 初值等于 total_amount，待核减后更新。"
+        },
+        {
+          "object_type": "Expense_Claim_Line",
+          "action": "CREATE_OR_MODIFY",
+          "property_impacted": [
+            "expense_claim_line_id",
+            "expense_claim_id",
+            "expense_category_id",
+            "invoice_id",
+            "expense_date",
+            "amount",
+            "payable_amount",
+            "remark"
+          ],
+          "description": "逐条创建/更新报销单明细行，写入费用科目、关联票据、发生日期、本行金额与事由，本行可报金额 payable_amount 初值等于 amount。无票行(如 F1030 出差补助)invoice_id 为空、金额按定额。"
+        },
+        {
+          "object_type": "Invoice",
+          "action": "MODIFY",
+          "property_impacted": [
+            "invoice_id"
+          ],
+          "description": "将票夹云内已分配 PIAO 号的发票与对应明细行建立一票一行关联(防一票多报)，不修改票面字段本身，仅建立挂接关系供后续 OCR 与查重定位。"
+        },
+        {
+          "object_type": "Expense_Audit_Case",
+          "action": "CREATE",
+          "property_impacted": [
+            "expense_audit_case_id",
+            "expense_claim_id",
+            "total_amount",
+            "total_payable_amount",
+            "claim_snapshot",
+            "status",
+            "audit_timeline",
+            "create_time"
+          ],
+          "description": "一对一创建费控审核案件 FK 并绑定报销单，落报销单快照(claim_snapshot)冻结建案时点全量字段，状态与报销单共用置 SUBMITTED，审计时间线追加建案首条。下游 OCR/校验/风险/预算/审批各阶段产物号均引在此案件上。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "报销单提交成功且案件建立",
+          "message": "报销单已提交成功。费控审核案件已建立，系统正在自动识别票据并校验，请在启费通关注单据实时状态。",
+          "triggered_event": "EXPENSE_SUBMITTED"
+        },
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "提交校验未通过被拦截",
+          "message": "报销单提交未通过：报销权限/成本中心启用状态/差旅出差编号/明细票据存在问题。请按提示修正后重新提交。",
+          "triggered_event": ""
+        }
+      ]
+    },
+    "triggered_event": [
+      "EXPENSE_SUBMITTED"
+    ]
+  },
+  {
+    "id": "2",
+    "name": "runInvoiceOCR",
+    "description": "负责对报销单关联的发票影像执行票夹云 OCR 结构化抽取，把图/PDF/版式文件认成结构化票面字段(发票类型/号码/日期/抬头税号/价税合计等)并对四个关键字段(价税合计/发票号码/购买方税号/开票日期)逐字段打置信度分。识别完成把字段与置信度回写票据记录并把明细行金额对齐票面，发出 OCR_COMPLETED；任一关键字段置信度低于 0.95 或影像无法识别则发出 OCR_FAILED 转人工校正。",
+    "submission_criteria": "1. EXPENSE_SUBMITTED 事件已送达且费控审核案件(Expense_Audit_Case)已建立\n2. 报销单明细行(Expense_Claim_Line)关联的发票(Invoice)记录存在且影像文件可读取\n3. 报销单状态为 SUBMITTED 或 OCR_RUNNING",
+    "object_type": "action",
+    "category": "票据识别",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "EXPENSE_SUBMITTED"
+    ],
+    "target_objects": [
+      "Invoice",
+      "Expense_Claim_Line"
+    ],
+    "inputs": [
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "待识别的报销单单号。通过 EXPENSE_SUBMITTED 事件携带。系统据此读取该单全部明细行及其关联发票，逐张送 OCR 引擎结构化。该值必须在系统中存在对应的 Expense_Claim 记录。",
+        "source_object": "Expense_Claim.expense_claim_id",
+        "required": true
+      },
+      {
+        "name": "invoice_ids",
+        "type": "List<String>",
+        "description": "本单各明细行关联的票夹云票据编号(PIAO)列表。系统对每个编号定位发票影像执行版式分类、字段定位、字符识别与置信度打分。无票行不在此列表内。",
+        "source_object": "Invoice.invoice_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ocr_result",
+        "type": "String",
+        "description": "OCR 结构化执行结果。包含每张发票抽取出的票面字段集合(发票类型/代码/号码/开票日期/销售方/购买方/价税合计/不含税金额/税额/税率/商品服务名称/校验码)与四个关键字段的逐字段置信度。"
+      },
+      {
+        "name": "min_key_field_confidence",
+        "type": "Float",
+        "description": "本单全部发票四个关键字段(价税合计/发票号码/购买方税号/开票日期)的最低置信度，0~1。按木桶效应取最短板，<0.95 则本单 OCR 判失败转人工。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "structureInvoiceFields",
+        "description": "对每张发票影像执行版式分类(先判数电票/专票/普票/火车票/机票行程单等)，定位并识别票面字段，按票种适配豁免不存在的字段(火车票无销方税号、数电票无发票代码与校验码)，输出结构化字段集合并对关键字段打置信度分。",
+        "object_type": "tool",
+        "condition": "已收到提交事件且发票影像可读取",
+        "rules": [
+          {
+            "id": "PIPE-03",
+            "submission_criteria": "OCR 已对每张发票各字段打出置信度，已取得税局验真结果。",
+            "description": "OCR 四个关键字段——金额(价税合计)、发票号码、税号、开票日期——的置信度必须全部 ≥ 0.95 且税局验真通过，单子才有资格走自动核准(直通)；任一关键字段 < 0.95 或验真存疑，立即转人工，案件标注转入原因\"低置信\"。置信度是逐字段的不是整票一个分，任一关键字段不达标即整单转人工。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "invoice_ids",
+            "type": "List<String>",
+            "description": "待识别的发票票据编号列表。本步骤逐张定位影像执行版式分类与字段抽取，按票种适配层处理字段差异。",
+            "source_object": "Invoice.invoice_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "structured_fields",
+            "type": "String",
+            "description": "每张发票抽取出的结构化票面字段集合(发票类型/代码/号码/开票日期/销售方名称税号/购买方名称税号/价税合计/不含税金额/税额/税率/商品服务名称/校验码)及来源标记(电子上传/拍照 OCR/数电直连)。"
+          },
+          {
+            "name": "field_confidence",
+            "type": "String",
+            "description": "各发票四个关键字段(价税合计/发票号码/购买方税号/开票日期)的逐字段置信度明细，<0.95 的字段标黄/标红。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "evaluateConfidenceAndAlign",
+        "description": "汇总各张发票关键字段置信度取最短板判定是否达标；达标则把结构化字段与置信度回写票据记录、把明细行金额对齐发票价税合计，并把报销单状态推进至校验中；任一关键字段低于 0.95 则标记本单 OCR 失败、案件打\"低置信\"标签转人工校正。",
+        "object_type": "logic",
+        "condition": "字段抽取与置信度打分完成",
+        "rules": [
+          {
+            "id": "RULE-INV-08",
+            "submission_criteria": "明细行已手填金额并关联发票，OCR 已抽出发票价税合计。",
+            "description": "系统拿明细行金额字段与所关联发票价税合计字段比对，完全一致(容差 0.01)通过，超出容差即命中。OCR 阶段先以票面价税合计回填/对齐明细行金额展示值，机器信票面不信手填；金额一致性的核减处置在后续规则校验阶段执行。须先排除一行关联多票或一票多行共用导致的表象不一致。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "structured_fields",
+            "type": "String",
+            "description": "structureInvoiceFields 步骤输出的结构化票面字段集合。本步骤据此把发票字段回写票据记录并以价税合计对齐对应明细行金额。",
+            "source_object": "structureInvoiceFields.structured_fields"
+          },
+          {
+            "name": "field_confidence",
+            "type": "String",
+            "description": "structureInvoiceFields 步骤输出的关键字段置信度明细。本步骤取最低值判定是否全部 ≥ 0.95 以决定发出 OCR_COMPLETED 还是 OCR_FAILED。",
+            "source_object": "structureInvoiceFields.field_confidence"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "ocr_outcome",
+            "type": "String",
+            "description": "OCR 判定结果。值为\"识别完成\"(关键字段全部 ≥ 0.95，发 OCR_COMPLETED)或\"识别失败\"(任一关键字段 < 0.95 或影像无法识别，发 OCR_FAILED 转人工)。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Invoice",
+          "action": "MODIFY",
+          "property_impacted": [
+            "invoice_type",
+            "invoice_code",
+            "invoice_number",
+            "issue_date",
+            "seller_name",
+            "seller_tax_id",
+            "buyer_name",
+            "buyer_tax_id",
+            "total_amount_with_tax",
+            "amount_without_tax",
+            "tax_amount",
+            "tax_rate",
+            "goods_or_service_name",
+            "check_code",
+            "ocr_confidence",
+            "source"
+          ],
+          "description": "把 OCR 结构化抽取的全部票面字段回写票据记录，并写入四个关键字段的最低置信度 ocr_confidence 与来源 source。下游规则校验(抬头/查重/超期/类型匹配/金额一致性)与分流判断的低置信条件均依赖这些字段。"
+        },
+        {
+          "object_type": "Expense_Claim_Line",
+          "action": "MODIFY",
+          "property_impacted": [
+            "amount",
+            "payable_amount"
+          ],
+          "description": "以关联发票价税合计对齐明细行金额(机器信票面)，本行可报金额 payable_amount 同步为对齐后金额，供后续标准组核减与预算占用按准确金额计算。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "费控审核员",
+          "channel": "InApp",
+          "condition": "任一关键字段置信度低于 0.95 或影像无法识别",
+          "message": "票据识别低置信：报销单存在关键字段(价税合计/发票号码/购买方税号/开票日期)识别置信度不足，已转人工。请点开影像逐字核对标红/标黄字段。",
+          "triggered_event": "OCR_FAILED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "OCR_COMPLETED",
+      "OCR_FAILED"
+    ]
+  },
+  {
+    "id": "3",
+    "name": "fixInvoice",
+    "description": "OCR 失败或低置信时由费控审核员(或影像岗)对发票字段做人工校正。审核员对照原票影像逐字段核对标红/标黄字段：一致则确认采用、不一致则改正字段值，每次改动强制留痕(字段名/前值/后值/操作人工号/时间/理由)。改动关键字段(如价税合计)后须重跑相关规则与金额对齐。影像本身无法辨认的走退回让员工重拍。校正完成后重入流程发出 OCR_COMPLETED。",
+    "object_type": "action",
+    "category": "票据识别",
+    "actor": [
+      "Human"
+    ],
+    "trigger": [
+      "OCR_FAILED"
+    ],
+    "target_objects": [
+      "Invoice"
+    ],
+    "inputs": [
+      {
+        "name": "invoice_id",
+        "type": "String",
+        "description": "待校正的发票票据编号(PIAO)。通过 OCR_FAILED 事件携带。系统据此并排展示左影像、右 OCR 结构化字段，标红/标黄低置信字段供审核员逐字核对。该值必须在系统中存在对应的 Invoice 记录。",
+        "source_object": "Invoice.invoice_id",
+        "required": true
+      },
+      {
+        "name": "corrected_fields",
+        "type": "JSON",
+        "description": "审核员逐字段核对后录入的校正值。每项含字段名、改正后的字段值与修改理由。一致采用的字段可不改，不一致的字段须填后值与理由(理由不填不允许保存)。该数据由审核员对照影像人工录入。",
+        "source_object": "",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "fix_result",
+        "type": "String",
+        "description": "人工校正结果。值为\"校正完成\"表示关键字段已全部核对采用/改正、留痕已记、相关规则已触发重跑，发出 OCR_COMPLETED 重入流程；值为\"影像不可辨认\"表示需退回报销人重拍。"
+      },
+      {
+        "name": "ocr_confidence",
+        "type": "Float",
+        "description": "校正后该发票关键字段的置信度状态标记。人工确认采用的字段视为已核实，供分流判断不再因低置信卡该票。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "审核员逐字段校正发票",
+        "description": "审核员点开案件详情票据影像区，对照原票影像逐字段核对标红/标黄字段，一致则确认采用，不一致则改正字段值。影像糊到人工也认不出关键字段的，不瞎填，走退回让员工重拍。",
+        "object_type": "action",
+        "rules": [
+          {
+            "id": "TRACE-01",
+            "submission_criteria": "对关键数据字段发生任何修改(OCR 校正、核减额录入/调整、成本中心改派、案件改派、风险处置、阈值变更、红冲等)。",
+            "description": "任何对关键数据的修改，系统强制记五件事：①谁改的(操作人工号 E / 系统)；②何时改的(精确时间戳)；③改的哪个字段(字段名，如价税合计、核减额、成本中心 CC)；④前值→后值(改前改后都记，缺一不可)；⑤为啥改(理由，人工修改必填，不写不让保存)。前值后值由系统在修改瞬间自动快照、理由栏不填则保存按钮点不动；留痕与操作绑死、当下强制、不可补不可改不可删。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "invoice_id",
+            "type": "String",
+            "description": "待校正的发票票据编号。审核员据此调出影像与结构化字段对照核对。",
+            "source_object": "Invoice.invoice_id"
+          },
+          {
+            "name": "corrected_fields",
+            "type": "JSON",
+            "description": "审核员录入的逐字段校正值与修改理由。本步骤据此改正发票字段并强制留痕。",
+            "source_object": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "fix_result",
+            "type": "String",
+            "description": "校正结果。值为\"校正完成\"或\"影像不可辨认需退回\"。"
+          }
+        ]
+      }
+    ],
+    "triggered_event": [
+      "OCR_COMPLETED"
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Invoice",
+          "action": "MODIFY",
+          "property_impacted": [
+            "invoice_number",
+            "issue_date",
+            "buyer_tax_id",
+            "total_amount_with_tax",
+            "amount_without_tax",
+            "tax_amount",
+            "tax_rate",
+            "ocr_confidence"
+          ],
+          "description": "按审核员人工核对结果改正发票关键字段并标记已核实，每个被改字段记录前值→后值与理由(TRACE-01 五要素留痕)。改动价税合计等关键字段后触发单票是否超 5000、金额一致性 RULE-INV-08、预算占用金额等相关规则重算。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "影像糊到人工也无法辨认关键字段",
+          "message": "票据影像无法辨认关键字段，已退回。请重新拍摄清晰的发票(关键字段:金额/发票号/税号/日期)后重新上传提交。",
+          "triggered_event": ""
+        }
+      ]
+    }
+  },
+  {
+    "id": "4",
+    "name": "validateExpenseRules",
+    "description": "负责对完成 OCR 结构化的报销单运行四组规则校验：按票据组(RULE-INV-*)→标准组(RULE-STD-*)→合规组(RULE-CMP-*)→预算组前置(RULE-BUD-*)固定顺序逐组执行，前组退回/驳回则截断不再跑后组。生成校验结果(总体结论/规则命中清单/标准值实际值/核减建议/核减后可报金额)并挂在费控审核案件上。命中升风险类规则(如重复/虚开/超标/拆分/私人消费)时生成风险事件发出 ANOMALY_DETECTED；正常完成发出 VALIDATION_COMPLETED。",
+    "submission_criteria": "1. OCR_COMPLETED 事件已送达且报销单关联发票字段与置信度已回写\n2. 费控审核案件(Expense_Audit_Case)记录存在且 status 为 OCR 完成待校验\n3. 启用中的审批规则(Approval_Rule)校验规则库(RULE-* 四组)已配置且 is_active 为 true\n4. 报销单各明细行已选费用科目且差旅类已关联出差编号 BTA",
+    "object_type": "action",
+    "category": "规则校验",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "OCR_COMPLETED"
+    ],
+    "target_objects": [
+      "Validation_Result",
+      "Expense_Audit_Case",
+      "Approval_Rule",
+      "Risk_Event"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "待校验的费控审核案件编号 FK。通过 OCR_COMPLETED 事件携带。系统据此读取报销单单头、全部明细行、关联发票结构化字段与税局验真/查重结果作为校验输入。该值必须在系统中存在对应的 Expense_Audit_Case 记录。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "案件关联的报销单单号。用于定位报销单明细行、费用科目、出差编号 BTA 与成本中心，供四组规则按行比对标准、查重、查行程、对科目。该值从 Expense_Audit_Case.expense_claim_id 获取。",
+        "source_object": "Expense_Audit_Case.expense_claim_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "validation_result_id",
+        "type": "String",
+        "description": "生成的规则校验结果唯一编号。挂在费控审核案件上，供审批建议汇总与人工复核处理引用。"
+      },
+      {
+        "name": "overall_conclusion",
+        "type": "String",
+        "description": "总体结论。枚举：通过/有核减/有风险/需退回/建议驳回。由命中动作按取最重且累加合成(升风险>转人工>退回>核减>提示)。"
+      },
+      {
+        "name": "hit_rule_list",
+        "type": "List<String>",
+        "description": "规则命中清单。本单命中的全部 RULE-* 编码列表，写入费控审核案件 hit_rule_list 字段。"
+      },
+      {
+        "name": "total_suggested_deduction",
+        "type": "Float",
+        "description": "核减建议汇总。标准组命中累加的合计建议核减金额。"
+      },
+      {
+        "name": "payable_after_deduction",
+        "type": "Float",
+        "description": "核减后合计可报金额，= 合计金额 − 所有核减之和。是后续预算占用、分流阈值、审批路由统一使用的金额口径。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "runInvoiceGroupRules",
+        "description": "校验引擎打头跑票据组(RULE-INV-*)：抬头税号校验、税局验真存疑、票夹云查重、连号预警、发票超期、类型与科目匹配、专票进项识别、金额一致性。票假/重复/抬头错则截断后续不必算，命中退回/驳回类即在前面截断不再跑后组。",
+        "object_type": "logic",
+        "condition": "已收到 OCR 完成事件且发票字段与验真/查重结果就绪",
+        "rules": [
+          {
+            "id": "PIPE-02",
+            "submission_criteria": "OCR 结构化与票据查验均已出结果，进入 VALIDATING 状态。",
+            "description": "规则校验引擎按固定顺序跑四组规则：票据组(RULE-INV-*)→标准组(RULE-STD-*)→合规组(RULE-CMP-*)→预算组(RULE-BUD-*)，从微观到宏观、从硬到软。票据组打头(票假/重复/抬头错则后续不必算)，标准组算核减得出可报净额，合规组查动机，预算组押后用核减后净额占用。若前组退回(RETURNED)或驳回(REJECTED)，引擎在前面截断、不再跑后组。"
+          },
+          {
+            "id": "RULE-INV-01",
+            "submission_criteria": "报销单已提交立案、OCR 已结构化出发票购买方名称与购买方税号字段。",
+            "description": "系统取 OCR 结构化出的发票购买方名称与购买方税号，与智控维护的授权抬头/税号白名单比对：抬头必须完全等于启明数字科技集团股份有限公司或在授权分/子公司抬头白名单内，且税号必须与抬头对应。抬头为个人、写错字漏字、税号填错或缺失，均判不通过。命中默认动作：退回修改，单子打回报销人重开正确抬头的票，并释放此前冻结的预算。"
+          },
+          {
+            "id": "RULE-INV-03",
+            "submission_criteria": "发票已入票夹云票据池，具备发票代码与发票号码唯一标识。",
+            "description": "系统取本张发票唯一标识(发票代码+发票号码，数电票用 20 位发票号码)，到票夹云票据池比对全集团已报、在报、归档票据。只要找到发票代码+号码完全相同的已存在记录即判重复，命中。命中默认动作：升风险 T1(重复报销)，驳回该明细行(REJECTED 该行，不驳整张单)，生成风险事件 RK 号。"
+          },
+          {
+            "id": "RULE-INV-06",
+            "submission_criteria": "明细行已填费用科目 F，且 OCR 已抽出发票商品/服务名称与发票类型。",
+            "description": "系统用 OCR 抽出的票面商品/服务名称、发票类型与报销人填写的费用科目 F，按智控维护的科目-票型对应表比对。票面内容与科目明显不属一类即判不匹配，命中。命中默认动作：退回修改，由报销人自行改对科目或把票挪到正确明细行。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待校验的报销单单号。本步骤据此读取各明细行关联发票的抬头税号、发票号码、类型、商品名称、税局验真与查重结果执行票据组规则。",
+            "source_object": "Expense_Audit_Case.expense_claim_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "inv_group_result",
+            "type": "String",
+            "description": "票据组校验结果。含命中的 RULE-INV-* 编码、涉及明细行、判定依据、建议动作(退回/驳回/核减/提示)及是否触发截断(命中退回/驳回则后组不跑)。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "runStandardAndComplianceRules",
+        "description": "票据组放行后跑标准组(RULE-STD-*)算核减得出可报净额：住宿/补助/招待人均/陪同人数/交通舱位/市内交通超标按标准核减或升风险；再跑合规组(RULE-CMP-*)查动机：大额拆分、凑数异常、节假日消费、消费时间与出差行程不符、高频商户、疑似私人消费/关联方，命中升风险类规则触发风险事件。",
+        "object_type": "logic",
+        "condition": "票据组未截断、已得出票面准确金额",
+        "rules": [
+          {
+            "id": "RULE-STD-01",
+            "submission_criteria": "明细费用科目 = F1020(差旅-住宿)，已取得发票城市、报销人职级与住宿天数。",
+            "description": "系统对每张住宿发票按城市分级×报销人职级比对住宿标准上限(价税合计÷住宿天数，每间每晚)。命中默认动作：超出部分核减(PARTIAL 降额核准)，触发 FA-02 释放对应预算占用，不升风险不驳回。城市分级由发票销售方所在地与出差编号 BTA 目的地双重判定，分级不一致时取低不取高。"
+          },
+          {
+            "id": "RULE-STD-04",
+            "submission_criteria": "F2010 招待单据已填我方陪同人数与被招待方人数。",
+            "description": "系统校验招待单据我方陪同人数是否超过被招待方人数，原则上我方陪同人数 ≤ 被招待方人数。我方人数明显多于对方，存在借招待名义内部聚餐套报嫌疑。命中默认动作：升风险 T3(超标准报销/陪同人数异常)+转人工，由人定性是否属业务招待。"
+          },
+          {
+            "id": "RULE-CMP-01",
+            "submission_criteria": "存在同一报销人、同一商户(或同类消费)在同一天或相邻几天的多张报销单/多条明细。",
+            "description": "系统按(报销人 E+供应商 V+7 天滑动时间窗)聚合金额，若聚合金额跨过某审批档而每张单都贴着档下沿，判拆分嫌疑。命中默认动作：升风险 T4(拆分规避审批)+转人工/转稽核，金额大、规避明显的直接 L3、暂缓付款。须按聚合后该走哪级审批判定而非单看单据金额。"
+          },
+          {
+            "id": "RULE-CMP-04",
+            "submission_criteria": "差旅类(F1010/F1011/F1020)明细已关联出差编号 BTA，BTA 起止日期与城市填写准确。",
+            "description": "系统判差旅类消费日期是否落在出差编号 BTA 的出差起止区间内、消费城市与行程是否一致。住宿/交通发票日期不在出差区间，或城市与行程对不上，命中。命中默认动作：升风险 T8(时间地点矛盾)+转人工；核出私人多待/私行的退回删除该明细。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "inv_group_result",
+            "type": "String",
+            "description": "runInvoiceGroupRules 步骤输出的票据组校验结果。本步骤据此确认未截断且金额已对齐票面，再在准确金额基础上执行标准组核减与合规组动机校验。",
+            "source_object": "runInvoiceGroupRules.inv_group_result"
+          },
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待校验的报销单单号。本步骤据此读取各明细行职级城市标准、招待人数、出差编号 BTA 行程、商户与消费时间执行标准组与合规组规则。",
+            "source_object": "Expense_Audit_Case.expense_claim_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "std_cmp_result",
+            "type": "String",
+            "description": "标准组与合规组校验结果。含各命中 RULE-STD-*/RULE-CMP-* 的明细行、标准值与实际值、建议核减金额、是否升风险及风险类型 T1-T8。"
+          },
+          {
+            "name": "payable_after_deduction",
+            "type": "Float",
+            "description": "核减后合计可报金额，= 合计金额 − 标准组累加核减之和。供预算占用与分流统一使用。"
+          }
+        ]
+      },
+      {
+        "order": "3",
+        "name": "synthesizeResultAndRaiseRisk",
+        "description": "按命中动作取最重且累加合成总体结论与可报金额，生成校验结果记录挂在案件上并写入规则命中清单。对命中升风险类规则的，生成风险事件 RK 并定类定级、发出 ANOMALY_DETECTED；无升风险则发出 VALIDATION_COMPLETED 进入预算占用。",
+        "object_type": "logic",
+        "condition": "四组规则(预算组前置)执行完毕或在前组截断",
+        "rules": [
+          {
+            "id": "PIPE-04",
+            "submission_criteria": "一张单已命中多条规则，产生多个默认动作。",
+            "description": "一单命中多条规则时，按取最重且累加合成：流转方向取最重动作(重量排序 升风险>转人工>退回>核减>提示)。核减金额可累加(合计可报=合计−所有核减之和)；退回截断后续；提示永不改变去向；风险事件未闭环则付款冻结、下游动作皆白搭。"
+          },
+          {
+            "id": "RULE-INV-02",
+            "submission_criteria": "OCR 已抽出发票代码、发票号码、开票日期、价税合计、校验码等查验要素。",
+            "description": "系统将 OCR 抽出的发票四要素发送至国家税务总局全国增值税发票查验平台，回写发票查验状态字段(已验真/存疑/未查)。返回存疑即命中。命中默认动作：升风险 T6(票据不实/真伪存疑)，转人工，生成风险事件 RK 号，初定 L2，可叠加其他命中升至 T2。未查不等于验真失败，挂起重试，绝不可当作验真通过放行。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "std_cmp_result",
+            "type": "String",
+            "description": "runStandardAndComplianceRules 步骤输出的标准组与合规组结果。本步骤连同票据组结果一并按取最重且累加合成总体结论与命中清单。",
+            "source_object": "runStandardAndComplianceRules.std_cmp_result"
+          },
+          {
+            "name": "payable_after_deduction",
+            "type": "Float",
+            "description": "核减后合计可报金额。本步骤写入校验结果与费控审核案件 total_payable_amount。",
+            "source_object": "runStandardAndComplianceRules.payable_after_deduction"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "validation_result_id",
+            "type": "String",
+            "description": "生成的校验结果唯一编号。已挂在费控审核案件上含总体结论、命中清单、核减建议。"
+          },
+          {
+            "name": "risk_signal",
+            "type": "String",
+            "description": "风险信号。值为\"有风险\"(命中升风险类规则，已生成 RK 并发 ANOMALY_DETECTED)或\"无风险\"(发 VALIDATION_COMPLETED 进入预算占用)。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Validation_Result",
+          "action": "CREATE",
+          "property_impacted": [
+            "validation_result_id",
+            "expense_audit_case_id",
+            "hit_rule_id",
+            "overall_conclusion",
+            "hit_line_no",
+            "standard_value",
+            "actual_value",
+            "suggested_action",
+            "suggested_deduction_amount",
+            "total_suggested_deduction",
+            "payable_after_deduction",
+            "validation_time"
+          ],
+          "description": "创建规则校验结果记录并写入总体结论、逐条命中规则编码与涉及明细行、标准值与实际值、建议动作与建议核减金额、核减建议汇总与核减后可报金额。是审批建议汇总的输入之一，触发 VALIDATION_COMPLETED。"
+        },
+        {
+          "object_type": "Expense_Audit_Case",
+          "action": "MODIFY",
+          "property_impacted": [
+            "total_payable_amount",
+            "hit_rule_list",
+            "audit_timeline",
+            "status"
+          ],
+          "description": "把核减后合计可报金额写回案件 total_payable_amount，把命中的 RULE-* 写入 hit_rule_list，审计时间线追加校验留痕，状态推进至校验完成(VALIDATED)。"
+        },
+        {
+          "object_type": "Risk_Event",
+          "action": "CREATE",
+          "property_impacted": [
+            "risk_event_id",
+            "expense_audit_case_id",
+            "expense_claim_id",
+            "hit_rule_id",
+            "risk_type",
+            "risk_level",
+            "evidence",
+            "status",
+            "raised_time"
+          ],
+          "description": "命中升风险类规则(RULE-INV-02/03、RULE-STD-04、RULE-CMP-01/04/06 等)时创建风险事件并由命中规则映射风险类型 T1-T8、初定等级 L1-L4、落命中详情为证据，状态置待处置，触发 ANOMALY_DETECTED 进入风险处置。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "费控审核员",
+          "channel": "InApp",
+          "condition": "命中升风险类规则生成风险事件",
+          "message": "规则校验命中风险：报销单触发升风险类规则并生成风险事件，请按风险类型与等级处置(重复/虚开存疑/超标/拆分/时间地点矛盾/私人消费)。",
+          "triggered_event": "ANOMALY_DETECTED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "VALIDATION_COMPLETED",
+      "ANOMALY_DETECTED"
+    ]
+  },
+  {
+    "id": "5",
+    "name": "occupyBudget",
+    "description": "负责在规则校验通过后调预算通按核减后可报金额执行预算占用(FA-01)。占用按成本中心×费用科目×期间三维定位，期间按费用发生日期定位而非提报日期。预算够则占用成功、由预算通生成 BG 号并回写、可用余额减少，发出 BUDGET_OCCUPIED；占用后会超预算则占用失败命中 RULE-BUD-02 升风险 T5，发出 BUDGET_INSUFFICIENT 转人工并升级审批。审核员无权在工作台绕过占用强行放行。",
+    "submission_criteria": "1. VALIDATION_COMPLETED 事件已送达且校验结果已得出核减后可报金额\n2. 费控审核案件(Expense_Audit_Case)记录存在且 status 为校验完成\n3. 报销单明细行已选费用科目与成本中心、差旅类已关联出差编号\n4. 对应成本中心×科目×期间的预算(Budget)记录存在",
+    "object_type": "action",
+    "category": "预算占用",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "VALIDATION_COMPLETED"
+    ],
+    "target_objects": [
+      "Budget",
+      "Budget_Occupation",
+      "Financial_Action"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "待占用预算的费控审核案件编号 FK。通过 VALIDATION_COMPLETED 事件携带。系统据此读取核减后可报金额、成本中心、各明细行费用科目与发生日期定位预算池。该值必须在系统中存在对应的 Expense_Audit_Case 记录。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "payable_amount",
+        "type": "Float",
+        "description": "核减后合计可报金额。预算永远按核减后可报金额占用而非员工填的原始合计。系统据此向预算通发占用指令。该值从校验结果 payable_after_deduction / 案件 total_payable_amount 获取。",
+        "source_object": "Expense_Audit_Case.total_payable_amount",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "budget_occupation_id",
+        "type": "String",
+        "description": "占用成功时由预算通生成并回写的预算占用号 BG(BG+8 位日期+6 位流水)。引在费控审核案件上，是分流判断预算条件满足的判据。占用失败时为空。"
+      },
+      {
+        "name": "occupation_result",
+        "type": "String",
+        "description": "占用结果。枚举：占用成功(发 BUDGET_OCCUPIED)/预算不足(发 BUDGET_INSUFFICIENT 升 T5 转人工)。"
+      },
+      {
+        "name": "available_after",
+        "type": "Float",
+        "description": "占用后预算可用余额(后值)。占用成功时 = 占用前可用 − 本次占用额。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "locateBudgetAndOccupy",
+        "description": "拿核减后可报金额、成本中心 CC、费用科目 F 与按费用发生日期定位的期间，调预算通占用接口。预算够则占用成功，由预算通校验余额、生成 BG 号、回写占用结果与前后值，可用余额减少。",
+        "object_type": "tool",
+        "condition": "已收到校验完成事件且核减后可报金额就绪",
+        "rules": [
+          {
+            "id": "RULE-BUD-04",
+            "submission_criteria": "已取得费用发生日期与本次拟占用的预算期间。",
+            "description": "系统判费用发生日期所属预算期间与本次占用的预算期间是否一致。命中默认动作：退回/需说明。跨期(尤其跨年度)须按权责发生制归到正确期间，可能走预提 FA-11；若对应期间预算已结已封账，则走当期预算+说明。占用期间按费用发生日期定位，不是提报日期。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "payable_amount",
+            "type": "Float",
+            "description": "核减后合计可报金额。本步骤据此向预算通发占用指令。",
+            "source_object": "Expense_Audit_Case.total_payable_amount"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "费控审核案件编号。本步骤据此读取成本中心、费用科目与费用发生日期定位 成本中心×科目×期间 三维预算池。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "occupy_call_result",
+            "type": "String",
+            "description": "预算通占用调用结果。含占用是否成功、占用前可用余额、占用后可用余额、占用成功时回写的 BG 号。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "handleBudgetOutcome",
+        "description": "占用成功则把 BG 号引到案件、写预算占用记录与 FA-01 财务动作、发出 BUDGET_OCCUPIED；占用后会超预算则占用失败，命中 RULE-BUD-02 升风险 T5、发出 BUDGET_INSUFFICIENT 转人工并升级审批，通知财务 BP。",
+        "object_type": "logic",
+        "condition": "预算通占用调用返回结果",
+        "rules": [
+          {
+            "id": "RULE-BUD-02",
+            "submission_criteria": "已取得核定后可报净额，准备占用对应成本中心×科目×期间预算。",
+            "description": "系统将核定后可报净额占用对应成本中心×科目×期间预算，判占用后是否超过预算总额(可用余额 < 本次占用额)。命中默认动作：升风险 T5(预算超支)+转人工+审批建议升级。处置三条路：①降额到可用余额内核准；②走预算调剂/追加后再占用；③驳回。预算超支须转人工由财务 BP 决定，审核员不得自行先斩后奏。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "occupy_call_result",
+            "type": "String",
+            "description": "locateBudgetAndOccupy 步骤输出的占用调用结果。本步骤据此判定占用成功还是预算不足并执行对应分支。",
+            "source_object": "locateBudgetAndOccupy.occupy_call_result"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "budget_occupation_id",
+            "type": "String",
+            "description": "占用成功时引到案件的预算占用号 BG；占用失败时为空。"
+          },
+          {
+            "name": "occupation_result",
+            "type": "String",
+            "description": "占用结果。值为\"占用成功\"(发 BUDGET_OCCUPIED)或\"预算不足\"(发 BUDGET_INSUFFICIENT 升 T5)。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Budget_Occupation",
+          "action": "CREATE",
+          "property_impacted": [
+            "budget_occupation_id",
+            "budget_id",
+            "expense_audit_case_id",
+            "occupation_amount",
+            "action_type",
+            "occupation_period",
+            "occupation_result",
+            "available_before",
+            "available_after",
+            "status",
+            "occupation_time"
+          ],
+          "description": "创建预算占用记录，写入 BG 号、归属预算、关联案件、按核减后可报金额的占用额、动作类型 FA-01、按费用发生日期定位的期间、占用结果与前后可用余额。占用成功触发 BUDGET_OCCUPIED；不足时 occupation_result 记预算不足触发 BUDGET_INSUFFICIENT。"
+        },
+        {
+          "object_type": "Budget",
+          "action": "MODIFY",
+          "property_impacted": [
+            "occupied_amount",
+            "available_amount"
+          ],
+          "description": "占用成功时更新对应成本中心×科目×期间预算池：已占用 occupied_amount 增加、可用余额 available_amount 减少(可用=预算额−已占用−已冻结)。占用失败不改预算字段。"
+        },
+        {
+          "object_type": "Financial_Action",
+          "action": "CREATE",
+          "property_impacted": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "cost_center_id",
+            "expense_category_id",
+            "budget_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ],
+          "description": "占用成功时创建 FA-01 预算占用财务动作记录，方向占用、关联 BG 与报销单、记账归集到成本中心与科目、操作主体记系统。是回写 ERP 与全链路审计的原子记录。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "财务BP",
+          "channel": "InApp",
+          "condition": "占用后会超预算导致占用失败",
+          "message": "预算占用失败(余额不足)：报销单按核减后可报金额占用对应成本中心科目期间预算后将超预算，已升风险 T5 转人工并升级审批。请评估预算调剂/追加或提级特批。",
+          "triggered_event": "BUDGET_INSUFFICIENT"
+        }
+      ]
+    },
+    "triggered_event": [
+      "BUDGET_OCCUPIED",
+      "BUDGET_INSUFFICIENT"
+    ]
+  },
+  {
+    "id": "6",
+    "name": "generateApprovalSuggestion",
+    "description": "负责把规则校验结果(命中清单+核减建议+核减后可报金额)、异常识别的风险事件(类型 T/等级 L)、预算占用结果(占成功 BG/占用失败)三摊产物汇总成一个综合审批建议，含建议动作(建议核准/建议降额/建议退回/建议驳回)、核减后可报金额，并按金额+科目+风险三维算出审批路由方案(走几级、谁审、是否因风险/超预算升级一级或加会签)。生成后发出 APPROVAL_SUGGESTION_GENERATED 供分流判断使用。",
+    "submission_criteria": "1. BUDGET_OCCUPIED 或 BUDGET_INSUFFICIENT 事件已送达\n2. 费控审核案件(Expense_Audit_Case)记录存在且已有规则校验结果\n3. 案件 total_payable_amount(核减后可报金额)已得出\n4. 启用中的审批权限路由规则(Approval_Rule rule_layer 为审批权限路由规则)已配置",
+    "object_type": "action",
+    "category": "审批建议",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "BUDGET_OCCUPIED",
+      "BUDGET_INSUFFICIENT"
+    ],
+    "target_objects": [
+      "Approval_Recommendation",
+      "Approval_Rule"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "待生成审批建议的费控审核案件编号 FK。通过 BUDGET_OCCUPIED/BUDGET_INSUFFICIENT 事件携带。系统据此汇总该案件的校验结果、风险事件、预算占用结果。该值必须在系统中存在对应的 Expense_Audit_Case 记录。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "payable_amount",
+        "type": "Float",
+        "description": "核减后合计可报金额。审批建议的金额口径、审批路由分档与升级判断一律用此值。该值从案件 total_payable_amount 获取。",
+        "source_object": "Expense_Audit_Case.total_payable_amount",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "approval_recommendation_id",
+        "type": "String",
+        "description": "生成的审批建议唯一编号。挂在费控审核案件上，是分流判断与下游审批流路由的依据。"
+      },
+      {
+        "name": "recommended_action",
+        "type": "String",
+        "description": "建议动作。枚举：建议核准(无核减无 L2+ 风险预算够)/建议降额(命中标准组核减)/建议退回(命中退回类规则)/建议驳回(命中坐实高风险)。"
+      },
+      {
+        "name": "routing_plan",
+        "type": "String",
+        "description": "审批路由方案。该单走几级审批、每级是谁(直接主管→部门经理→部门总监→分管VP→CFO→CEO)，按金额分档并叠加科目/风险升级。"
+      },
+      {
+        "name": "is_escalated",
+        "type": "Boolean",
+        "description": "路由是否因命中 L2+ 风险(尤其 T5 预算超支、T3 超标)或超预算自动升级一级或加会签。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "aggregateAndDecideAction",
+        "description": "汇总校验结果、风险事件、预算占用三摊产物，按取最重动作综合得出建议动作(核准/降额/退回/驳回)与核减后可报金额。",
+        "object_type": "logic",
+        "condition": "已收到预算占用结果事件且校验/风险/预算三摊产物就绪",
+        "rules": [
+          {
+            "id": "PIPE-04",
+            "submission_criteria": "一张单已命中多条规则，产生多个默认动作。",
+            "description": "一单命中多条规则时，按取最重且累加合成：流转方向取最重动作(重量排序 升风险>转人工>退回>核减>提示)。建议动作据此综合：含坐实高风险→建议驳回、含退回类→建议退回、含标准组核减→建议降额、无更重动作→建议核准。核减金额可累加，提示永不改变去向。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "费控审核案件编号。本步骤据此读取校验结果总体结论与命中清单、关联风险事件类型与等级、预算占用结果汇总判定建议动作。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          },
+          {
+            "name": "payable_amount",
+            "type": "Float",
+            "description": "核减后合计可报金额。本步骤据此带入审批建议的可报金额字段。",
+            "source_object": "Expense_Audit_Case.total_payable_amount"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "recommended_action",
+            "type": "String",
+            "description": "综合得出的建议动作。枚举：建议核准/建议降额/建议退回/建议驳回。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "computeRoutingPlan",
+        "description": "按核减后可报金额分档生成逐级审批路由(高档含低档)，对敏感科目(招待 F2010/市场会议 F2020/大额培训 F4010/超标住宿/超职级舱位)提前提级，对命中 L2+ 风险或超预算(T5)在金额档基础上升一级或加财务 BP 会签，并处理审批人回避。",
+        "object_type": "logic",
+        "condition": "建议动作已综合得出",
+        "rules": [
+          {
+            "id": "ROUTE-02",
+            "submission_criteria": "复核或直通后进入审批建议生成，已知报销单合计金额。",
+            "description": "系统按报销单合计金额分档生成逐级审批路由(高档含低档)：≤5,000→直接主管；>5,000 且 ≤20,000→主管→部门经理；>2万 且 ≤5万→主管→经理→总监；>5万 且 ≤20万→…→总监→VP；>20万 且 ≤50万→…→VP→CFO；>50万→…→CFO→CEO。审批为逐级、每级都须过。金额判断用核减后合计可报金额。"
+          },
+          {
+            "id": "ROUTE-04",
+            "submission_criteria": "单子在金额分档基础上命中 L2 及以上风险或预算超支(RULE-BUD-02 T5)。",
+            "description": "系统在金额分档基础路由之上叠加升级：命中 L2+ 风险事件或超预算(RULE-BUD-02 T5)，审批建议在金额档基础上升一级或加一个会签(如本应总监批升级为总监+财务 BP 会签)。科目特殊审批即便金额不大也叠加特定审批。审批升级是兜底叠加，不替代金额分档基础路由。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "recommended_action",
+            "type": "String",
+            "description": "aggregateAndDecideAction 步骤输出的建议动作。本步骤在此基础上为可往下走的建议(核准/降额)计算审批路由。",
+            "source_object": "aggregateAndDecideAction.recommended_action"
+          },
+          {
+            "name": "payable_amount",
+            "type": "Float",
+            "description": "核减后合计可报金额。本步骤据此做金额分档并叠加科目/风险升级算出路由层级与各级审批人。",
+            "source_object": "Expense_Audit_Case.total_payable_amount"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "routing_plan",
+            "type": "String",
+            "description": "审批路由方案。含路由层级数、各级审批人与顺序、是否因风险/超预算升级或加会签、回避处理。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Approval_Recommendation",
+          "action": "CREATE",
+          "property_impacted": [
+            "approval_recommendation_id",
+            "expense_audit_case_id",
+            "recommended_action",
+            "payable_amount",
+            "routing_plan",
+            "routing_level_count",
+            "dispatch_decision",
+            "is_escalated",
+            "generated_time"
+          ],
+          "description": "创建审批建议记录并写入建议动作、核减后可报金额、审批路由方案与层级数、是否升级，初步带出分流倾向。是分流判断(直通 vs 转人工)与下游审批流路由的依据，触发 APPROVAL_SUGGESTION_GENERATED。"
+        }
+      ],
+      "notifications": []
+    },
+    "triggered_event": [
+      "APPROVAL_SUGGESTION_GENERATED"
+    ]
+  },
+  {
+    "id": "7",
+    "name": "routeOrAutoApprove",
+    "description": "负责在审批建议生成后做分流判断：直通自动核准五条件(合计可报≤2万、单票≤5000、无 L2+ 风险、关键字段置信度≥0.95 且验真通过、预算占用成功)同时满足则按建议核准自动核准报销单、状态置 AUTO_APPROVED 并发出 AUTO_APPROVED；任一不满足(木桶效应按最短板)则转人工复核、按命中条件打转人工原因标签(金额超阈/命中风险/低置信/超预算)、状态置 MANUAL_REVIEW 并发出 ROUTED_TO_MANUAL 进分案。金额判断一律用核减后合计可报金额。",
+    "submission_criteria": "1. APPROVAL_SUGGESTION_GENERATED 事件已送达\n2. 费控审核案件(Expense_Audit_Case)记录存在且 status 为校验完成(VALIDATED)\n3. 已具备校验结果、风险结论、预算占用结果与审批建议\n4. 案件 total_payable_amount(核减后可报金额)已得出",
+    "object_type": "action",
+    "category": "审批分流",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "APPROVAL_SUGGESTION_GENERATED"
+    ],
+    "target_objects": [
+      "Expense_Audit_Case"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "待分流的费控审核案件编号 FK。通过 APPROVAL_SUGGESTION_GENERATED 事件携带。系统据此读取核减后可报金额、最大单票、最高风险等级、最低关键字段置信度与验真状态、预算占用结果五个判据。该值必须在系统中存在对应的 Expense_Audit_Case 记录。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "payable_amount",
+        "type": "Float",
+        "description": "核减后合计可报金额。分流第一个判据(合计 ≤ 20,000)用此值，不是员工填的原始合计。该值从案件 total_payable_amount 获取。",
+        "source_object": "Expense_Audit_Case.total_payable_amount",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "dispatch_decision",
+        "type": "String",
+        "description": "分流判断结果。枚举：直通自动核准(发 AUTO_APPROVED)/转人工复核(发 ROUTED_TO_MANUAL)。"
+      },
+      {
+        "name": "manual_review_reason",
+        "type": "String",
+        "description": "转人工原因标签。转人工时按命中条件打标，枚举可同时多个：金额超阈/命中风险/低置信/超预算。直通时为空。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "evaluateStraightThroughConditions",
+        "description": "读核减后可报金额、最大单票价税合计、最高风险等级、最低关键字段置信度与验真状态、预算占用结果五个判据，按全满足才直通、差一个就转人工的木桶逻辑判定分流结果。",
+        "object_type": "logic",
+        "condition": "已收到审批建议生成事件且五个判据就绪",
+        "rules": [
+          {
+            "id": "PIPE-01",
+            "submission_criteria": "报销单状态已到 VALIDATED，已有规则校验结果、风险结论与预算占用结果。",
+            "description": "系统判定一单能否直通自动核准(AUTO_APPROVED，无人复核)，须同时满足五个条件：①报销单合计可报金额 ≤ 20,000 元；②单张发票价税合计 ≤ 5,000 元；③无 L2 及以上风险事件；④OCR 关键字段(金额/发票号/税号/日期)置信度均 ≥ 0.95 且税局验真通过；⑤预算占用成功(未超)。五条件全满足才直通(事件 AUTO_APPROVED)，差一条即转人工(木桶效应，按最短板算)。金额判断一律用核减后合计可报金额。"
+          },
+          {
+            "id": "ROUTE-01",
+            "submission_criteria": "报销单状态已到 VALIDATED，进入分流判断。",
+            "description": "满足任一即转人工复核(MANUAL_REVIEW，事件 ROUTED_TO_MANUAL)：合计可报 > 20,000；或单张发票 > 5,000；或命中 L2/L3 风险；或 OCR 关键字段置信度 < 0.95 / 验真存疑；或预算不足。系统按命中条件打转人工原因标签(金额超阈/命中风险/低置信/超预算，可同时多个)，并进分案落到审核员名下。特例 L4 不进普通人工池，直接转稽核、SUSPENDED 暂停付款。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "费控审核案件编号。本步骤据此读取最大单票、最高风险等级、最低关键字段置信度与验真状态、预算占用结果。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          },
+          {
+            "name": "payable_amount",
+            "type": "Float",
+            "description": "核减后合计可报金额。本步骤据此判定合计是否 ≤ 20,000。",
+            "source_object": "Expense_Audit_Case.total_payable_amount"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "condition_check_result",
+            "type": "String",
+            "description": "五条件判定结果。含每个条件的满足/不满足状态与不满足条件对应的转人工原因标签。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "applyDispatchOutcome",
+        "description": "五条件全满足则按建议核准自动核准、报销单与案件状态置 AUTO_APPROVED、发出 AUTO_APPROVED 推审批流；任一不满足则打转人工原因标签、状态置 MANUAL_REVIEW、发出 ROUTED_TO_MANUAL 进分案落到审核员名下。",
+        "object_type": "logic",
+        "condition": "五条件判定完成",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "condition_check_result",
+            "type": "String",
+            "description": "evaluateStraightThroughConditions 步骤输出的五条件判定结果。本步骤据此决定直通还是转人工并落状态与标签。",
+            "source_object": "evaluateStraightThroughConditions.condition_check_result"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "dispatch_decision",
+            "type": "String",
+            "description": "最终分流结果。值为\"直通自动核准\"(发 AUTO_APPROVED)或\"转人工复核\"(发 ROUTED_TO_MANUAL)。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Expense_Audit_Case",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status",
+            "manual_review_reason",
+            "assignee_employee_id",
+            "sla_deadline",
+            "audit_timeline"
+          ],
+          "description": "直通时状态置 AUTO_APPROVED、审计时间线追加自动核准留痕(判据:五条件均满足)；转人工时状态置 MANUAL_REVIEW、按命中条件写转人工原因标签 manual_review_reason、分案写承办人 assignee_employee_id 并起 SLA 倒计时 sla_deadline、审计时间线追加分流留痕。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "费控审核员",
+          "channel": "InApp",
+          "condition": "任一直通条件不满足转人工",
+          "message": "新待办：报销单转人工复核。转人工原因(金额超阈/命中风险/低置信/超预算)已标注，请按原因标签重点复核对应项。",
+          "triggered_event": "ROUTED_TO_MANUAL"
+        },
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "五条件全满足直通自动核准",
+          "message": "报销单已自动核准，正在进入审批流程。可在启费通关注审批进度。",
+          "triggered_event": "AUTO_APPROVED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "AUTO_APPROVED",
+      "ROUTED_TO_MANUAL"
+    ]
+  },
+  {
+    "id": "8",
+    "name": "manualReview",
+    "description": "费控审核员对转人工的报销单（FK 案件）进行人工复核。审核员在人工复核工作台上对着 OCR 结构化结果 + 原票影像、四组规则命中清单、风险事件 RK 及等级、预算占用情况、机器给出的审批建议逐条处置，给出确认核准（含降额核减）/退回补正/驳回三类结论。核减、退回、驳回均须写明理由并留痕（TRACE-01 五要素），不采纳系统核减建议同样须写理由。审核员无权绕过预算占用，超预算单须协同财务 BP；L4 疑似舞弊单不进普通人工池不在本动作处置。处理重点由转人工原因标签（金额超阈/命中风险/低置信/超预算）决定。",
+    "submission_criteria": "1. ROUTED_TO_MANUAL 事件已送达\n2. 费控审核案件(Expense_Audit_Case)记录存在且 status 为 MANUAL_REVIEW\n3. 案件关联的报销单(Expense_Claim)与规则校验结果(Validation_Result)记录存在\n4. 案件已完成分案且 assignee_employee_id 已写入(落到审核员名下)",
+    "object_type": "action",
+    "category": "审批分流",
+    "actor": [
+      "Human"
+    ],
+    "trigger": [
+      "ROUTED_TO_MANUAL"
+    ],
+    "target_objects": [
+      "Expense_Audit_Case",
+      "Validation_Result"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "待人工复核的费控审核案件唯一编号(FK 号)。通过 ROUTED_TO_MANUAL 事件携带。系统中必须存在对应的 Expense_Audit_Case 记录且 status 为 MANUAL_REVIEW。本 Action 基于此 ID 调取案件全套信息(报销单快照/校验结果/风险事件/预算占用/审批建议)供审核员处置。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "manual_review_reason",
+        "type": "String",
+        "description": "转人工原因标签。值为金额超阈/命中风险/低置信/超预算,可同时多个。来源于分流判断阶段打标。审核员据此判断本单卡在哪条、该重点看什么(金额超阈重点核金额与事由,命中风险重点查风险,低置信重点逐字核对影像,超预算协同财务 BP)。",
+        "source_object": "Expense_Audit_Case.manual_review_reason",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "review_result",
+        "type": "String",
+        "description": "人工复核结论。值为确认核准(REVIEWED)/降额核准(PARTIAL)/退回修改(RETURNED)/驳回(REJECTED)四者之一。确认核准与降额核准对应事件 MANUAL_CONFIRMED,退回对应 RETURNED_FOR_FIX,驳回对应 REJECTED。"
+      },
+      {
+        "name": "total_payable_amount",
+        "type": "Float",
+        "description": "复核后合计可报金额。确认核准时等于校验后可报金额;降额核准时为审核员录入核减额后重算的可报金额(= 各行可报金额之和)。下游审批路由与回写均用此值。"
+      },
+      {
+        "name": "review_comment",
+        "type": "String",
+        "description": "复核处置理由。核减/退回/驳回均必填;不采纳系统核减建议亦必填。退回理由须可操作(告知员工改哪、怎么改),驳回理由须站得住(审计会查)。随处置写入审计时间线留痕。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "复核校验结果与风险结论",
+        "description": "审核员在人工复核工作台调取案件全套信息：OCR 结构化结果 + 原票影像、四组规则命中清单（含标准值 vs 实际值、建议动作、建议核减金额）、风险事件 RK 及等级、预算占用情况、机器审批建议。按转人工原因标签确定复核重点，逐条核对命中项的判定依据是否成立。",
+        "object_type": "action",
+        "condition": "案件已分案到审核员名下，处于 MANUAL_REVIEW",
+        "rules": [
+          {
+            "id": "ROUTE-01",
+            "submission_criteria": "报销单状态已到 VALIDATED，进入分流判断。",
+            "description": "系统按命中条件给本案件打转人工原因标签(金额超阈/命中风险/低置信/超预算,可同时多个),审核员据标签确定复核重点：金额超阈类多为干净大单,重点核对金额与事由;命中风险类重点查那条风险;低置信类重点点开影像逐字核对标红标黄字段;超预算类需协同财务 BP,审核员一个人定不了。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "待复核的费控审核案件编号。用于调取案件关联的报销单快照、校验结果、风险事件、预算占用与审批建议。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          },
+          {
+            "name": "manual_review_reason",
+            "type": "String",
+            "description": "转人工原因标签。审核员据此确定本单复核重点。",
+            "source_object": "Expense_Audit_Case.manual_review_reason"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "review_findings",
+            "type": "String",
+            "description": "复核发现。逐条记录每个命中项判定是否成立、是否采纳系统建议、风险是否坐实或属误报。供下一步形成处置结论。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "录入处置结论与理由",
+        "description": "审核员基于复核发现录入处置结论：合规则确认核准（REVIEWED）；超标但合规则录入核减额降额核准（PARTIAL），核减额不能为负不能超过该行金额，不采纳系统建议须写理由；字段错/缺料/票不清则退回修改（RETURNED）写清改哪；不该报/严重问题则驳回（REJECTED）写明理由。处置动作、前值后值、理由强制留痕，理由栏不填保存按钮点不动。",
+        "object_type": "action",
+        "condition": "复核发现已形成，准备录入结论",
+        "rules": [
+          {
+            "id": "TRACE-01",
+            "submission_criteria": "对关键数据字段发生任何修改(核减额录入/调整、退回、驳回、风险处置等)。",
+            "description": "审核员录入核减额、退回、驳回等处置时,系统强制记五件事：谁改的(操作人工号)、何时改、改的哪个字段(如核减额)、前值→后值、为啥改(理由必填)。前值后值由系统在修改瞬间自动快照,理由不填保存按钮点不动,留痕与操作绑死、当下强制、append-only 不可补不可改不可删。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "review_findings",
+            "type": "String",
+            "description": "上一步形成的复核发现。本步骤据此决定确认核准/降额/退回/驳回并录入对应理由。",
+            "source_object": "复核校验结果与风险结论.review_findings"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "待处置的费控审核案件编号。用于更新案件状态、合计可报金额并写入审计时间线。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "review_result",
+            "type": "String",
+            "description": "处置结论。值为确认核准(REVIEWED)/降额核准(PARTIAL)/退回修改(RETURNED)/驳回(REJECTED)。"
+          },
+          {
+            "name": "review_comment",
+            "type": "String",
+            "description": "处置理由,已留痕。"
+          }
+        ]
+      }
+    ],
+    "triggered_event": [
+      "MANUAL_CONFIRMED",
+      "RETURNED_FOR_FIX",
+      "REJECTED"
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Expense_Audit_Case",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status",
+            "assignee_employee_id",
+            "total_payable_amount",
+            "audit_timeline"
+          ],
+          "description": "按处置结论更新案件状态：确认核准→REVIEWED、降额→PARTIAL、退回→RETURNED、驳回→REJECTED。降额时重算 total_payable_amount。每步处置追加 audit_timeline 留痕(操作人工号/时间/前值后值/理由)。"
+        },
+        {
+          "object_type": "Validation_Result",
+          "action": "MODIFY",
+          "property_impacted": [
+            "suggested_deduction_amount",
+            "total_suggested_deduction",
+            "payable_after_deduction",
+            "suggested_action"
+          ],
+          "description": "降额核准时审核员采纳或调整核减建议,更新校验结果上的核减额与核减后可报金额。不采纳系统建议须写理由留痕。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "审核员退回修改(RETURNED)",
+          "message": "您的报销单已被退回修改。请对照退回详情中标注的全部命中项一次性改正后重新提交(单号不变)。",
+          "triggered_event": "RETURNED_FOR_FIX"
+        },
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "审核员驳回(REJECTED)",
+          "message": "您的报销单已被驳回(终态)。驳回理由及依据规则/风险编号见通知详情。如认为系误判可附证据发起申诉。",
+          "triggered_event": "REJECTED"
+        }
+      ]
+    }
+  },
+  {
+    "id": "9",
+    "name": "runApprovalFlow",
+    "description": "直通自动核准或人工确认核准后，智控把审批路由方案推给启流BPM，由 BPM 生成审批流实例(AP 号)逐级跑业务审批。审批按金额分档逐级升高(直接主管→部门经理→部门总监→分管VP→CFO→CEO,高档含低档),招待/会议等敏感科目门槛更低更早提级,命中 L2+ 风险或预算超支(T5)在金额档基础上升一级或加会签。审批为逐级、每级都须过;审批人若为报销人本人自动跳上一级(回避)。末级审批通过触发 APPROVAL_PASSED,案件进 APPROVED 进入回写 ERP。人工确认(要不要人看)与逐级审批(业务批不批)是两道独立的关,都过才进待付款。",
+    "submission_criteria": "1. AUTO_APPROVED 或 MANUAL_CONFIRMED 事件已送达\n2. 报销单(Expense_Claim)记录存在且 status 为 AUTO_APPROVED/REVIEWED/PARTIAL\n3. 审批建议(Approval_Recommendation)已生成且含 routing_plan 审批路由方案\n4. 报销单 total_payable_amount 已确定(核减后可报金额)",
+    "object_type": "action",
+    "category": "审批分流",
+    "actor": [
+      "Human"
+    ],
+    "trigger": [
+      "AUTO_APPROVED",
+      "MANUAL_CONFIRMED"
+    ],
+    "target_objects": [
+      "Approval_Instance",
+      "Expense_Claim"
+    ],
+    "inputs": [
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "待审批的报销单唯一编号(ECA/OEP)。通过 AUTO_APPROVED 或 MANUAL_CONFIRMED 事件携带。系统中必须存在对应 Expense_Claim 记录且已通过分流或人工确认。本 Action 基于此 ID 生成审批流实例并绑定。",
+        "source_object": "Expense_Claim.expense_claim_id",
+        "required": true
+      },
+      {
+        "name": "routing_plan",
+        "type": "String",
+        "description": "审批路由方案。来源于审批建议(Approval_Recommendation)阶段按金额×科目×风险三维算出的逐级审批链(每级是谁)。启流BPM 据此生成审批流实例逐级流转。",
+        "source_object": "Approval_Recommendation.routing_plan",
+        "required": true
+      },
+      {
+        "name": "total_payable_amount",
+        "type": "Float",
+        "description": "核减后合计可报金额。审批人审的是核减后的数而非员工最初填的原始数。金额分档审批权限矩阵按此值定走几级。",
+        "source_object": "Expense_Claim.total_payable_amount",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "approval_instance_id",
+        "type": "String",
+        "description": "生成的审批流实例唯一编号(AP 号,格式 AP+8 位日期+6 位流水)。绑定到报销单。供下游回写 ERP 与审计追溯定位审批链。"
+      },
+      {
+        "name": "approval_result",
+        "type": "String",
+        "description": "审批流最终结果。值为 APPROVED(末级通过)或驳回。末级通过触发 APPROVAL_PASSED。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "生成审批流实例并逐级审批",
+        "description": "启流BPM 按审批路由方案生成审批流实例(AP 号),从报销人直接主管起逐级流转。各级审批人在 BPM 看到核减后可报金额、单据明细、规则命中与风险结论后逐级签批,每级都须过。审批人若为报销人本人自动跳上一级(回避)。",
+        "object_type": "action",
+        "condition": "已收到直通核准或人工确认核准事件",
+        "rules": [
+          {
+            "id": "ROUTE-02",
+            "submission_criteria": "复核或直通后进入审批,已知报销单合计金额。",
+            "description": "系统按报销单合计金额分档生成逐级审批路由(高档含低档)：≤5000→直接主管;>5000 且 ≤20000→主管→部门经理;>2万 且 ≤5万→主管→经理→总监;>5万 且 ≤20万→…→总监→VP;>20万 且 ≤50万→…→VP→CFO;>50万→…→CFO→CEO。审批为逐级、每级都须过。逐级审批(启流BPM 出 AP 号)解决业务批不批,与人工确认是两道独立的关。"
+          },
+          {
+            "id": "ROUTE-04",
+            "submission_criteria": "单子在金额分档基础上命中 L2 及以上风险或预算超支(RULE-BUD-02 T5)。",
+            "description": "系统在金额分档基础路由之上叠加升级：命中 L2+ 风险事件或超预算(T5),审批建议在金额档基础上升一级或加一个会签(如本应总监批升级为总监 + 财务 BP 会签);招待 F2010 单次>2000、市场会议费 F2020、大额培训 F4010、超标住宿 F1020、超职级舱位 F1010 等科目特殊审批即便金额不大也叠加特定审批。审批升级是兜底叠加,不替代金额分档基础路由。"
+          },
+          {
+            "id": "ROUTE-03",
+            "submission_criteria": "报销单涉及差旅、招待、超标住宿/舱位、大额培训会议或超预算等需先批后花的费用。",
+            "description": "系统校验事前申请合规性：凡差旅费须有出差编号 BTA,单次招待>2000 须事前招待申请+总监审批,超标住宿/超职级舱位须事前审批,大额培训/会议须事前申请+对应级别审批,占用后超预算须预算追加申请。事前申请同时触发预算冻结 FA-03、写明时间地点事由供消费比对。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待审批的报销单编号。用于生成审批流实例并建立绑定关系。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          },
+          {
+            "name": "routing_plan",
+            "type": "String",
+            "description": "审批路由方案。BPM 据此确定逐级审批链各级审批人与顺序。",
+            "source_object": "Approval_Recommendation.routing_plan"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "approval_instance_id",
+            "type": "String",
+            "description": "生成的审批流实例编号(AP 号)。"
+          },
+          {
+            "name": "approval_result",
+            "type": "String",
+            "description": "逐级审批结果。末级通过为 APPROVED;任一级驳回则审批不通过。"
+          }
+        ]
+      }
+    ],
+    "triggered_event": [
+      "APPROVAL_PASSED"
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Approval_Instance",
+          "action": "CREATE",
+          "property_impacted": [
+            "approval_instance_id",
+            "expense_claim_id",
+            "approver_employee_id",
+            "current_node",
+            "approval_chain",
+            "status",
+            "approval_comments",
+            "start_time",
+            "complete_time"
+          ],
+          "description": "按审批路由方案创建审批流实例,写入审批链各级审批人与顺序、当前节点、发起时间。逐级流转中更新 current_node 与 approver_employee_id,末级通过时 status 置 APPROVED 并写 complete_time,触发 APPROVAL_PASSED。"
+        },
+        {
+          "object_type": "Expense_Claim",
+          "action": "MODIFY",
+          "property_impacted": [
+            "approval_instance_id",
+            "status"
+          ],
+          "description": "进审批流时将 approval_instance_id 绑定到报销单,状态 APPROVING;末级审批通过后状态置 APPROVED 进入回写 ERP。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "审批人",
+          "channel": "InApp",
+          "condition": "审批流流转到某一级审批节点",
+          "message": "您有一张报销单待审批。请查看核减后可报金额、单据明细与风险结论后签批。",
+          "triggered_event": ""
+        }
+      ]
+    }
+  },
+  {
+    "id": "10",
+    "name": "postToERP",
+    "description": "末级审批通过(APPROVED)后,智控通知启账ERP 回写,把费控决策落成对账与账务的真实变更：生成应付单(FA-04,YF 号)→生成记账凭证(FA-05,PZ 号,借费用/进项税额、贷应付/银行)→专票进项认证抵扣(FA-06,仅 RULE-INV-07 命中的明细)。应付→凭证→认证是 ERP 一气呵成的一个回写事务,要么都成要么都不成。回写完成事件 ERP_POSTED,状态进 PENDING_PAYMENT 待付款。回写铁律：必须 APPROVED 才回写(先审批后记账);YF/PZ 号反写智控后只读,真相源在 ERP。",
+    "submission_criteria": "1. APPROVAL_PASSED 事件已送达\n2. 报销单(Expense_Claim)与费控审核案件(Expense_Audit_Case)记录存在且 status 为 APPROVED\n3. 案件 total_payable_amount(核减后可报金额)、cost_center_id、明细费用科目齐备\n4. 预算已 FA-01 占用成功(存在 BG 号)",
+    "object_type": "action",
+    "category": "回写ERP",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "APPROVAL_PASSED"
+    ],
+    "target_objects": [
+      "Financial_Action",
+      "Expense_Claim"
+    ],
+    "inputs": [
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "待回写的报销单唯一编号(ECA/OEP)。通过 APPROVAL_PASSED 事件携带。系统中必须存在对应 Expense_Claim 记录且 status 为 APPROVED。本 Action 基于此 ID 读取核减后可报金额、成本中心、费用科目执行 ERP 回写。",
+        "source_object": "Expense_Claim.expense_claim_id",
+        "required": true
+      },
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "报销单关联的费控审核案件编号(FK 号)。财务动作挂在案件上,回写生成的 YF/PZ 号反写到案件供全链路审计还原。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "post_result",
+        "type": "String",
+        "description": "回写执行结果。包含应付单 YF 号、记账凭证 PZ 号、是否做了进项认证(FA-06)、回写状态(成功/失败)。成功时报销单状态进 PENDING_PAYMENT。"
+      },
+      {
+        "name": "erp_voucher_no",
+        "type": "String",
+        "description": "ERP 凭证号 PZ。FA-05 生成,反写智控后只读,真相源在启账ERP。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "generatePayableAndVoucher",
+        "description": "智控通知启账ERP 回写应付：FA-04 生成应付单 YF(挂报销人对私收款或对公供应商、金额=核减后合计可报金额、成本中心 CC、费用科目 F)；FA-05 生成记账凭证 PZ(借：费用 F/进项税额；贷：其他应付款-员工 或 应付账款-供应商)。应付与凭证在 ERP 是一个回写事务,要么都成要么都不成。",
+        "object_type": "tool",
+        "condition": "末级审批已通过,报销单状态 APPROVED",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待回写报销单编号。用于读取核减后可报金额、成本中心、费用科目作为生成应付单与记账凭证的依据。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          },
+          {
+            "name": "cost_center_id",
+            "type": "String",
+            "description": "报销单归属成本中心编号。借方费用按此 CC + 科目 F 入账,CC 错则费用入错成本中心。",
+            "source_object": "Expense_Claim.cost_center_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "payable_voucher_result",
+            "type": "String",
+            "description": "应付与凭证生成结果。包含应付单 YF 号、记账凭证 PZ 号及会计分录。回写事务成功则两号齐备。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "certifyInputTax",
+        "description": "对命中 RULE-INV-07(专票进项可抵扣识别)的明细,FA-06 在启账ERP 勾选认证、做进项抵扣,记账凭证中拆出进项税额单独列示为借方(借：应交税费-应交增值税(进项税额))。普票、火车票、出租车票等不抵扣,无 FA-06,直接含税进费用。",
+        "object_type": "logic",
+        "condition": "存在命中 RULE-INV-07 的可抵扣专票明细",
+        "rules": [
+          {
+            "id": "RULE-INV-07",
+            "submission_criteria": "OCR 已抽出发票类型、税额、税率、销售方/购买方税号等字段。",
+            "description": "系统识别发票类型是否为增值税专用发票或可抵扣数电专票,且销售方/购买方信息完整、税号正确、税额单独列示。满足即识别为可抵扣专票,触发 FA-06 进项税额认证抵扣——在回写 ERP 阶段勾选认证、做进项抵扣,不拦单。带专票的大单须优先处理避免错过认证抵扣时间窗。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "payable_voucher_result",
+            "type": "String",
+            "description": "上一步生成的应付与凭证结果。本步骤对其中命中 RULE-INV-07 的专票明细执行进项认证抵扣,拆出进项税额。",
+            "source_object": "generatePayableAndVoucher.payable_voucher_result"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "费控审核案件编号。用于定位案件下命中 RULE-INV-07 的发票明细做认证。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "tax_certification_result",
+            "type": "String",
+            "description": "进项认证结果。含已认证抵扣的进项税额;无专票时为不适用。"
+          }
+        ]
+      },
+      {
+        "order": "3",
+        "name": "writeBackPostingStatus",
+        "description": "ERP 回写完成后,把应付单 YF、记账凭证 PZ 反写回 FK 案件与报销单对应字段,生成 ERP_POSTED 事件,报销单状态置 PENDING_PAYMENT(待付款)。反写的 YF/PZ 号在智控只读。",
+        "object_type": "tool",
+        "condition": "应付/凭证/认证回写事务执行完毕",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "payable_voucher_result",
+            "type": "String",
+            "description": "应付与凭证生成结果。本步骤从中提取 YF 号、PZ 号反写报销单与案件并更新状态。",
+            "source_object": "generatePayableAndVoucher.payable_voucher_result"
+          },
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待更新状态的报销单编号。用于定位并把状态从 APPROVED 推到 PENDING_PAYMENT。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "post_status",
+            "type": "String",
+            "description": "回写状态更新结果。值为已回写(状态进 PENDING_PAYMENT)或回写失败。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Financial_Action",
+          "action": "CREATE",
+          "property_impacted": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "cost_center_id",
+            "expense_category_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "direction",
+            "operator",
+            "erp_voucher_no",
+            "status",
+            "action_time"
+          ],
+          "description": "创建 FA-04 生成应付单(关联 YF)、FA-05 生成记账凭证(写 erp_voucher_no=PZ、direction 借/贷)、FA-06 进项税额认证抵扣(仅专票)三条财务动作记录,按 CC + 科目归集,operator 记系统,挂在 FK 案件上供 L4 移送稽核还原。"
+        },
+        {
+          "object_type": "Expense_Claim",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status"
+          ],
+          "description": "回写事务成功后将报销单状态从 APPROVED 推到 PENDING_PAYMENT(待付款),触发 ERP_POSTED 事件。启费通同步给报销人显示已生成应付。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "ERP 回写完成,状态进 PENDING_PAYMENT",
+          "message": "您的报销单已审批通过并完成应付与记账回写,进入待付款。后续到账进度可在启费通查询。",
+          "triggered_event": "ERP_POSTED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "ERP_POSTED"
+    ]
+  },
+  {
+    "id": "11",
+    "name": "initiatePayment",
+    "description": "发起付款——应付与凭证回写完成(PENDING_PAYMENT)后,资金组经银企直连 FA-07 发起支付指令(PAY 号),对私走员工银行卡退报销款、对公走供应商,报销单状态从 PENDING_PAYMENT 推到 PAYING 付款中,生成 PAY 号(Financial_Action),产出 PAYMENT_INITIATED 事件。发起支付与付款完成是两步,中间隔银行处理时间差,本动作只管发起、到账确认由 confirmPayment 承接。PAY 号反写智控后只读,真相源在资金/银企直连。",
+    "submission_criteria": "1. APPROVAL_PASSED 后 ERP 已回写(ERP_POSTED 已送达)\n2. 报销单(Expense_Claim)记录存在且 status 为 PENDING_PAYMENT\n3. 应付/凭证已生成(FA-04/05/06 完成),收款账户(报销人对私银行卡或对公供应商)已确定",
+    "object_type": "action",
+    "category": "回写ERP与付款",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "ERP_POSTED"
+    ],
+    "target_objects": [
+      "Financial_Action",
+      "Expense_Claim"
+    ],
+    "inputs": [
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "待付款的报销单唯一编号(ECA/OEP)。通过 ERP_POSTED 事件携带。系统中必须存在对应 Expense_Claim 记录且 status 为 PENDING_PAYMENT。本 Action 基于此 ID 读取应付金额与收款账户发起支付。",
+        "source_object": "Expense_Claim.expense_claim_id",
+        "required": true
+      },
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "报销单关联的费控审核案件编号(FK 号)。付款财务动作 FA-07 挂在案件上,生成的 PAY 号反写到案件供审计追溯。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "payment_initiate_result",
+        "type": "String",
+        "description": "发起支付结果。包含支付指令 PAY 号、收款方向(对私/对公)、状态 PAYING。供下游 PAYMENT_INITIATED 事件携带,经事件传给 confirmPayment 匹配回单确认到账。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "initiatePayment",
+        "description": "资金组经银企直连 FA-07 发起支付：按应付单生成支付指令 PAY,对私(报销退款给员工)走员工银行卡、对公走供应商。生成支付指令后报销单状态进 PAYING 付款中,触发 PAYMENT_INITIATED 事件。",
+        "object_type": "tool",
+        "condition": "报销单已回写应付,状态 PENDING_PAYMENT 且未暂停付款",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待付款报销单编号。用于读取应付金额与收款账户(对私员工卡/对公供应商)生成支付指令。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "费控审核案件编号。用于把 FA-07 支付动作挂到案件并写入 PAY 号。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "payment_initiate_result",
+            "type": "String",
+            "description": "发起支付结果。包含支付指令 PAY 号、收款方向(对私/对公)、状态 PAYING。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Financial_Action",
+          "action": "CREATE",
+          "property_impacted": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ],
+          "description": "创建 FA-07 发起支付财务动作记录(关联 PAY、direction 付),operator 记系统,挂在 FK 案件上。生成的 PAY 号(financial_action_id/related_document)供 confirmPayment 经 PAYMENT_INITIATED 事件匹配回单确认。"
+        },
+        {
+          "object_type": "Expense_Claim",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status"
+          ],
+          "description": "发起支付后报销单状态从 PENDING_PAYMENT 推到 PAYING 付款中(触发 PAYMENT_INITIATED)。启费通同步给报销人显示付款中。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "支付指令已发起,状态进 PAYING",
+          "message": "您的报销款已发起付款,正在银企直连处理中,到账后将另行通知。",
+          "triggered_event": "PAYMENT_INITIATED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "PAYMENT_INITIATED"
+    ]
+  },
+  {
+    "id": "11-2",
+    "name": "confirmPayment",
+    "description": "确认到账与差额结算——银行处理完毕后 FA-08 回单回写：银企直连收到银行回单确认款项到账,报销单状态从 PAYING 推到 PAID 已付款(事件 PAYMENT_COMPLETED)；涉及核减差额(PARTIAL)且员工已垫全款的走 FA-12 差额退款/个人补缴,按核减后可报金额退款给个人,被削掉的差额由员工承担。发起支付与付款完成是两步,本动作承接 initiatePayment 经 PAYMENT_INITIATED 传入的 PAY 号做到账确认。",
+    "submission_criteria": "1. PAYMENT_INITIATED 事件已送达\n2. 报销单(Expense_Claim)记录存在且 status 为 PAYING\n3. 已有对应 PAY 支付指令(Financial_Action)记录(FA-07 已发起)",
+    "object_type": "action",
+    "category": "回写ERP与付款",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "PAYMENT_INITIATED"
+    ],
+    "target_objects": [
+      "Financial_Action",
+      "Expense_Claim"
+    ],
+    "inputs": [
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "待确认到账的报销单唯一编号(ECA/OEP)。通过 PAYMENT_INITIATED 事件携带。系统中必须存在对应 Expense_Claim 记录且 status 为 PAYING。本 Action 基于此 ID 把状态从 PAYING 推到 PAID。",
+        "source_object": "Expense_Claim.expense_claim_id",
+        "required": true
+      },
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "报销单关联的费控审核案件编号(FK 号)。付款财务动作 FA-08 及必要时 FA-12 挂在案件上,供审计追溯。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "payment_complete_result",
+        "type": "String",
+        "description": "付款完成结果。含银行回单确认到账时间、付款状态 PAID。完成时报销单状态进 PAID。"
+      },
+      {
+        "name": "refund_result",
+        "type": "String",
+        "description": "差额处理结果。含 FA-12 退款/补缴金额与方向;无核减差额时为不适用。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "confirmPaymentByBankReceipt",
+        "description": "银行处理完毕后 FA-08 回单回写：银企直连收到银行回单,确认款项到账,报销单状态从 PAYING 推到 PAID 已付款,触发 PAYMENT_COMPLETED 事件。发起支付与付款完成是两步,中间隔银行处理时间差。",
+        "object_type": "tool",
+        "condition": "已发起支付,等待银行回单",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "payment_initiate_result",
+            "type": "String",
+            "description": "initiatePayment 经 PAYMENT_INITIATED 事件传入的发起支付结果。本步骤匹配对应支付指令 PAY 号回写银行回单确认到账。",
+            "source_object": "Financial_Action.financial_action_id"
+          },
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "待确认到账的报销单编号。用于把状态从 PAYING 推到 PAID。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "payment_complete_result",
+            "type": "String",
+            "description": "付款完成结果。含银行回单确认时间、状态 PAID。触发 PAYMENT_COMPLETED 进入回写总账。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "settleDeductionRefund",
+        "description": "涉及核减差额(PARTIAL)且员工已垫全款的,FA-12 差额退款/个人补缴：按核减后可报金额退款给个人,被削掉的差额由员工承担(垫多了退、垫少了补缴)。无核减或对公付款则不适用。",
+        "object_type": "logic",
+        "condition": "案件为 PARTIAL 差额核准且存在个人垫付差额",
+        "rules": [
+          {
+            "id": "RULE-INV-08",
+            "submission_criteria": "明细行已手填金额并关联发票,OCR 已抽出发票价税合计。",
+            "description": "系统以票面价税合计为准核减手填高于票面的金额(PARTIAL),核减差额触发 FA-02 释放多占预算、FA-12 差额处理。员工已垫全款时按核减后可报金额退个人,差额由个人承担,走 FA-12 差额退款/个人补缴逻辑。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "payment_complete_result",
+            "type": "String",
+            "description": "付款完成结果。本步骤据核减后可报金额与员工垫付额计算差额做退款或补缴。",
+            "source_object": "confirmPaymentByBankReceipt.payment_complete_result"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "费控审核案件编号。用于读取核减额与可报金额确定差额并把 FA-12 动作挂到案件。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "refund_result",
+            "type": "String",
+            "description": "差额处理结果。含 FA-12 退款/补缴金额与方向;无核减差额时为不适用。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Financial_Action",
+          "action": "CREATE_OR_MODIFY",
+          "property_impacted": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ],
+          "description": "创建 FA-08 支付完成回执财务动作记录;若涉及个人垫付差额追加 FA-12 差额退款/个人补缴。operator 记系统,挂在 FK 案件上。"
+        },
+        {
+          "object_type": "Expense_Claim",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status"
+          ],
+          "description": "收到银行回单确认到账后报销单状态从 PAYING 推到 PAID 已付款(触发 PAYMENT_COMPLETED)。启费通同步给报销人显示已到账。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "银行回单确认到账,状态进 PAID",
+          "message": "您的报销款已付款完成到账。如有核减差额已按可报金额结算(差额由个人承担)。",
+          "triggered_event": "PAYMENT_COMPLETED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "PAYMENT_COMPLETED"
+    ]
+  },
+  {
+    "id": "12",
+    "name": "disposeRiskEvent",
+    "description": "异常识别命中风险类规则(或预算占用失败)后,生成风险事件(RK),按规则→风险类型映射(T1-T8)定类、综合命中类型/规则数量/涉及金额/是否疑似舞弊定级(L1-L4)。L1 记录放行不占人工;L2 转普通审核员复核;L3 转费控主管并暂缓付款(案件 SUSPENDED);L4 疑似舞弊强制脱离普通池移送稽核、暂停付款(冻结)。预算超支(BUDGET_INSUFFICIENT)映射 T5。生成风险事件事件 RISK_EVENT_RAISED。暂停期间预算保持 FA-03 冻结不释放,等风险结论;每个风险事件最终走到已闭环或误报关闭两个终态之一。",
+    "submission_criteria": "1. ANOMALY_DETECTED 或 BUDGET_INSUFFICIENT 事件已送达\n2. 费控审核案件(Expense_Audit_Case)与关联报销单(Expense_Claim)记录存在\n3. 校验阶段已写入命中规则清单(hit_rule_list 含触发风险的 RULE-*)\n4. 命中规则为风险类规则(failurePolicy 为 block 的 RULE-INV/STD/CMP/BUD)或预算占用失败",
+    "object_type": "action",
+    "category": "规则校验",
+    "actor": [
+      "Agent",
+      "Human"
+    ],
+    "trigger": [
+      "ANOMALY_DETECTED",
+      "BUDGET_INSUFFICIENT"
+    ],
+    "target_objects": [
+      "Risk_Event",
+      "Expense_Audit_Case"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "命中风险的费控审核案件唯一编号(FK 号)。通过 ANOMALY_DETECTED 或 BUDGET_INSUFFICIENT 事件携带。系统中必须存在对应 Expense_Audit_Case 记录。本 Action 基于此 ID 读取命中规则清单生成风险事件并回写案件状态。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "hit_rule_id",
+        "type": "String",
+        "description": "触发本风险的命中规则编号(RULE-*)。校验阶段写入。本 Action 按规则→风险类型映射表确定风险类型 T1-T8(如 RULE-INV-03→T1、RULE-STD-*→T3、RULE-CMP-01→T4、RULE-BUD-02→T5、RULE-INV-02→T6、RULE-CMP-06→T7、RULE-CMP-04→T8)。",
+        "source_object": "Approval_Rule.approval_rule_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "risk_event_id",
+        "type": "String",
+        "description": "生成的风险事件唯一编号(RK 号,格式 RK+8 位日期+5 位流水)。挂在 FK 案件与报销单上。供下游处置与审计追溯定位。"
+      },
+      {
+        "name": "risk_level",
+        "type": "String",
+        "description": "风险等级。值为 L1 低/L2 中/L3 高/L4 严重。决定是否暂停付款、分案去向(L3 主管暂缓、L4 移送稽核冻结)。"
+      },
+      {
+        "name": "disposal_action",
+        "type": "String",
+        "description": "处置动作。值为放行/退回/降额/驳回/转稽核/移送。L1 系统自动放行;L2/L3/L4 由人(审核员/主管/稽核)处置后填。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "classifyAndGradeRisk",
+        "description": "系统按规则→风险类型映射表自动生成风险事件并定类(T1-T8)：单纯验真存疑为 T6,验真失败叠加连号/金额异常/拆分等多条升级为 T2。综合命中风险类型、命中规则数量、涉及金额、是否疑似主观舞弊定级(L1-L4),写入证据/说明、是否暂停付款、是否移送稽核标记。",
+        "object_type": "logic",
+        "condition": "已收到异常识别命中或预算占用失败事件",
+        "rules": [
+          {
+            "id": "PIPE-04",
+            "submission_criteria": "一张单已命中多条规则,产生多个默认动作。",
+            "description": "一单命中多条规则时按取最重且累加合成流转方向(升风险>转人工>退回>核减>提示)：含升风险 L4→SUSPENDED 暂停付款转稽核;含升风险 L3→转费控主管暂缓付款;含升风险 L2 或转人工或金额超阈→MANUAL_REVIEW。风险事件未闭环则付款冻结、下游动作皆白搭。多规则叠加是 T2(虚开/套票)的特征,单条 RULE-INV-02 一般先按 T6 处置。"
+          },
+          {
+            "id": "RULE-BUD-02",
+            "submission_criteria": "已取得核定后可报净额,准备占用对应成本中心×科目×期间预算。",
+            "description": "占用后超过预算总额(可用余额<本次占用额)命中,升风险 T5(预算超支)+转人工+审批建议升级。处置三条路：降额到可用余额内核准/走预算调剂追加后再占用/驳回。预算超支须转人工由财务 BP 决定,审核员不得自行先斩后奏。BUDGET_INSUFFICIENT 即映射本风险类型。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "命中风险的费控审核案件编号。用于读取命中规则清单、涉及金额执行定类定级。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          },
+          {
+            "name": "hit_rule_id",
+            "type": "String",
+            "description": "触发风险的命中规则编号 RULE-*。用于按映射表确定风险类型 T1-T8。",
+            "source_object": "Approval_Rule.approval_rule_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "risk_classification",
+            "type": "String",
+            "description": "风险定类定级结果。含风险类型 T1-T8、风险等级 L1-L4、证据/说明、是否暂停付款、是否移送稽核标记,以及生成的 RK 号。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "suspendAndDispatch",
+        "description": "按风险等级路由：L1 系统自动放行仅记录不分人;L2 转普通审核员池复核;L3 案件置 SUSPENDED 暂缓付款分给费控主管;L4 案件置 SUSPENDED 冻结付款、强制脱离普通审核员池移送稽核。暂停期间预算保持 FA-03 冻结不释放,等风险结论。生成 RISK_EVENT_RAISED 事件。",
+        "object_type": "logic",
+        "condition": "风险定类定级完成",
+        "rules": [
+          {
+            "id": "ROUTE-01",
+            "submission_criteria": "报销单状态已到 VALIDATED,进入分流判断。",
+            "description": "命中 L2/L3 风险转人工复核并按命中条件打转人工原因标签(命中风险),进分案落到审核员名下。特例 L4 不进普通人工池,直接转稽核、SUSPENDED 暂停付款。L3 高风险暂缓付款分给主管,不让普通审核员单独拍板;L4 严重风险一律不进普通审核员待办,直接进稽核线且暂停付款(冻结)。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "risk_classification",
+            "type": "String",
+            "description": "上一步定类定级结果。本步骤据风险等级决定放行/分普通池/分主管暂缓/移送稽核冻结。",
+            "source_object": "classifyAndGradeRisk.risk_classification"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "风险事件关联案件编号。用于按等级更新案件状态(L3/L4 置 SUSPENDED)与承办人。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "dispatch_result",
+            "type": "String",
+            "description": "风险路由结果。含案件目标状态(放行继续/SUSPENDED 暂停)、分案去向(普通审核员/费控主管/稽核)、是否暂停付款。"
+          }
+        ]
+      },
+      {
+        "order": "3",
+        "name": "处置风险事件并闭环",
+        "description": "处置人(审核员/主管/稽核,L4 由稽核)接手风险事件：核实误报则标误报关闭、案件恢复;坐实但可整改则降额 PARTIAL/退回 RETURNED;坐实且违规则驳回 REJECTED + 作废 VOID + 释放预算(FA-02)+(L4)移送。每个风险事件最终走到已闭环或误报关闭终态之一,处置动作、处置人、理由强制留痕,L4 不可私自降级处置或拽回普通池。",
+        "object_type": "action",
+        "condition": "风险事件已分派到处置人待办",
+        "rules": [
+          {
+            "id": "TRACE-01",
+            "submission_criteria": "对关键数据字段发生任何修改(风险处置、核减额录入/调整、红冲等)。",
+            "description": "风险处置(放行/退回/降额/驳回/转稽核/移送)时系统强制记五件事：谁处置(处置人工号)、何时、改的哪个字段(如处置动作、风险状态)、前值→后值、为啥(理由必填)。留痕当下强制、append-only 不可补不可改不可删,是 L4 移送稽核还原一单一生的命根子。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "dispatch_result",
+            "type": "String",
+            "description": "风险路由结果。本步骤据分案去向由对应处置人接手并形成处置结论。",
+            "source_object": "suspendAndDispatch.dispatch_result"
+          },
+          {
+            "name": "risk_event_id",
+            "type": "String",
+            "description": "待处置的风险事件编号 RK。用于更新处置动作、处置人、风险状态并写入证据。",
+            "source_object": "Risk_Event.risk_event_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "disposal_result",
+            "type": "String",
+            "description": "风险处置结论。含处置动作(放行/退回/降额/驳回/转稽核/移送)、风险事件终态(已闭环/误报关闭)、处置人与理由。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Risk_Event",
+          "action": "CREATE_OR_MODIFY",
+          "property_impacted": [
+            "risk_event_id",
+            "expense_audit_case_id",
+            "expense_claim_id",
+            "hit_rule_id",
+            "disposer_employee_id",
+            "risk_type",
+            "risk_level",
+            "evidence",
+            "disposal_action",
+            "status",
+            "is_payment_suspended",
+            "is_escalated_to_audit",
+            "raised_time"
+          ],
+          "description": "命中时创建风险事件记录,写入风险类型 T1-T8、风险等级 L1-L4、命中规则、证据、是否暂停付款/移送稽核标记;处置时更新处置人、处置动作与状态(待处置→处置中→已闭环/误报关闭),触发 RISK_EVENT_RAISED。"
+        },
+        {
+          "object_type": "Expense_Audit_Case",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status",
+            "manual_review_reason",
+            "assignee_employee_id",
+            "hit_rule_list",
+            "audit_timeline"
+          ],
+          "description": "L3/L4 时案件状态置 SUSPENDED 暂停付款,打转人工原因标签(命中风险/超预算),写入承办人(L3 主管/L4 稽核)与命中规则清单;误报关闭后恢复到暂停前状态。每步处置追加 audit_timeline 留痕。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "费控主管",
+          "channel": "InApp",
+          "condition": "风险事件定级 L3 高风险,案件暂缓付款",
+          "message": "高风险案件待处置：检测到 L3 风险事件,案件已暂缓付款。请查看命中规则与证据后处置,不要让普通审核员单独拍板。",
+          "triggered_event": "RISK_EVENT_RAISED"
+        },
+        {
+          "recipient": "稽核",
+          "channel": "InApp",
+          "condition": "风险事件定级 L4 严重(疑似舞弊),强制移送",
+          "message": "严重风险移送：检测到 L4 疑似舞弊风险事件,案件已暂停付款(冻结)并移送稽核。请调阅全链路审计、FK 快照与 OCR 原值启动稽核流程。",
+          "triggered_event": "RISK_EVENT_RAISED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "RISK_EVENT_RAISED"
+    ]
+  },
+  {
+    "id": "13",
+    "name": "archiveCase",
+    "description": "付款完成(PAID)后,启账ERP 先 FA-09 回写总账：预算池已占用/已冻结转已实际发生,费用正式入账,状态进 POSTED(预算已实际发生才记,不是审批通过就记)。随后票夹云把单据、发票影像、OCR 结构化结果、规则命中清单、风险事件、审批留痕、财务动作 FA-01~FA-12 的每一步前值/后值/理由全部归档,生成 AUDIT_ARCHIVED 事件,案件状态进 ARCHIVED 终态。到 ARCHIVED 一张单的一生才算走完,稽核随时可顺着 FK 完整还原。",
+    "submission_criteria": "1. PAYMENT_COMPLETED 事件已送达\n2. 报销单(Expense_Claim)与费控审核案件(Expense_Audit_Case)记录存在且 status 为 PAID\n3. 预算已 FA-09 回写总账(已实际发生入账完成),状态进 POSTED\n4. 全链路财务动作(FA-01~FA-12)与审计时间线齐备",
+    "object_type": "action",
+    "category": "回写ERP",
+    "actor": [
+      "Agent"
+    ],
+    "trigger": [
+      "PAYMENT_COMPLETED"
+    ],
+    "target_objects": [
+      "Expense_Audit_Case"
+    ],
+    "inputs": [
+      {
+        "name": "expense_audit_case_id",
+        "type": "String",
+        "description": "待归档的费控审核案件唯一编号(FK 号)。通过 PAYMENT_COMPLETED 事件携带。系统中必须存在对应 Expense_Audit_Case 记录且关联报销单 status 为 PAID。本 Action 基于此 ID 完成回写总账与全链路归档。",
+        "source_object": "Expense_Audit_Case.expense_audit_case_id",
+        "required": true
+      },
+      {
+        "name": "expense_claim_id",
+        "type": "String",
+        "description": "案件关联的报销单编号(ECA/OEP)。用于回写总账后把报销单状态推到 POSTED 再到 ARCHIVED,并归档报销单全量字段。",
+        "source_object": "Expense_Claim.expense_claim_id",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "archive_result",
+        "type": "String",
+        "description": "归档执行结果。包含回写总账(FA-09)状态、归档内容清单(单据/影像/OCR/规则命中/风险/审批/财务动作留痕)与归档时间。成功时案件状态进 ARCHIVED 终态。"
+      }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "writeBackGeneralLedger",
+        "description": "付款完成后启账ERP FA-09 回写总账：把预算池的已占用/已冻结额度转成已实际发生(这笔钱真正花掉,从预算实打实扣除),费用正式入账,报销单与案件状态从 PAID 推到 POSTED。",
+        "object_type": "tool",
+        "condition": "银行回单已确认到账,状态 PAID",
+        "rules": [],
+        "inputs": [
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "待回写总账的案件编号。用于定位关联预算占用把已占用转已实际发生并生成 FA-09 动作。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          },
+          {
+            "name": "expense_claim_id",
+            "type": "String",
+            "description": "案件关联报销单编号。用于把状态从 PAID 推到 POSTED。",
+            "source_object": "Expense_Claim.expense_claim_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "ledger_result",
+            "type": "String",
+            "description": "回写总账结果。含 FA-09 已实际发生入账金额与状态 POSTED。"
+          }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "archiveToPiaoJiaCloud",
+        "description": "票夹云把单据、发票影像、OCR 结构化结果、四组规则命中清单、风险事件 RK、审批流留痕、财务动作 FA-01~FA-12 的每一步前值/后值/理由全部归档,形成全链路审计闭环,供稽核顺着 FK 随时还原一单一生。",
+        "object_type": "tool",
+        "condition": "回写总账完成,状态 POSTED",
+        "rules": [
+          {
+            "id": "TRACE-01",
+            "submission_criteria": "全链路关键数据修改(OCR 校正、核减、风险处置、财务动作等)均已留痕。",
+            "description": "归档时把全链路留痕(谁改/何时/哪个字段/前值→后值/理由)与单据、影像、OCR 结果、规则命中、风险事件、审批留痕、FA-01~FA-12 一并归入票夹云。留痕 append-only 不可补不可改不可删,是顺着 FK 完整还原一单一生、争议与 L4 移送时的命根子。"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "ledger_result",
+            "type": "String",
+            "description": "上一步回写总账结果。归档以 POSTED 状态为前置,把全链路产物归入票夹云。",
+            "source_object": "writeBackGeneralLedger.ledger_result"
+          },
+          {
+            "name": "expense_audit_case_id",
+            "type": "String",
+            "description": "待归档案件编号。用于汇集案件全链路产物(快照/校验结果/风险/财务动作/审计时间线)归档并把状态推到 ARCHIVED。",
+            "source_object": "Expense_Audit_Case.expense_audit_case_id"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "archive_status",
+            "type": "String",
+            "description": "归档状态。值为已归档(状态进 ARCHIVED 终态)或归档失败。触发 AUDIT_ARCHIVED 事件。"
+          }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        {
+          "object_type": "Expense_Audit_Case",
+          "action": "MODIFY",
+          "property_impacted": [
+            "status",
+            "audit_timeline"
+          ],
+          "description": "回写总账后案件状态从 PAID→POSTED,全链路归档完成后→ARCHIVED 终态,触发 AUDIT_ARCHIVED。归档动作追加 audit_timeline 留痕(操作人记系统/时间)。"
+        }
+      ],
+      "notifications": [
+        {
+          "recipient": "报销人",
+          "channel": "InApp",
+          "condition": "全链路归档完成,案件进 ARCHIVED 终态",
+          "message": "您的报销单已完成回写总账与归档,流程结束。全链路记录已留痕可供随时查询。",
+          "triggered_event": "AUDIT_ARCHIVED"
+        }
+      ]
+    },
+    "triggered_event": [
+      "AUDIT_ARCHIVED"
+    ]
+  }
+]

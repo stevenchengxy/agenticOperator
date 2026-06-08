@@ -6,7 +6,6 @@ import clsx from "clsx";
 import { Ic, IcName } from "./Ic";
 import { useApp } from "@/lib/i18n";
 import { fetchJson } from "@/lib/api/client";
-import type { HumanTasksResponse } from "@/lib/api/types";
 
 type NavItem =
   | { type: "group"; title: string }
@@ -15,26 +14,13 @@ type NavItem =
 export function LeftNav() {
   const { t } = useApp();
   const pathname = usePathname();
-  const [inboxCount, setInboxCount] = React.useState<string>("—");
   const [monitorCount, setMonitorCount] = React.useState<string>("—");
-  const [behaviorCount, setBehaviorCount] = React.useState<string>("—");
   const [alertsCount, setAlertsCount] = React.useState<string>("—");
 
   React.useEffect(() => {
     const tick = () => {
       fetchJson<{ counts: { needsHuman: number } | null }>("/api/notifications?limit=1", { cache: "no-store" })
         .then((j) => setAlertsCount(j.counts && j.counts.needsHuman > 0 ? String(j.counts.needsHuman) : ""))
-        .catch(() => {/* keep "—" */});
-    };
-    tick();
-    const id = setInterval(tick, 10_000);
-    return () => clearInterval(id);
-  }, []);
-
-  React.useEffect(() => {
-    const tick = () => {
-      fetchJson<HumanTasksResponse>("/api/human-tasks")
-        .then((r) => setInboxCount(r.total > 0 ? String(r.total) : ""))
         .catch(() => {/* keep "—" */});
     };
     tick();
@@ -54,20 +40,9 @@ export function LeftNav() {
     return () => clearInterval(id);
   }, []);
 
-  React.useEffect(() => {
-    const tick = () => {
-      fetchJson<{ kpi: { open: number } }>("/api/behavior", { cache: "no-store" })
-        .then((j) => setBehaviorCount(j.kpi.open > 0 ? String(j.kpi.open) : ""))
-        .catch(() => {/* keep "—" */});
-    };
-    tick();
-    const id = setInterval(tick, 10_000);
-    return () => clearInterval(id);
-  }, []);
-
   // IA reorg (UX review feedback):
   //   - "Operate" = the surfaces you ACT on daily (overview, fleet, monitor,
-  //     inbox, alerts, behavior, chat). High-frequency, decision-oriented.
+  //     inbox, alerts, chat). High-frequency, decision-oriented.
   //   - "Observability" = read-only inspection of the runtime (events,
   //     triggers, correlations, rule-check). Split out so the 11-item Operate
   //     bucket stays scannable and the daily-driver items float to the top.
@@ -80,14 +55,13 @@ export function LeftNav() {
     { type: "item", id: "overview",   icon: "grid",     label: t("nav_overview"), href: "/overview" },
     { type: "item", id: "fleet",      icon: "cpu",      label: t("nav_fleet"), count: "22", href: "/fleet" },
     { type: "item", id: "monitor",    icon: "gauge",    label: t("nav_monitor"), count: monitorCount, href: "/monitor" },
-    { type: "item", id: "inbox",      icon: "user",     label: t("nav_inbox"), count: inboxCount, href: "/inbox" },
     { type: "item", id: "alerts",     icon: "bell",     label: t("nav_alerts"), count: alertsCount, href: "/notifications" },
-    { type: "item", id: "behavior",   icon: "sparkle",  label: t("nav_behavior"), count: behaviorCount, href: "/behavior" },
     { type: "item", id: "chat",       icon: "chat",     label: t("nav_trace_chat"), href: "/chat" },
     { type: "group", title: t("nav_group_observe") },
     { type: "item", id: "events",     icon: "bolt",     label: t("nav_events"), href: "/events" },
     { type: "item", id: "triggers",   icon: "clock",    label: t("nav_triggers"), href: "/triggers" },
     { type: "item", id: "correlations", icon: "branch", label: t("nav_correlations"), href: "/correlations" },
+    { type: "item", id: "funnel",     icon: "pulse",    label: t("nav_funnel"), href: "/funnel" },
     { type: "item", id: "rule-check", icon: "check",    label: t("nav_rule_check"), href: "/rule-check" },
     { type: "group", title: t("nav_group_build") },
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), count: "1", href: "/workflow" },

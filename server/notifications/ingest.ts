@@ -53,6 +53,7 @@ function toRow(draft: NotificationDraft) {
     traceId: draft.traceId,
     eventInstanceId: draft.eventInstanceId,
     agent: draft.agent,
+    domain: draft.domain,
     anchorsJson: draft.anchorsJson,
     linkKind: draft.linkKind,
     linkId: draft.linkId,

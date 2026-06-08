@@ -19,6 +19,12 @@ export function claimOnce(key: string): boolean {
   return true;
 }
 
+/** Release a single (case, action) claim so it can run again — used by the
+ *  human-gate 退回/否决 path to re-enter generateSuggestion for a fresh attempt. */
+export function releaseClaim(key: string): void {
+  claimed.delete(key);
+}
+
 /** Test/seed hook. */
 export function resetClaims(): void {
   claimed.clear();

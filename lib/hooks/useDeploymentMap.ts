@@ -10,12 +10,16 @@
 
 "use client";
 import { useEffect, useState } from "react";
-import type { AgentsResponse } from "@/lib/api/types";
+import type { AgentsResponse, AgentRow } from "@/lib/api/types";
 
 type DeploymentMap = {
   realness: Map<string, "real" | "shell" | "unbuilt">;
   slug: Map<string, string | null>;
   paused: Map<string, boolean>;
+  /** Full agent rows from /api/agents — domain-scoped consumers (e.g. the
+   *  /overview health grid) enumerate the per-domain roster from here so
+   *  non-recruitment domains' agents show up, not just AGENT_MAP entries. */
+  rows: AgentRow[];
   loading: boolean;
 };
 
@@ -32,7 +36,7 @@ function buildMap(agents: AgentsResponse["agents"]): DeploymentMap {
     slug.set(a.short, a.slug);
     paused.set(a.short, a.paused);
   }
-  return { realness, slug, paused, loading: false };
+  return { realness, slug, paused, rows: agents, loading: false };
 }
 
 async function doFetch(): Promise<void> {
@@ -52,7 +56,7 @@ export function useDeploymentMap(): DeploymentMap {
   const [data, setData] = useState<DeploymentMap>(
     cached && Date.now() - cached.ts < CACHE_TTL_MS
       ? cached.data
-      : { realness: new Map(), slug: new Map(), paused: new Map(), loading: true }
+      : { realness: new Map(), slug: new Map(), paused: new Map(), rows: [], loading: true }
   );
 
   useEffect(() => {

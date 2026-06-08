@@ -33,6 +33,8 @@ export interface CaptureInput {
   dedupeHint?: string | null;
   /** Set when a Manager-axis agent already auto-handled this (auto_restart/throttle/scale). */
   managerAction?: string | null;
+  /** Business domain (Allmeta id) this signal belongs to. Null = system/cross-domain. */
+  domain?: string | null;
 }
 
 export interface NotificationDraft {
@@ -53,6 +55,7 @@ export interface NotificationDraft {
   agent: string | null;
   anchorsJson: string | null;
   managerAction: string | null;
+  domain: string | null;
 }
 
 export interface DeriveOptions {
@@ -64,7 +67,12 @@ const INFRA_SOURCES = new Set([
   'LLM 网关', 'EM', 'RAAS API', 'system', '系统', 'Allmeta', 'Partner-PG', '基础设施',
 ]);
 const INFRA_CATEGORIES = new Set(['system', 'llm_call', 'api_call', 'db_call']);
-const MESSAGE_CATEGORIES = new Set(['agent_lifecycle', 'event_publish', 'manage_action']);
+const MESSAGE_CATEGORIES = new Set([
+  'agent_lifecycle',
+  'event_publish',
+  'manage_action',
+  'system_lifecycle', // backend start / clean restart — surfaces as an info message
+]);
 
 /** dedupeHints whose blast radius is broad enough to be critical regardless of level. */
 function isBroadImpact(hint?: string | null): boolean {
@@ -168,6 +176,9 @@ export function deriveNotification(
     agent: input.agent ?? null,
     anchorsJson,
     managerAction: input.managerAction ?? null,
+    // System messages are domain-agnostic (always shown); everything else is
+    // tagged with its business domain so the view can scope by it.
+    domain: category === 'system' ? null : (input.domain ?? null),
   };
 
   if (isAlert) {

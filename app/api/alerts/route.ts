@@ -108,46 +108,6 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
-  // Behavior axis: Monitor Agent's open BehaviorAlert rows. Each unresolved
-  // row is one active alert (the agent dedups by alertKey). Categories map
-  // to existing categories where possible; new behavior-only categories
-  // fall under 'behavior'.
-  if (!categoryFilter || categoryFilter.includes('behavior') || categoryFilter.includes('sla') || categoryFilter.includes('infra')) {
-    try {
-      const open = await prisma.behaviorAlert.findMany({
-        where: { resolvedAt: null },
-        orderBy: { lastSeenAt: 'desc' },
-        take: 100,
-      });
-      for (const a of open) {
-        let category: Alert['category'] = 'behavior';
-        if (a.ruleId.startsWith('queue_backlog') || a.ruleId.startsWith('em_')) category = 'infra';
-        else if (a.ruleId.startsWith('run_stalled') || a.ruleId.startsWith('hitl_stale')) category = 'sla';
-        const skipForCategoryFilter = categoryFilter && !categoryFilter.includes(category);
-        if (skipForCategoryFilter) continue;
-        // Decode details: per-rule structured context (stringified JSON)
-        let detailsObj: Record<string, unknown> = {};
-        try { detailsObj = JSON.parse(a.details); } catch { /* ignore */ }
-        const affected = (detailsObj.agentName as string | undefined)
-          ?? (detailsObj.runId as string | undefined)
-          ?? a.alertKey.split('.').slice(1).join('.')
-          ?? a.ruleId;
-        alerts.push({
-          id: `behavior-${a.id}`,
-          category,
-          severity: a.severity === 'error' ? 'high' : 'medium',
-          title: behaviorAlertTitle(a.ruleId, detailsObj),
-          affected,
-          triggeredAt: a.firstSeenAt.toISOString(),
-          acked: false,
-          ackedBy: null,
-        });
-      }
-    } catch {
-      partial.push('behavior');
-    }
-  }
-
   // Filter by affected (event name / agent / run id) on the synthesized list.
   const filtered = affectedFilter
     ? alerts.filter((a) => a.affected === affectedFilter)
@@ -165,30 +125,4 @@ export async function GET(req: Request): Promise<Response> {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
-}
-
-/** Human-readable title for a BehaviorAlert based on its ruleId + details. */
-function behaviorAlertTitle(ruleId: string, details: Record<string, unknown>): string {
-  const agent = (details.agentName as string | undefined) ?? '';
-  const rate = typeof details.errorRate === 'number' ? `${Math.round((details.errorRate as number) * 100)}%` : '';
-  const attempts = typeof details.attempts === 'number' ? `${details.attempts} 次` : '';
-  if (ruleId.startsWith('agent_error_rate.')) {
-    return `${agent} 错误率 ${rate}${attempts ? ` (${attempts})` : ''} — 超阈值`;
-  }
-  if (ruleId.startsWith('agent_error_rate_degraded.')) {
-    return `${agent} 错误率上升 ${rate}${attempts ? ` (${attempts})` : ''}`;
-  }
-  if (ruleId.startsWith('queue_backlog.')) {
-    return `Queue 积压 — ${details.count ?? '?'} 条 (15min)`;
-  }
-  if (ruleId.startsWith('hitl_stale.')) {
-    return `HITL 任务等待超 30 分钟`;
-  }
-  if (ruleId.startsWith('run_stalled.')) {
-    return `Run ${details.runId ?? ''} 停滞超 30 分钟`;
-  }
-  if (ruleId === 'em_degraded') {
-    return `Event Manager 异常 — ${details.state ?? '?'}`;
-  }
-  return `Behavior 告警: ${ruleId}`;
 }

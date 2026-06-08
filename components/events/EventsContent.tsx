@@ -13,7 +13,25 @@ import { CandidateTrackingTab } from "./CandidateTrackingTab";
 import { AllmetaSyncStrip } from "./AllmetaSyncStrip";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
+import {
+  ENERGY_DOMAIN_ID,
+  ENERGY_EVENT_NS,
+  COST_CONTROL_DOMAIN_ID,
+  COST_CONTROL_EVENT_NS,
+  RECRUITMENT_DOMAIN_ID,
+} from "@/lib/domain-ids";
 import { classifyByPublishers, DIRECTION_META } from "@/lib/events/event-direction";
+
+/** Classify a LIVE event into a business domain by its name namespace —
+ *  energy/… → 能源调度-v1, feikong/… → 费控-v1, everything else (recruitment
+ *  events + inngest/* meta) → 招聘-v1. Lets the event stream scope to the active
+ *  业务领域 the same way the monitor runs do (domain-app event names are ASCII-
+ *  namespaced; recruitment events carry no namespace). */
+function eventDomainOf(name: string): string {
+  if (name.startsWith(`${ENERGY_EVENT_NS}/`)) return ENERGY_DOMAIN_ID;
+  if (name.startsWith(`${COST_CONTROL_EVENT_NS}/`)) return COST_CONTROL_DOMAIN_ID;
+  return RECRUITMENT_DOMAIN_ID;
+}
 
 // /events — 事件
 //
@@ -88,11 +106,16 @@ export function EventsContent() {
   const emHealth = useEmHealth();
   const { registry, syncing, refreshRegistry, syncNow } = useEventRegistry();
   const dlq = useDlq(view === "dlq");
+  const { domain } = useDomain();
 
   const filtered = React.useMemo(() => {
     const windowMs = windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000;
     const cutoff = Date.now() - windowMs;
     return events.filter((e) => {
+      // Scope to the active 业务领域 — classify each event by its name namespace
+      // (energy/* → 能源调度, feikong/* → 费控, else 招聘) so switching the AppBar
+      // domain shows only that domain's events (matches the monitor runs).
+      if (eventDomainOf(e.name) !== domain) return false;
       if (!e.received_at) return true;
       if (new Date(e.received_at).getTime() < cutoff) return false;
       // Registration filter (logic wired but UI disabled for now)
@@ -109,7 +132,7 @@ export function EventsContent() {
       }
       return true;
     });
-  }, [events, windowId, regFilter, registry, dirFilter]);
+  }, [events, windowId, regFilter, registry, dirFilter, domain]);
 
   const selected = React.useMemo(() => {
     if (!selectedId) return filtered[0] ?? null;

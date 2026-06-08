@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
+import { hasOntologyRuleChecks, ontologyStats } from '@/lib/rule-check/ontology-audit-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,8 +33,13 @@ export async function GET(req: Request) {
   const days = parseWindowDays(searchParams);
   const cutoff = new Date(Date.now() - days * 86_400_000);
 
-  // A domain with no recorded rule-check audits gets an empty (zeroed) result.
-  if (!isRuleCheckDomain(searchParams.get('domain'))) {
+  // Non-recruitment domains: serve from the generic ontology rule-check store
+  // (energy validateConstraints / triageScheme …) when it has data.
+  const domain = searchParams.get('domain');
+  if (!isRuleCheckDomain(domain)) {
+    if (await hasOntologyRuleChecks(domain)) {
+      return NextResponse.json<RuleCheckStatsResponse>(await ontologyStats(domain!.trim(), days));
+    }
     return NextResponse.json<RuleCheckStatsResponse>({
       total: 0,
       pass: 0,

@@ -229,7 +229,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(out.explanations).toHaveLength(0);
   });
 
-  it('PASS: pending no longer folds to REVIEW (policy 2026-05-26 — only真违反阻断)', async () => {
+  it('FAIL: pending on a 底线规则 fails-closed (policy 2026-06-01 — agent 无法自证达标)', async () => {
     mockRulesOneStepOneRule();
     mockGraphEmpty();
     mChat.mockResolvedValueOnce({
@@ -243,15 +243,17 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
       toolUseIterations: 0,
     });
     const out = await runRuleCheck(fakeInput());
-    // foldDecision folds pending → PASS (no longer blocks); the pending rule is
-    // still recorded in stats/explanations for the HSM review surface.
-    expect(out.decision).toBe('PASS');
+    // 2026-06-01 fail-closed:pending(需 HSM 主观判断)落在底线规则(severity≠flag_only)
+    // → 不通过、走人工复核;pending 仍记入 stats/explanations 供审计区分。
+    expect(out.decision).toBe('FAIL');
     expect(out.stats.pending).toBe(1);
+    expect(out.explanations).toHaveLength(1);
+    expect(out.explanations[0].status).toBe('pending');
   });
 
-  it('PASS: insufficient_info does NOT block match (folds to PASS, not REVIEW)', async () => {
-    // Per partner contract: missing data shouldn't penalize the candidate.
-    // Only REAL rule violations (status='fail') block.
+  it('FAIL: insufficient_info on a 底线规则 fails-closed (policy 2026-06-01)', async () => {
+    // 硬规则信息缺失 → 不给通过(fail-closed);仍保留 insufficient_info 的逐条 status,
+    // 让审计能区分「硬违反」与「信息不足」,reason 由 formatExplanation 带「需人工复核」标注。
     mockRulesOneStepOneRule();
     mockGraphEmpty();
     mChat.mockResolvedValueOnce({
@@ -265,7 +267,7 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
       toolUseIterations: 0,
     });
     const out = await runRuleCheck(fakeInput());
-    expect(out.decision).toBe('PASS');
+    expect(out.decision).toBe('FAIL');
     expect(out.stats.insufficient_info).toBe(1);
     expect(out.stats.fail).toBe(0);
     // explanations still surface the insufficient_info entry for audit visibility

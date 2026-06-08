@@ -55,7 +55,10 @@ export type OntologyEvent = {
 };
 
 export type OntologyRule = Record<string, unknown>;
-export type OntologyWorkflow = Record<string, unknown> | null;
+export type OntologyWorkflowItem = Record<string, unknown>;
+/** A domain's workflow definitions. Modeled as a LIST (like objects/rules/
+ *  actions/events) so it's counted by length, not by mere presence. */
+export type OntologyWorkflow = OntologyWorkflowItem[];
 
 export type DomainOntology = {
   domainId: string;
@@ -81,10 +84,45 @@ function unwrapList<T = unknown>(raw: unknown, key: string): T[] {
   return [];
 }
 
+/**
+ * Action `name` is the ontology's de-facto primary key: events name their emitter
+ * via `source_action`, and the analyzer keys each derived agent — its React list
+ * key, AgentVersion slug, Inngest fn id and short name — off the action name. A
+ * live domain export can still carry two nodes with the same name when a re-import
+ * or schema migration leaves an old + a patched copy (招聘-v1 ships id:10 and
+ * id:10-2, both named "matchResume"; the old copy parks its actor in an unread
+ * `actor_json`, so it normalizes actor-less). Collapse same-named actions to one
+ * so the name-as-PK invariant holds end-to-end — otherwise two identical React
+ * keys crash the Ontology Generator and two identical slugs would collide on
+ * deploy. On a name clash keep the more complete record (the one that actually
+ * declares an `actor`); tie-break to the first seen. Map.set on an existing key
+ * keeps that name's original position, so action order is preserved.
+ */
+export function dedupeActionsByName(actions: OntologyAction[]): OntologyAction[] {
+  const byName = new Map<string, OntologyAction>();
+  for (const a of actions) {
+    const seen = byName.get(a.name);
+    if (!seen || (seen.actor.length === 0 && a.actor.length > 0)) {
+      byName.set(a.name, a);
+    }
+  }
+  return [...byName.values()];
+}
+
 function readSnapshotFile(domainId: string, file: string): unknown {
   const p = path.join(SNAPSHOT_ROOT, domainId, file);
   if (!fs.existsSync(p)) return null;
   return JSON.parse(fs.readFileSync(p, "utf8"));
+}
+
+/**
+ * Load + unwrap a domain's workflow definitions from its in-repo snapshot.
+ * Handles both the `{metadata, workflows:[...]}` envelope and a bare array;
+ * returns [] when the domain has no workflow.json. Exported so the live
+ * (Allmeta) path can backfill workflows it doesn't itself serve.
+ */
+export function loadSnapshotWorkflow(domainId: string): OntologyWorkflow {
+  return unwrapList<OntologyWorkflowItem>(readSnapshotFile(domainId, "workflow.json"), "workflows");
 }
 
 /** Load a domain's ontology from the in-repo snapshot. Throws if absent. */
@@ -100,12 +138,9 @@ export function loadSnapshotOntology(domainId: string): DomainOntology {
     domainId,
     objects: unwrapList<OntologyObject>(objectsRaw, "objects"),
     rules: unwrapList<OntologyRule>(readSnapshotFile(domainId, "rules.json"), "rules"),
-    actions: unwrapList<OntologyAction>(actionsRaw, "actions"),
+    actions: dedupeActionsByName(unwrapList<OntologyAction>(actionsRaw, "actions")),
     events: unwrapList<OntologyEvent>(readSnapshotFile(domainId, "events.json"), "events"),
-    workflow: (() => {
-      const wf = readSnapshotFile(domainId, "workflow.json");
-      return (wf as OntologyWorkflow) ?? null;
-    })(),
+    workflow: loadSnapshotWorkflow(domainId),
     source: "snapshot",
   };
 }
@@ -244,9 +279,9 @@ async function fetchAllmetaOntology(domainId: string): Promise<DomainOntology | 
     domainId,
     objects: objectsRaw.map(normalizeAllmetaObject),
     rules: rulesRaw as OntologyRule[],
-    actions: actionsRaw.map((n) => normalizeAllmetaAction(n, emitByAction)),
+    actions: dedupeActionsByName(actionsRaw.map((n) => normalizeAllmetaAction(n, emitByAction))),
     events,
-    workflow: null, // Allmeta has no workflow resource; analyzer needs actions+events
+    workflow: [], // Allmeta has no workflow resource; backfilled from snapshot in fetchDomainOntology
     source: "allmeta",
   };
 }
@@ -260,7 +295,17 @@ async function fetchAllmetaOntology(domainId: string): Promise<DomainOntology | 
  */
 export async function fetchDomainOntology(domainId: string): Promise<DomainOntology> {
   const live = await fetchAllmetaOntology(domainId);
-  if (live) return live;
+  if (live) {
+    // Allmeta exposes no workflow resource, so a live read carries no
+    // workflow. Backfill the domain's workflow definitions from the in-repo
+    // snapshot when one exists — so the workflow count is correct whether the
+    // domain is served live (Allmeta) or offline (snapshot).
+    if (live.workflow.length === 0) {
+      const snapWf = loadSnapshotWorkflow(domainId);
+      if (snapWf.length) live.workflow = snapWf;
+    }
+    return live;
+  }
   if (hasSnapshot(domainId)) return loadSnapshotOntology(domainId);
   return {
     domainId,
@@ -268,7 +313,25 @@ export async function fetchDomainOntology(domainId: string): Promise<DomainOntol
     rules: [],
     actions: [],
     events: [],
-    workflow: null,
+    workflow: [],
     source: "snapshot",
   };
+}
+
+/**
+ * Ontology source for the RUNNABLE-PACK surfaces (Ontology Generator infer +
+ * Workflow canvas + agent derivation). A domain that ships an in-repo snapshot
+ * IS a runnable pack, and that snapshot is authoritative: the registered Inngest
+ * functions (server/inngest/domains/*), the curated Chinese workflow labels, and
+ * the rule-check executor are all built from it. Live Allmeta can carry a richer
+ * but NON-runnable design — e.g. 费控 ships a 14-action runnable snapshot while
+ * Allmeta holds a 25-action draft with no registered functions. Reading live on
+ * these surfaces is what made the canvas show English (labels keyed to snapshot
+ * names) and the generator emit 0 agents (infer's live keys never matched the
+ * snapshot-derived generate step). So: snapshot-shipping domain → snapshot;
+ * everything else → live Allmeta (`fetchDomainOntology`).
+ */
+export async function fetchRunnableOntology(domainId: string): Promise<DomainOntology> {
+  if (hasSnapshot(domainId)) return loadSnapshotOntology(domainId);
+  return fetchDomainOntology(domainId);
 }

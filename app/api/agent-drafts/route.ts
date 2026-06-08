@@ -1,14 +1,19 @@
 // GET /api/agent-drafts?domain=X            — manageable agents in a domain
 // GET /api/agent-drafts?domain=X&recycled=1 — the recycle bin (archived) instead
 //
-// Returns BOTH ontology-generated shells AND the domain's real production agents
-// (AGENT_MAP) merged with any lifecycle override, so the Fleet「部署智能体」store
-// can manage all of them (deploy / online / offline / 放回草稿 / 删除→回收站 /
-// 恢复). Soft-deleted agents (status='archived') live in the recycle bin.
+// Returns BOTH ontology-generated shells AND the domain's REAL production agents
+// merged with any lifecycle override, so the Fleet「部署智能体」store can manage
+// all of them (deploy / online / offline / 放回草稿 / 删除→回收站 / 恢复).
+// Soft-deleted agents (status='archived') live in the recycle bin.
+//
+// "Real production agents" = AGENT_MAP entries that map to a registered Inngest
+// function (hasRealInngestFn → carry an inngestId). The legacy design-era roster
+// (stub/unbuilt AGENT_MAP entries, e.g. ReqSync/Clarifier/…) is intentionally
+// EXCLUDED so the panel reflects the agents we actually have, not the old DAG.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
-import { AGENT_MAP, displayName as agentDisplayName } from "@/lib/agent-mapping";
+import { AGENT_MAP, displayName as agentDisplayName, hasRealInngestFn } from "@/lib/agent-mapping";
 import {
   ONTOLOGY_GEN_SOURCE,
   REAL_AGENT_SOURCE,
@@ -65,8 +70,12 @@ export async function GET(req: Request) {
   }
 
   // 2. Real production agents (AGENT_MAP) for the domain, merged with overrides.
+  //    Only agents backed by a registered Inngest function (hasRealInngestFn) are
+  //    listed — the legacy design-era roster (stub/unbuilt shorts) is skipped so
+  //    the panel shows exactly the agents we actually have.
   for (const a of AGENT_MAP) {
     if (a.short === "Chatbot") continue;
+    if (!hasRealInngestFn(a.short)) continue;
     if (domainParam && a.domain !== domainParam) continue;
     const ov = overrideByKey.get(`${a.domain}::${a.short}`);
     const status: DraftLifecycle = (ov?.status as DraftLifecycle) ?? "active"; // no override → live

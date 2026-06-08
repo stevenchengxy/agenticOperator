@@ -74,6 +74,12 @@ export type WorkflowNode = {
   x: number;
   y: number;
   title: string;
+  /**
+   * Optional Chinese display label for generated (non-recruitment) nodes whose
+   * ontology only carries an English `name`. Recruitment nodes leave this unset
+   * and localize via the `display_<short>` i18n keys instead.
+   */
+  titleZh?: string;
   sub: string;
   icon: IcName;
   /**

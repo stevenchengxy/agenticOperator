@@ -12,6 +12,7 @@
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { byShortFunction } from "@/lib/agent-functions";
 import { displayNameFor } from "@/lib/agent-display-names";
+import { classifyStep } from "./step-classify";
 
 // Localize any agent identifier (short / inngest id / app-prefixed slug) to its
 // Chinese business name. The LLM only ever SEES business names, so it can only
@@ -59,7 +60,16 @@ function buildRealTopology(involved: Set<string>): string[] {
 export type AgentBreakdownRow = {
   agentName: string;
   steps: number;
+  /** Terminal failures = infraFailed + businessFailed. */
   failed: number;
+  /** Failures caused by infrastructure (gateway/graph/timeout/retry) — NOT a
+   *  candidate result. Surfaced separately so the summary never frames these as
+   *  "候选人未通过". */
+  infraFailed: number;
+  /** Failures that reflect a real business decision (e.g. a written 判定=未通过). */
+  businessFailed: number;
+  /** Steps that failed once but succeeded on retry (transient, recovered). */
+  recovered: number;
   totalDurationMs: number;
   lastNarrative: string | null;
 };
@@ -71,10 +81,15 @@ export const SYSTEM_PROMPT = `你是 Agentic Operator 的运行报告生成器�
 1. 智能体一律用**中文业务名称**（如 规则校验、简历匹配、面试邀约）。**严禁**出现函数 slug（如 \`agentic-operator-main-rule-check-agent\`）、英文代号（如 RuleCheck）、或任何编造的名字（如 \`JD_Writer\`）。只能用输入里出现过的名称、事件名与数字。
 2. 输入的「工作流拓扑」段落已给出**真实的下游订阅关系**——必须据此描述路径。**不得声称拓扑未知/不完整**，也不得索取更多拓扑或配置数据。
 3. 若「各 Agent 明细」为空，只简述可见的元信息（触发事件 / 状态 / 耗时），不要伪造路径，也不要给任何系统内部建议。
+4. **区分两类失败，绝不混淆**：
+   - **基础设施故障**（输入标注 \`基础设施故障\`：网关 / 大模型额度 / 图谱不可用 / 超时 / 工具循环 / 重试）——这是系统侧的临时故障，**不是候选人的评估结论**。系统会自动重试或挂起重放。**严禁**把它表述为"候选人规则校验未通过 / 候选人被拒"。应表述为"规则校验因基础设施故障临时挂起，已自动重试/重放，候选人未被拒绝"。
+   - **业务失败**（输入标注 \`业务失败\`，或活动里明确写出"判定=未通过 / 不符合规则"）——这才是真实的候选人结论，可以说"候选人规则校验未通过"。
+   - 输入标注"重试后成功"的环节属于**已恢复**，**不算失败**。
+   - 当输入未出现任何"业务失败"标注时，**不得**断言候选人规则校验未通过。
 
 格式（Markdown）：
 ## 概述
-（1~2 句：触发事件 / 总耗时 / 整体结果 / 当前阶段。基于实际数据。）
+（1~2 句：触发事件 / 总耗时 / 整体结果 / 当前阶段。基于实际数据。整体结果要区分"候选人业务结论"与"基础设施故障"——基础设施故障且已重试/重放的，应说明系统波动已自动恢复、候选人未受影响。）
 
 ## 工作流路径
 用 → 串起本次实际激活的智能体（中文名）；用 ⊘ 标出拓扑里应触发但本次未激活的下游智能体；若已到流程终点则说明。停滞原因用 suspendedReason 或失败环节，不要猜。
@@ -83,10 +98,10 @@ export const SYSTEM_PROMPT = `你是 Agentic Operator 的运行报告生成器�
 每个激活的智能体 1~2 行：业务角色 + 本次具体做了什么（用 narrative）。
 
 ## 异常 / 关注点
-列出失败 / 错误 / 异常，没有就写 "未发现异常"。
+分别列出：**业务失败**（真实候选人结论）与**基础设施故障**（系统侧临时故障，已重试/重放，候选人未被拒绝）。重试后已恢复的环节注明"已恢复"。没有任何异常就写 "未发现异常"。
 
 ## 下一步建议
-1~2 条**面向业务结果**的建议——围绕候选人 / 职位 / 匹配 / 面试 / 推荐包的下一步动作（例如：建议人工复核该候选人规则校验未通过的原因、确认是否进入面试邀约、补齐推荐包缺失字段）。
+1~2 条**面向业务结果**的建议——围绕候选人 / 职位 / 匹配 / 面试 / 推荐包的下一步动作（例如：确认候选人是否进入面试邀约、补齐推荐包缺失字段；**仅当**存在真实"业务失败"时，才建议人工复核候选人规则校验未通过的原因）。若本次仅为基础设施故障，建议关注依赖健康 / 等待自动重放，**不要**让运营去复核候选人。
 **严禁**任何关于本系统内部数据完整性、拓扑配置、事件分发、活动日志 / AgentActivity 接入、AO 系统配置的建议——这些不是用户关心的内容，出现即视为输出失败。
 
 总长度 250~400 字。简洁、诚实、业务导向。`;
@@ -114,6 +129,7 @@ export function buildUserPrompt(
     status: string;
     error: string | null;
     durationMs: number | null;
+    attempts?: number | null;
   }>,
   activities: Array<{ agentName: string; type: string; narrative: string }>,
   opts?: BuildUserPromptOpts,
@@ -143,21 +159,63 @@ export function buildUserPrompt(
   lines.push(...buildRealTopology(involved));
   lines.push("");
 
+  // Classify every step once so we can describe failures honestly (infra vs
+  // business) and not count retry-recoveries as failures.
+  const classified = steps.map((s) => ({ s, c: classifyStep(s) }));
+  const infraFails = classified.filter(({ c }) => c.outcome === "infra-failed");
+  const bizFails = classified.filter(({ c }) => c.outcome === "business-failed");
+  const recovered = classified.filter(({ c }) => c.outcome === "recovered");
+
+  // Run-level directive — the most important framing signal. When the only
+  // failures are infrastructure (no business failure anywhere), tell the model
+  // explicitly NOT to report a candidate rejection.
+  if (infraFails.length > 0 && bizFails.length === 0) {
+    lines.push(
+      "⚠ 失败性质：本次所有失败均为【基础设施故障】（网关/大模型额度/图谱/超时/工具循环/重试），系统已自动重试或挂起重放，**候选人未被拒绝**。严禁表述为“候选人规则校验未通过”。",
+    );
+    lines.push("");
+  } else if (bizFails.length > 0) {
+    lines.push(
+      "⚠ 失败性质：存在【业务失败】（真实候选人结论），同时可能伴随基础设施故障——请在总结中分别说明，不要把基础设施故障也算作候选人结论。",
+    );
+    lines.push("");
+  }
+
   lines.push("各 Agent 明细（本次运行）：");
   for (const r of breakdown) {
     const fn = byShortFunction(r.agentName);
     const desc = fn ? ` — ${fn.summary}` : "";
+    const failBits: string[] = [];
+    if (r.businessFailed > 0) failBits.push(`业务失败 ${r.businessFailed}`);
+    if (r.infraFailed > 0) failBits.push(`基础设施故障 ${r.infraFailed}（已重试/重放）`);
+    if (r.recovered > 0) failBits.push(`重试后成功 ${r.recovered}`);
+    const failStr = failBits.length > 0 ? `, ${failBits.join("、")}` : ", 0 失败";
     lines.push(
-      `- ${zh(r.agentName)}: ${r.steps} 个 step, ${r.failed} 个失败, 共 ${r.totalDurationMs}ms${desc}`,
+      `- ${zh(r.agentName)}: ${r.steps} 个 step${failStr}, 共 ${r.totalDurationMs}ms${desc}`,
     );
     if (r.lastNarrative) lines.push(`    最近: ${r.lastNarrative}`);
   }
   lines.push("");
-  if (steps.some((s) => s.error)) {
-    lines.push("错误：");
-    for (const s of steps.filter((s) => s.error)) {
-      lines.push(`- ${zh(s.nodeId)} (${s.status}): ${s.error}`);
+
+  if (bizFails.length > 0) {
+    lines.push("业务失败（真实候选人结论）：");
+    for (const { s, c } of bizFails) {
+      lines.push(`- ${zh(s.nodeId)}: ${c.message ?? "判定未通过"}`);
     }
+    lines.push("");
+  }
+  if (infraFails.length > 0) {
+    lines.push("基础设施故障（系统侧临时故障，已自动重试/重放，非候选人结论）：");
+    for (const { s, c } of infraFails) {
+      const tries = c.attempts != null && c.attempts > 1 ? `（已尝试 ${c.attempts} 次）` : "";
+      lines.push(`- ${zh(s.nodeId)}${tries}: ${c.message ?? "基础设施故障"}`);
+    }
+    lines.push("");
+  }
+  if (recovered.length > 0) {
+    lines.push(
+      `已恢复：本次有 ${recovered.length} 个环节在重试后成功（曾短暂失败但已恢复），不应视为失败。`,
+    );
     lines.push("");
   }
   // Cap activity log so the prompt stays bounded — last 20 entries are

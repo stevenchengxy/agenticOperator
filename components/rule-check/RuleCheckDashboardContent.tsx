@@ -71,7 +71,7 @@ type MatrixRule = {
 type OntologyRulesResponse = {
   ok: true;
   rules: Array<{ id: string; name?: string; severity?: string; applicableDepartment?: string }>;
-  source: "ontology-api" | "json-fallback";
+  source: "ontology-api" | "json-fallback" | "snapshot";
   fetched_at: string;
   api_error?: string;
 };
@@ -219,7 +219,7 @@ export function RuleCheckDashboardContent() {
         <WindowToggle value={windowDays} onChange={setWindowDays} t={t} />
       </div>
 
-      {/* Fallback warn badge */}
+      {/* Source badge: degraded json fallback (warn) vs authoritative local snapshot (info). */}
       {ontology?.source === "json-fallback" && (
         <div
           className="border border-line rounded inline-flex items-center gap-2"
@@ -234,6 +234,22 @@ export function RuleCheckDashboardContent() {
         >
           <span>⚠</span>
           <span>{t("rc_rules_fallback_warn")}</span>
+        </div>
+      )}
+      {ontology?.source === "snapshot" && (
+        <div
+          className="border border-line rounded inline-flex items-center gap-2"
+          style={{
+            padding: "6px 10px",
+            background: "var(--c-accent-bg)",
+            color: "var(--c-accent)",
+            fontSize: 12,
+            alignSelf: "flex-start",
+          }}
+          title={t("rc_rules_snapshot_detail")}
+        >
+          <span>📦</span>
+          <span>{t("rc_rules_snapshot_info")}</span>
         </div>
       )}
 

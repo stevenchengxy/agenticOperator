@@ -3,15 +3,17 @@ import React from "react";
 import { Badge } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import type { Rule } from "@/lib/rule-check/types";
 
 // Inline minimal shape — the /api/ontology/rules/[ruleId] endpoint returns the
-// live Rule node pulled from the graph engine (or a json fallback).
+// live Rule node pulled from the graph engine, the in-repo snapshot (energy
+// etc.), or a json fallback.
 export type OntologyRuleResponse =
   | {
       ok: true;
       rule: Rule;
-      source: "ontology-api" | "json-fallback";
+      source: "ontology-api" | "json-fallback" | "snapshot";
     }
   | {
       ok: false;
@@ -28,23 +30,27 @@ export type OntologyRuleResponse =
  */
 export function RuleDefinitionPanel({ ruleId }: { ruleId: string }) {
   const { t } = useApp();
+  const { domain } = useDomain();
   const [open, setOpen] = React.useState(false);
   const [data, setData] = React.useState<OntologyRuleResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
-  // Lazy load: fetch on first expand, cache thereafter.
+  // Lazy load: fetch on first expand, cache thereafter. Pass the active domain
+  // so non-recruitment rule ids (energy "41"/"CR-HYD-05") resolve from that
+  // domain's ontology instead of 404-ing against the recruitment rule set.
   React.useEffect(() => {
     if (!open || data || loading) return;
     setLoading(true);
     setErr(null);
+    const dq = domain ? `?domain=${encodeURIComponent(domain)}` : "";
     fetchJson<OntologyRuleResponse>(
-      `/api/ontology/rules/${encodeURIComponent(ruleId)}`,
+      `/api/ontology/rules/${encodeURIComponent(ruleId)}${dq}`,
     )
       .then(setData)
       .catch((e) => setErr((e as Error)?.message || t("rc_rule_def_load_failed")))
       .finally(() => setLoading(false));
-  }, [open, ruleId, data, loading, t]);
+  }, [open, ruleId, domain, data, loading, t]);
 
   return (
     <div
@@ -90,7 +96,7 @@ function RuleDefinitionBody({
   source,
 }: {
   rule: Rule;
-  source: "ontology-api" | "json-fallback";
+  source: "ontology-api" | "json-fallback" | "snapshot";
 }) {
   const { t } = useApp();
   const enforcement = rule.enforcementLevel ?? "optional";
@@ -126,7 +132,9 @@ function RuleDefinitionBody({
           title={
             source === "ontology-api"
               ? t("rc_rule_source_api_detail")
-              : t("rc_rule_source_fallback_detail")
+              : source === "snapshot"
+                ? t("rc_rules_snapshot_detail")
+                : t("rc_rule_source_fallback_detail")
           }
         >
           {t("rc_rule_source_label").replace("{source}", source)}

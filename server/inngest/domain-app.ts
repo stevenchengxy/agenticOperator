@@ -16,7 +16,9 @@ import { prisma } from "@/server/db";
 import { ensureWorkflowRun, markRunComplete, createAgentLogger } from "@/server/agent-logger";
 import { getInngestUrl } from "@/lib/inngest-url";
 import { ONTOLOGY_GEN_SOURCE } from "@/lib/ontology-generator/draft-store";
-import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
+import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID } from "@/lib/domain-ids";
+import { buildEnergyFunctions } from "@/server/inngest/domains/energy";
+import { buildCostControlFunctions } from "@/server/inngest/domains/feikong";
 import type { ShellCardData } from "@/lib/ontology-generator/types";
 
 // The `raas` (业务领域) domain is ALREADY served by the main app
@@ -92,13 +94,21 @@ function makeShellFunction(client: Inngest, domain: string, shell: ShellRow, car
   );
 }
 
-/** Build the live stub functions for a domain from its DEPLOYED shells. */
+/** Build the live functions for a domain from its DEPLOYED agents. */
 async function buildDomainFunctions(client: Inngest, domain: string) {
   // raas is served by agentic-operator-main, not a per-domain app.
   if (domain === MAIN_DOMAIN) return [];
   const app = await prisma.domainInngestApp.findUnique({ where: { domain } });
   // Offline (or never registered) → serve zero functions.
   if (!app || app.status !== "online") return [];
+
+  // Energy + 费控 ship REAL runnable agent packs (the make-agent factory:
+  // deterministic rule-check agents + HITL human gates + LLM agents). Serve those
+  // on the domain's own client — NOT the sleep+emit shells below — so each runs
+  // for real in its OWN app (agentic-operator-<domain>) without ever polluting the
+  // recruitment main app.
+  if (domain === ENERGY_DOMAIN_ID) return buildEnergyFunctions(client);
+  if (domain === COST_CONTROL_DOMAIN_ID) return buildCostControlFunctions(client);
 
   const shells = await prisma.agentVersion.findMany({
     where: { capturedFrom: ONTOLOGY_GEN_SOURCE, domain, status: "active" },

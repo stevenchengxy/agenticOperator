@@ -1,0 +1,880 @@
+[
+  {
+    "name": "EXPENSE_SUBMITTED",
+    "description": "触发条件：报销人在启费通把报销单（出差报销 ECA / 普通报销 OEP）从 DRAFT 提交。系统动作：智控建案，一对一生成费控审核案件（FK），落库报销单及明细行快照，单据进 OCR。伴随状态变化：报销单与案件从 DRAFT/SUBMITTED 推进至 OCR_RUNNING。",
+    "payload": {
+      "source_action": "submitExpenseClaim",
+      "event_data": [
+        {
+          "name": "expense_claim_id",
+          "type": "String",
+          "target_object": "Expense_Claim"
+        },
+        {
+          "name": "claim_type",
+          "type": "String",
+          "target_object": "Expense_Claim"
+        },
+        {
+          "name": "claimant_employee_id",
+          "type": "String",
+          "target_object": "Employee"
+        },
+        {
+          "name": "total_amount",
+          "type": "Float",
+          "target_object": "Expense_Claim"
+        },
+        {
+          "name": "submit_result",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "expense_claim_id",
+            "total_amount",
+            "total_payable_amount",
+            "claim_snapshot",
+            "status",
+            "audit_timeline",
+            "create_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Claim",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "expense_claim_id",
+            "claimant_employee_id",
+            "department_id",
+            "cost_center_id",
+            "expense_audit_case_id",
+            "claim_type",
+            "total_amount",
+            "status",
+            "submit_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Claim_Line",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "expense_claim_line_id",
+            "expense_claim_id",
+            "expense_category_id",
+            "invoice_id",
+            "expense_date",
+            "amount",
+            "payable_amount",
+            "remark"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "OCR_COMPLETED",
+    "description": "触发条件：票夹云对报销单关联票据的 OCR 识别完成且关键字段置信度达标。系统动作：票面字段结构化落库、置信度打分，明细行金额按发票价税合计回填对齐。伴随状态变化：案件从 OCR_RUNNING 推进至 VALIDATING。",
+    "payload": {
+      "source_action": "runInvoiceOCR",
+      "event_data": [
+        {
+          "name": "invoice_id",
+          "type": "String",
+          "target_object": "Invoice"
+        },
+        {
+          "name": "ocr_confidence",
+          "type": "Float",
+          "target_object": "Invoice"
+        },
+        {
+          "name": "ocr_result",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Invoice",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "invoice_id",
+            "invoice_type",
+            "invoice_number",
+            "issue_date",
+            "total_amount_with_tax",
+            "tax_amount",
+            "ocr_confidence",
+            "source"
+          ]
+        },
+        {
+          "target_object": "Expense_Claim_Line",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "expense_claim_line_id",
+            "expense_claim_id",
+            "invoice_id",
+            "expense_date",
+            "amount",
+            "payable_amount"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "OCR_FAILED",
+    "description": "触发条件：票据影像糊、票种不支持或关键字段置信度 < 0.95，runInvoiceOCR 无法可靠结构化票面。系统动作：将发票标记为低置信/待人工校正，进入影像岗与审核员的人工校正口子，等待 fixInvoice 修复或退回重传。伴随状态变化：案件停在 OCR_RUNNING 等待人工兜底，不向 VALIDATING 推进。",
+    "payload": {
+      "source_action": "runInvoiceOCR",
+      "event_data": [
+        {
+          "name": "invoice_id",
+          "type": "String",
+          "target_object": "Invoice"
+        },
+        {
+          "name": "ocr_confidence",
+          "type": "Float",
+          "target_object": "Invoice"
+        },
+        {
+          "name": "error_code",
+          "type": "Enum",
+          "target_object": null
+        },
+        {
+          "name": "error_message",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Invoice",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "invoice_id",
+            "invoice_type",
+            "invoice_number",
+            "ocr_confidence",
+            "verification_status",
+            "source"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "VALIDATION_COMPLETED",
+    "description": "触发条件：四组规则（INV→STD→CMP→BUD）按序跑完。系统动作：生成规则校验结果与核减建议，回写命中清单与核减后可报金额，伴随 FA-03 冻结 / FA-01 占用。伴随状态变化：案件从 VALIDATING 推进至 VALIDATED。",
+    "payload": {
+      "source_action": "validateExpenseRules",
+      "event_data": [
+        {
+          "name": "validation_result_id",
+          "type": "String",
+          "target_object": "Validation_Result"
+        },
+        {
+          "name": "overall_conclusion",
+          "type": "String",
+          "target_object": "Validation_Result"
+        },
+        {
+          "name": "total_suggested_deduction",
+          "type": "Float",
+          "target_object": "Validation_Result"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Validation_Result",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "validation_result_id",
+            "expense_audit_case_id",
+            "hit_rule_id",
+            "overall_conclusion",
+            "total_suggested_deduction",
+            "payable_after_deduction",
+            "suggested_action",
+            "validation_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "total_payable_amount",
+            "status",
+            "hit_rule_list",
+            "audit_timeline"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "ANOMALY_DETECTED",
+    "description": "触发条件：四组规则校验过程中命中风险类规则。系统动作：生成风险事件 RK 并定类（T1–T8）定级（L1–L4），落证据与命中规则，等待处置或转 SUSPENDED。伴随状态变化：案件挂上 RK，命中 L3/L4 时可能进 SUSPENDED 暂停付款。",
+    "payload": {
+      "source_action": "validateExpenseRules",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "risk_type",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "risk_event_id",
+            "expense_audit_case_id",
+            "expense_claim_id",
+            "hit_rule_id",
+            "risk_type",
+            "risk_level",
+            "evidence",
+            "status",
+            "raised_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "BUDGET_OCCUPIED",
+    "description": "触发条件：规则校验通过且对应成本中心×科目×期间预算可用余额充足。系统动作：调预算通占用额度生成 BG 号（FA-01 占用 / FA-03 冻结），扣减预算可用余额并登记财务动作。伴随状态变化：主线照走，预算六字段更新，可用余额减少。",
+    "payload": {
+      "source_action": "occupyBudget",
+      "event_data": [
+        {
+          "name": "budget_occupation_id",
+          "type": "String",
+          "target_object": "Budget_Occupation"
+        },
+        {
+          "name": "occupation_amount",
+          "type": "Float",
+          "target_object": "Budget_Occupation"
+        },
+        {
+          "name": "occupation_result",
+          "type": "String",
+          "target_object": "Budget_Occupation"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Budget_Occupation",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "budget_occupation_id",
+            "budget_id",
+            "expense_audit_case_id",
+            "occupation_amount",
+            "action_type",
+            "occupation_period",
+            "occupation_result",
+            "available_before",
+            "available_after",
+            "status",
+            "occupation_time"
+          ]
+        },
+        {
+          "target_object": "Budget",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "budget_id",
+            "occupied_amount",
+            "frozen_amount",
+            "available_amount"
+          ]
+        },
+        {
+          "target_object": "Financial_Action",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "budget_id",
+            "action_type",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "BUDGET_INSUFFICIENT",
+    "description": "触发条件：占用时对应成本中心×科目×期间预算可用余额不足。系统动作：占用失败，升风险 T5（预算超支）并把审批建议升级一级，把原本要直通的单子拽去转人工，案件转人工原因标签打 `超预算`。伴随状态变化：占用记录置预算不足，案件改走 MANUAL_REVIEW。",
+    "payload": {
+      "source_action": "occupyBudget",
+      "event_data": [
+        {
+          "name": "budget_occupation_id",
+          "type": "String",
+          "target_object": "Budget_Occupation"
+        },
+        {
+          "name": "occupation_result",
+          "type": "String",
+          "target_object": "Budget_Occupation"
+        },
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Budget_Occupation",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "budget_occupation_id",
+            "budget_id",
+            "expense_audit_case_id",
+            "occupation_amount",
+            "action_type",
+            "occupation_result",
+            "available_before",
+            "available_after",
+            "status"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "risk_event_id",
+            "expense_audit_case_id",
+            "expense_claim_id",
+            "hit_rule_id",
+            "risk_type",
+            "risk_level",
+            "evidence",
+            "status",
+            "raised_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "APPROVAL_SUGGESTION_GENERATED",
+    "description": "触发条件：校验结果、风险事件与预算占用结果三者齐备。系统动作：汇总生成审批建议（建议核准 / 降额 / 退回 / 驳回），算出核减后可报金额与审批路由方案、层级数，喂给分流判断。伴随状态变化：审批建议挂上案件，等待分流（直通 vs 转人工）。",
+    "payload": {
+      "source_action": "generateApprovalSuggestion",
+      "event_data": [
+        {
+          "name": "approval_recommendation_id",
+          "type": "String",
+          "target_object": "Approval_Recommendation"
+        },
+        {
+          "name": "recommended_action",
+          "type": "String",
+          "target_object": "Approval_Recommendation"
+        },
+        {
+          "name": "payable_amount",
+          "type": "Float",
+          "target_object": "Approval_Recommendation"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Approval_Recommendation",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "approval_recommendation_id",
+            "expense_audit_case_id",
+            "recommended_action",
+            "payable_amount",
+            "routing_plan",
+            "routing_level_count",
+            "dispatch_decision",
+            "is_escalated",
+            "generated_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "AUTO_APPROVED",
+    "description": "触发条件：直通五条件全满足（合计 ≤ 20000、单票价税合计 ≤ 5000、无 L2 及以上风险、OCR 关键字段置信度 ≥ 0.95 且验真通过、预算占用成功）。系统动作：自动核准，按建议核准方案直接推审批流，无需人工介入。伴随状态变化：案件从 VALIDATED 推进至 AUTO_APPROVED。",
+    "payload": {
+      "source_action": "routeOrAutoApprove",
+      "event_data": [
+        {
+          "name": "dispatch_decision",
+          "type": "String",
+          "target_object": "Approval_Recommendation"
+        },
+        {
+          "name": "payable_amount",
+          "type": "Float",
+          "target_object": "Approval_Recommendation"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "total_payable_amount",
+            "status",
+            "audit_timeline"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "ROUTED_TO_MANUAL",
+    "description": "触发条件：金额超阈 / 命中中高风险 / OCR 低置信 / 预算不足（任一），最主要的是金额超阈。系统动作：进人工复核工作台，按触发原因打转人工原因标签（可多个），按分案规则派给审核员，起 SLA 倒计时。伴随状态变化：案件从 VALIDATED 推进至 MANUAL_REVIEW。",
+    "payload": {
+      "source_action": "routeOrAutoApprove",
+      "event_data": [
+        {
+          "name": "dispatch_decision",
+          "type": "String",
+          "target_object": "Approval_Recommendation"
+        },
+        {
+          "name": "manual_review_reason",
+          "type": "String",
+          "target_object": "Expense_Audit_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "assignee_employee_id",
+            "status",
+            "manual_review_reason",
+            "sla_deadline",
+            "audit_timeline"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MANUAL_CONFIRMED",
+    "description": "触发条件：费控审核员在人工复核工作台核对无误后点确认。系统动作：复核通过，把单子推进至审批流。伴随状态变化：案件从 MANUAL_REVIEW 推进至 REVIEWED。",
+    "payload": {
+      "source_action": "manualReview",
+      "event_data": [
+        {
+          "name": "review_result",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "assignee_employee_id",
+          "type": "String",
+          "target_object": "Employee"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "assignee_employee_id",
+            "total_payable_amount",
+            "status",
+            "audit_timeline"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RETURNED_FOR_FIX",
+    "description": "触发条件：审核员判定单子改改还能报（字段缺失 / 票据不清 / 信息待补）而点退回。系统动作：单子回 DRAFT 让员工改了重提（老 FK 关闭并链上、生成新 FK），释放此前冻结额度（FA-02 释放冻结）。伴随状态变化：案件进 RETURNED（非终态），伴随 FA-02 释放冻结。",
+    "payload": {
+      "source_action": "manualReview",
+      "event_data": [
+        {
+          "name": "return_reason",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "assignee_employee_id",
+          "type": "String",
+          "target_object": "Employee"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "assignee_employee_id",
+            "status",
+            "audit_timeline"
+          ]
+        },
+        {
+          "target_object": "Financial_Action",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "budget_id",
+            "action_type",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "REJECTED",
+    "description": "触发条件：审核员或主管判定单子压根不能报而点驳回。系统动作：终态处理，释放预算（FA-02 释放预算）并将报销单作废（VOID），不可重提。伴随状态变化：案件进 REJECTED / 报销单 VOID，伴随 FA-02 释放预算。",
+    "payload": {
+      "source_action": "manualReview",
+      "event_data": [
+        {
+          "name": "reject_reason",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "assignee_employee_id",
+          "type": "String",
+          "target_object": "Employee"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "assignee_employee_id",
+            "status",
+            "audit_timeline"
+          ]
+        },
+        {
+          "target_object": "Financial_Action",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "budget_id",
+            "action_type",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "APPROVAL_PASSED",
+    "description": "触发条件：启流BPM 审批流逐级跑到末级、各级审批人审批通过。系统动作：审批流实例置 APPROVED，触发回写 ERP（生成 YF/PZ）。伴随状态变化：案件与报销单从 APPROVING 推进至 APPROVED。",
+    "payload": {
+      "source_action": "runApprovalFlow",
+      "event_data": [
+        {
+          "name": "approval_instance_id",
+          "type": "String",
+          "target_object": "Approval_Instance"
+        },
+        {
+          "name": "approval_result",
+          "type": "String",
+          "target_object": "Approval_Instance"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Approval_Instance",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "approval_instance_id",
+            "expense_claim_id",
+            "approver_employee_id",
+            "current_node",
+            "approval_chain",
+            "status",
+            "approval_comments",
+            "complete_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Claim",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_claim_id",
+            "approval_instance_id",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "ERP_POSTED",
+    "description": "触发条件：审批通过后启账ERP 完成应付单 / 记账凭证生成。系统动作：生成应付单与记账凭证、专票进项认证抵扣并回写总账（FA-04/05/06/09），写回 ERP 凭证号。伴随状态变化：案件与报销单从 APPROVED 推进至 PENDING_PAYMENT（FA-09 后进 POSTED）。",
+    "payload": {
+      "source_action": "postToERP",
+      "event_data": [
+        {
+          "name": "financial_action_id",
+          "type": "String",
+          "target_object": "Financial_Action"
+        },
+        {
+          "name": "erp_voucher_no",
+          "type": "String",
+          "target_object": "Financial_Action"
+        },
+        {
+          "name": "post_result",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Financial_Action",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "cost_center_id",
+            "expense_category_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "erp_voucher_no",
+            "status",
+            "action_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Claim",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_claim_id",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "PAYMENT_INITIATED",
+    "description": "触发条件：待付款单据生成支付指令。系统动作：资金组经银企直连发起付款生成 PAY（FA-07 发起支付），登记付款方向的财务动作。伴随状态变化：案件与报销单从 PENDING_PAYMENT 推进至 PAYING。",
+    "payload": {
+      "source_action": "initiatePayment",
+      "event_data": [
+        {
+          "name": "financial_action_id",
+          "type": "String",
+          "target_object": "Financial_Action"
+        },
+        {
+          "name": "related_document",
+          "type": "String",
+          "target_object": "Financial_Action"
+        },
+        {
+          "name": "payment_result",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Financial_Action",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "PAYMENT_COMPLETED",
+    "description": "触发条件：银行回单确认款项已付。系统动作：回写支付完成回执（FA-08 支付完成回执），登记收/付方向财务动作。伴随状态变化：案件与报销单从 PAYING 推进至 PAID。",
+    "payload": {
+      "source_action": "confirmPayment",
+      "event_data": [
+        {
+          "name": "financial_action_id",
+          "type": "String",
+          "target_object": "Financial_Action"
+        },
+        {
+          "name": "payment_completed",
+          "type": "Boolean",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Financial_Action",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "financial_action_id",
+            "expense_audit_case_id",
+            "action_type",
+            "related_document",
+            "amount",
+            "direction",
+            "operator",
+            "status",
+            "action_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Claim",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_claim_id",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RISK_EVENT_RAISED",
+    "description": "触发条件：风险事件登记且定级 L3/L4。系统动作：进稽核 / 内审待办，暂停付款（L4 强制移送稽核），登记处置人与移送标记。伴随状态变化：案件进 SUSPENDED 暂停付款，等风险闭环后回到暂停前状态或坐实后 REJECTED/VOID。",
+    "payload": {
+      "source_action": "disposeRiskEvent",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "risk_event_id",
+            "expense_audit_case_id",
+            "disposer_employee_id",
+            "disposal_action",
+            "status",
+            "is_payment_suspended",
+            "is_escalated_to_audit",
+            "raised_time"
+          ]
+        },
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "status",
+            "audit_timeline"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "AUDIT_ARCHIVED",
+    "description": "触发条件：全流程结束、款项已付且总账回写完成。系统动作：单据与审计日志归档票夹云，案件审计时间线封档。伴随状态变化：案件与报销单从 POSTED 推进至 ARCHIVED（终态）。",
+    "payload": {
+      "source_action": "archiveCase",
+      "event_data": [
+        {
+          "name": "expense_audit_case_id",
+          "type": "String",
+          "target_object": "Expense_Audit_Case"
+        },
+        {
+          "name": "archive_result",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Expense_Audit_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "expense_audit_case_id",
+            "status",
+            "claim_snapshot",
+            "audit_timeline"
+          ]
+        }
+      ]
+    }
+  }
+]

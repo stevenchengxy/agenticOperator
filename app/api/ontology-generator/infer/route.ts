@@ -9,7 +9,7 @@
 
 import { NextResponse } from "next/server";
 import { inferAgents, buildInferResult } from "@/lib/ontology-generator/infer";
-import { fetchDomainOntology } from "@/lib/ontology-generator/ontology-source";
+import { fetchRunnableOntology } from "@/lib/ontology-generator/ontology-source";
 import { DEFAULT_DOMAIN_ID } from "@/lib/ontology-generator/profiles";
 
 export const dynamic = "force-dynamic";
@@ -28,11 +28,13 @@ export async function POST(req: Request) {
   } catch {
     // empty / invalid body → default domain
   }
-  // Read the domain's REAL ontology (live Allmeta/Neo4j → snapshot). If it has
-  // actions, derive candidates from them — so selecting any deployed domain
-  // shows ITS real ontology. Only domains with no ontology at all fall back to
-  // the legacy curated profile.
-  const onto = await fetchDomainOntology(domainId);
+  // Read the domain's RUNNABLE ontology: a snapshot-shipping domain (energy /
+  // 费控) is a runnable pack whose snapshot is authoritative — infer must read
+  // it, not the richer-but-non-runnable live Allmeta draft, so the candidates
+  // line up 1:1 with what the generate step deploys (and what actually runs).
+  // Domains with no snapshot read live Allmeta. Only a domain with no ontology
+  // at all falls back to the legacy curated profile.
+  const onto = await fetchRunnableOntology(domainId);
   if (onto.actions.length > 0) {
     return NextResponse.json(buildInferResult(onto));
   }
