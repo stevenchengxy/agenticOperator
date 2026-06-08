@@ -229,6 +229,21 @@ const INTERVIEW_INVITATION_FAILED_v1 = envelope(
 
 // ── Registrations ─────────────────────────────────────────────────────────
 
+// 2026-06-08 — 候选人锁定冲突 (RMHR uploadByRecruiterEmail 返回他人锁定/保护/黑名单)。
+// resumeParserAgent 在 lock-only 时发,中止该上传者的下游匹配,路由到 HSM·仲裁台。
+const RESUME_LOCKED_CONFLICT_v1 = envelope(
+  z.object({
+    upload_id: z.string().optional(),
+    candidate_id: z.string().optional(),
+    resume_id: z.string().optional(),
+    current_owner_employee_id: z.string().nullable().optional(),
+    current_owner_email: z.string().nullable().optional(),
+    lock_state: z.number().nullable().optional(),
+    lock_time: z.string().nullable().optional(),
+    reason: z.string().optional(),
+  }).passthrough(),
+);
+
 export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
   {
     name: "REQUIREMENT_LOGGED",
@@ -253,6 +268,13 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
       "ao.ruleCheckAgent",
       "raas-backend.resume-processed-ingest",
     ],
+  },
+  {
+    name: "RESUME_LOCKED_CONFLICT",
+    description: "上传时检测到候选人已被他人锁定/保护/黑名单(公司 RMHR);lock-only,中止下游匹配",
+    versions: [{ version: "1.0", schema: RESUME_LOCKED_CONFLICT_v1 }],
+    publishers: ["ao.resumeParserAgent"],
+    subscribers: ["hsm.lock-arbitrate"],
   },
   {
     name: "MATCH_RULE_CHECK_PASSED",

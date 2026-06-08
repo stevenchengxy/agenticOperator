@@ -8,7 +8,7 @@
 // See docs/superpowers/specs/2026-06-05-external-dependency-health-design.md.
 
 /** Which paid dependency the signal is about. */
-export type DepProvider = 'robohire' | 'llm';
+export type DepProvider = 'robohire' | 'llm' | 'rmhr';
 
 /**
  * The machine-readable cause, derived from the vendor's response. This is the

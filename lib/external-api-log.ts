@@ -37,7 +37,7 @@ function dayStamp(): string {
   return `${y}-${m}-${day}`;
 }
 
-export type ApiLogCategory = 'robohire' | 'allmeta' | 'partner-pg';
+export type ApiLogCategory = 'robohire' | 'allmeta' | 'partner-pg' | 'rmhr';
 
 export type ApiLogEntry = {
   category: ApiLogCategory;

@@ -73,10 +73,21 @@ export type SaveCandidateResult = {
 // Helpers
 // ──────────────────────────────────────────────────────────────────────
 
-/** Strip non-digits for dedup key. Returns null if result is too short. */
+/**
+ * Strip non-digits for the dedup key.
+ * Default (flag off): >=7 digits, all digits kept (legacy behavior — unchanged).
+ * DEDUP_PHONE_PRIMARY=1: align to partner / RMHR canon — require >=11 digits and
+ *   return the LAST 11, so country-code / OCR variants collapse to one identity
+ *   (matching how the company RMHR dedups by phone). ⚠️ Enabling changes the
+ *   STORED mobile_normalized too, so existing rows need a one-off backfill before
+ *   phone-only dedup matches them (see P2 in the candidate-lock plan).
+ */
 function normalizeMobile(s: string | null | undefined): string | null {
   if (!s) return null;
   const digits = s.replace(/\D/g, '');
+  if (process.env.DEDUP_PHONE_PRIMARY === '1') {
+    return digits.length >= 11 ? digits.slice(-11) : null;
+  }
   return digits.length >= 7 ? digits : null;
 }
 
@@ -236,11 +247,21 @@ export async function saveCandidateToPartnerPg(
     let candidate_created = false;
 
     if (!candidate_id && mobile_normalized) {
+      // DEDUP_PHONE_PRIMARY=1 → phone is the sole identity key (drop `AND name`),
+      // matching RMHR's phone-only dedup so its returned lock owner maps 1:1 onto
+      // one AO candidate row. Flag off → legacy (mobile + exact name). The
+      // email+name fallback tier below is left UNTOUCHED (it closed the
+      // 2026-05-26 placeholder/test-email merge bug).
+      const phonePrimary = process.env.DEDUP_PHONE_PRIMARY === '1';
       const existing = await c.query<{ candidate_id: string }>(
-        `SELECT candidate_id FROM candidate
-          WHERE mobile_normalized = $1 AND name = $2
-          ORDER BY created_at ASC LIMIT 1`,
-        [mobile_normalized, name],
+        phonePrimary
+          ? `SELECT candidate_id FROM candidate
+              WHERE mobile_normalized = $1
+              ORDER BY created_at ASC LIMIT 1`
+          : `SELECT candidate_id FROM candidate
+              WHERE mobile_normalized = $1 AND name = $2
+              ORDER BY created_at ASC LIMIT 1`,
+        phonePrimary ? [mobile_normalized] : [mobile_normalized, name],
       );
       candidate_id = existing.rows[0]?.candidate_id ?? null;
     }

@@ -49,6 +49,7 @@ export function judgeDependency(failures: DepFailure[], t: MonitorThresholds): J
 const PROVIDER_LABEL: Record<DepFailure['provider'], string> = {
   robohire: 'RoboHire',
   llm: 'AI 网关',
+  rmhr: '简历锁定 (RMHR)',
 };
 // Source must match server/notifications/derive.ts INFRA_SOURCES so the alert is
 // routed to the always-visible 系统 lane (an infra outage shouldn't hide behind a
@@ -56,6 +57,7 @@ const PROVIDER_LABEL: Record<DepFailure['provider'], string> = {
 const PROVIDER_SOURCE: Record<DepFailure['provider'], string> = {
   robohire: 'RoboHire',
   llm: 'LLM 网关',
+  rmhr: 'RMHR',
 };
 const OP_LABEL: Record<string, string> = {
   parseResume: '简历解析',

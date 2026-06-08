@@ -36,6 +36,7 @@ export type LockOutcomeReason =
 /** What the dumb persistence port writes. Pre-computed; port does NOT derive anything. */
 export interface LockRecord {
   candidateId: string;
+  uploadId: string | null;         // ingestion event id — idempotency guard for replay
   rmhrResumeId: string | null;
   lockState: number | null;        // LockState numeric, or null when no successful snapshot
   blacklisted: boolean;

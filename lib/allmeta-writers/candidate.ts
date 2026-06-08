@@ -24,6 +24,15 @@ export type WriteCandidateInput = {
   employee_id?: string | null;
   /** RoboHire parse-resume `data` object (or partner pre-parsed JSON). */
   parsed: Record<string, unknown>;
+  // Candidate-lock mirror (2026-06-08, P4). Written ONLY when provided — existing
+  // callers pass none, so compact() drops them and behavior is unchanged. When the
+  // lock owner differs from the uploader, pass employee_id = the lock OWNER (工号).
+  // ⚠️ Activation is partner-gated: confirm AO may write is_locked/lock_start_time
+  // (currently '留 hsm 端填', see ao-to-allmeta.ts) and that Allmeta upserts rather
+  // than replaces the instance, before wiring a caller to pass these.
+  is_locked?: boolean | null;
+  lock_start_time?: string | Date | null;
+  blacklist_status?: string | null;
 };
 
 export type WriteCandidateResult = WriteResult & {
@@ -64,6 +73,14 @@ export async function writeCandidateInstance(
           (p.education[0] as Record<string, unknown>)?.degree,
       ),
     work_years: workYears,
+    // Lock-mirror fields — included only when the caller provides them (P4).
+    ...(input.is_locked !== undefined ? { is_locked: input.is_locked ?? undefined } : {}),
+    ...(input.lock_start_time !== undefined
+      ? { lock_start_time: asIsoDateOrNull(input.lock_start_time) }
+      : {}),
+    ...(input.blacklist_status !== undefined
+      ? { blacklist_status: nonEmptyString(input.blacklist_status) }
+      : {}),
   });
 
   const result = await safeWriteInstance('Candidate', payload);

@@ -31,7 +31,7 @@ import {
   writeCandidateInstance,
   writeResumeInstance,
 } from '@/lib/allmeta-writers';
-import { parseResumeDirect } from '@/lib/robohire-client';
+import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { classifyRobohire } from '@/lib/dependency-health/classify';
 import { reportDependencyDegraded } from '@/lib/dependency-health/report';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
@@ -39,6 +39,7 @@ import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { prisma } from '@/server/db';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
+import { runLockCheck } from '@/lib/candidate-lock/run-lock-check';
 
 // Local alias mirroring the RoboHire parse-resume `data` shape that we
 // historically imported from raas-api-client.ts. After the 2026-05-20
@@ -209,6 +210,25 @@ export const resumeParserAgent = inngest.createFunction(
           // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
           parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId, logger: fileLogger });
         } catch (e) {
+          // Document-content failure (image-only / scanned / corrupt PDF — RoboHire
+          // truthfully reports "no extractable text"). This is NOT a vendor
+          // degradation: do not pollute RoboHire health and do not park-and-retry a
+          // document that will fail identically forever. Mark the upload terminally
+          // failed so partner/RAAS stop re-driving it, then fail the run
+          // NonRetriably with a content-level (not dependency) message.
+          if (e instanceof RobohireApiError && e.code === 'UNPARSEABLE') {
+            try {
+              await markResumeUploadFailed(String(upload_id), e.message);
+            } catch (markErr) {
+              logger.warn(
+                `[resume-persist] markResumeUploadFailed failed: ${(markErr as Error).message}`,
+              );
+            }
+            fileLogger.event('parse.unparseable', { upload_id, error: e.message });
+            throw new NonRetriableError(
+              `简历无法解析(文档无可提取文字)· upload_id=${upload_id}: ${e.message}`,
+            );
+          }
           // Out-of-funds / fault / network — classify, record the dependency
           // signal, and throw (run fails/parks; quota auto-resumes after top-up).
           const oc = classifyRobohire('parseResume', e);
@@ -352,6 +372,29 @@ export const resumeParserAgent = inngest.createFunction(
     // only to surface application_id in downstream events when it's already
     // there; we never mint or write Application rows.
 
+    // ── 5c. RMHR 锁定校验 (candidate-lock alignment, 2026-06-08) ──
+    // 调公司 RMHR uploadByRecruiterEmail(上传+锁定合一)拿当前锁定真相、刷新 AO
+    // 认知并据此放行/拦截。三个 flag 默认全关 → 与 2026-06-08 前行为完全一致:
+    //   LOCK_CHECK_ENABLED 关 → runLockCheck 直接 proceed(disabled),不外呼、不落库。
+    const lockResult = await step.run('rmhr-lock-check', async () =>
+      runLockCheck({
+        candidateId: saveResult.candidate_id,
+        uploadId: String(upload_id),
+        employeeId,
+        bucket: bucket ? String(bucket) : null,
+        objectKey: object_key ? String(object_key) : null,
+        filename: (filename ?? 'resume.pdf').trim(),
+        sourcingChannelId: sourcing_channel_id,
+        clientId: client_id ?? null,
+        hasFileBytes: !parsedFromEvent,
+        logger,
+      }),
+    );
+    // 只有显式开启 LOCK_CHECK_ENFORCE 时,lock-only 才真正拦截下游(默认关=不拦,
+    // dark-launch 期只观察 lockResult、不改 announce 行为)。
+    const lockOnly =
+      process.env.LOCK_CHECK_ENFORCE === '1' && lockResult.decision === 'lock-only';
+
     // ── emit RESUME_PROCESSED 触发下游 matcher ──
     // Note: 在 v7 §4.8 下,RAAS 自己在 saveCandidate 后也会按规则发
     // RESUME_PROCESSED 给下游 matching 流程. 我们这里 dual-track 也
@@ -409,20 +452,41 @@ export const resumeParserAgent = inngest.createFunction(
       object_key,
       full_payload: processedPayload,    // 完整 emit payload (含 parsed.data, snapshot 等)
     });
-    await step.sendEvent('emit-resume-processed', {
-      name: 'RESUME_PROCESSED',
-      data: processedPayload,
-    });
-    await notifyRecruitmentLifecycle(step, 'RESUME_PROCESSED', {
-      anchors: {
-        candidate_id: saveResult.candidate_id,
-        upload_id,
-        resume_id: saveResult.resume_id,
-        client_id: client_id ?? null,
-      },
-      runId: runId ?? null,
-      traceId,
-    });
+    if (!lockOnly) {
+      await step.sendEvent('emit-resume-processed', {
+        name: 'RESUME_PROCESSED',
+        data: processedPayload,
+      });
+      await notifyRecruitmentLifecycle(step, 'RESUME_PROCESSED', {
+        anchors: {
+          candidate_id: saveResult.candidate_id,
+          upload_id,
+          resume_id: saveResult.resume_id,
+          client_id: client_id ?? null,
+        },
+        runId: runId ?? null,
+        traceId,
+      });
+    } else {
+      // 锁定冲突 lock-only:候选人已被他人锁定/保护/黑名单 → 不跑该上传者的匹配,
+      // 但发一个显式 RESUME_LOCKED_CONFLICT 让运营看得到(可见不可处理)。
+      await step.sendEvent('emit-resume-locked-conflict', {
+        name: 'RESUME_LOCKED_CONFLICT',
+        data: {
+          upload_id,
+          candidate_id: saveResult.candidate_id,
+          resume_id: saveResult.resume_id,
+          current_owner_employee_id: lockResult.lockOwnerEmployeeId,
+          current_owner_email: lockResult.lockByEmail,
+          reason: lockResult.reason,
+        },
+      });
+      logger.info(
+        `[resume-persist] 🔒 lock-only · candidate ${saveResult.candidate_id} ` +
+          `owned by ${lockResult.lockByEmail ?? lockResult.lockOwnerEmployeeId ?? '—'} ` +
+          `(reason=${lockResult.reason}) — RESUME_PROCESSED suppressed`,
+      );
+    }
 
     logger.info(
       `[resume-persist] ✅ emitted RESUME_PROCESSED · upload_id=${upload_id} ` +
