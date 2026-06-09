@@ -4,6 +4,7 @@ import { Btn, Badge } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import { RuleDefinitionPanel } from "@/components/rule-check/RuleDefinitionPanel";
 import { CandidateProfileCard } from "@/components/rule-check/CandidateProfileCard";
+import { buildRuleDisplayModel, type RuleDisplayRow } from "@/lib/rule-check/rule-display-model";
 import { verdictLabel } from "@/components/rule-check/verdict-label";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
@@ -251,9 +252,35 @@ function AdaptedRules({
     () => new Map((verification?.rule_opinions ?? []).map((o) => [o.rule_id, o])),
     [verification],
   );
+  // 全量 provenance(含排除)→ 选中/排除两组 + 计数 + 每行筛选 verdict。
+  const displayModel = React.useMemo(
+    () =>
+      buildRuleDisplayModel({
+        provenance: detail.rule_provenance ?? [],
+        opinions: (verification?.rule_opinions ?? []).map((o) => ({
+          rule_id: o.rule_id,
+          selection_ok: o.selection_ok,
+        })),
+      }),
+    [detail.rule_provenance, verification],
+  );
+  const excludedRows = displayModel.excluded;
+  const provTotal = displayModel.counts.total;
   const selected = detail.flags ?? [];
   const filtered = detail.filtered_out_rules ?? [];
   const total = detail.rules_total_in_ontology;
+  // 因果链计数:有 provenance 时用全量派生(规则库=全量, 过滤=排除数);
+  // 无 provenance(旧/能源 audit)回退旧字段。
+  const chainTotal = provTotal > 0 ? provTotal : total;
+  const chainFiltered = provTotal > 0 ? excludedRows.length : filtered.length;
+  // Infra park (没钱/故障): no per-rule flags were written, but the rules WERE
+  // fetched — surface them from provenance so the page still shows 抓取了哪些规则.
+  const fetchedIncluded = React.useMemo(
+    () => (detail.rule_provenance ?? []).filter((p) => p.included),
+    [detail.rule_provenance],
+  );
+  const parked = selected.length === 0 && fetchedIncluded.length > 0;
+  const selectedCount = parked ? fetchedIncluded.length : selected.length;
 
   return (
     <div
@@ -276,9 +303,9 @@ function AdaptedRules({
       </div>
       <div className="mono text-[12px] text-ink-1" style={{ marginBottom: 2 }}>
         {t("rc_sel_chain")
-          .replace("{total}", String(total))
-          .replace("{filtered}", String(filtered.length))
-          .replace("{selected}", String(selected.length))}
+          .replace("{total}", String(chainTotal))
+          .replace("{filtered}", String(chainFiltered))
+          .replace("{selected}", String(selectedCount))}
       </div>
       <div className="hint" style={{ marginBottom: 10 }}>
         {t("rc_sel_dim").replace(
@@ -293,27 +320,75 @@ function AdaptedRules({
       {/* 判定结果概览(PASS / FAIL / 不适用 计数)只在「规则判断」全量视图显示 */}
       {mode === "full" ? <RuleResultStrip flags={selected} /> : null}
 
+      {parked ? (
+        <div
+          className="text-[11.5px]"
+          style={{
+            margin: "10px 0",
+            padding: "8px 10px",
+            borderRadius: 4,
+            background: "var(--c-warn-bg)",
+            borderLeft: "3px solid var(--c-warn)",
+            color: "var(--c-ink-1)",
+            lineHeight: 1.55,
+          }}
+        >
+          {detail.failure_reasons[0] ?? t("rc_sel_parked_generic")}
+        </div>
+      ) : null}
       <div className="hint" style={{ marginBottom: 6, marginTop: 12 }}>
-        {t("rc_sel_selected_title")} ({selected.length})
+        {parked ? t("rc_sel_fetched_title") : t("rc_sel_selected_title")} ({selectedCount})
       </div>
-      <div className="flex flex-col" style={{ gap: 6 }}>
-        {selected.map((f, i) => (
-          <AdaptedRuleCard
-            key={f.flag_id}
-            mode={mode}
-            index={i}
-            flag={f}
-            prov={provById.get(f.rule_id) ?? null}
-            opinion={opinionById.get(f.rule_id) ?? null}
-            verifying={verifying}
-          />
-        ))}
-      </div>
+      {parked ? (
+        <div className="flex flex-col" style={{ gap: 6 }}>
+          {fetchedIncluded.map((p) => (
+            <ParkedRuleRow key={p.rule_id} prov={p} t={t} />
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col" style={{ gap: 6 }}>
+          {selected.map((f, i) => (
+            <AdaptedRuleCard
+              key={f.flag_id}
+              mode={mode}
+              index={i}
+              flag={f}
+              prov={provById.get(f.rule_id) ?? null}
+              opinion={opinionById.get(f.rule_id) ?? null}
+              verifying={verifying}
+            />
+          ))}
+        </div>
+      )}
       <div className="text-[11px]" style={{ marginTop: 8, color: "var(--c-accent)" }}>
-        ↳ {t("rc_sel_injected_note").replace("{count}", String(selected.length))}
+        ↳{" "}
+        {parked
+          ? t("rc_sel_parked_note").replace("{count}", String(selectedCount))
+          : t("rc_sel_injected_note").replace("{count}", String(selected.length))}
       </div>
 
-      {filtered.length > 0 ? (
+      {/* 未选中 · 排除组:全量 provenance 驱动,每条 = 确定性排除理由 + AI 该不该纳入 */}
+      {excludedRows.length > 0 ? (
+        <div style={{ marginTop: 14, borderTop: "1px solid var(--c-line)", paddingTop: 10 }}>
+          <div className="hint" style={{ marginBottom: 6 }}>
+            {t("rc_sel_excluded_group").replace("{n}", String(excludedRows.length))}
+          </div>
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            {excludedRows.map((row) => (
+              <ExcludedRuleCard
+                key={row.rule_id}
+                row={row}
+                opinion={opinionById.get(row.rule_id) ?? null}
+                verifying={verifying}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* 旧/能源 audit(无 provenance)回退原折叠区;有 provenance 时已被上面排除组覆盖 */}
+      {provTotal === 0 ? (
+        filtered.length > 0 ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--c-line)", paddingTop: 10 }}>
           <button
             type="button"
@@ -348,7 +423,141 @@ function AdaptedRules({
         <div className="hint" style={{ fontSize: 11, marginTop: 10 }}>
           {t("rc_sel_empty_filtered").replace("{total}", String(total))}
         </div>
-      )}
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/** 挂起态(没钱/故障)单条已抓取规则 — 无 LLM 逐条判定,只展示抓取证据 + 「未判定」。 */
+function ParkedRuleRow({
+  prov,
+  t,
+}: {
+  prov: { rule_id: string; tier: string; reason: string };
+  t: (k: string) => string;
+}) {
+  const tierKey = TIER_KEY[prov.tier];
+  return (
+    <div
+      className="flex items-start"
+      style={{ gap: 10, padding: "7px 9px", background: "var(--c-surface)", border: "1px solid var(--c-line)", borderRadius: 4 }}
+    >
+      <span className="mono text-[11px] text-ink-3 flex-none" style={{ minWidth: 46 }}>
+        {prov.rule_id}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="flex items-center gap-2 flex-wrap">
+          {tierKey ? <Badge variant="default">{t(tierKey)}</Badge> : null}
+          <Badge variant="warn">{t("rc_verdict_parked")}</Badge>
+        </div>
+        <div className="mono text-[10.5px] text-ink-3" style={{ marginTop: 3, lineHeight: 1.5 }}>
+          {prov.reason}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 筛选 verdict → i18n key + 色调(ok 绿 / err 红 / muted 灰)。 */
+const FILTER_VERDICT_META: Record<string, { key: string; tone: "ok" | "err" | "muted" }> = {
+  correct_included: { key: "rc_filter_correct_included", tone: "ok" },
+  suspect_over: { key: "rc_filter_suspect_over", tone: "err" },
+  correct_excluded: { key: "rc_filter_correct_excluded", tone: "ok" },
+  suspect_missed: { key: "rc_filter_suspect_missed", tone: "err" },
+  unknown: { key: "", tone: "muted" },
+};
+
+/** 单条「被排除规则」卡:确定性排除理由 + AI 该不该纳入(selection_ok)。无 PASS/FAIL。 */
+function ExcludedRuleCard({
+  row,
+  opinion,
+  verifying,
+}: {
+  row: RuleDisplayRow;
+  opinion: RuleOpinion | null;
+  verifying: boolean;
+}) {
+  const { t } = useApp();
+  const [open, setOpen] = React.useState(false);
+  const tierKey = TIER_KEY[row.tier];
+  const meta = FILTER_VERDICT_META[row.filter_verdict];
+  const tone =
+    meta.tone === "ok" ? "var(--c-ok)" : meta.tone === "err" ? "var(--c-err)" : "var(--c-ink-4)";
+  return (
+    <div className="border border-line rounded-sm overflow-hidden" style={{ background: "var(--c-bg)" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 text-left"
+        style={{ padding: "8px 10px", cursor: "pointer" }}
+      >
+        <span
+          className="text-ink-3 select-none flex-none"
+          style={{ fontSize: 10, transform: open ? "rotate(90deg)" : "none", transition: "transform 160ms ease" }}
+        >
+          ▶
+        </span>
+        <span className="mono text-[11.5px] text-ink-1 font-semibold flex-none">{row.rule_id}</span>
+        <span className="text-[12px] text-ink-1 flex-1 truncate">{row.rule_name}</span>
+        {tierKey ? <Badge variant="default">{t(tierKey)}</Badge> : null}
+        {meta.key ? (
+          <span
+            className="mono rounded-sm flex-none"
+            style={{
+              fontSize: 10,
+              padding: "1px 6px",
+              color: tone,
+              background: `color-mix(in oklab, ${tone} 12%, var(--c-bg))`,
+              border: `1px solid color-mix(in oklab, ${tone} 35%, var(--c-line))`,
+            }}
+          >
+            {t(meta.key)}
+          </span>
+        ) : verifying ? (
+          <span className="mono text-ink-3 flex-none" style={{ fontSize: 10 }}>
+            {t("rc_sel_verifying")}
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="rc-fade-in" style={{ borderTop: "1px solid var(--c-line)", padding: "10px 12px" }}>
+          <div className="hint" style={{ marginBottom: 4 }}>
+            {t("rc_sel_excluded_reason")}
+            {tierKey ? `（${t(tierKey)}）` : ""}
+          </div>
+          <div className="text-ink-2" style={{ fontSize: 11.5, lineHeight: 1.55, marginBottom: opinion ? 8 : 0 }}>
+            {row.reason}
+          </div>
+          {opinion ? (
+            <div
+              className="rounded-sm"
+              style={{
+                background:
+                  row.filter_verdict === "suspect_missed"
+                    ? "color-mix(in oklab, var(--c-err) 6%, var(--c-bg))"
+                    : "var(--c-panel)",
+                borderLeft: `3px solid ${tone}`,
+                padding: "6px 8px",
+              }}
+            >
+              <div className="hint" style={{ fontSize: 10, marginBottom: 3 }}>
+                {t("rc_sel_llm_select_judge")}
+              </div>
+              <div className="text-ink-2" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                {opinion.selection_reasoning || "—"}
+              </div>
+            </div>
+          ) : null}
+          <div style={{ borderTop: "1px solid var(--c-line)", marginTop: 10 }}>
+            <div className="hint" style={{ padding: "8px 0 0" }}>
+              {t("rc_sel_orig_rule_title")}
+            </div>
+            <RuleDefinitionPanel ruleId={row.rule_id} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
