@@ -20,7 +20,7 @@
 import { NonRetriableError } from 'inngest';
 import { buildRuleCheckInput, runRuleCheck, formatExplanation } from '@/lib/rule-check';
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
-import { isInfraFailure } from '@/lib/rule-check/infra-failure';
+import { isInfraFailure, friendlyInfraReason } from '@/lib/rule-check/infra-failure';
 import { recordNotification } from '@/server/notifications/ingest';
 import { classifyLlm } from '@/lib/dependency-health/classify';
 import { recordDependencySignal } from '@/lib/dependency-health/report';
@@ -242,6 +242,34 @@ export async function ruleCheckAgentHandler({
     parsedContent = pulled.parsed_content;
   }
 
+  // ── 2b. 解析内容闸门 ──
+  // 简历解析失败 / 空回拉 → 没有任何可核查的内容。上游 parser 在解析失败时
+  // 不会 emit RESUME_PROCESSED,但 partner 重发 + 空回拉仍可能落到这里。此时
+  // 必须停止该候选人,而不是对着空简历跑规则、判 PASS、再推进到 match / interview。
+  // 对应 match-resume 的 resume-text-empty 守卫,但提前到这一环就拦住。
+  const hasUsableResume =
+    (typeof parsedContent === 'string' && parsedContent.trim().length > 0) ||
+    (parsedData != null && Object.keys(parsedData).length > 0);
+  if (!hasUsableResume) {
+    logger.warn(
+      `[${AGENT_NAME}] resume 无可用解析内容(解析失败/空回拉)· candidate_id=${candidateId ?? '—'} ` +
+        `resume_id=${resumeId || '—'} — 停止,不推进下游`,
+    );
+    fileLogger.event('handler.resume-unparseable', {
+      candidate_id: candidateId,
+      resume_id: resumeId,
+      upload_id: uploadId,
+    });
+    return {
+      ok: false,
+      upload_id: uploadId,
+      candidate_id: candidateId,
+      employee_id: employeeId,
+      requested_count: requirements.length,
+      reason: 'resume-unparseable-or-empty',
+    };
+  }
+
   const bypass = process.env.RULE_CHECK_BYPASS === 'true';
   let passed = 0;
   let failed = 0;
@@ -365,18 +393,77 @@ export async function ruleCheckAgentHandler({
         // parks (throws) + fires its own rule_check_parked alert below, so we
         // don't hijack the throw here. Non-LLM infra (graph / tool-loop / parse)
         // is not a vendor-funds issue → no dependency signal.
-        if (reason === 'llm-call-error' || reason === 'gateway-unavailable') {
-          const oc = classifyLlm('ruleCheck', new Error(r.audit.llm_error_detail ?? String(reason)));
-          if (!oc.ok) {
-            await recordDependencySignal(oc, {
-              agent: 'RuleCheck',
-              runId: runId ?? null,
-              traceId: traceId ?? null,
-              domain: RECRUITMENT_DOMAIN_ID,
-              anchors: { candidate_id: candidateId, job_requisition_id: jrid, upload_id: uploadId },
-            });
-          }
+        const llmDegrade = reason === 'llm-call-error' || reason === 'gateway-unavailable';
+        const oc = llmDegrade
+          ? classifyLlm('ruleCheck', new Error(r.audit.llm_error_detail ?? String(reason)))
+          : null;
+        if (oc && !oc.ok) {
+          await recordDependencySignal(oc, {
+            agent: 'RuleCheck',
+            runId: runId ?? null,
+            traceId: traceId ?? null,
+            domain: RECRUITMENT_DOMAIN_ID,
+            anchors: { candidate_id: candidateId, job_requisition_id: jrid, upload_id: uploadId },
+          });
         }
+
+        // Persist a PARKED audit row BEFORE throwing so the /rule-check page can
+        // still show WHICH rules we fetched (rule_provenance) + a plain-language
+        // reason (没钱/故障), even though no per-rule judgment was produced. This
+        // is AO-side observability ONLY — decision='FAIL' for display but the
+        // non-null fail_reason marks it as an infra park so 总览/漏斗 exclude it
+        // from 通过/未通过 counts. Crucially we still write NO RuleCheckFlag rows,
+        // NO Candidate_Match_Result, NO partner main-table 未通过, and emit no
+        // FAILED event — those all live AFTER this throw. Idempotent upsert on a
+        // stable id so Inngest retries overwrite instead of piling up rows.
+        const parkedReason = friendlyInfraReason(reason, oc && !oc.ok ? oc.reason : undefined);
+        const parkedAuditId = `rca_parked_${candidateId || 'unknown'}_${jrid}`;
+        const parkedData = {
+          run_id: runtimeContext.trace_id ?? parkedAuditId,
+          trace_id: runtimeContext.trace_id ?? null,
+          upload_id: uploadId ?? '',
+          candidate_id: candidateId ?? '',
+          resume_id: resumeId || '',
+          job_requisition_id: jrid,
+          client_name: r.audit.client_name_resolved ?? null,
+          client_display_name: r.audit.client_name_resolved ?? null,
+          business_group: r.audit.business_group_resolved ?? null,
+          studio: null,
+          decision: 'FAIL',
+          llm_decision: 'FAIL',
+          failure_reasons: JSON.stringify([parkedReason]),
+          fail_reason: reason,
+          llm_model: r.audit.llm_model ?? 'unknown',
+          llm_duration_ms: Math.round(r.audit.llm_duration_ms ?? 0),
+          llm_prompt_tokens: r.audit.llm_prompt_tokens ?? null,
+          llm_completion_tokens: r.audit.llm_completion_tokens ?? null,
+          rules_evaluated: r.audit.rules_evaluated ?? 0,
+          // 规则库总数 = 候选规则全集(provenance,含被排除的);早期误写成
+          // rules_evaluated(只数选中的)→ KPI「规则库 N」偏小。
+          rules_total_in_ontology: r.audit.rule_provenance?.length || r.audit.rules_evaluated || 0,
+          rule_source: r.audit.rule_source ?? 'ontology-api',
+          partial_resume_fields: '[]',
+          rule_provenance: JSON.stringify(r.audit.rule_provenance ?? []),
+          // Carry the resume/JR snapshot so the 总览 "故障挂起的校验" panel can
+          // show the candidate name + 岗位 (not "(未知候选人)").
+          parsed_resume_json: parsedData ? JSON.stringify(parsedData).slice(0, 200_000) : null,
+          job_requisition_json: req ? JSON.stringify(req).slice(0, 200_000) : null,
+        };
+        try {
+          await prisma.ruleCheckAudit.upsert({
+            where: { audit_id: parkedAuditId },
+            create: { audit_id: parkedAuditId, ...parkedData },
+            update: parkedData,
+          });
+          logger.info(
+            `[${AGENT_NAME}] ⏸ wrote PARKED audit ${parkedAuditId} reason=${reason} rules_fetched=${parkedData.rules_evaluated}`,
+          );
+        } catch (e) {
+          logger.warn(
+            `[${AGENT_NAME}] parked-audit write failed jr=${jrid}: ${(e as Error).message.slice(0, 200)}`,
+          );
+        }
+
         // Surface a critical alert into the 消息通知 center. Deduped by reason, so
         // a gateway outage collapses every parked rule-check into ONE alert with a
         // count — not N. Fire-and-forget: recordNotification never throws.
@@ -454,8 +541,14 @@ export async function ruleCheckAgentHandler({
             llm_prompt_tokens: result.audit.llm_prompt_tokens ?? null,
             llm_completion_tokens: result.audit.llm_completion_tokens ?? null,
             rules_evaluated: result.audit.rules_evaluated ?? 0,
-            rules_total_in_ontology: result.audit.rules_evaluated ?? 0,
+            // 规则库总数 = 候选规则全集(provenance,含被排除的);早期误写成
+            // rules_evaluated(只数选中的)→ KPI「规则库 N」偏小。
+            rules_total_in_ontology:
+              result.audit.rule_provenance?.length || result.audit.rules_evaluated || 0,
             rule_source: result.audit.rule_source ?? 'unknown',
+            // Business decisions reach this write (infra failures throw earlier),
+            // so fail_reason is null/non-infra here → counted normally by stats.
+            fail_reason: result.audit.fail_reason ?? null,
             partial_resume_fields: '[]',
             // 2026-05-26: 三层抓取证据(为何纳入/排除每条规则)落 audit,供 UI 展示。
             rule_provenance: JSON.stringify(result.audit.rule_provenance ?? []),

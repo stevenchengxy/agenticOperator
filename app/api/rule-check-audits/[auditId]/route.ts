@@ -385,6 +385,13 @@ export async function GET(
       (a, b) => a.rule_id.localeCompare(b.rule_id),
     );
 
+    // 全量 provenance(已补 rule_name)。规则库总数读时从它派生 —— 早期 writer
+    // 把 rules_total_in_ontology 错写成 rules_evaluated(只数选中的),导致 KPI
+    // 「规则库 N」偏小。provenance 才是真实候选规则全集(含被排除的)。
+    const enrichedProvenance = enrichProvenanceWithNames(parseProvenance(audit.rule_provenance));
+    const rulesTotal =
+      enrichedProvenance.length > 0 ? enrichedProvenance.length : audit.rules_total_in_ontology;
+
     const detail: RuleCheckAuditDetail = {
       audit_id: audit.audit_id,
       decision: audit.decision as 'PASS' | 'FAIL',
@@ -407,12 +414,12 @@ export async function GET(
       llm_completion_tokens: audit.llm_completion_tokens,
       parse_error: audit.parse_error,
       rules_evaluated: audit.rules_evaluated,
-      rules_total_in_ontology: audit.rules_total_in_ontology,
+      rules_total_in_ontology: rulesTotal,
       rule_source: audit.rule_source,
       partial_resume_fields: parseStringArray(audit.partial_resume_fields),
       failure_reasons: parseStringArray(audit.failure_reasons),
       filtered_out_rules: parseFilteredOut(audit.filtered_out_rules),
-      rule_provenance: enrichProvenanceWithNames(parseProvenance(audit.rule_provenance)),
+      rule_provenance: enrichedProvenance,
       user_prompt: audit.user_prompt,
       system_prompt: audit.system_prompt,
       llm_raw_text: audit.llm_raw_text,
