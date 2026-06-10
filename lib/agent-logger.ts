@@ -172,6 +172,8 @@ export interface AgentLogger {
   ): void;
   /** 当前日志文件路径(诊断用)。 */
   currentLogFile(): string;
+  /** 归属上下文(agent/runId/traceId) — 外部调用 sink 落库时取归属用。null logger 无。 */
+  readonly ctx?: AgentLoggerCtx;
 }
 
 export function createAgentLogger(ctx: AgentLoggerCtx): AgentLogger {
@@ -213,6 +215,7 @@ export function createAgentLogger(ctx: AgentLoggerCtx): AgentLogger {
   };
 
   return {
+    ctx,
     async step<T>(stepId: string, fn: () => Promise<T>, meta?: Record<string, unknown>): Promise<T> {
       const start = Date.now();
       write('step.start', { step_id: stepId, meta });

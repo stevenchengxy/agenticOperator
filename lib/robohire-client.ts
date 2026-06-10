@@ -53,7 +53,9 @@ async function instrumentedFetch<T>(
       label,
       url,
       method,
-      trace_id: traceId ?? null,
+      trace_id: traceId ?? logger?.ctx?.traceId ?? null,
+      agent: logger?.ctx?.agent ?? null,
+      run_id: logger?.ctx?.runId ?? null,
       duration_ms: Date.now() - start,
       request,
       error: (err as Error).message,
@@ -87,7 +89,9 @@ async function instrumentedFetch<T>(
     label,
     url,
     method,
-    trace_id: traceId ?? null,
+    trace_id: traceId ?? logger?.ctx?.traceId ?? null,
+    agent: logger?.ctx?.agent ?? null,
+    run_id: logger?.ctx?.runId ?? null,
     status,
     duration_ms: Date.now() - start,
     request,
@@ -117,7 +121,7 @@ function config(): { baseUrl: string; apiKey: string; timeoutMs: number } {
 export class RobohireApiError extends Error {
   constructor(
     public httpStatus: number,
-    public code: 'CLIENT' | 'RATE_LIMITED' | 'QUOTA_EXHAUSTED' | 'SERVER' | 'NETWORK',
+    public code: 'CLIENT' | 'RATE_LIMITED' | 'QUOTA_EXHAUSTED' | 'SERVER' | 'NETWORK' | 'UNPARSEABLE',
     message: string,
     public requestId?: string,
   ) {
@@ -136,6 +140,27 @@ function statusToCode(status: number): RobohireApiError['code'] {
   if (status >= 500) return 'SERVER';
   if (status >= 400) return 'CLIENT';
   return 'SERVER';
+}
+
+/**
+ * True when RoboHire's error message says the *document itself* can't be parsed
+ * (image-only / scanned / corrupt / unsupported PDF — no extractable text). This
+ * is a content problem RoboHire reports truthfully; it is NOT a vendor outage and
+ * must never be coded SERVER (which dependency-health treats as a recoverable
+ * RoboHire degradation worth parking + auto-retrying — but this same document
+ * will fail identically forever). Only meaningful for parse-resume.
+ */
+function isUnparseableDocMessage(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    /extraction\s+failed/.test(m) ||
+    (/no\s+text/.test(m) && /extract/.test(m)) ||
+    /no\s+extractable\s+text/.test(m) ||
+    /could\s*n[o']?t?\s+extract/.test(m) ||
+    /unparse?able/.test(m) ||
+    /corrupt(ed)?\s+(file|pdf|document)/.test(m) ||
+    /unsupported\s+(file|format|document)/.test(m)
+  );
 }
 
 export type CommonOpts = {
@@ -486,17 +511,27 @@ async function handleJsonResponse<T>(res: Response, op: string): Promise<T> {
   }
 
   if (!res.ok) {
-    const code = statusToCode(res.status);
     const errMsg = body?.error ?? `${op} ${res.status} ${res.statusText}`;
-    const requestId = body?.requestId;
-    throw new RobohireApiError(res.status, code, errMsg, requestId);
+    // A parse-resume failure whose message says the document has no extractable
+    // text is a content problem, not a vendor one — code it UNPARSEABLE so the
+    // agent fails it terminally without polluting RoboHire's health signal.
+    const code =
+      op === 'parse-resume' && typeof body?.error === 'string' && isUnparseableDocMessage(body.error)
+        ? 'UNPARSEABLE'
+        : statusToCode(res.status);
+    throw new RobohireApiError(res.status, code, errMsg, body?.requestId);
   }
 
   if (!body || body.success === false) {
+    const errMsg = body?.error ?? 'unknown';
+    const code =
+      op === 'parse-resume' && typeof errMsg === 'string' && isUnparseableDocMessage(errMsg)
+        ? 'UNPARSEABLE'
+        : 'SERVER';
     throw new RobohireApiError(
       res.status,
-      'SERVER',
-      `${op} returned success=false: ${body?.error ?? 'unknown'}`,
+      code,
+      `${op} returned success=false: ${errMsg}`,
       body?.requestId,
     );
   }

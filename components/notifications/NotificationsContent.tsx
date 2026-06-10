@@ -5,41 +5,16 @@ import { useDomain } from "@/lib/domains";
 import { Ic, IcName } from "@/components/shared/Ic";
 import { fetchJson } from "@/lib/api/client";
 import { NotificationDetailDrawer } from "@/components/notifications/NotificationDetailDrawer";
+import type {
+  NotifKind as Kind,
+  NotifSeverity as Severity,
+  NotifCategory as Category,
+  NotificationRow,
+  NotificationsResponse,
+} from "@/lib/api/notification-types";
 
-// ── shapes (mirror /api/notifications) ──────────────────────────────────────
-type Kind = "message" | "alert";
-type Severity = "info" | "warning" | "critical";
-type Category = "system" | "agent" | "event" | "candidate" | "job";
-
-type NotificationRow = {
-  id: string;
-  ts: string;
-  kind: Kind;
-  severity: Severity;
-  category: Category;
-  source: string;
-  title: string;
-  body: string;
-  aiSource: string | null;
-  count: number;
-  disposition: "needs_human" | "auto_handled" | "info_only";
-  managerAction: string | null;
-  status: string | null;
-  readAt: string | null;
-  anchors: Record<string, string> | null;
-  href: string | null;
-};
-
-type NotificationsResponse = {
-  notifications: NotificationRow[];
-  nextCursor: string | null;
-  counts: {
-    byCategory: Partial<Record<Category, number>>;
-    byKind: Partial<Record<Kind, number>>;
-    needsHuman: number;
-    unread: number;
-  } | null;
-};
+// Shapes (Kind/Severity/Category/NotificationRow/NotificationsResponse) now live
+// in lib/api/notification-types.ts — shared with the /overview「待我处理」panel.
 
 const CATEGORIES: Category[] = ["system", "agent", "event", "candidate", "job"];
 const CAT_ICON: Record<Category, IcName> = {
@@ -116,7 +91,11 @@ export function NotificationsContent() {
 
   const markAllRead = async () => {
     try {
-      await fetchJson(`/api/notifications`, { method: "POST", body: JSON.stringify({ action: "read_all" }) });
+      // 带上活动域 — 只清本域(+系统)未读,别的域的未读不动。
+      await fetchJson(`/api/notifications`, {
+        method: "POST",
+        body: JSON.stringify({ action: "read_all", domain: domain || undefined }),
+      });
       load();
     } catch {
       /* ignore */

@@ -9,7 +9,7 @@ import type { AuditResponse, AuditLogRow } from "@/app/api/audit/route";
 import type { RunAuditResponse, RunAuditSummary } from "@/app/api/audit/runs/route";
 import { describeLogKind } from "@/lib/monitor-step-descriptor";
 
-type Tab = "runs" | "events" | "ops" | "log";
+type Tab = "runs" | "events" | "ops" | "log" | "terminal";
 
 export function AuditContent() {
   const { t } = useApp();
@@ -41,6 +41,9 @@ export function AuditContent() {
           <TabButton active={tab === "log"} onClick={() => setTab("log")}>
             {t("adx_tab_log")}
           </TabButton>
+          <TabButton active={tab === "terminal"} onClick={() => setTab("terminal")}>
+            {t("adx_tab_terminal")}
+          </TabButton>
         </div>
       </div>
       {tab === "runs" ? (
@@ -49,8 +52,10 @@ export function AuditContent() {
         <EventAuditTab />
       ) : tab === "ops" ? (
         <OpsAuditTab />
-      ) : (
+      ) : tab === "log" ? (
         <LogEventTab />
+      ) : (
+        <TerminalLogTab />
       )}
     </div>
   );
@@ -675,6 +680,218 @@ function FilterPill({ active, onClick, children }: { active: boolean; onClick: (
     >
       {children}
     </button>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Tab 5 — 实时终端 (live tail over LogEvent via /api/log-events order=asc).
+// 终端视觉:固定深色(不随主题翻转)、mono、ANSI 式 level 配色。每 2s 增量拉取
+// (since=lastTs inclusive + id 去重),滚到底自动跟随,上滚即暂停跟随。
+// ════════════════════════════════════════════════════════════════════════
+
+const TERM_BG = "oklch(0.17 0.012 260)";
+const TERM_INK: Record<string, string> = {
+  critical: "oklch(0.72 0.19 25)",
+  error: "oklch(0.72 0.19 25)",
+  warn: "oklch(0.82 0.14 85)",
+  notice: "oklch(0.8 0.1 200)",
+  info: "oklch(0.78 0.01 260)",
+  debug: "oklch(0.55 0.01 260)",
+};
+const TERM_DIM = "oklch(0.55 0.015 260)";
+const TERM_AGENT = "oklch(0.75 0.11 320)";
+const TERM_MAX_LINES = 2000;
+
+function TerminalLogTab() {
+  const { t } = useApp();
+  const [lines, setLines] = React.useState<LogEventRow[]>([]);
+  const [paused, setPaused] = React.useState(false);
+  const [follow, setFollow] = React.useState(true);
+  const [level, setLevel] = React.useState("");
+  const [agentInput, setAgentInput] = React.useState("");
+  const [agent, setAgent] = React.useState("");
+  const lastTsRef = React.useRef<string | null>(null);
+  // id → ts。since 是含端点的,只有 ts === lastTs 的行需要去重;每轮把 Map
+  // 修剪到这个边界,持续 tail 几小时也不会无界涨内存。独立于 lines 缓冲,
+  // 所以"清屏"不影响去重正确性。
+  const seenRef = React.useRef<Map<string, string>>(new Map());
+  const boxRef = React.useRef<HTMLDivElement | null>(null);
+  const followRef = React.useRef(true);
+  followRef.current = follow;
+
+  // agent 是精确匹配,逐键清屏重拉太抖 — 250ms 防抖(与 tab4 同款)。
+  React.useEffect(() => {
+    const id = setTimeout(() => setAgent(agentInput.trim()), 250);
+    return () => clearTimeout(id);
+  }, [agentInput]);
+
+  // 过滤条件变了 → 重置缓冲重新拉。
+  React.useEffect(() => {
+    setLines([]);
+    lastTsRef.current = null;
+    seenRef.current = new Map();
+  }, [level, agent]);
+
+  React.useEffect(() => {
+    if (paused) return;
+    let stopped = false;
+    const pull = async () => {
+      try {
+        const qs = new URLSearchParams();
+        if (level) qs.set("level", level);
+        if (agent) qs.set("agent", agent);
+        qs.set("payload", "full"); // 展开视图要 pretty-print 完整 JSON
+        let fresh: LogEventRow[];
+        if (!lastTsRef.current) {
+          // 首屏:最近 200 行(desc 取回后翻转成时间正序)。
+          qs.set("limit", "200");
+          const r = await fetchJson<LogEventsResponse>(`/api/log-events?${qs.toString()}`);
+          fresh = [...r.logs].reverse();
+        } else {
+          // 增量:since 含端点,靠 id 去重防同毫秒漏行/重行。
+          qs.set("order", "asc");
+          qs.set("limit", "500");
+          qs.set("since", lastTsRef.current);
+          const r = await fetchJson<LogEventsResponse>(`/api/log-events?${qs.toString()}`);
+          fresh = r.logs;
+        }
+        if (stopped) return;
+        // 同一次外部调用会落两行:'api' lane(完整归属)+ 'tool' lane(file
+        // logger 镜像,message 形如 api.RoboHire.parseResume)。终端只留 'api'
+        // 那行,免得每次调用刷两行;tab4 运行日志仍能看到全部。
+        const add = fresh.filter(
+          (l) => !seenRef.current.has(l.id) && !(l.category === "tool" && l.message.startsWith("api.")),
+        );
+        if (add.length === 0) return;
+        for (const l of add) seenRef.current.set(l.id, l.ts);
+        lastTsRef.current = add[add.length - 1].ts;
+        // 修剪去重 Map:ts < 边界的行服务端不会再返回(since=gte 边界),删掉。
+        const boundary = lastTsRef.current;
+        for (const [id, ts] of seenRef.current) {
+          if (ts !== boundary) seenRef.current.delete(id);
+        }
+        setLines((prev) => {
+          const next = [...prev, ...add];
+          return next.length <= TERM_MAX_LINES ? next : next.slice(next.length - TERM_MAX_LINES);
+        });
+      } catch {
+        /* 网络抖动忽略,下一轮再试 */
+      }
+    };
+    pull();
+    const id = setInterval(pull, 2000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [paused, level, agent]);
+
+  // 跟随:新行进来时滚到底;用户上滚(离底 >40px)自动停跟随,回底恢复。
+  React.useEffect(() => {
+    const box = boxRef.current;
+    if (box && followRef.current) box.scrollTop = box.scrollHeight;
+  }, [lines]);
+
+  const onScroll = () => {
+    const box = boxRef.current;
+    if (!box) return;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    if (atBottom !== followRef.current) setFollow(atBottom);
+  };
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex items-center gap-2 flex-wrap border-b border-line bg-panel" style={{ padding: "10px 22px" }}>
+        <div className="flex items-center gap-1 bg-surface rounded-md p-0.5 border border-line">
+          <FilterPill active={level === ""} onClick={() => setLevel("")}>{t("adx_log_all_levels")}</FilterPill>
+          {LOG_LEVELS.map((lv) => (
+            <FilterPill key={lv} active={level === lv} onClick={() => setLevel(lv)}>
+              <span style={{ color: LEVEL_INK[lv] }}>●</span> {lv}
+            </FilterPill>
+          ))}
+        </div>
+        <input
+          value={agentInput}
+          onChange={(e) => setAgentInput(e.target.value)}
+          placeholder="agent"
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 w-[120px]"
+        />
+        <span className="flex-1" />
+        <Badge variant={paused ? "warn" : "ok"} dot pulse={!paused}>
+          {paused ? t("adx_term_pause") : t("adx_term_conn")}
+        </Badge>
+        <span className="text-[11px] text-ink-3 mono">{t("adx_term_lines").replace("{n}", String(lines.length))}</span>
+        <Btn size="sm" onClick={() => setPaused((p) => !p)}>
+          {paused ? t("adx_term_resume") : t("adx_term_pause")}
+        </Btn>
+        {/* 清屏只清显示缓冲;去重 Map 保留,否则 since 含端点会让边界行立刻重现 */}
+        <Btn size="sm" onClick={() => setLines([])}>
+          {t("adx_term_clear")}
+        </Btn>
+      </div>
+
+      <div
+        ref={boxRef}
+        onScroll={onScroll}
+        className="flex-1 overflow-auto mono"
+        style={{ background: TERM_BG, padding: "10px 14px", fontSize: 11.5, lineHeight: 1.65 }}
+      >
+        {lines.length === 0 ? (
+          <div style={{ color: TERM_DIM }}>{t("adx_term_empty")}</div>
+        ) : (
+          lines.map((l) => <TerminalLine key={l.id} row={l} />)
+        )}
+        {/* 跟随状态提示:不跟随时浮出"回到底部" */}
+        {!follow && lines.length > 0 && (
+          <button
+            onClick={() => {
+              const box = boxRef.current;
+              if (box) box.scrollTop = box.scrollHeight;
+              setFollow(true);
+            }}
+            className="fixed bottom-8 right-10 text-[11px] px-2.5 py-1.5 rounded-md border"
+            style={{ background: TERM_BG, color: TERM_INK.info, borderColor: TERM_DIM }}
+          >
+            ↓ {t("adx_term_follow")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TerminalLine({ row }: { row: LogEventRow }) {
+  const [open, setOpen] = React.useState(false);
+  const d = new Date(row.ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  const ink = TERM_INK[row.level] ?? TERM_INK.info;
+  let payloadPretty: string | null = null;
+  if (open && row.payloadPreview) {
+    try {
+      payloadPretty = JSON.stringify(JSON.parse(row.payloadPreview), null, 2);
+    } catch {
+      payloadPretty = row.payloadPreview;
+    }
+  }
+  return (
+    <div
+      onClick={() => row.payloadPreview && setOpen((o) => !o)}
+      style={{ cursor: row.payloadPreview ? "pointer" : "default", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+    >
+      <span style={{ color: TERM_DIM }}>{hh}:{mm}:{ss}.{ms} </span>
+      <span style={{ color: ink, fontWeight: row.level === "error" || row.level === "critical" ? 600 : 400 }}>
+        {row.level.toUpperCase().padEnd(6)}
+      </span>
+      <span style={{ color: TERM_DIM }}>{row.category.padEnd(11)} </span>
+      <span style={{ color: TERM_AGENT }}>{row.agent ? `[${row.agent}] ` : ""}</span>
+      <span style={{ color: ink }}>{row.message}</span>
+      {open && payloadPretty && (
+        <div style={{ color: TERM_DIM, paddingLeft: 24, fontSize: 10.5 }}>{payloadPretty}</div>
+      )}
+    </div>
   );
 }
 

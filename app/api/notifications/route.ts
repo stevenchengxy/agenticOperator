@@ -53,6 +53,9 @@ export async function GET(req: Request): Promise<Response> {
   const unread = url.searchParams.get('unread') === '1';
   const cursor = url.searchParams.get('cursor'); // ISO ts
   const domain = url.searchParams.get('domain')?.trim() || null; // active 业务领域
+  // countsOnly=1 — 轻量徽标模式(LeftNav/AppBar 每 10s 轮询):只回 counts,
+  // 不取行、不触发 AI 富化。
+  const countsOnly = url.searchParams.get('countsOnly') === '1';
   const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
   const scope = domainScopeWhere(domain);
 
@@ -60,7 +63,10 @@ export async function GET(req: Request): Promise<Response> {
   // background (fire-and-forget — AO runs as a persistent `next start` server,
   // so this completes after the response). The response below returns the
   // deterministic body immediately; AI summaries appear on the next refresh.
-  void summarizePendingAlerts(8).catch(() => {});
+  // Per-alert failures are logged inside summarizePendingAlerts (the only
+  // reachable failure path); it also carries an in-flight guard against the
+  // overlapping pollers.
+  if (!countsOnly) void summarizePendingAlerts(8).catch(() => {});
 
   const where: Record<string, unknown> = {};
   if (kind === 'message' || kind === 'alert') where.kind = kind;
@@ -72,6 +78,18 @@ export async function GET(req: Request): Promise<Response> {
   Object.assign(where, scope); // domain scope (system always shown)
 
   try {
+    if (countsOnly) {
+      const [needsHumanCount, unreadCount] = await Promise.all([
+        prisma.notification.count({ where: { disposition: 'needs_human', readAt: null, ...scope } }),
+        prisma.notification.count({ where: { readAt: null, ...scope } }),
+      ]);
+      return NextResponse.json({
+        notifications: [],
+        nextCursor: null,
+        counts: { byCategory: {}, byKind: {}, needsHuman: needsHumanCount, unread: unreadCount },
+        meta: { generatedAt: new Date().toISOString() },
+      });
+    }
     const [rows, byCategory, byKind, needsHumanCount, unreadCount] = await Promise.all([
       prisma.notification.findMany({ where, orderBy: { ts: 'desc' }, take: limit + 1 }),
       prisma.notification.groupBy({ by: ['category'], _count: { _all: true }, where: scope }),
@@ -125,7 +143,7 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  let body: { action?: string; id?: string };
+  let body: { action?: string; id?: string; domain?: string };
   try {
     body = await req.json();
   } catch {
@@ -138,7 +156,15 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({ ok: true });
     }
     if (body.action === 'read_all') {
-      const r = await prisma.notification.updateMany({ where: { readAt: null }, data: { readAt: now } });
+      // Scope read_all to the caller's active 业务领域 (same scope the list view
+      // shows) — without it, 招聘域点"全部已读"会把能源/费控域的未读一并清掉。
+      // No domain passed → legacy behavior (everything), kept for callers that
+      // genuinely operate cross-domain.
+      const scope = domainScopeWhere(body.domain?.trim() || null);
+      const r = await prisma.notification.updateMany({
+        where: { readAt: null, ...scope },
+        data: { readAt: now },
+      });
       return NextResponse.json({ ok: true, updated: r.count });
     }
     if (body.action === 'ack' && body.id) {

@@ -30,6 +30,22 @@ import {
 import { tryParse, type TryParseResult } from "./registry";
 import * as degradedMode from "./degraded-mode";
 import { emitRejection } from "./rejection";
+import { recordNotification } from "../notifications/ingest";
+
+// Schema 拒绝 → 消息通知(warning alert,按事件名 dedupe)。被静默丢弃的业务
+// 事件是数据质量事故,EventInstance 行躺在表里没人看 — 必须主动浮出。
+// fire-and-forget;通知失败不影响 publish 结果。(2026-06-10 audit fix)
+function notifySchemaReject(name: string, eventId: string, reason: string): void {
+  void recordNotification({
+    level: "warn",
+    category: "event_publish",
+    source: "EM",
+    eventName: name,
+    eventInstanceId: eventId,
+    message: `事件 ${name} 未通过格式校验被拒收:${reason}`,
+    dedupeHint: `em_schema_reject.${name}`,
+  }).catch(() => {});
+}
 
 // ── Public types ──────────────────────────────────────────────────────────
 
@@ -198,6 +214,7 @@ async function publishInner(
           payloadForSummary: data,
         });
         degradedMode.recordReject();
+        notifySchemaReject(name, eventId, `事件未注册格式定义`);
         if (emitOnFail) {
           await emitRejection({
             originalEventName: name,
@@ -265,6 +282,7 @@ async function publishInner(
           payloadForSummary: data,
         });
         degradedMode.recordReject();
+        notifySchemaReject(name, eventId, summarized);
         if (emitOnFail) {
           await emitRejection({
             originalEventName: name,

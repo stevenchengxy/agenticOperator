@@ -10,6 +10,7 @@
 
 import { prisma } from '@/server/db';
 import { chatComplete, isGatewayConfigured } from '@/server/llm/gateway';
+import { recordLogEvent } from '@/server/log/log-event';
 
 export interface TriageRow {
   source: string;
@@ -130,8 +131,23 @@ export async function summarizeAlert(id: string): Promise<void> {
 /**
  * Lazy-on-view: enrich up to `limit` firing alerts that have no AI summary yet.
  * Returns how many were processed. Safe to fire-and-forget from the list route.
+ *
+ * In-flight guard: the list route is polled by 2-3 components every 10-15s
+ * (LeftNav 徽标 / AppBar 铃铛 / 通知页), and a batch of LLM round-trips easily
+ * outlives one poll interval — without the guard, overlapping invocations
+ * fetch the same un-summarized ids and double-spend the gateway.
  */
-export async function summarizePendingAlerts(limit = 10): Promise<number> {
+let inFlight: Promise<number> | null = null;
+
+export function summarizePendingAlerts(limit = 10): Promise<number> {
+  if (inFlight) return inFlight;
+  inFlight = summarizePendingAlertsInner(limit).finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+async function summarizePendingAlertsInner(limit: number): Promise<number> {
   let pending: Array<{ id: string }> = [];
   try {
     pending = await prisma.notification.findMany({
@@ -144,7 +160,16 @@ export async function summarizePendingAlerts(limit = 10): Promise<number> {
     return 0;
   }
   for (const p of pending) {
-    await summarizeAlert(p.id).catch(() => {});
+    // Per-alert failure → audit log (level=warn),绝不抛 — 这里是 AI 富化失败
+    // 唯一真实可达的 catch(summarizeAlert 内部网关失败已降级 fallback,会
+    // reject 的只剩 DB 读写类异常),没有这行失败就被静默吞掉。
+    await summarizeAlert(p.id).catch((e) => {
+      void recordLogEvent({
+        type: 'anomaly',
+        source: 'system',
+        message: `通知 AI 富化失败(${p.id}):${(e as Error).message ?? String(e)}`,
+      }).catch(() => {});
+    });
   }
   return pending.length;
 }

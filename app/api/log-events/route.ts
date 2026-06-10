@@ -1,7 +1,9 @@
 // 审计日志查询 API — the everything-queryable read over LogEvent.
-//   GET /api/log-events?runId=&agent=&traceId=&level=&category=&q=&since=&until=&cursor=&limit=
+//   GET /api/log-events?runId=&agent=&traceId=&level=&category=&q=&since=&until=&cursor=&limit=&order=
 // (Named log-events, not logs: .gitignore ignores `logs/`.)
 // Filters are all optional; default is the most recent 100 rows by ts desc.
+// order=asc + since=<lastTs> is the live-tail mode (审计实时终端 tab polls it
+// every 2s; since is inclusive — the client dedupes by row id).
 // This is the audit substrate — the curated subset lives at /api/notifications.
 
 import { NextResponse } from 'next/server';
@@ -18,6 +20,10 @@ export async function GET(req: Request): Promise<Response> {
   const since = url.searchParams.get('since');
   const until = url.searchParams.get('until');
   const cursor = url.searchParams.get('cursor');
+  const order = url.searchParams.get('order') === 'asc' ? ('asc' as const) : ('desc' as const);
+  // payload=full → 整段 payloadJson(写入时已截 4000);默认 200 字符预览。
+  // 终端 tab 的展开视图需要完整 JSON 才能 pretty-print。
+  const fullPayload = url.searchParams.get('payload') === 'full';
   const limit = Math.min(Number(url.searchParams.get('limit')) || 100, 500);
 
   const where: Record<string, unknown> = {};
@@ -36,7 +42,7 @@ export async function GET(req: Request): Promise<Response> {
   try {
     const rows = await prisma.logEvent.findMany({
       where,
-      orderBy: { ts: 'desc' },
+      orderBy: { ts: order },
       take: limit + 1,
     });
     const hasMore = rows.length > limit;
@@ -54,7 +60,7 @@ export async function GET(req: Request): Promise<Response> {
         eventName: r.eventName,
         message: r.message,
         durationMs: r.durationMs,
-        payloadPreview: r.payloadJson ? r.payloadJson.slice(0, 200) : null,
+        payloadPreview: r.payloadJson ? (fullPayload ? r.payloadJson : r.payloadJson.slice(0, 200)) : null,
       })),
       nextCursor: hasMore ? page[page.length - 1]?.ts ?? null : null,
       meta: { generatedAt: new Date().toISOString() },

@@ -1,9 +1,12 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import clsx from "clsx";
 import { Ic } from "./Ic";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import { useEmHealth } from "@/lib/api/em-health";
+import { fetchJson } from "@/lib/api/client";
 import { DomainSwitcher } from "./DomainSwitcher";
 
 export function AppBar({
@@ -103,9 +106,7 @@ export function AppBar({
           {theme === "light" ? <Ic.moon /> : <Ic.sun />}
         </button>
 
-        <button className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line" title="alerts">
-          <Ic.bell />
-        </button>
+        <BellLink />
 
         <div
           className="w-[26px] h-[26px] rounded-full grid place-items-center text-white text-[11px] font-semibold"
@@ -123,6 +124,42 @@ export function AppBar({
 // stop reading as buttons sitting in one undifferentiated pill row.
 function Sep() {
   return <div className="w-px h-5 bg-line" aria-hidden />;
+}
+
+// 铃铛 → 消息通知中心入口 + 域内未读红点(与通知页/LeftNav 同口径,10s 轮询)。
+function BellLink() {
+  const { t } = useApp();
+  const { domain } = useDomain();
+  const [unread, setUnread] = React.useState(0);
+
+  React.useEffect(() => {
+    const qs = domain ? `&domain=${encodeURIComponent(domain)}` : "";
+    const tick = () => {
+      fetchJson<{ counts: { unread: number } | null }>(`/api/notifications?countsOnly=1${qs}`, { cache: "no-store" })
+        .then((j) => setUnread(j.counts?.unread ?? 0))
+        .catch(() => {/* keep last value */});
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => clearInterval(id);
+  }, [domain]);
+
+  return (
+    <Link
+      href="/notifications"
+      className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line relative"
+      title={unread > 0 ? `${t("ntf_title")} · ${unread}` : t("ntf_title")}
+    >
+      <Ic.bell />
+      {unread > 0 && (
+        <span
+          className="absolute top-[3px] right-[3px] w-[7px] h-[7px] rounded-full"
+          style={{ background: "var(--c-err)", boxShadow: "0 0 0 2px var(--c-surface)" }}
+          aria-hidden
+        />
+      )}
+    </Link>
+  );
 }
 
 // EM dot — three states: healthy (green) / degraded (orange) / down or

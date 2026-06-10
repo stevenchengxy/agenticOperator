@@ -9,11 +9,19 @@
 // 每条调用同时:
 //   1. 写到 logs/<category>-YYYY-MM-DD.log 一行 JSON (in / out 都全)
 //   2. 同步 echo 到 stdout — 多行可读, 大对象 indent
+//   3. fire-and-forget 镜像进 Postgres LogEvent(category='api' lane,
+//      server/log/api-call-mirror.ts)— 审计日志全可查 + /analytics 统计
 // 失败 swallow,不影响业务调用.
+//
+// 归属(agent/run_id/trace_id):调用方显式传(robohire-client 的 loggerOverride
+// 闭包,step.run replay 也稳定)优先;缺省回落 ALS currentLogger().ctx —
+// allmeta/partner-pg/rmhr 都从 ALS 取 logger,这里同源兜底即可。
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { terminalLogEnabled } from '@/lib/terminal-log';
+import { currentLogger } from '@/lib/agent-logger';
+import { mirrorApiCall } from '@/server/log/api-call-mirror';
 
 const LOG_DIR = process.env.AO_LOG_DIR?.trim() || join(process.cwd(), 'logs');
 const TERMINAL_ENABLED = terminalLogEnabled;
@@ -57,6 +65,10 @@ export type ApiLogEntry = {
   error?: string;
   /** 任意补充. */
   meta?: Record<string, unknown>;
+  /** 归属 agent(file-logger ctx.agent)— 不传则回落 ALS currentLogger().ctx. */
+  agent?: string | null;
+  /** 归属 Inngest run id — 不传则回落 ALS currentLogger().ctx. */
+  run_id?: string | null;
 };
 
 /**
@@ -66,19 +78,33 @@ export type ApiLogEntry = {
  */
 export function logApiCall(entry: ApiLogEntry): void {
   const ts = new Date().toISOString();
-  const fileLine = JSON.stringify({ ts, ...entry }, jsonReplacer) + '\n';
+  // 归属解析:显式字段优先,缺省回落 ALS(step.run 外可靠;step.run replay 内
+  // ALS 可能丢 → robohire-client 走显式传参,见该文件 2026-05-26 注释)。
+  let resolved = entry;
+  if (entry.agent === undefined || entry.run_id === undefined || entry.trace_id === undefined) {
+    const ctx = currentLogger()?.ctx;
+    resolved = {
+      ...entry,
+      agent: entry.agent ?? ctx?.agent ?? null,
+      run_id: entry.run_id ?? ctx?.runId ?? null,
+      trace_id: entry.trace_id ?? ctx?.traceId ?? null,
+    };
+  }
+  const fileLine = JSON.stringify({ ts, ...resolved }, jsonReplacer) + '\n';
   try {
     ensureDir();
     if (dirEnsured) {
-      const file = join(LOG_DIR, `${entry.category}-${dayStamp()}.log`);
+      const file = join(LOG_DIR, `${resolved.category}-${dayStamp()}.log`);
       appendFileSync(file, fileLine, 'utf8');
     }
   } catch (e) {
     // 日志写挂只 console.error 提示, 不传给 caller
     // eslint-disable-next-line no-console
-    console.error(`[api-log:${entry.category}] write failed:`, (e as Error).message);
+    console.error(`[api-log:${resolved.category}] write failed:`, (e as Error).message);
   }
-  if (TERMINAL_ENABLED) echoToTerminal(entry, ts);
+  if (TERMINAL_ENABLED) echoToTerminal(resolved, ts);
+  // Postgres 镜像 — fire-and-forget,绝不阻塞/抛错(内部 swallow)。
+  void mirrorApiCall(resolved);
 }
 
 // ── Terminal echo ──────────────────────────────────────────────────────

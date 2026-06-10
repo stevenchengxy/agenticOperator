@@ -78,10 +78,14 @@ async function tick(): Promise<{ events: number; runs: number; steps: number }> 
       await upsertRun(r);
       runs++;
     }
-    // Fetch the (expensive) trace once: when newly seen terminal, or when a
-    // run just reached a terminal state and we haven't captured it yet.
-    const needTrace =
-      (isNew || statusChanged) && isTerminalStatus(r.status) && !prev?.traceFetched;
+    // Fetch the (expensive) trace for any terminal run we haven't captured
+    // yet. Deliberately NOT gated on (isNew || statusChanged): if the archiver
+    // died between upsertRun (terminal status persisted) and archiveRunTrace,
+    // or a getRunHistory call failed transiently (soft catch below), the next
+    // tick must retry — otherwise traceFetched=false rows are stuck forever
+    // and the monitor serves an empty step trace for that run. Retry cost is
+    // bounded by the rolling run window. (2026-06-10 audit fix.)
+    const needTrace = isTerminalStatus(r.status) && !prev?.traceFetched;
     if (needTrace) toFetchTrace.push(r.id);
   }
 
@@ -101,6 +105,11 @@ async function tick(): Promise<{ events: number; runs: number; steps: number }> 
 }
 
 let stopping = false;
+// In-flight tick — shutdown awaits it so SIGTERM mid-tick can't strand a run
+// between upsertRun (terminal status written) and archiveRunTrace. Paired with
+// the needTrace recovery above this is belt-and-braces, but it also protects
+// the event/cursor writes from being cut off halfway.
+let inFlightTick: Promise<unknown> | null = null;
 
 async function loop(): Promise<void> {
   console.log(
@@ -111,7 +120,8 @@ async function loop(): Promise<void> {
   while (!stopping) {
     const t0 = Date.now();
     try {
-      const s = await tick();
+      inFlightTick = tick();
+      const s = (await inFlightTick) as Awaited<ReturnType<typeof tick>>;
       console.log(
         `[archive] tick ok — events+${s.events} runs±${s.runs} steps+${s.steps} ` +
           `(${Date.now() - t0}ms)`,
@@ -124,6 +134,8 @@ async function loop(): Promise<void> {
       } catch {
         /* cursor write best-effort */
       }
+    } finally {
+      inFlightTick = null;
     }
     if (stopping) break;
     await sleep(Math.max(0, INTERVAL_MS - (Date.now() - t0)));
@@ -131,8 +143,9 @@ async function loop(): Promise<void> {
 }
 
 async function shutdown(signal: string): Promise<void> {
-  console.log(`[archive] ${signal} — shutting down…`);
+  console.log(`[archive] ${signal} — shutting down (waiting for in-flight tick)…`);
   stopping = true;
+  if (inFlightTick) await Promise.race([inFlightTick.catch(() => {}), sleep(15_000)]);
   await prisma.$disconnect().catch(() => {});
   process.exit(0);
 }

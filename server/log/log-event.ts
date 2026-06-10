@@ -29,6 +29,12 @@ export function levelCategoryFor(type: string): LevelCategory {
       // Operator "I topped up" marker — degraded-call signals at/before it are
       // ignored. Its own category so the read port can find it. See reset.ts.
       return { level: 'info', category: 'dependency_reset' };
+    case 'domain_drift':
+      // The recruitment Allmeta domain id no longer matches any live domain
+      // (renamed/removed in Studio) so ontology reads fell back to the constant.
+      // Shares the 'dependency' queryable lane (provider-less → safely dropped by
+      // the dep-health parser). See lib/domain-resolve.ts + /api/domains.
+      return { level: 'warn', category: 'dependency' };
     case 'step.failed':
       return { level: 'error', category: 'step' };
     case 'anomaly':
@@ -139,6 +145,10 @@ export interface MirrorFileLogInput {
  * /api/log-events and 消息通知. Fire-and-forget — never throws.
  */
 export async function mirrorAgentFileLog(input: MirrorFileLogInput): Promise<void> {
+  // Hermetic tests: agent handler unit tests exercise the file logger directly
+  // (candidate-identity/ownership 等) — they must not write LogEvent /
+  // AgentActivity / Notification rows into the dev DB.
+  if (process.env.VITEST) return;
   const type = typeForFileKind(input.kind);
   let payloadJson: string | null = null;
   if (input.payload !== undefined) {

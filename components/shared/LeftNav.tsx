@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Ic, IcName } from "./Ic";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import { fetchJson } from "@/lib/api/client";
 
 type NavItem =
@@ -14,19 +15,22 @@ type NavItem =
 export function LeftNav() {
   const { t } = useApp();
   const pathname = usePathname();
+  const { domain } = useDomain();
   const [monitorCount, setMonitorCount] = React.useState<string>("—");
   const [alertsCount, setAlertsCount] = React.useState<string>("—");
 
   React.useEffect(() => {
+    // 与通知页同口径:按活动业务域取 needsHuman(系统类全域可见,API 内已含)。
+    const qs = domain ? `&domain=${encodeURIComponent(domain)}` : "";
     const tick = () => {
-      fetchJson<{ counts: { needsHuman: number } | null }>("/api/notifications?limit=1", { cache: "no-store" })
+      fetchJson<{ counts: { needsHuman: number } | null }>(`/api/notifications?countsOnly=1${qs}`, { cache: "no-store" })
         .then((j) => setAlertsCount(j.counts && j.counts.needsHuman > 0 ? String(j.counts.needsHuman) : ""))
         .catch(() => {/* keep "—" */});
     };
     tick();
     const id = setInterval(tick, 10_000);
     return () => clearInterval(id);
-  }, []);
+  }, [domain]);
 
   React.useEffect(() => {
     const tick = () => {
@@ -63,6 +67,7 @@ export function LeftNav() {
     { type: "item", id: "correlations", icon: "branch", label: t("nav_correlations"), href: "/correlations" },
     { type: "item", id: "funnel",     icon: "pulse",    label: t("nav_funnel"), href: "/funnel" },
     { type: "item", id: "rule-check", icon: "check",    label: t("nav_rule_check"), href: "/rule-check" },
+    { type: "item", id: "analytics",  icon: "spark",    label: t("nav_analytics"), href: "/analytics" },
     { type: "group", title: t("nav_group_build") },
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), count: "1", href: "/workflow" },
     { type: "item", id: "ontology-gen", icon: "branch", label: t("nav_ontology_gen"), href: "/behavior/ontology-generator" },

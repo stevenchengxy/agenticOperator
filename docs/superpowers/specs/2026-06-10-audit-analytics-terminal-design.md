@@ -40,13 +40,13 @@
 
 - **B1** `POST /api/notifications` 接受 `domain`,`read_all` 复用 `domainScopeWhere`;UI 传活动域。
 - **B2** LeftNav 徽标请求带 `domain`(读 `useDomain()`),与页面口径一致。
-- **B3** EM 拒绝通知:`server/em/publish.ts` 的 `rejected_schema` 路径(严格模式两处)落 `recordNotification`(warning alert,`dedupeHint='em_schema_reject.'+name`,category 走 event lane);`rejected_filter` 是有意过滤不通知。
+- **B3** EM 拒绝通知:`server/em/publish.ts` 的 `rejected_schema` 路径(严格模式两处)落 `recordNotification`(warning alert,`dedupeHint='em_schema_reject.'+name`)。注:source='EM' 在 derive 的 INFRA_SOURCES 里 → 实际归 **system** 类。review 后确认保留这个分类:schema 拒绝是数据质量事故,system 类在所有业务域都可见(event 类 + domain=null 只会折进招聘默认域,能源/费控事件的拒绝就看不见了)。`rejected_filter` 是有意过滤不通知。
 - **B4** `summarizePendingAlerts` 失败由 `.catch(()=>{})` 改为记一行 LogEvent warn(category='anomaly', source='system'),仍不抛。
 - **B5** AppBar 铃铛:跳 `/notifications` + 未读红点(domain-scoped unread,10s 轮询,与 LeftNav 同模式)。
 
 ### C. /analytics 运行统计页(业务名"运行统计")
 
-- **API** `GET /api/analytics/stats?window=24h|7d|30d&bucket=hour|day|week`(bucket 默认随 window:24h→hour,7d→day,30d→day;week 仅 30d 可选)。`$queryRaw` + `date_trunc`:
+- **API** `GET /api/analytics/stats?window=24h|7d|30d&bucket=hour|day|week`(bucket 默认随 window:24h→hour,7d→day,30d→day;week 仅 30d 可选)。实现为 findMany 原始行 + JS 纯函数分桶(`lib/analytics/stats.ts`,本地控制面数据量小,本地时区口径与 UI 一致、可单测;放弃了最初的 `date_trunc` 方案)。统计只计**有归属**(agent 或 runId 非空)的外部调用 — 监控页探针等 route-handler 流量留在审计日志可查,但不计入 KPI,否则"外部调用"会随运维开监控面板的行为膨胀:
   - `runsByAgent`: inngest_run_archive 按 (bucket, function_slug) 计数 + 状态拆分(Completed/Failed/Cancelled/Running)
   - `apiCalls`: log_event `category='api'` 按 (bucket, eventName 的 provider 前缀, agent) 计数 + error 数 + p50/总耗时
   - KPI: 总 run 数、失败率、外部调用总数、RoboHire 调用数
