@@ -137,6 +137,12 @@ function failSafe(
       raw_llm_text: base.raw_llm_text,
       llm_finish_reason: base.llm_finish_reason,
       llm_error_detail: base.llm_error_detail,
+      // Carry the fetched-rules evidence through an infra failSafe so the
+      // /rule-check page can still show WHICH rules were fetched even though
+      // the LLM never produced a per-rule judgment (没钱 / 故障 / parse-error).
+      rule_provenance: base.rule_provenance,
+      client_name_resolved: base.client_name_resolved,
+      business_group_resolved: base.business_group_resolved,
     },
   };
 }
@@ -373,6 +379,15 @@ export async function runRuleCheck(
     0,
   );
 
+  // Fetched-rules evidence — attached to every infra failSafe AFTER this point
+  // (graph-unavailable / llm-call-error / parse-error). Rules were already
+  // resolved from the ontology API, so even a parked run records what we got.
+  const fetchedAudit: Partial<MatchResumeCheckResult['audit']> = {
+    rule_provenance: sourceResult.provenance,
+    client_name_resolved: sourceResult.client_name_resolved,
+    business_group_resolved: sourceResult.business_group_resolved,
+  };
+
   ruleCheckLog.info('runRuleCheck.start', {
     candidate_id: input.runtime_context.candidate_id,
     resume_id: input.runtime_context.resume_id,
@@ -421,6 +436,7 @@ export async function runRuleCheck(
       message: (err as Error).message,
     });
     return failSafe('ontology-graph-unavailable', {
+      ...fetchedAudit,
       rules_evaluated: expectedRuleCount,
       rule_source: sourceResult.source,
     });
@@ -485,6 +501,7 @@ export async function runRuleCheck(
     ruleCheckLog.error('llm.failed', { reason, message: msg });
     logger.event('llm.failed', { from: 'AI 模型', to: '智能体', reason, message: msg });
     return failSafe(reason, {
+      ...fetchedAudit,
       rules_evaluated: expectedRuleCount,
       graph_calls: graph.fetch_count,
       rule_source: sourceResult.source,
@@ -518,6 +535,7 @@ export async function runRuleCheck(
 
   const parsed = parseLlmJson(llmResult.text);
   const auditOnError = {
+    ...fetchedAudit,
     rules_evaluated: expectedRuleCount,
     graph_calls: graph.fetch_count,
     llm_model: llmResult.modelUsed,

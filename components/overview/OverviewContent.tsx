@@ -1,18 +1,20 @@
 "use client";
 import React from "react";
 import Link from "next/link";
-import { Ic } from "@/components/shared/Ic";
+import { Ic, type IcName } from "@/components/shared/Ic";
 import { fetchJson } from "@/lib/api/client";
-import type { RunsResponse, HumanTaskCard, HumanTasksResponse } from "@/lib/api/types";
-import type { ActivityResponse, LogEntry, LogKind } from "@/lib/api/activity-types";
+import type { RunsResponse } from "@/lib/api/types";
+import type { NotificationRow, NotificationsResponse } from "@/lib/api/notification-types";
 import { useAgentsHealth } from "@/lib/api/agents-health";
 import { useInngestEventsStream } from "@/lib/api/inngest-events-stream";
 import type { InngestEventRow } from "@/lib/api/inngest-events";
-import { AGENT_MAP } from "@/lib/agent-mapping";
+import { displayName as agentDisplayName } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
 import { useDisplayNameResolver } from "@/lib/agent-names";
+import { runDomainOf, useAgentDomainMap, slugToShort } from "@/lib/monitor/run-domain";
+import { statusLabel, statusDotColor, type RunRow } from "@/components/shared/RunTrace";
 import {
   buildOverviewAgentCards,
   agentStatus,
@@ -23,10 +25,12 @@ import {
 //
 // Sections:
 //   A. Hero — overline, time-of-day greeting, refresh.
-//   B. 2-column body — left: HITL list (待我处理); right: live event
-//      stream via SSE (实时事件流). Stream falls back to polling.
-//   C. Agent runtime monitor — compact full-width strip showing recent
-//      step-level activity from agents (started/completed/failed/anomaly).
+//   B. 2-column body — left: 待我处理 = needs-human, unread notifications from
+//      the 消息通知中心 (/api/notifications); right: live event stream via SSE
+//      (实时事件流). Stream falls back to polling.
+//   C. Agent runtime monitor (智能体运行) — compact full-width strip of recent
+//      runs from the same live Inngest feed /monitor reads
+//      (/api/inngest-admin/runs), one row per run, scoped to the active domain.
 //   D. Agent health grid — deployed agents in the active domain, one
 //      card each. Status badge (上线/下线/暂停) + invocations + success.
 //      Hides metrics row when there are no runs.
@@ -41,37 +45,55 @@ export function OverviewContent() {
   const health = useAgentsHealth(4_000);
   const { rows: agentRows } = useDeploymentMap();
   const resolveName = useDisplayNameResolver();
+  // Run → domain attribution map (shared with /monitor) for the 智能体运行 panel.
+  const slugToDomain = useAgentDomainMap();
 
   // SSE-backed Inngest event stream (real-time). Falls back to 2s polling.
   const eventStream = useInngestEventsStream();
 
-  // KPI + activity (still polled every 8s — these are aggregate snapshots).
+  // KPI + panels (polled every 8s — these are aggregate snapshots).
   const [failed1hCount, setFailed1hCount] = React.useState<number | null>(null);
-  const [hitlTasks, setHitlTasks] = React.useState<HumanTaskCard[] | null>(null);
-  const [activity, setActivity] = React.useState<LogEntry[] | null>(null);
+  // 待我处理 — needs-human, unread notifications (消息通知中心). Domain scope is
+  // applied server-side (system always shows; recruitment absorbs null-domain).
+  const [notifications, setNotifications] = React.useState<NotificationRow[] | null>(null);
+  const [needsHumanCount, setNeedsHumanCount] = React.useState<number | null>(null);
+  // 智能体运行 — recent runs from the live Inngest feed /monitor reads.
+  const [runs, setRuns] = React.useState<RunRow[] | null>(null);
   const [alertsActive, setAlertsActive] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     const since1h = new Date(Date.now() - 60 * 60_000).toISOString();
     try {
-      const [failed, activityRes, hitl, alerts] = await Promise.all([
+      // Each fetch degrades independently — one slow / failing endpoint (an
+      // Inngest 502, a 5s timeout) blanks only its own panel, never the whole
+      // page. fetchJson throws on non-2xx, so the per-fetch .catch is required.
+      const [failed, notif, runsRes, alerts] = await Promise.all([
         fetchJson<RunsResponse>(
           `/api/runs?status=failed,timed_out,interrupted&since=${encodeURIComponent(since1h)}&limit=20`,
+        ).catch(() => ({ runs: [] })),
+        fetchJson<NotificationsResponse>(
+          `/api/notifications?needsHuman=1&unread=1&limit=20&domain=${encodeURIComponent(domain)}`,
+        ).catch(
+          (): NotificationsResponse => ({ notifications: [], nextCursor: null, counts: null }),
         ),
-        fetchJson<ActivityResponse>("/api/activity/recent?windowMs=1800000&limit=18"),
-        fetchJson<HumanTasksResponse>("/api/human-tasks?status=pending"),
-        fetchJson<{ alerts: Array<{ acked: boolean }> }>("/api/alerts"),
+        fetchJson<{ runs: RunRow[] }>("/api/inngest-admin/runs?limit=60").catch(
+          () => ({ runs: [] as RunRow[] }),
+        ),
+        fetchJson<{ alerts: Array<{ acked: boolean }> }>("/api/alerts").catch(
+          () => ({ alerts: [] as Array<{ acked: boolean }> }),
+        ),
       ]);
       setFailed1hCount(failed.runs.length);
-      setActivity(activityRes.entries);
-      setHitlTasks(hitl.recent ?? []);
+      setNotifications(notif.notifications);
+      setNeedsHumanCount(notif.counts?.needsHuman ?? notif.notifications.length);
+      setRuns(runsRes.runs ?? []);
       setAlertsActive(alerts.alerts.filter((a) => !a.acked).length);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [domain]);
 
   React.useEffect(() => {
     void refresh();
@@ -79,22 +101,14 @@ export function OverviewContent() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Set of agent shorts in the current domain — sourced from the live
-  // /api/agents roster (not AGENT_MAP), so non-recruitment domains (energy /
-  // 费控) scope their HITL + activity correctly too.
-  const shortsInDomain = React.useMemo(
-    () => new Set(agentRows.filter((a) => a.domain === domain).map((a) => a.short)),
-    [agentRows, domain],
-  );
-
-  const hitlInDomain = React.useMemo<HumanTaskCard[] | null>(
-    () => hitlTasks?.filter((tk) => shortsInDomain.has(tk.agentShort)) ?? null,
-    [hitlTasks, shortsInDomain],
-  );
-
-  const activityInDomain = React.useMemo<LogEntry[] | null>(
-    () => activity?.filter((e) => e.agent === "system" || shortsInDomain.has(e.agent)) ?? null,
-    [activity, shortsInDomain],
+  // Recent runs scoped to the active business domain — attributed via the run's
+  // Inngest function slug, the same way /monitor scopes its run list.
+  const runsInDomain = React.useMemo<RunRow[] | null>(
+    () =>
+      runs
+        ? runs.filter((r) => runDomainOf(r, slugToDomain) === domain).slice(0, 8)
+        : null,
+    [runs, slugToDomain, domain],
   );
 
   // Deployed agents in domain, sorted by recent activity (most active first).
@@ -129,7 +143,7 @@ export function OverviewContent() {
             className="grid"
             style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}
           >
-            <TodoPanel t={t} tasks={hitlInDomain} resolveName={resolveName} />
+            <TodoPanel t={t} notifications={notifications} count={needsHumanCount} />
             <EventStreamPanel
               t={t}
               events={eventStream.events}
@@ -138,11 +152,7 @@ export function OverviewContent() {
             />
           </div>
           <div className="mt-6">
-            <AgentRuntimePanel
-              t={t}
-              entries={activityInDomain}
-              resolveName={resolveName}
-            />
+            <AgentRuntimePanel t={t} runs={runsInDomain} />
           </div>
           <div className="mt-6">
             <AgentHealthGrid t={t} cards={agentCards} />
@@ -258,16 +268,32 @@ function ErrorBar({ message }: { message: string }) {
   );
 }
 
-// ── HITL ────────────────────────────────────────────────────────────────
+// ── 待我处理 (needs-human, unread notifications) ─────────────────────────
+
+// Category → icon + severity → ink, mirroring the 消息通知中心
+// (components/notifications/NotificationsContent.tsx) so the overview row reads
+// the same as the full center.
+const NOTIF_CAT_ICON: Record<NotificationRow["category"], IcName> = {
+  system: "shield",
+  agent: "cpu",
+  event: "bolt",
+  candidate: "user",
+  job: "branch",
+};
+const NOTIF_SEV_INK: Record<NotificationRow["severity"], string> = {
+  critical: "var(--c-err)",
+  warning: "oklch(0.62 0.15 70)",
+  info: "var(--c-accent)",
+};
 
 function TodoPanel({
   t,
-  tasks,
-  resolveName,
+  notifications,
+  count,
 }: {
   t: (k: string) => string;
-  tasks: HumanTaskCard[] | null;
-  resolveName: (short: string) => string;
+  notifications: NotificationRow[] | null;
+  count: number | null;
 }) {
   return (
     <section
@@ -279,7 +305,7 @@ function TodoPanel({
           <span className="text-ink-1" style={{ fontSize: 14, fontWeight: 500 }}>
             {t("overview_todo_title")}
           </span>
-          {tasks && tasks.length > 0 && (
+          {count != null && count > 0 && (
             <span
               className="rounded-sm mono tabular-nums"
               style={{
@@ -290,12 +316,12 @@ function TodoPanel({
                 border: "1px solid color-mix(in oklab, oklch(0.6 0.14 75) 35%, var(--c-line))",
               }}
             >
-              {tasks.length}
+              {count}
             </span>
           )}
         </div>
         <Link
-          href="/inbox"
+          href="/notifications"
           className="text-ink-3 text-[11.5px] hover:text-ink-1"
           style={{ textDecoration: "none" }}
         >
@@ -303,13 +329,13 @@ function TodoPanel({
         </Link>
       </div>
       <div className="flex-1 flex flex-col" style={{ gap: 8 }}>
-        {tasks === null ? (
+        {notifications === null ? (
           <div className="text-ink-3 text-[12px]">{t("common_loading")}</div>
-        ) : tasks.length === 0 ? (
+        ) : notifications.length === 0 ? (
           <div className="text-ink-3 text-[12px]">{t("overview_todo_empty")}</div>
         ) : (
-          tasks.slice(0, 6).map((tk, i) => (
-            <TodoRow key={tk.id} task={tk} index={i} resolveName={resolveName} t={t} />
+          notifications.slice(0, 6).map((n, i) => (
+            <TodoRow key={n.id} n={n} index={i} t={t} />
           ))
         )}
       </div>
@@ -318,23 +344,22 @@ function TodoPanel({
 }
 
 function TodoRow({
-  task,
+  n,
   index,
-  resolveName,
   t,
 }: {
-  task: HumanTaskCard;
+  n: NotificationRow;
   index: number;
-  resolveName: (short: string) => string;
   t: (k: string) => string;
 }) {
-  const agentMeta = AGENT_MAP.find((a) => a.short === task.agentShort);
-  const stage = agentMeta?.stage ?? "system";
-  const glyph = stageGlyph(stage);
-  const subtitle = `${resolveName(task.agentShort)}${task.assignee ? ` · ${task.assignee}` : ""}`;
+  const ink = NOTIF_SEV_INK[n.severity] ?? "var(--c-accent)";
+  const Glyph = Ic[NOTIF_CAT_ICON[n.category] ?? "bolt"];
+  // Deep-link to the notification's single process (run / audit / event) when it
+  // has one; otherwise fall back to the 消息通知中心.
+  const href = n.href ?? "/notifications";
   return (
     <Link
-      href={`/inbox?task=${encodeURIComponent(task.id)}`}
+      href={href}
       className="ao-hover-lift ao-stream-in flex items-start gap-3 rounded-sm cursor-pointer"
       style={
         {
@@ -346,21 +371,26 @@ function TodoRow({
       }
     >
       <span
-        className="flex-none flex items-center justify-center rounded-sm text-[11px] font-medium"
-        style={{ width: 28, height: 28, background: glyph.bg, color: glyph.color }}
+        className="flex-none flex items-center justify-center rounded-sm"
+        style={{
+          width: 28,
+          height: 28,
+          background: `color-mix(in oklab, ${ink} 14%, var(--c-bg))`,
+          color: ink,
+        }}
       >
-        {glyph.label}
+        <Glyph style={{ width: 14, height: 14 }} />
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-ink-1 truncate" style={{ fontSize: 12.5 }}>
-          {task.title}
+          {n.title}
         </div>
         <div className="text-ink-3 mono text-[10.5px] truncate" style={{ marginTop: 2 }}>
-          {subtitle}
+          {n.source}
         </div>
       </div>
       <span className="text-ink-4 mono text-[10.5px] flex-none" style={{ paddingTop: 2 }}>
-        {relativeTime(task.createdAt, t)}
+        {relativeTime(n.ts, t)}
       </span>
     </Link>
   );
@@ -512,35 +542,15 @@ function EventRow({ entry, index, t }: { entry: InngestEventRow; index: number; 
   );
 }
 
-// ── Agent runtime monitor ───────────────────────────────────────────────
+// ── 智能体运行 (recent runs — same live Inngest feed as /monitor) ─────────
 
 function AgentRuntimePanel({
   t,
-  entries,
-  resolveName,
+  runs,
 }: {
   t: (k: string) => string;
-  entries: LogEntry[] | null;
-  resolveName: (short: string) => string;
+  runs: RunRow[] | null;
 }) {
-  // Keep only step-level / decision / anomaly / hitl rows — those are the
-  // "agent is doing something now" signals. step.completed for already-done
-  // work also passes through as the trailing context.
-  const filtered = React.useMemo(() => {
-    if (!entries) return null;
-    const interestingKinds: LogKind[] = [
-      "step.started",
-      "step.completed",
-      "step.failed",
-      "step.retrying",
-      "anomaly",
-      "decision",
-      "tool",
-      "hitl",
-    ];
-    return entries.filter((e) => interestingKinds.includes(e.kind)).slice(0, 8);
-  }, [entries]);
-
   return (
     <section
       className="border border-line rounded-md bg-surface"
@@ -563,22 +573,16 @@ function AgentRuntimePanel({
           {t("nav_monitor")} →
         </Link>
       </div>
-      {filtered === null ? (
+      {runs === null ? (
         <div className="text-ink-3 text-[12px]">{t("common_loading")}</div>
-      ) : filtered.length === 0 ? (
+      ) : runs.length === 0 ? (
         <div className="text-ink-3 text-[12px]" style={{ padding: "12px 0" }}>
           {t("overview_runtime_empty")}
         </div>
       ) : (
         <div className="flex flex-col" style={{ gap: 4 }}>
-          {filtered.map((e, i) => (
-            <RuntimeRow
-              key={e.id}
-              entry={e}
-              index={i}
-              t={t}
-              resolveName={resolveName}
-            />
+          {runs.map((r, i) => (
+            <RuntimeRow key={r.id} run={r} index={i} t={t} />
           ))}
         </div>
       )}
@@ -587,35 +591,43 @@ function AgentRuntimePanel({
 }
 
 function RuntimeRow({
-  entry,
+  run,
   index,
   t,
-  resolveName,
 }: {
-  entry: LogEntry;
+  run: RunRow;
   index: number;
   t: (k: string) => string;
-  resolveName: (short: string) => string;
 }) {
-  const tone = kindTone(entry.kind);
-  const verb = kindVerb(entry.kind, t);
-  const agentLabel =
-    entry.agent === "system" ? t("nav_system") || "系统" : resolveName(entry.agent);
-  const runHref = entry.runId ? `/monitor/runs/${encodeURIComponent(entry.runId)}` : null;
-  const body = (
-    <>
+  // Resolve the agent the run belongs to from its Inngest function slug, the
+  // same way /monitor labels its run rows.
+  const short = slugToShort(run.function?.slug);
+  // Visible label stays jargon-free — fall back to the run's human function
+  // name, never the raw Inngest slug (that's kept on the title tooltip below).
+  const agentLabel = short ? agentDisplayName(short) : run.function?.name ?? "—";
+  const dot = statusDotColor(run.status);
+  const statusInk = run.status === "Failed" ? "var(--c-err)" : "var(--c-ink-2)";
+  return (
+    <Link
+      href={`/monitor/runs/${encodeURIComponent(run.id)}`}
+      className="ao-stream-in ao-hover-lift flex items-center gap-3 rounded-sm cursor-pointer"
+      style={
+        {
+          padding: "5px 6px",
+          textDecoration: "none",
+          color: "inherit",
+          ["--ao-i"]: index,
+        } as React.CSSProperties
+      }
+    >
       <span
         className="flex-none rounded-full"
-        style={{
-          width: 6,
-          height: 6,
-          background: tone.color,
-          marginTop: 7,
-        }}
+        style={{ width: 6, height: 6, background: dot }}
       />
       <span
-        className="text-ink-1 flex-none"
-        style={{ fontSize: 12.5, fontWeight: 500, minWidth: 92 }}
+        className="text-ink-1 flex-none truncate"
+        style={{ fontSize: 12.5, fontWeight: 500, minWidth: 92, maxWidth: 148 }}
+        title={short ?? run.function?.slug ?? undefined}
       >
         {agentLabel}
       </span>
@@ -623,49 +635,29 @@ function RuntimeRow({
         className="mono flex-none"
         style={{
           fontSize: 10.5,
-          color: tone.color,
+          color: statusInk,
           padding: "1px 6px",
-          background: `color-mix(in oklab, ${tone.color} 12%, var(--c-bg))`,
+          background: `color-mix(in oklab, ${dot} 12%, var(--c-bg))`,
           borderRadius: 3,
           minWidth: 44,
           textAlign: "center",
         }}
       >
-        {verb}
+        {statusLabel(run.status, t)}
       </span>
       <span className="text-ink-2 truncate flex-1" style={{ fontSize: 12 }}>
-        {entry.message}
+        {run.eventName ?? "—"}
       </span>
-      <span className="text-ink-4 mono text-[10.5px] flex-none" style={{ paddingTop: 2 }}>
-        {relativeTime(entry.ts, t)}
-      </span>
-    </>
-  );
-  if (runHref) {
-    return (
-      <Link
-        href={runHref}
-        className="ao-stream-in ao-hover-lift flex items-center gap-3 rounded-sm cursor-pointer"
-        style={
-          {
-            padding: "5px 6px",
-            textDecoration: "none",
-            color: "inherit",
-            ["--ao-i"]: index,
-          } as React.CSSProperties
-        }
+      <span
+        className="text-ink-4 mono text-[10.5px] flex-none tabular-nums"
+        style={{ minWidth: 34, textAlign: "right" }}
       >
-        {body}
-      </Link>
-    );
-  }
-  return (
-    <div
-      className="ao-stream-in flex items-center gap-3 rounded-sm"
-      style={{ padding: "5px 6px", ["--ao-i"]: index } as React.CSSProperties}
-    >
-      {body}
-    </div>
+        {run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : ""}
+      </span>
+      <span className="text-ink-4 mono text-[10.5px] flex-none" style={{ paddingLeft: 2 }}>
+        {run.startedAt ? relativeTime(run.startedAt, t) : "—"}
+      </span>
+    </Link>
   );
 }
 
@@ -851,47 +843,6 @@ function relativeTime(iso: string, t: (k: string) => string): string {
   if (diff < 60 * 60_000) return t("common_minutes_ago").replace("{n}", String(Math.floor(diff / 60_000)));
   if (diff < 24 * 60 * 60_000) return t("common_hours_ago").replace("{n}", String(Math.floor(diff / (60 * 60_000))));
   return t("common_days_ago").replace("{n}", String(Math.floor(diff / (24 * 60 * 60_000))));
-}
-
-const KIND_TONE: Record<LogKind, { color: string; kind: "ok" | "info" | "warn" | "err" }> = {
-  "step.started": { color: "var(--c-info)", kind: "info" },
-  "step.completed": { color: "var(--c-ok)", kind: "ok" },
-  "step.failed": { color: "var(--c-err)", kind: "err" },
-  "step.retrying": { color: "oklch(0.6 0.14 75)", kind: "warn" },
-  narrative: { color: "var(--c-ink-3)", kind: "info" },
-  tool: { color: "var(--c-info)", kind: "info" },
-  decision: { color: "var(--c-accent)", kind: "info" },
-  anomaly: { color: "oklch(0.6 0.14 75)", kind: "warn" },
-  error: { color: "var(--c-err)", kind: "err" },
-  hitl: { color: "oklch(0.6 0.14 75)", kind: "warn" },
-  info: { color: "var(--c-info)", kind: "info" },
-};
-
-function kindTone(kind: LogKind): { color: string; kind: "ok" | "info" | "warn" | "err" } {
-  return KIND_TONE[kind] ?? { color: "var(--c-ink-3)", kind: "info" };
-}
-
-function kindVerb(kind: LogKind, t: (k: string) => string): string {
-  switch (kind) {
-    case "step.started":
-      return t("overview_runtime_verb_started");
-    case "step.completed":
-      return t("overview_runtime_verb_completed");
-    case "step.failed":
-      return t("overview_runtime_verb_failed");
-    case "step.retrying":
-      return t("overview_runtime_verb_retrying");
-    case "anomaly":
-      return t("overview_runtime_verb_anomaly");
-    case "decision":
-      return t("overview_runtime_verb_decision");
-    case "tool":
-      return t("overview_runtime_verb_tool");
-    case "hitl":
-      return t("overview_runtime_verb_hitl");
-    default:
-      return t("overview_runtime_verb_info");
-  }
 }
 
 /** Event name → tone color. `_FAILED` / `_ERROR` are err; `_SENT` / `_PASSED`

@@ -10,6 +10,7 @@
 import { prisma } from "@/server/db";
 import { friendlyDomainName, RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import type { RuleCheckAuditDetail } from "@/app/api/rule-check-audits/[auditId]/route";
+import type { AuditFacets } from "@/app/api/rule-check-audits/route";
 
 function isOntologyAuditDomain(domain: string | null | undefined): boolean {
   const d = (domain ?? "").trim();
@@ -71,15 +72,24 @@ export async function ontologyAuditList(domain: string, limit: number) {
     take: limit,
     select: {
       id: true, createdAt: true, decision: true, redlineFlag: true, selectionOk: true, stage: true,
-      caseId: true, dsNo: true, agentName: true, rulesEvaluated: true, ruleSource: true,
+      caseId: true, dsNo: true, agentSlug: true, agentName: true, rulesEvaluated: true, ruleSource: true,
       evals: { where: { result: "FAIL" }, select: { ruleId: true, ruleName: true } },
     },
   });
   const friendly = friendlyDomainName(domain);
-  return rows.map((r) => ({
+  return rows.map((r) => {
+    const decision = passOf(r.decision, r.redlineFlag, r.selectionOk);
+    return {
     audit_id: r.id,
     created_at: r.createdAt.toISOString(),
-    decision: passOf(r.decision, r.redlineFlag, r.selectionOk),
+    decision,
+    // Faceting: the generic store already records which agent ran, at which
+    // workflow stage. A deterministic rule engine has no infra "parked" state,
+    // so verdict folds straight from the decision.
+    agent_id: r.agentSlug,
+    agent_label: r.agentName,
+    stage: r.stage,
+    verdict: decision === "PASS" ? ("pass" as const) : ("fail" as const),
     llm_decision: r.decision,
     candidate_id: r.dsNo ?? r.caseId,
     resume_id: r.caseId,
@@ -99,7 +109,29 @@ export async function ontologyAuditList(domain: string, limit: number) {
     n_flags: r.evals.length,
     trace_id: r.caseId,
     failure_reasons: r.evals.map((e) => `${e.ruleId} ${e.ruleName}`),
-  }));
+    };
+  });
+}
+
+/** Distinct (agent, stage) facet options for a domain's ontology rule-checks.
+ *  Drives the /rule-check page's 执行 agent / 阶段 dropdowns for non-recruitment
+ *  domains, where agents are data-driven (energy validateConstraints, etc.). */
+export async function ontologyAuditFacets(domain: string): Promise<AuditFacets> {
+  const rows = await prisma.ontologyRuleCheck.findMany({
+    where: { domain },
+    select: { agentSlug: true, agentName: true, stage: true },
+    distinct: ["agentSlug", "stage"],
+  });
+  const agentMap = new Map<string, string>();
+  const stageSet = new Set<string>();
+  for (const r of rows) {
+    if (!agentMap.has(r.agentSlug)) agentMap.set(r.agentSlug, r.agentName);
+    if (r.stage) stageSet.add(r.stage);
+  }
+  return {
+    agents: Array.from(agentMap, ([id, label]) => ({ id, label })),
+    stages: Array.from(stageSet, (s) => ({ id: s, label: s })),
+  };
 }
 
 export async function ontologyMatrix(domain: string, days: number) {
@@ -147,13 +179,27 @@ export async function ontologyAuditDetail(checkId: string): Promise<OntologyAudi
     include: { evals: { orderBy: { createdAt: "asc" } } },
   });
   if (!c) return null;
-  const selectionNote = (() => {
+  const selectionNoteRaw = (() => {
     try {
-      return JSON.parse(c.selectionNote ?? "{}") as Partial<SelectionInfo>;
+      return JSON.parse(c.selectionNote ?? "{}") as Partial<SelectionInfo> & {
+        llmPrompt?: unknown;
+        llmResponse?: unknown;
+      };
     } catch {
       return {};
     }
   })();
+  // 把大模型「纳入依据」的 prompt/response 抽出来给 user_prompt/llm_raw_text(混合型:
+  // 查重核心走确定性引擎,但纳入依据由大模型生成),其余字段照常进 detail.selection。
+  const llmPrompt =
+    typeof (selectionNoteRaw as { llmPrompt?: unknown }).llmPrompt === "string"
+      ? ((selectionNoteRaw as { llmPrompt?: string }).llmPrompt as string)
+      : null;
+  const llmResponse =
+    typeof (selectionNoteRaw as { llmResponse?: unknown }).llmResponse === "string"
+      ? ((selectionNoteRaw as { llmResponse?: string }).llmResponse as string)
+      : null;
+  const { llmPrompt: _lp, llmResponse: _lr, ...selectionNote } = selectionNoteRaw as Record<string, unknown>;
 
   return {
     audit_id: c.id,
@@ -171,7 +217,7 @@ export async function ontologyAuditDetail(checkId: string): Promise<OntologyAudi
     client_display_name: null,
     business_group: friendlyDomainName(c.domain),
     studio: null,
-    llm_model: "(确定性规则引擎)",
+    llm_model: llmResponse ? "(确定性引擎 + 大模型纳入依据)" : "(确定性规则引擎)",
     llm_duration_ms: 0,
     llm_prompt_tokens: null,
     llm_completion_tokens: null,
@@ -190,9 +236,9 @@ export async function ontologyAuditDetail(checkId: string): Promise<OntologyAudi
       included: true,
       reason: e.checkPoint ?? e.evidence ?? `${e.ruleGroup} 组规则`,
     })),
-    user_prompt: null,
+    user_prompt: llmPrompt,
     system_prompt: null,
-    llm_raw_text: null,
+    llm_raw_text: llmResponse,
     resume_augmentation: null,
     parsed_resume_full: null,
     job_requisition_full: null,

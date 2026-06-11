@@ -19,13 +19,46 @@
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { currentLogger } from '@/lib/agent-logger';
 import { logApiCall } from '@/lib/external-api-log';
+import { isConnFailure, runWithMirrorFallback } from './mirror-fallback';
 
 declare global {
   // eslint-disable-next-line no-var
   var __raasPgPool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var __raasMirrorPool: Pool | undefined;
 }
 
 let pool: Pool | null = globalThis.__raasPgPool ?? null;
+let mirrorPool: Pool | null = globalThis.__raasMirrorPool ?? null;
+
+// ── 开发态本地镜像兜底 ──────────────────────────────────────────────────
+// partner-pg(同事远程库)连不上时,透明改用本地镜像库(只读/写都行)。
+// 门控:配了 RAAS_MIRROR_PG_URL 且 RAAS_MIRROR_ENABLED ≠ '0' 才启用。
+// 生产部署不配 RAAS_MIRROR_PG_URL → getMirrorPool() 恒为 null → 永不兜底,
+// 行为与改造前完全一致(不影响 agent 任何逻辑)。
+function getMirrorPool(): Pool | null {
+  const url = process.env.RAAS_MIRROR_PG_URL?.trim();
+  if (!url || process.env.RAAS_MIRROR_ENABLED === '0') return null;
+  if (mirrorPool) return mirrorPool;
+  mirrorPool = new Pool({
+    connectionString: url,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+  });
+  mirrorPool.on('error', (err) => reportPgFailure(err, { phase: 'idle', label: 'mirror-idle-error' }));
+  try {
+    const u = new URL(url);
+    console.log(
+      `[partner-pg] 本地镜像兜底已启用(开发态)· mirror=${u.host}${u.pathname} · ` +
+        `partner 连不上时透明切到这里。生产不配此 env 即关闭。`,
+    );
+  } catch {
+    /* url parse fail — let pg surface it on first use */
+  }
+  if (process.env.NODE_ENV !== 'production') globalThis.__raasMirrorPool = mirrorPool;
+  return mirrorPool;
+}
 
 // First non-empty line of the SQL (collapsed) — used as the apiCall label so
 // "pg.SELECT candidate_id FROM candidate WHERE …" shows up grouped in logs.
@@ -257,11 +290,15 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   params?: unknown[],
 ): Promise<QueryResult<T>> {
   const p = getPool();
-  return loggedQuery<T>(
-    (t, ps) => p.query<T>(t, ps as never),
-    text,
-    params,
-    false,
+  const mirror = getMirrorPool();
+  return runWithMirrorFallback<QueryResult<T>>(
+    () => loggedQuery<T>((t, ps) => p.query<T>(t, ps as never), text, params, false),
+    mirror
+      ? () => {
+          console.warn('[partner-pg] ✗ partner 不可达 → 本地镜像兜底(query · 开发态)');
+          return loggedQuery<T>((t, ps) => mirror.query<T>(t, ps as never), text, params, false);
+        }
+      : null,
   );
 }
 
@@ -273,13 +310,26 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
  * BEGIN / COMMIT / ROLLBACK are logged as well so a single audit line per
  * step shows the full tx boundary.
  */
-export async function withTx<T>(
-  fn: (client: PoolClient) => Promise<T>,
-): Promise<T> {
+export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  try {
+    return await runTxOnPool(getPool(), fn);
+  } catch (err) {
+    const mirror = getMirrorPool();
+    if (mirror && isConnFailure(err)) {
+      console.warn('[partner-pg] ✗ partner 不可达 → 本地镜像兜底(事务 · 开发态)');
+      return await runTxOnPool(mirror, fn);
+    }
+    throw err;
+  }
+}
+
+/** 在给定 pool 上跑一个事务(BEGIN/COMMIT/ROLLBACK + c.query 代理打点)。
+ *  withTx 先用 partner pool 跑;连不上(ECONNREFUSED 等)才换 mirror pool 重跑。 */
+async function runTxOnPool<T>(targetPool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const acquireStart = Date.now();
   let c: PoolClient;
   try {
-    c = await getPool().connect();
+    c = await targetPool.connect();
   } catch (err) {
     reportPgFailure(err, {
       phase: 'acquire',
@@ -296,12 +346,7 @@ export async function withTx<T>(
     get(target, prop, receiver) {
       if (prop === 'query') {
         return (text: string, params?: unknown[]) =>
-          loggedQuery(
-            (t, ps) => target.query(t, ps as never),
-            text,
-            params,
-            true,
-          );
+          loggedQuery((t, ps) => target.query(t, ps as never), text, params, true);
       }
       return Reflect.get(target, prop, receiver);
     },

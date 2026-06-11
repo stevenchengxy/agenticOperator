@@ -1,7 +1,8 @@
-// 读时把 rule_provenance 用打包规则目录(loadAllRules)按 id 补全名称/定义。
-// provenance 只存 {rule_id,tier,included,reason} — 排除规则的可读名称/逻辑
-// 定义不落库,这里按 id 现查目录补回,供详情 UI 展示 + verify 喂给第二模型。
-import { loadAllRules } from './ontology';
+// 读时把 rule_provenance 用**live 规则目录**(getLiveRuleCatalog,优先 Neo4j、
+// 打包兜底)按 id 补全名称/定义。provenance 只存 {rule_id,tier,included,reason}
+// —— 排除规则的可读名称/逻辑定义不落库,这里按 id 现查 live 目录补回,供详情 UI
+// 展示 + verify 喂给第二模型。改 Neo4j 立即对齐,不再硬编码读打包文件。
+import { getLiveRuleCatalog } from './live-rule-catalog';
 import type { RuleProvenance } from './types';
 
 export type EnrichedProvenance = RuleProvenance & { rule_name?: string };
@@ -16,24 +17,20 @@ export type ExcludedRule = {
   definition: string;
 };
 
-function catalogById() {
-  return new Map(loadAllRules().map((r) => [r.id, r]));
-}
-
-export function enrichProvenanceWithNames(prov: RuleProvenance[]): EnrichedProvenance[] {
-  const byId = catalogById();
+export async function enrichProvenanceWithNames(
+  prov: RuleProvenance[],
+): Promise<EnrichedProvenance[]> {
+  const byId = await getLiveRuleCatalog();
   return prov.map((p) => {
     const r = byId.get(p.rule_id);
     return r ? { ...p, rule_name: r.businessLogicRuleName } : { ...p };
   });
 }
 
-// 入参用结构化最小类型(而非 RuleProvenance),好让 route 那边 parseArray 出来的
-// `tier: string` 宽类型直接传入,无需 as 桥接。RuleProvenance[] 也兼容。
-export function buildExcludedRules(
+export async function buildExcludedRules(
   prov: Array<{ rule_id: string; tier: string; included: boolean; reason: string }>,
-): ExcludedRule[] {
-  const byId = catalogById();
+): Promise<ExcludedRule[]> {
+  const byId = await getLiveRuleCatalog();
   return prov
     .filter((p) => !p.included)
     .map((p) => {

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
 import { hasOntologyRuleChecks, ontologyStats } from '@/lib/rule-check/ontology-audit-source';
+import { isInfraFailure } from '@/lib/rule-check/infra-failure';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,7 +57,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const audits = await prisma.ruleCheckAudit.findMany({
+    const allAudits = await prisma.ruleCheckAudit.findMany({
       where: { created_at: { gte: cutoff } },
       select: {
         decision: true,
@@ -65,8 +66,13 @@ export async function GET(req: Request) {
         llm_prompt_tokens: true,
         llm_completion_tokens: true,
         failure_reasons: true,
+        fail_reason: true,
       },
     });
+    // Exclude infra-parked rows (没钱/故障): they carry decision='FAIL' for
+    // display but the candidate was NOT rejected, so they must not count toward
+    // 通过/未通过. fail_reason is null for every genuine business decision.
+    const audits = allAudits.filter((a) => !isInfraFailure(a.fail_reason));
 
     let pass = 0;
     let fail = 0;

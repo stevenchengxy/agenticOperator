@@ -6,14 +6,38 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
-import { hasOntologyRuleChecks, ontologyAuditList } from '@/lib/rule-check/ontology-audit-source';
+import {
+  hasOntologyRuleChecks,
+  ontologyAuditList,
+  ontologyAuditFacets,
+} from '@/lib/rule-check/ontology-audit-source';
+import { foldVerdict, applyAuditFacets, type Verdict } from '@/lib/rule-check/audit-facets';
+import { agentsForDomain, JR_COMPLIANCE_AGENT_ID, lookupAgent } from '@/lib/rule-check/agent-registry';
+import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
 export const dynamic = 'force-dynamic';
+
+/** A selectable value for one of the audit-list facets (execution agent / stage). */
+export type AuditFacetOption = { id: string; label: string };
+/** Facet option sets the /rule-check page renders its filter dropdowns from. */
+export type AuditFacets = { agents: AuditFacetOption[]; stages: AuditFacetOption[] };
 
 export type RuleCheckAuditRow = {
   audit_id: string;
   created_at: string;
   decision: 'PASS' | 'FAIL';
+  /** Non-null = this FAIL is an infra park (没钱/故障), candidate NOT rejected.
+   *  Lets the list badge it distinctly and counts exclude it. Optional so the
+   *  generic-ontology audit source (no infra parking) stays compatible. */
+  fail_reason?: string | null;
+  /** Which rule-check agent produced this run (facet id, e.g. 'jr-compliance'). */
+  agent_id: string;
+  /** Server best-effort display label for the agent (UI may re-localize by id). */
+  agent_label: string;
+  /** Workflow position the run executed at (e.g. 简历筛查). Display + facet. */
+  stage: string | null;
+  /** Folded display verdict: pass | fail | parked(infra, candidate NOT rejected). */
+  verdict: Verdict;
   llm_decision: string;
   candidate_id: string;
   resume_id: string;
@@ -41,52 +65,111 @@ export type RuleCheckAuditRow = {
 export type RuleCheckAuditListResponse = {
   rows: RuleCheckAuditRow[];
   total: number;
-  meta: { empty: boolean; not_configured?: boolean; error?: string; generatedAt: string };
+  meta: {
+    empty: boolean;
+    not_configured?: boolean;
+    error?: string;
+    generatedAt: string;
+    /** Facet option sets for the filter dropdowns (execution agent / stage). */
+    facets?: AuditFacets;
+  };
 };
+
+/** Recruitment facet options, sourced from the agent registry (zh labels; the
+ *  UI re-localizes by id). Stage options mirror each agent's workflow position. */
+function recruitmentFacets(domain: string | null | undefined): AuditFacets {
+  const agents = agentsForDomain(domain);
+  return {
+    agents: agents.map((a) => ({ id: a.id, label: a.label.zh })),
+    stages: agents.map((a) => ({ id: a.stage.zh, label: a.stage.zh })),
+  };
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const decision = searchParams.get('decision');
   const client = searchParams.get('client') ?? '';
   const jrId = searchParams.get('jrId') ?? '';
+  const ruleId = searchParams.get('ruleId') ?? '';
+  // Unified-surface facets (Option B): which agent ran, at which stage, and the
+  // folded verdict (pass | fail | parked). `verdict` supersedes the legacy
+  // `decision` filter when present; `decision` stays for old deep-links.
+  const agent = searchParams.get('agent') ?? '';
+  const stage = searchParams.get('stage') ?? '';
+  const verdictParam = searchParams.get('verdict');
+  const verdict: Verdict | '' =
+    verdictParam === 'pass' || verdictParam === 'fail' || verdictParam === 'parked'
+      ? verdictParam
+      : '';
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 200);
 
   // Non-recruitment domains: serve from the generic ontology rule-check store.
   const domain = searchParams.get('domain');
   if (!isRuleCheckDomain(domain)) {
     if (await hasOntologyRuleChecks(domain)) {
-      let rows = await ontologyAuditList(domain!.trim(), limit);
+      const d = domain!.trim();
+      let rows = await ontologyAuditList(d, limit);
       if (decision === 'PASS' || decision === 'FAIL') rows = rows.filter((r) => r.decision === decision);
       if (client) rows = rows.filter((r) => r.client_name === client);
-      return NextResponse.json<RuleCheckAuditListResponse>({ rows, total: rows.length, meta: { empty: rows.length === 0, generatedAt: new Date().toISOString() } });
+      rows = applyAuditFacets(rows, { agent, stage, verdict });
+      const facets = await ontologyAuditFacets(d);
+      return NextResponse.json<RuleCheckAuditListResponse>({
+        rows,
+        total: rows.length,
+        meta: { empty: rows.length === 0, generatedAt: new Date().toISOString(), facets },
+      });
     }
     return NextResponse.json<RuleCheckAuditListResponse>({
       rows: [],
       total: 0,
-      meta: { empty: true, generatedAt: new Date().toISOString() },
+      meta: { empty: true, generatedAt: new Date().toISOString(), facets: { agents: [], stages: [] } },
     });
   }
 
   try {
+    const facets = recruitmentFacets(domain);
+    // The recruitment RuleCheckAudit store has no agent column — every row is the
+    // compliance agent @ 简历筛查. Identity (it has its own slug) comes from the
+    // registry so the stamped facet matches the dropdown.
+    const compliance = lookupAgent(domain, JR_COMPLIANCE_AGENT_ID);
+    const complianceStage = compliance?.stage.zh ?? null;
+    const complianceLabel = compliance?.label.zh ?? JR_COMPLIANCE_AGENT_ID;
+    // Skip this store when the agent/stage facet selects a *different* recruitment
+    // agent (the planned identity / ownership ones write to the generic store).
+    const wantsCompliance =
+      (!agent || agent === JR_COMPLIANCE_AGENT_ID) && (!stage || stage === complianceStage);
+
     const where: Record<string, unknown> = {};
-    if (decision === 'PASS' || decision === 'FAIL') where.decision = decision;
     if (client) where.client_name = client;
     if (jrId) where.job_requisition_id = jrId;
+    // Rule drill-down from the 总览 rule table: audits where this rule was
+    // assessed (persisted flag) OR was a blocking reason (failure_reasons text,
+    // e.g. "[10-45] …"). The trailing `]` in the contains pattern prevents
+    // prefix collisions (10-4 vs 10-45).
+    if (ruleId) {
+      where.OR = [
+        { flags: { some: { rule_id: ruleId } } },
+        { failure_reasons: { contains: `[${ruleId}]` } },
+      ];
+    }
+    // verdict → DB constraint (richer than the legacy decision filter):
+    //   pass = PASS;  fail = FAIL & 真违规(fail_reason null);  parked = FAIL & 基础设施挂起.
+    if (verdict === 'pass') where.decision = 'PASS';
+    else if (verdict === 'fail') { where.decision = 'FAIL'; where.fail_reason = null; }
+    else if (verdict === 'parked') { where.decision = 'FAIL'; where.fail_reason = { not: null }; }
+    else if (decision === 'PASS' || decision === 'FAIL') where.decision = decision;
 
-    const [audits, totalMatchingFilters] = await Promise.all([
-      prisma.ruleCheckAudit.findMany({
-        where,
-        orderBy: { created_at: 'desc' },
-        take: limit,
-        include: { _count: { select: { flags: true } } },
-      }),
-      // Total matching the filter set — drives the dashboard's "loaded X/Y"
-      // line and the 加载更多 button visibility. Was hardcoded to rows.length
-      // before, which made the button never appear.
-      prisma.ruleCheckAudit.count({ where }),
-    ]);
+    const audits = wantsCompliance
+      ? await prisma.ruleCheckAudit.findMany({
+          where,
+          orderBy: { created_at: 'desc' },
+          take: limit,
+          include: { _count: { select: { flags: true } } },
+        })
+      : [];
+    const prismaTotal = wantsCompliance ? await prisma.ruleCheckAudit.count({ where }) : 0;
 
-    const rows: RuleCheckAuditRow[] = audits.map((a) => {
+    const prismaRows: RuleCheckAuditRow[] = audits.map((a) => {
       const resume = parseJsonObj(a.parsed_resume_json);
       const jr = parseJsonObj(a.job_requisition_json);
       const candidate_name = pluckStr(resume, 'name');
@@ -97,6 +180,11 @@ export async function GET(req: Request) {
       audit_id: a.audit_id,
       created_at: a.created_at.toISOString(),
       decision: a.decision as 'PASS' | 'FAIL',
+      fail_reason: a.fail_reason,
+      agent_id: JR_COMPLIANCE_AGENT_ID,
+      agent_label: complianceLabel,
+      stage: complianceStage,
+      verdict: foldVerdict(a.decision, a.fail_reason),
       llm_decision: a.llm_decision,
       candidate_id: a.candidate_id,
       resume_id: a.resume_id,
@@ -119,10 +207,23 @@ export async function GET(req: Request) {
       };
     });
 
+    // Merge generic-store rule-checks recorded under the recruitment domain —
+    // the planned 候选人身份去重 / 归属 agents write there (one row per run).
+    // Empty today; the page is forward-compatible, so those agents light up the
+    // agent facet the moment they start emitting.
+    let ontoRows = await ontologyAuditList(RECRUITMENT_DOMAIN_ID, limit).catch(() => []);
+    ontoRows = applyAuditFacets(ontoRows, { agent, stage, verdict });
+    if (decision === 'PASS' || decision === 'FAIL') ontoRows = ontoRows.filter((r) => r.decision === decision);
+    if (client) ontoRows = ontoRows.filter((r) => r.client_name === client);
+
+    const rows = [...prismaRows, ...ontoRows]
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .slice(0, limit);
+
     return NextResponse.json<RuleCheckAuditListResponse>({
       rows,
-      total: totalMatchingFilters,
-      meta: { empty: rows.length === 0, generatedAt: new Date().toISOString() },
+      total: prismaTotal + ontoRows.length,
+      meta: { empty: rows.length === 0, generatedAt: new Date().toISOString(), facets },
     });
   } catch (e) {
     return NextResponse.json<RuleCheckAuditListResponse>({

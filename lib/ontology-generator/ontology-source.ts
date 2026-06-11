@@ -195,6 +195,8 @@ async function allmetaList(resource: string, domainId: string): Promise<Node[]> 
     const res = await fetch(url, {
       headers: ALLMETA_KEY ? { Authorization: `Bearer ${ALLMETA_KEY}` } : {},
       signal: controller.signal,
+      // 每次都拿 Neo4j 当前值,绝不走 Next 的 fetch data-cache(总览轮询要实时反映改动)。
+      cache: 'no-store',
     });
     if (!res.ok) return [];
     const body = (await res.json()) as { items?: unknown[] };

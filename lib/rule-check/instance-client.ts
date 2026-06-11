@@ -4,14 +4,13 @@
 // Env-driven config:
 //   ALLMETA_BASE_URL — e.g. "http://localhost:3500"
 //   ALLMETA_API_KEY  — bearer
-//   ALLMETA_DOMAIN   — ontology domain (default "RAAS-v1"); must match the
-//                       value lib/allmeta-client.ts uses, otherwise rule-check
-//                       reads from a different ontology than agents write to.
+//   ALLMETA_DOMAIN   — explicit ontology domain override (escape hatch). When
+//                       unset, the recruitment domain is resolved from the live
+//                       Allmeta list (lib/domain-resolve.ts) so a rename keeps
+//                       reads pointed at the live ontology agents write to.
 
 import { getInstanceFallback, hasInstanceFallback } from './pg-fallback';
-import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
-
-const DOMAIN = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
+import { recruitmentReadDomain } from '@/lib/domain-resolve';
 
 function getConfig(): { base: string; token: string } {
   const base = process.env.ALLMETA_BASE_URL;
@@ -48,7 +47,7 @@ export async function getInstance(
   const { base, token } = getConfig();
   const url = `${base}/api/v1/ontology/instances/${encodeURIComponent(
     label,
-  )}/${encodeURIComponent(value)}?domain=${DOMAIN}`;
+  )}/${encodeURIComponent(value)}?domain=${recruitmentReadDomain()}`;
   const res = await fetch(url, { headers: authHeaders(token) });
   if (res.status === 404) return instanceFallback(label, value);
   if (!res.ok) {
@@ -97,7 +96,7 @@ export async function listInstances(
   const qs = encodeFilters(filters);
   const url =
     `${base}/api/v1/ontology/instances/${encodeURIComponent(label)}` +
-    `?domain=${DOMAIN}${qs ? `&${qs}` : ''}`;
+    `?domain=${recruitmentReadDomain()}${qs ? `&${qs}` : ''}`;
   const res = await fetch(url, { headers: authHeaders(token) });
   if (res.status === 404) return [];
   if (!res.ok) {
@@ -130,7 +129,7 @@ export async function listLinks(
   const qs = encodeFilters(out);
   const url =
     `${base}/api/v1/ontology/links` +
-    `?domain=${DOMAIN}${qs ? `&${qs}` : ''}`;
+    `?domain=${recruitmentReadDomain()}${qs ? `&${qs}` : ''}`;
   const res = await fetch(url, { headers: authHeaders(token) });
   if (res.status === 404) return [];
   if (!res.ok) {

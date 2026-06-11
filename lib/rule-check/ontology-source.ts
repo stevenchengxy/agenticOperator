@@ -14,9 +14,10 @@
 //   3. 上报 drift(API 有 JSON 没有 / JSON 有 API 没有)给 audit + console
 
 import { fetchAction, OntologyGenError } from '@/lib/ontology-gen';
-import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import { recruitmentReadDomain } from '@/lib/domain-resolve';
 
 import { loadAllRules } from './ontology';
+import { getLiveRuleCatalog } from './live-rule-catalog';
 import type { Rule } from './types';
 
 export interface FetchRulesResult {
@@ -50,10 +51,10 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
   try {
     const action = await fetchAction({
       actionRef: 'matchResume',
-      // Recruitment ontology id — renamed RAAS-v1 → 招聘-v1 in Allmeta. Centralized
-      // in lib/domain-ids.ts so a future rename is a one-line change. A stale id
-      // here just 404s → silent JSON fallback ("Ontology API 不可达" banner).
-      domain: RECRUITMENT_DOMAIN_ID,
+      // Recruitment ontology id — resolved from the live Allmeta domain list
+      // (lib/domain-resolve.ts) so a rename in Allmeta Studio keeps reads live
+      // instead of silently 404→JSON-fallback. ALLMETA_DOMAIN still overrides.
+      domain: recruitmentReadDomain(),
       apiBase,
       apiToken,
       timeoutMs: 5000,
@@ -78,13 +79,15 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
       };
     }
 
-    // 3. API rule_id whitelist + JSON metadata 拼合 — JSON 暂时是
-    // applicableDepartment / standardizedLogicRule 等字段的 source-of-truth
+    // 3. API rule_id whitelist + **live 中身**(getLiveRuleCatalog,Neo4j 优先、
+    //    打包兜底)。改 Neo4j 立即对齐;打包 JSON 只在 live 缺该 id 时兜底。
+    const liveCat = await getLiveRuleCatalog();
     const jsonIndex = new Map(jsonRules.map((r) => [r.id, r]));
+    const contentFor = (id: string) => liveCat.get(id) ?? jsonIndex.get(id);
     const rules: Rule[] = [];
     const onlyInApi: string[] = [];
     for (const ruleId of apiRuleIds) {
-      const meta = jsonIndex.get(ruleId);
+      const meta = contentFor(ruleId);
       if (meta) {
         rules.push(meta);
       } else {
@@ -112,7 +115,7 @@ export async function fetchRulesForMatchResume(): Promise<FetchRulesResult> {
     for (const step of action.actionSteps ?? []) {
       const stepRules: Rule[] = [];
       for (const r of step.rules ?? []) {
-        const meta = typeof r.id === 'string' ? jsonIndex.get(r.id) : undefined;
+        const meta = typeof r.id === 'string' ? contentFor(r.id) : undefined;
         if (meta) stepRules.push(meta);
       }
       if (stepRules.length === 0) continue;

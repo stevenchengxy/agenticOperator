@@ -19,8 +19,8 @@
 //
 // 不再有 JSON fallback —— API 失败直接抛错(failSafe in runner.ts)。
 
-import type { AgentLogger } from '@/lib/agent-logger';
-import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import { createNullLogger, type AgentLogger } from '@/lib/agent-logger';
+import { recruitmentReadDomain } from '@/lib/domain-resolve';
 import type {
   MatchResumeStepGroup,
   Rule,
@@ -452,6 +452,41 @@ async function resolveDepartmentBg(
     }
   }
 
+  // a.5) partner-pg client_department.dept_name 兜底 —— Neo4j 图谱还没投入
+  //      :Client_Department 节点时(图查 404),partner-pg 的 client_department
+  //      表才是 department→事业群的事实源(dept_name 直接是 "CDG"/"IEG"/… token)。
+  //      对称于 resolveClientName 里 `SELECT client_name FROM client` 的兜底 ——
+  //      少了这一条,client_department_id 是 UUID 且 sd_org_name 解析不出 bg 的
+  //      JR(如 CDG 岗位)会 fail-closed 丢掉部门专属规则(10-42)。
+  if (deptId && isPartnerPgConfigured()) {
+    const t0 = Date.now();
+    try {
+      const r = await pgQuery<{ dept_name: string }>(
+        'SELECT dept_name FROM client_department WHERE client_department_id = $1 LIMIT 1',
+        [deptId],
+      );
+      const row = r.rows[0];
+      logger.apiCall('lookup-department.partner-pg', {
+        url: 'partner-pg://client_department.dept_name',
+        method: 'GET',
+        request: { client_department_id: deptId },
+        status: row ? 200 : 404,
+        durationMs: Date.now() - t0,
+        response: row ?? null,
+      });
+      const bg = coerceBg(row?.dept_name);
+      if (bg) return { bg, source: 'partner-pg' };
+    } catch (e) {
+      logger.apiCall('lookup-department.partner-pg', {
+        url: 'partner-pg://client_department.dept_name',
+        method: 'GET',
+        request: { client_department_id: deptId },
+        durationMs: Date.now() - t0,
+        error: (e as Error).message,
+      });
+    }
+  }
+
   // b) 回退字符串:显式 client_business_group → department_id 编码 → sd_org_name
   const explicit = coerceBg(input.businessGroup);
   if (explicit) return { bg: explicit, source: 'jr-business-group' };
@@ -472,7 +507,7 @@ async function resolveDepartmentBg(
 export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<RuleFetchResult> {
   const apiBase = (process.env.ALLMETA_BASE_URL ?? '').replace(/\/+$/, '');
   const apiToken = process.env.ALLMETA_API_KEY ?? '';
-  const domain = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
+  const domain = recruitmentReadDomain();
 
   if (!apiBase) {
     throw new RuleFetchApiError('ALLMETA_BASE_URL env not configured');
@@ -579,6 +614,36 @@ export async function fetchRulesViaOntologyApi(input: RuleFetchInput): Promise<R
   });
 
   return result;
+}
+
+/**
+ * 取 live ontology 全部 matchResume 规则(整条,用 toRule 规范化),按 id 索引。
+ * 给 UI「单条原规则定义」展示用 —— 跟 agent runtime 同一个 endpoint + 同一个
+ * toRule,所以 UI 显示的就是 Neo4j 当前值(含改后的 standardizedLogicRule),
+ * 不再读打包 rules.json。ALLMETA env 缺失 / API 失败时抛错,调用方自行回退 JSON。
+ */
+export async function fetchActionRulesLive(
+  actionName = 'ruleCheckForMatchResume',
+  logger?: AgentLogger,
+): Promise<Map<string, Rule>> {
+  const apiBase = (process.env.ALLMETA_BASE_URL ?? '').replace(/\/+$/, '');
+  const apiToken = process.env.ALLMETA_API_KEY ?? '';
+  const domain = recruitmentReadDomain();
+  if (!apiBase) throw new RuleFetchApiError('ALLMETA_BASE_URL env not configured');
+  if (!apiToken) throw new RuleFetchApiError('ALLMETA_API_KEY env not configured');
+  const log = logger ?? createNullLogger();
+  const actionUrl = `${apiBase}/api/v1/ontology/actions/${encodeURIComponent(actionName)}/rules?domain=${encodeURIComponent(domain)}`;
+  const resp = await httpJson({ label: 'fetch-action-rules', url: actionUrl, apiToken, logger: log });
+  if (!resp.ok || !resp.data || typeof resp.data !== 'object') {
+    throw new RuleFetchApiError('action response not an object', { url: actionUrl });
+  }
+  const action = resp.data as Record<string, unknown>;
+  const flatRules = Array.isArray(action.rules) ? (action.rules as Array<Record<string, unknown>>) : [];
+  const byId = new Map<string, Rule>();
+  for (const r of flatRules) {
+    if (typeof r.id === 'string' && r.id.trim()) byId.set(r.id, toRule(r));
+  }
+  return byId;
 }
 
 // API rule → internal Rule shape

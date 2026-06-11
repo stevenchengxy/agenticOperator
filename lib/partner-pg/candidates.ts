@@ -59,6 +59,9 @@ export type SaveCandidateInput = {
   };
   /** Optional explicit candidate_id (force use this instead of dedup). */
   candidate_id?: string;
+  /** 查重(9-15)判出的"老人"candidate_id —— 同一人时强制复用此行(UPDATE 挂新简历到老
+   *  Candidate,1:N),优先级仅次于显式 candidate_id、高于 phone/email dedup。null → 走兜底 dedup。 */
+  same_as_candidate_id?: string | null;
 };
 
 export type SaveCandidateResult = {
@@ -243,7 +246,9 @@ export async function saveCandidateToPartnerPg(
     //   - Else if mobile_normalized present → look up by (mobile_normalized, name)
     //   - Else if email present → look up by email
     //   - Else → create new
-    let candidate_id = input.candidate_id ?? null;
+    // dedup 档序:① 显式 candidate_id ② 查重(9-15)判出的 same_as_candidate_id ③ 手机号 ④ 邮箱+名字 ⑤ 建新。
+    // 查重前移后 same_as_candidate_id 是权威归属源;phone/email 仅在查重未命中时兜底。
+    let candidate_id = input.candidate_id ?? input.same_as_candidate_id ?? null;
     let candidate_created = false;
 
     if (!candidate_id && mobile_normalized) {

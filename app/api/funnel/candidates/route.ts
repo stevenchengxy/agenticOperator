@@ -9,6 +9,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
+import { isInfraFailure } from "@/lib/rule-check/infra-failure";
 import { candidateNameFromSnapshot, resolveNamesBestEffort } from "@/lib/funnel/names";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,7 @@ type AuditLite = {
   candidate_id: string;
   job_requisition_id: string;
   decision: string;
+  fail_reason: string | null;
   trace_id: string | null;
   run_id: string;
   created_at: Date;
@@ -70,12 +72,13 @@ export async function GET(req: Request): Promise<Response> {
   const dimension: "job" | "candidate" = byCandidate ? "candidate" : "job";
 
   try {
-    const audits = (await prisma.ruleCheckAudit.findMany({
+    const rawAudits = (await prisma.ruleCheckAudit.findMany({
       where: jobId ? { job_requisition_id: jobId } : undefined,
       select: {
         candidate_id: true,
         job_requisition_id: true,
         decision: true,
+        fail_reason: true,
         trace_id: true,
         run_id: true,
         created_at: true,
@@ -86,6 +89,11 @@ export async function GET(req: Request): Promise<Response> {
       orderBy: { created_at: "desc" },
       take: 5000,
     })) as AuditLite[];
+    // Drop infra-parked rows (没钱/故障): decision='FAIL' for display only, the
+    // candidate was NOT rejected. Excluding them keeps the latest-per-candidate
+    // status truthful — a candidate whose only audit is parked is still in
+    // flight, not 已拦截.
+    const audits = rawAudits.filter((a) => !isInfraFailure(a.fail_reason));
 
     if (byCandidate) {
       // 花名册：每 candidate 取最新一条 + 横跨岗位数。

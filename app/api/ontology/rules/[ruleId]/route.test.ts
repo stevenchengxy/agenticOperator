@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the ontology source so we can drive the live-vs-snapshot divergence that
 // causes the 费控 bug. normalizeOntologyRule + toEngineRules run for real (pure).
@@ -7,7 +7,7 @@ vi.mock("@/lib/ontology-generator/ontology-source", () => ({
   hasSnapshot: vi.fn(),
   loadSnapshotOntology: vi.fn(),
 }));
-// The recruitment branch isn't exercised here; keep its deps cheap + side-effect free.
+// loadAllRules = bundled rules.json fallback (when ALLMETA is unconfigured/down).
 vi.mock("@/lib/rule-check/ontology", () => ({ loadAllRules: vi.fn(() => []) }));
 vi.mock("@/lib/ontology-gen", () => ({
   fetchAction: vi.fn(),
@@ -104,5 +104,58 @@ describe("GET /api/ontology/rules/[ruleId] — 费控 live/snapshot id divergenc
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.reason).toBe("not_found");
+  });
+});
+
+describe("GET /api/ontology/rules/[ruleId] — 招聘域全阶段 (非 matchResume 也能解析)", () => {
+  beforeEach(() => {
+    // ALLMETA 配置存在 → 走 live ontology(而非直接回退打包 JSON)。
+    vi.stubEnv("ALLMETA_BASE_URL", "http://allmeta.test");
+    vi.stubEnv("ALLMETA_API_KEY", "k");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("resolves a non-matchResume (推荐包生成 阶段) recruitment rule from the full domain ontology", async () => {
+    // 这条规则属于「推荐包生成」阶段,不在 matchResume action 里 —— 旧实现
+    // (fetchActionRulesLive,只取 simplied 简历匹配 action) 抓不到、会 404。
+    // 新实现走 fetchDomainOntology(整域全阶段,生 :Rule 节点)→ 跟总览同源,能解析。
+    vi.mocked(fetchDomainOntology).mockResolvedValue(
+      ontology("allmeta", [
+        {
+          id: "20-07",
+          businessLogicRuleName: "推荐包封面信息完整性",
+          standardizedLogicRule: "生成推荐包时校验封面必填字段是否齐全…",
+          specificScenarioStage: "推荐包生成",
+        },
+      ]),
+    );
+
+    const res = await get("20-07", "招聘-v1");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.source).toBe("ontology-api");
+    expect(body.rule.id).toBe("20-07");
+    expect(body.rule.standardizedLogicRule).toContain("推荐包");
+    // 用整域 ontology 解析,绝不碰 matchResume action 快照。
+    expect(fetchDomainOntology).toHaveBeenCalledWith("招聘-v1");
+  });
+
+  it("falls back to bundled rules.json when the live ontology lacks the id", async () => {
+    const { loadAllRules } = await import("@/lib/rule-check/ontology");
+    vi.mocked(loadAllRules).mockReturnValueOnce([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { id: "10-42", businessLogicRuleName: "CDG永不回流", standardizedLogicRule: "CDG绝不回流。" } as any,
+    ]);
+    vi.mocked(fetchDomainOntology).mockResolvedValue(ontology("allmeta", []));
+
+    const res = await get("10-42", "招聘-v1");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.source).toBe("json-fallback");
+    expect(body.rule.id).toBe("10-42");
   });
 });

@@ -7,69 +7,13 @@ import { SystemStatusCards } from "./SystemStatusCards";
 import { useApp } from "@/lib/i18n";
 import { AGENT_MAP, displayName as agentDisplayName, type Stage } from "@/lib/agent-mapping";
 import { useDomain } from "@/lib/domains";
-import { ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID, RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import { useDisplayNameResolver } from "@/lib/agent-names";
-
-// Each runnable pack runs on its OWN Inngest app `agentic-operator-<domainId>`,
-// and the function slug is `agentic-operator-<domainId>-<fnId>`. The domainId can
-// be CJK (费控-v1 / 能源调度-v1), so the old `^agentic-operator-[a-z0-9-]+?-`
-// strip silently failed on it and EVERY domain-app run fell through to the
-// recruitment default — i.e. energy/费控 runs showed up under 招聘-v1, not their
-// own domain. Match the known domain-app prefixes directly instead.
-const DOMAIN_APP_IDS = [ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID];
-
-// Resolve which business domain a run belongs to, from its Inngest function slug.
-function runDomainOf(
-  run: { function?: { slug?: string } | undefined },
-  slugToDomain: Map<string, string>,
-): string {
-  const slug = run.function?.slug ?? "";
-  // 1. Own per-domain app: `agentic-operator-<domainId>-<fnId>` (authoritative
-  //    for the hardcoded packs; works regardless of /api/agents availability).
-  for (const d of DOMAIN_APP_IDS) {
-    if (slug.startsWith(`agentic-operator-${d}-`)) return d;
-  }
-  // 2. Recruitment main app + the live slug→domain map (deployed shells).
-  const fnId = slug.replace(/^agentic-operator-main-/, "");
-  const mapped = slugToDomain.get(fnId) ?? slugToDomain.get(slug);
-  if (mapped) return mapped;
-  // 3. Generic fallback for any other per-domain app: the longest live-map key
-  //    the run slug ends with (future packs work without a code change).
-  let best = "";
-  for (const key of slugToDomain.keys()) {
-    if (key && (slug === key || slug.endsWith(`-${key}`)) && key.length > best.length) best = key;
-  }
-  return best ? (slugToDomain.get(best) ?? RECRUITMENT_DOMAIN_ID) : RECRUITMENT_DOMAIN_ID;
-}
-
-/** Fetch /api/agents once → Map<fnId(slug), domain> for run attribution. */
-function useAgentDomainMap(): Map<string, string> {
-  const [map, setMap] = React.useState<Map<string, string>>(new Map());
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetch("/api/agents");
-        const body = (await res.json()) as { agents?: Array<{ slug?: string | null; wsId?: string; domain?: string }> };
-        if (!alive) return;
-        const m = new Map<string, string>();
-        for (const a of body.agents ?? []) {
-          if (a.domain) {
-            if (a.slug) m.set(a.slug, a.domain);
-            if (a.wsId) m.set(a.wsId, a.domain);
-          }
-        }
-        setMap(m);
-      } catch {
-        /* keep prefix-based fallback */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return map;
-}
+import {
+  runDomainOf,
+  useAgentDomainMap,
+  slugToShort,
+  shortToSlug,
+} from "@/lib/monitor/run-domain";
 
 // Stage order — workflow-natural left-to-right reading order. Matches Fleet's
 // STAGE_ORDER. Used by AgentFilter to cluster the deployed agents.
@@ -500,34 +444,8 @@ function ReplayRunButton({ run }: { run: RunRow }) {
   );
 }
 
-// Inngest app id (see server/inngest/client.ts). Slug shape: `<prefix>-<fnId>`.
-// Static derivation here so the lookup doesn't depend on useInngestLiveOverlay
-// being mounted upstream — /monitor is often the first page visited.
-const INNGEST_APP_PREFIX = "agentic-operator-main-";
-
-// Match the three fnId conventions kept in sync with lib/inngest-registry.ts:
-//   1. explicit `inngestId` on AgentMeta
-//   2. stub-factory `agent.<short.toLowerCase()>`
-//   3. kebab `<kebab-short>-agent` (real-agent file convention)
-function matchesFnId(a: (typeof AGENT_MAP)[number], fnId: string): boolean {
-  if (a.inngestId === fnId) return true;
-  if (fnId === `agent.${a.short.toLowerCase()}`) return true;
-  const kebab = a.short.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "");
-  return fnId === `${kebab}-agent`;
-}
-
-function shortToSlug(short: string): string | null {
-  const meta = AGENT_MAP.find((a) => a.short === short);
-  if (!meta) return null;
-  const fnId = meta.inngestId ?? `agent.${meta.short.toLowerCase()}`;
-  return `${INNGEST_APP_PREFIX}${fnId}`;
-}
-
-function slugToShort(slug: string | undefined): string | null {
-  if (!slug) return null;
-  const fnId = slug.startsWith(INNGEST_APP_PREFIX) ? slug.slice(INNGEST_APP_PREFIX.length) : slug;
-  return AGENT_MAP.find((a) => matchesFnId(a, fnId))?.short ?? null;
-}
+// slug↔short + run→domain attribution now live in lib/monitor/run-domain.ts
+// (shared with /overview's 智能体运行 panel).
 
 // ── controls ────────────────────────────────────────────────────
 

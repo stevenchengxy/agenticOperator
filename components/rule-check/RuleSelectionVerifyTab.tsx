@@ -152,6 +152,16 @@ export function RuleJudgmentTab({ detail, verify }: { detail: RuleCheckAuditDeta
     ) : (
       <RunningState stage={verify.stage} />
     );
+  // 确定性族(查重/归属/能源):不套 matchResume 的「适配规则:过滤→选中→注入提示词」,
+  // 改用判定阶梯/结论版式。二次验证(交叉复核)仍保留。
+  if (detail.deterministic) {
+    return (
+      <div className="flex flex-col" style={{ gap: 16 }}>
+        <DeterministicRules detail={detail} />
+        {validation}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
       {/* Deterministic ontology audits (energy / 费控) have no candidate — skip the
@@ -168,11 +178,134 @@ export function RuleJudgmentTab({ detail, verify }: { detail: RuleCheckAuditDeta
  * 再独立判断「这条该不该选 / 为什么选对了」。**不做 PASS/FAIL 判断**(那在规则判断 tab)。
  */
 export function RuleSelectionTab({ detail, verify }: { detail: RuleCheckAuditDetail; verify: VerifyState }) {
+  // 确定性族:用 DeterministicRules,不显示「规则库→过滤→选中→注入提示词」那套语义。
+  if (detail.deterministic) {
+    return (
+      <div className="flex flex-col" style={{ gap: 16 }}>
+        <DeterministicRules detail={detail} />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
       {!detail.deterministic && <CandidateProfileCard detail={detail} />}
       <AdaptedRules mode="selection" detail={detail} verification={verify.result} verifying={verify.status === "running"} />
       <SelectionSummary verify={verify} />
+    </div>
+  );
+}
+
+/** 确定性 rule-check(查重 9-15 / 归属 / 能源)的规则面板 —— 不套 matchResume 的
+ *  「规则库→过滤→选中→注入用户提示词」(确定性引擎判、规则恒纳入)。展示:模式说明 +
+ *  (查重时)三级判定阶梯 + 关联候选人;每条规则 = 结论徽章 + 纳入依据 + 原规则定义。 */
+function DeterministicRules({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t } = useApp();
+  const sel = ((detail as unknown as { selection?: Record<string, unknown> }).selection ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const isIdentity = sel.ontologyRuleId === "9-15";
+  return (
+    <div className="rounded-md" style={{ border: "1px solid var(--c-line)", overflow: "hidden" }}>
+      <div
+        className="flex items-center"
+        style={{ gap: 8, padding: "10px 12px", background: "var(--c-panel)", borderBottom: "1px solid var(--c-line)" }}
+      >
+        <Badge variant="default">{t("rc_det_mode_badge")}</Badge>
+        <span className="text-ink-2" style={{ fontSize: 11.5 }}>
+          {t("rc_det_mode_desc")}
+        </span>
+      </div>
+      {isIdentity ? <IdentityLadder sel={sel} /> : null}
+      {detail.flags.map((f) => (
+        <DeterministicRuleRow key={f.rule_id} flag={f} />
+      ))}
+    </div>
+  );
+}
+
+/** 查重专用:三级判定阶梯(命中即停)+ 结论 + 关联候选人。 */
+function IdentityLadder({ sel }: { sel: Record<string, unknown> }) {
+  const { t } = useApp();
+  const TIERS = [t("rc_id_tier1"), t("rc_id_tier2"), t("rc_id_tier3")];
+  const matched = typeof sel.matchedRule === "string" ? sel.matchedRule : null;
+  const mIdx = matched ? Number(matched.replace(/\D/g, "")) - 1 : -1;
+  const dedup = typeof sel.dedupAction === "string" ? sel.dedupAction : "";
+  const name = typeof sel.matchedCandidateName === "string" ? sel.matchedCandidateName : null;
+  const cid = typeof sel.matchedCandidateId === "string" ? sel.matchedCandidateId : null;
+  const conclusion =
+    dedup === "auto-merged"
+      ? t("rc_id_concl_merged")
+      : dedup === "pending-review"
+        ? t("rc_id_concl_review")
+        : t("rc_id_concl_new");
+  return (
+    <div style={{ padding: 12, borderBottom: "1px solid var(--c-line)" }}>
+      <div className="text-ink-1" style={{ fontSize: 13, fontWeight: 600 }}>
+        {t("rc_id_conclusion")}：{conclusion}
+      </div>
+      {name && cid ? (
+        <div className="text-ink-2" style={{ fontSize: 12, marginTop: 4 }}>
+          {t("rc_id_linked")}：{name}（{cid}）
+        </div>
+      ) : null}
+      <div className="hint" style={{ marginTop: 10, marginBottom: 6 }}>
+        {t("rc_id_ladder")}
+      </div>
+      <div className="flex flex-col" style={{ gap: 5 }}>
+        {TIERS.map((label, i) => {
+          const status =
+            mIdx < 0 || i < mIdx ? t("rc_id_tier_miss") : i === mIdx ? t("rc_id_tier_hit") : t("rc_id_tier_skip");
+          const active = i === mIdx;
+          return (
+            <div
+              key={i}
+              className="flex items-center"
+              style={{ gap: 8, fontSize: 12, opacity: mIdx >= 0 && i > mIdx ? 0.5 : 1 }}
+            >
+              <span style={{ color: active ? "var(--c-ok)" : "var(--c-ink-3)", fontSize: 10 }}>
+                {active ? "●" : "○"}
+              </span>
+              <span className="text-ink-1">{label}</span>
+              <span className="mono" style={{ fontSize: 10.5, color: active ? "var(--c-ok)" : "var(--c-ink-3)" }}>
+                {status}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 单条确定性规则:规则号 + 名 + 结论徽章 + 纳入依据 + 原规则定义(图引擎懒加载)。 */
+function DeterministicRuleRow({ flag }: { flag: RuleCheckAuditDetail["flags"][number] }) {
+  const { t } = useApp();
+  const color =
+    flag.result === "PASS" ? "var(--c-ok)" : flag.result === "FAIL" ? "var(--c-err)" : "var(--c-ink-3)";
+  return (
+    <div style={{ padding: 12, borderBottom: "1px solid var(--c-line)" }}>
+      <div className="flex items-center" style={{ gap: 8, marginBottom: 6 }}>
+        <span className="mono text-ink-3" style={{ fontSize: 11 }}>
+          {flag.rule_id}
+        </span>
+        <span className="text-ink-1" style={{ fontSize: 13, fontWeight: 600 }}>
+          {flag.rule_name_snapshot}
+        </span>
+        <span
+          className="mono"
+          style={{ fontSize: 10.5, color, border: `1px solid ${color}`, borderRadius: 4, padding: "1px 6px" }}
+        >
+          {verdictLabel(flag.result, t)}
+        </span>
+      </div>
+      <div className="hint" style={{ marginBottom: 3 }}>
+        {t("rc_det_basis")}
+      </div>
+      <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.55, marginBottom: 8 }}>
+        {flag.evidence}
+      </div>
+      <RuleDefinitionPanel ruleId={flag.rule_id} />
     </div>
   );
 }

@@ -63,6 +63,7 @@ export function identityToCheck(
   rulesTotal: number,
   link: IdentityLinkInfo = {},
   ontologyRule?: IdentityOntologyRule,
+  llmRationale?: string | null,
 ): CandidateOntologyCheck {
   const linkSuffix =
     res.samePerson && link.matchedCandidateId
@@ -80,6 +81,11 @@ export function identityToCheck(
         ? 'FAIL'
         : 'PASS'
       : 'NA';
+    // 纳入依据:优先用大模型生成的业务文案;LLM 不可达时回退机械文案。机械判定依据 +
+    // 字段证据始终留在 evidence,大模型文案上位也不丢失可审计的确定性依据。
+    const mechanical = `${matched ? '命中' : '未命中'}规则 ${ontologyRule.id} · ${tier}${linkSuffix}`;
+    const fieldEvidence = matched ? evidenceOf(matched) : res.ruleOutcomes.map(evidenceOf).join(' | ');
+    const llm = llmRationale?.trim();
     return {
       decision: res.needsHumanReview ? 'VIOLATED' : 'VALIDATED',
       redlineFlag: false,
@@ -95,8 +101,8 @@ export function identityToCheck(
           ruleGroup: '身份去重',
           hardSoft: res.needsHumanReview ? 'soft' : 'hard',
           result,
-          checkPoint: `${matched ? '命中' : '未命中'}规则 ${ontologyRule.id} · ${tier}${linkSuffix}`,
-          evidence: matched ? evidenceOf(matched) : res.ruleOutcomes.map(evidenceOf).join(' | '),
+          checkPoint: llm || mechanical,
+          evidence: llm ? `${mechanical} · ${fieldEvidence}` : fieldEvidence,
         },
       ],
     };

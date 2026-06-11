@@ -94,6 +94,19 @@ describe('identityToCheck', () => {
     expect(check.evals[0].ruleId).toBe('9-15');
     expect(check.evals[0].result).toBe('NA');
   });
+
+  it('ontologyRule + llmRationale(大模型生成依据)→ checkPoint 用大模型文案,机械文案进 evidence', async () => {
+    const b = { ...base, candidate_id: 'cand_old', name: 'x', email: 'y@z.com' };
+    const res = await applyIdentityRules(base, b, RULES);
+    const llm = '手机号与已有候选人完全一致,依据同一候选人判定规则判为同一人,自动关联老档不重复建档';
+    const check = identityToCheck(
+      res, RULES.length, { matchedCandidateId: 'cand_old', matchedCandidateName: '张三', dedupAction: 'auto-merged' },
+      { id: '9-15', name: '同一候选人判定规则' }, llm,
+    );
+    expect(check.evals[0].checkPoint).toBe(llm);
+    // 机械文案不丢失:进 evidence,留可审计的结构化命中依据
+    expect(check.evals[0].evidence).toContain('phone');
+  });
 });
 
 describe('ownershipToCheck', () => {

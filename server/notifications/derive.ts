@@ -35,6 +35,8 @@ export interface CaptureInput {
   managerAction?: string | null;
   /** Business domain (Allmeta id) this signal belongs to. Null = system/cross-domain. */
   domain?: string | null;
+  /** 业务里程碑信号(RecruitmentSignal 等)。透传给外部通知通道做白名单过滤,不落库。 */
+  signal?: string | null;
 }
 
 export interface NotificationDraft {
@@ -56,6 +58,7 @@ export interface NotificationDraft {
   anchorsJson: string | null;
   managerAction: string | null;
   domain: string | null;
+  signal: string | null;
 }
 
 export interface DeriveOptions {
@@ -179,6 +182,7 @@ export function deriveNotification(
     // System messages are domain-agnostic (always shown); everything else is
     // tagged with its business domain so the view can scope by it.
     domain: category === 'system' ? null : (input.domain ?? null),
+    signal: input.signal ?? null,
   };
 
   if (isAlert) {

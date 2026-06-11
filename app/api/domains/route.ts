@@ -19,6 +19,12 @@ import {
   friendlyDomainName,
   colorForDomain,
 } from "@/lib/domain-ids";
+import {
+  resolveRecruitmentDomainId,
+  setResolvedRecruitmentDomainId,
+  type RecruitmentDomainStatus,
+} from "@/lib/domain-resolve";
+import { recordLogEvent } from "@/server/log/log-event";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +92,11 @@ function writeCache(list: AllmetaDomain[]): void {
 let lastGoodAllmeta: AllmetaDomain[] =
   readCacheSync() ?? [{ id: RECRUITMENT_DOMAIN_ID }, { id: ENERGY_DOMAIN_ID }];
 
+// Last recruitment-anchor status we logged a drift event for. GET /api/domains
+// is polled by the switcher, so we emit the drift LogEvent only on a transition
+// INTO 'missing' (not on every poll). Resets on restart → re-emits once.
+let lastAnchorStatus: RecruitmentDomainStatus | null = null;
+
 async function fetchAllmetaDomains(): Promise<AllmetaDomain[]> {
   if (!ALLMETA_BASE) return lastGoodAllmeta;
   const controller = new AbortController();
@@ -112,8 +123,16 @@ async function fetchAllmetaDomains(): Promise<AllmetaDomain[]> {
   }
 }
 
+/** Resolved recruitment domain anchor — lets the UI warn when the configured
+ *  id no longer matches any live Allmeta domain (status !== "exact"). */
+export type RecruitmentAnchor = {
+  configured: string;
+  resolved: string;
+  status: RecruitmentDomainStatus;
+};
+
 export type DomainListResponse =
-  | { ok: true; domains: DomainRow[] }
+  | { ok: true; domains: DomainRow[]; recruitmentAnchor: RecruitmentAnchor }
   | { ok: false; reason: "error"; error?: string };
 
 export type DomainCreateResponse =
@@ -186,6 +205,28 @@ async function pickColor(): Promise<string> {
 export async function GET() {
   try {
     const allmeta = await fetchAllmetaDomains();
+
+    // Resolve the recruitment anchor against the LIVE Allmeta ids (not the union
+    // below — drift is specifically "does Allmeta still know this id?"). On a
+    // Studio outage `allmeta` is the seed/cache that includes the constant, so a
+    // transient outage never falsely reports drift. Publish the resolved id so
+    // the ontology-read path (lib/domain-resolve.ts) follows a rename live.
+    const anchor = resolveRecruitmentDomainId(allmeta.map((d) => d.id));
+    setResolvedRecruitmentDomainId(anchor.status === "missing" ? null : anchor.id);
+    if (anchor.status === "missing" && lastAnchorStatus !== "missing") {
+      void recordLogEvent({
+        type: "domain_drift",
+        source: "domain-resolve",
+        message: `招聘域 id 在 Allmeta 已不存在(配置 ${RECRUITMENT_DOMAIN_ID})— ontology 读取回退到常量,可能读到静态规则。请在 Allmeta 确认新域名并更新别名。`,
+        payloadJson: JSON.stringify({
+          configured: RECRUITMENT_DOMAIN_ID,
+          resolved: anchor.id,
+          status: anchor.status,
+          liveIds: allmeta.map((d) => d.id),
+        }),
+      });
+    }
+    lastAnchorStatus = anchor.status;
 
     // Domains that already hold agent data must never disappear from the list.
     const agentDomains = await prisma.agentVersion
@@ -261,7 +302,15 @@ export async function GET() {
       .sort((a, b) => a.order - b.order)
       .map((x) => x.row);
 
-    return NextResponse.json<DomainListResponse>({ ok: true, domains });
+    return NextResponse.json<DomainListResponse>({
+      ok: true,
+      domains,
+      recruitmentAnchor: {
+        configured: RECRUITMENT_DOMAIN_ID,
+        resolved: anchor.id,
+        status: anchor.status,
+      },
+    });
   } catch (e) {
     return NextResponse.json<DomainListResponse>({
       ok: false,

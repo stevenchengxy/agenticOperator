@@ -64,6 +64,16 @@ const AGENT_MAP_RAAS_RAW: Omit<AgentMeta, 'domain'>[] = [
   { short: 'ResumeCollector',  wsId: '8',       stage: 'resume',      kind: 'hybrid', ownerTeam: '招聘运营', version: 'v3.0.1', triggersEvents: ['CHANNEL_PUBLISHED'],                              emitsEvents: ['RESUME_DOWNLOADED'],                                                        terminal: false },
   { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false, inngestName: 'Resume Parser Agent', inngestId: 'resume-parser-agent' },
   { short: 'ResumeFixer',      wsId: '9-2',     stage: 'resume',      kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['RESUME_PARSE_ERROR'],                             emitsEvents: ['RESUME_PROCESSED'],                                                         terminal: false },
+  // Candidate identity (去重·是不是同一人) + ownership (归属·锁定/腾讯) rule-check agents —
+  // independent, AUDIT-ONLY agents at the intake seam (between ResumeParser and RuleCheck).
+  // They consume RESUME_PROCESSED,调规则判断后写 OntologyRuleCheck 审计(/rule-check 面板),
+  // 不 emit 任何事件 → 永不拦截主链路。实现见 server/inngest/agents/candidate-{identity,ownership}-agent.ts。
+  // No explicit inngestId: the live fn id derives from short via the kebab convention
+  // (RuleCheckCandidateIdentity → rule-check-candidate-identity-agent), so the registry
+  // merges them as 'real' without adding them to the "canonical 5 deployable" set
+  // (hasRealInngestFn).
+  { short: 'RuleCheckCandidateIdentity',  wsId: '9-3',   stage: 'resume',      kind: 'auto',   ownerTeam: '合规',     version: 'v0.1.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: [],                                                                           terminal: false, inngestName: 'Rule Check Candidate Identity' },
+  { short: 'RuleCheckCandidateOwnership', wsId: '9-4',   stage: 'resume',      kind: 'auto',   ownerTeam: '合规',     version: 'v0.1.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: [],                                                                           terminal: false, inngestName: 'Rule Check Candidate Ownership' },
   // 2026-05-19 consolidation: matchResume 收敛成只订 MATCH_RULE_CHECK_PASSED;
   // 第一段(RESUME_PROCESSED → 拉 JR + 派发)整段并进 RuleCheck。
   // wsId 保持 '10' / '10-5' 以兼容 monitor / topology / workflow-graph 现有节点 ID;

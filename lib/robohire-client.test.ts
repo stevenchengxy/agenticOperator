@@ -78,6 +78,51 @@ describe('parseResumeDirect', () => {
     const init = (fetchSpy.mock.calls[0][1] ?? {}) as RequestInit;
     expect((init.headers as Record<string, string>)['X-Trace-Id']).toBe('trace-123');
   });
+
+  // A scanned/image-only/corrupt PDF: RoboHire is healthy and tells us, in plain
+  // words, that THIS document has no extractable text. That is a document-content
+  // problem, not a vendor outage — it must NOT be coded SERVER (which the
+  // dependency-health classifier treats as a recoverable RoboHire degradation).
+  it('throws UNPARSEABLE when RoboHire reports no extractable text (200 success:false)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: 'PDF extraction failed: no text could be extracted by any method',
+          requestId: 'req_np',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await expect(parseResumeDirect(Buffer.from('%PDF'), 'scan.pdf')).rejects.toMatchObject({
+      code: 'UNPARSEABLE',
+      requestId: 'req_np',
+    });
+  });
+
+  it('also detects an unparseable-document message delivered as a 5xx', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: false, error: 'document is corrupt and unparseable' }),
+        { status: 500, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await expect(parseResumeDirect(Buffer.from('%PDF'), 'r.pdf')).rejects.toMatchObject({
+      code: 'UNPARSEABLE',
+    });
+  });
+
+  it('keeps a generic success:false as SERVER (genuine vendor problem, not a document one)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: false, error: 'internal pipeline crashed' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await expect(parseResumeDirect(Buffer.from('%PDF'), 'r.pdf')).rejects.toMatchObject({
+      code: 'SERVER',
+    });
+  });
 });
 
 describe('matchResumeDirect', () => {

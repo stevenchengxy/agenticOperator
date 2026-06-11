@@ -232,8 +232,9 @@ export async function POST(
         executor: string;
         reason: string;
       }>(audit.filtered_out_rules),
-      // 从 provenance 的排除条目按 id 补名称/定义,喂给第二模型逐条判「该不该排除」。
-      excluded_rules: buildExcludedRules(provenance),
+      // 从 provenance 的排除条目按 id 补名称/定义(live 目录,改 Neo4j 立即对齐),
+      // 喂给第二模型逐条判「该不该排除」。
+      excluded_rules: await buildExcludedRules(provenance),
     });
 
     const verifierModel = pickVerifierModel(audit.llm_model);

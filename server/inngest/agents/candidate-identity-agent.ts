@@ -108,8 +108,8 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
 
     // 大模型生成「纳入依据」:把确定性判定(命中第几级、关联到谁、去重动作)交给 LLM 用
     // 一句业务中文复述。soft-fail → null,identityToCheck 回退机械文案。LLM 只复述、不改判。
-    const llmRationale = (await ctx.step.run('generate-inclusion-rationale', async () => {
-      if (!ontologyRule) return null;
+    const rationale = (await ctx.step.run('generate-inclusion-rationale', async () => {
+      if (!ontologyRule) return { reason: null, prompt: '', raw: '' };
       return generateIdentityRationale({
         result,
         candidateName: rec.name ?? null,
@@ -119,7 +119,8 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
         ontologyRuleId: ontologyRule.id,
         ontologyRuleName: ontologyRule.name,
       });
-    })) as string | null;
+    })) as { reason: string | null; prompt: string; raw: string };
+    const llmRationale = rationale.reason;
 
     const check = identityToCheck(
       result,
@@ -149,6 +150,9 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
           matchedCandidateName: computed.matchedCandidateName,
           dedupAction,
           sameAsCandidateId,
+          // 大模型「纳入依据」的提示词 + 原始响应 → 审计「用户提示词」「LLM 响应」tab。
+          llmPrompt: rationale.prompt || null,
+          llmResponse: rationale.raw || null,
         },
         check,
       }),

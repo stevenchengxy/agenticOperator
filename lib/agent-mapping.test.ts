@@ -2,18 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { AGENT_MAP, byShort, byWsId } from './agent-mapping';
 
 describe('AGENT_MAP', () => {
-  it('has exactly 23 entries', () => {
-    expect(AGENT_MAP).toHaveLength(23);
+  it('has exactly 26 entries', () => {
+    // 24 base + CandidateIdentity + CandidateOwnership (2026-06-09, domain 招聘-v1).
+    expect(AGENT_MAP).toHaveLength(26);
   });
 
   it('every short name is unique', () => {
     const shorts = AGENT_MAP.map((a) => a.short);
-    expect(new Set(shorts).size).toBe(23);
+    expect(new Set(shorts).size).toBe(26);
   });
 
   it('every wsId is unique', () => {
     const ids = AGENT_MAP.map((a) => a.wsId);
-    expect(new Set(ids).size).toBe(23);
+    expect(new Set(ids).size).toBe(26);
   });
 
   it('uses only the 9 valid stages', () => {
@@ -48,10 +49,15 @@ describe('AGENT_MAP', () => {
     expect(a?.terminal).toBe(true);
   });
 
-  it('exactly 4 agents are terminal', () => {
-    // Chatbot is terminal because it emits no events and is outside the business workflow chain.
+  it('exactly 3 agents are terminal', () => {
+    // Chatbot is terminal (emits nothing, outside the workflow chain); Publisher +
+    // PortalSubmitter are branch leaves. InterviewInviter became non-terminal on
+    // 2026-05-25 (its _SENT is consumed by AIInterviewer — see agent-mapping.ts).
+    // The new CandidateIdentity / CandidateOwnership agents are audit-only but carry a
+    // RESUME_PROCESSED trigger, so they satisfy the trigger-or-terminal invariant
+    // without being terminal.
     const terms = AGENT_MAP.filter((a) => a.terminal).map((a) => a.short);
-    expect(terms.sort()).toEqual(['Chatbot', 'InterviewInviter', 'PortalSubmitter', 'Publisher']);
+    expect(terms.sort()).toEqual(['Chatbot', 'PortalSubmitter', 'Publisher']);
   });
 
   it('every agent has at least 1 trigger event OR is terminal', () => {

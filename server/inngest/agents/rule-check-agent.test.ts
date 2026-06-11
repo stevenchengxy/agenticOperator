@@ -46,6 +46,12 @@ vi.mock('@/lib/rule-check/ontology', () => ({
   severityForRuleId: vi.fn(() => 'flag_only'),
 }));
 
+// live 规则目录 — stub 成空 Map(不打网络),agent 回退用 severityForRuleId。
+vi.mock('@/lib/rule-check/live-rule-catalog', () => ({
+  getLiveRuleCatalog: vi.fn(async () => new Map()),
+  severityForRuleIdLive: vi.fn(async () => 'flag_only'),
+}));
+
 // Allmeta (Neo4j) writers — HTTP side-effects; stub to no-op success.
 vi.mock('@/lib/allmeta-writers', () => ({
   writeJobRequisitionInstance: vi.fn(async () => ({ ok: true })),
@@ -55,7 +61,7 @@ vi.mock('@/lib/allmeta-writers', () => ({
 // Prisma — audit + flag persistence is soft-fail; stub the methods used.
 vi.mock('@/server/db', () => ({
   prisma: {
-    ruleCheckAudit: { create: vi.fn(async () => ({})) },
+    ruleCheckAudit: { create: vi.fn(async () => ({})), upsert: vi.fn(async () => ({})) },
     ruleCheckFlag: { createMany: vi.fn(async () => ({ count: 0 })) },
     notification: {
       upsert: vi.fn(async () => ({ id: 'n1' })),
@@ -96,6 +102,7 @@ vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
 }));
 
 import { ruleCheckAgentHandler } from './rule-check-agent';
+import { prisma } from '@/server/db';
 import { runRuleCheck } from '@/lib/rule-check';
 import { extractDims } from '@/lib/rule-check/ontology';
 import { getParsedResume } from '@/lib/partner-pg/parsed-resume';
@@ -375,6 +382,10 @@ describe('ruleCheckAgent — infra failure does NOT reject the candidate', () =>
           llm_round_trips: 0,
           rule_source: 'ontology-api',
           fail_reason: reason, // ← infrastructure failure
+          // fetched-rules evidence survives the infra failSafe (runner change)
+          rule_provenance: [
+            { rule_id: '10-1', tier: 'general', included: true, reason: '通用规则' },
+          ],
         },
       } as any);
 
@@ -392,8 +403,62 @@ describe('ruleCheckAgent — infra failure does NOT reject the candidate', () =>
       expect(mockWriteCmr).not.toHaveBeenCalled();
       expect(step.sent.find((e) => e.name === 'MATCH_RULE_CHECK_FAILED')).toBeUndefined();
       expect(step.sent.find((e) => e.name === 'MATCH_RULE_CHECK_PASSED')).toBeUndefined();
+
+      // BUT a PARKED audit row IS written (before the throw) so the /rule-check
+      // page can still show the fetched rules + a plain-language reason. It is
+      // decision='FAIL' with a non-null fail_reason marker, no per-rule flags.
+      const upsert = (prisma.ruleCheckAudit as any).upsert as ReturnType<typeof vi.fn>;
+      expect(upsert).toHaveBeenCalledTimes(1);
+      const arg = upsert.mock.calls[0][0];
+      expect(arg.where.audit_id).toBe('rca_parked_C1_JR1');
+      expect(arg.create.decision).toBe('FAIL');
+      expect(arg.create.fail_reason).toBe(reason);
+      expect(JSON.parse(arg.create.rule_provenance)).toHaveLength(1);
+      // no per-rule judgment persisted on a park
+      expect((prisma.ruleCheckFlag as any).createMany).not.toHaveBeenCalled();
     });
   }
+});
+
+describe('ruleCheckAgent — unparseable/empty resume gate', () => {
+  // The upstream parser refuses to emit RESUME_PROCESSED on a parse failure, but
+  // a partner re-emit + an empty back-pull can still land here. A resume with no
+  // usable parsed content must STOP the candidate — not be fact-checked against
+  // nothing and pushed downstream to match → interview.
+  it('short-circuits (no runRuleCheck, no emit) when back-pull yields empty data + no content', async () => {
+    mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
+    mockGetParsedResume.mockResolvedValue({ data: {}, parsed_content: null });
+
+    const step = mockStep();
+    const r = await ruleCheckAgentHandler({
+      event: thinEvt({ job_requisition_id: 'JR1' }) as any,
+      step: step as any,
+      logger: mockLogger as any,
+    });
+
+    expect(r).toMatchObject({ ok: false, reason: 'resume-unparseable-or-empty' });
+    expect(mockRunRuleCheck).not.toHaveBeenCalled();
+    expect(step.sent).toHaveLength(0);
+    expect(mockSavePartnerFail).not.toHaveBeenCalled();
+    expect(mockWriteCmr).not.toHaveBeenCalled();
+  });
+
+  it('proceeds when back-pull yields only raw text (parsed_content) even if data is empty', async () => {
+    mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
+    mockGetParsedResume.mockResolvedValue({ data: {}, parsed_content: '张三 后端工程师 5年经验' });
+    mockRunRuleCheck.mockResolvedValue(passResult as any);
+
+    const step = mockStep();
+    await ruleCheckAgentHandler({
+      event: thinEvt({ job_requisition_id: 'JR1' }) as any,
+      step: step as any,
+      logger: mockLogger as any,
+    });
+
+    expect(mockRunRuleCheck).toHaveBeenCalled();
+    expect(step.sent).toHaveLength(1);
+    expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_PASSED');
+  });
 });
 
 describe('ruleCheckAgent — bypass', () => {

@@ -324,8 +324,7 @@ export function TimelineRow({ seg, totalMs }: { seg: TimelineSeg; totalMs: numbe
 // ── AI summary banner ───────────────────────────────────────────
 // A one-line, template-generated natural-language read of the run, pulled
 // from the trigger payload + status. No LLM call — derived client-side from
-// data already in the detail response. The 追问 button hands off to the
-// single-run inspection station (/live) which hosts the run chatbot.
+// data already in the detail response.
 
 const STATUS_KEY: Record<RunStatus, string> = {
   Running: "mox_status_running",
@@ -381,7 +380,7 @@ type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
  *   - Failed/Completed/Suspended: fetch /api/runs/<id>/summary on mount.
  *     The route is cache-then-lazy-synthesize; first viewer pays the LLM
  *     wait, subsequent viewers get the cached Postgres row instantly.
- *   - Header: title + AI badge + 重新生成 (DELETE + fresh refetch) + 追问 link
+ *   - Header: title + AI badge + 重新生成 (DELETE + fresh refetch)
  *   - Body: full markdown via <Markdown compact /> when ok; heuristic
  *     one-liner as a fallback while loading / on error.
  */
@@ -495,19 +494,6 @@ function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: Run
             ↻ {t("run_ai_summary_regenerate")}
           </button>
         )}
-        <Link
-          href={`/live?run=${encodeURIComponent(run.id)}`}
-          className="inline-flex items-center gap-1 rounded-md no-underline whitespace-nowrap shrink-0 ao-hover-lift"
-          style={{
-            padding: "5px 11px",
-            border: "1px solid var(--c-line)",
-            color: "var(--c-ink-1)",
-            background: "var(--c-surface)",
-            fontSize: 11.5,
-          }}
-        >
-          <Ic.chat style={{ width: 12, height: 12 }} /> {t("mox_ask_followup")}
-        </Link>
       </div>
 
       {/* body */}
@@ -678,7 +664,7 @@ export function RunDetailBody({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* AI summary banner — one-line read + 追问 hand-off */}
+      {/* AI summary banner — one-line read */}
       <RunSummaryBanner run={run} detail={detail} agentName={fnName ?? agentShortForLinks} />
 
       {/* meta + cross-link row */}

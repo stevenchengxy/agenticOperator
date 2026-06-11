@@ -4,586 +4,386 @@ import Link from "next/link";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
-import { verdictLabel } from "@/components/rule-check/verdict-label";
+import { RuleDefinitionBody, type OntologyRuleResponse } from "@/components/rule-check/RuleDefinitionPanel";
+import type { RuleHealthRow } from "@/lib/rule-check/rule-health";
+import type { RuleHealthResponse, InfraParkedEntry } from "@/app/api/rule-check-audits/rule-health/route";
 
-// Rule Check Dashboard (陈洋 macro view).
-// Per Kenny / 2026-05-13 review:
-//   - "一行一个场景,直接看 OK/Not OK,有 TP/FP/TN/FN 四象限分类"
-//   - "马上可以计算 Coverage,Dead Rule 一目了然"
+// 规则检查 · 总览 — rule-centric health view (2026-06 redesign).
 //
-// And per 2026-05-19 user clarification: this should be the "image-like"
-// grid — rules × audits cells with ✓ / ✗ / – symbols. Click any cell to
-// drill into that audit's detail (in the 审计 layer).
-//
-// Hero KPI strip on top, then the rule × audit grid.
+// Was a rule×audit heatmap whose audit list ignored the window toggle, so the
+// grid looked populated while the windowed KPIs read 0 ("假数据"). Rebuilt
+// around ONE window-aware payload (/rule-health): the protagonist is the rule.
+// Binary outcomes — 通过 / 失败 — with NO "判不了". LLM 没钱/故障 failures are an
+// infra signal (candidate NOT rejected), surfaced separately from rule失败.
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
 
-type Stats = {
-  total: number;
-  pass: number;
-  fail: number;
-  blocked_robohire_calls: number;
-  avg_llm_duration_ms: number;
-  total_prompt_tokens: number;
-  total_completion_tokens: number;
-  estimated_robohire_savings_usd: number;
-  by_client: Array<{ client: string; pass: number; fail: number }>;
-  top_failure_rules: Array<{ rule_id: string; count: number }>;
-  meta: { window_days: number; generated_at: string };
-};
-
-type AuditListRow = {
-  audit_id: string;
-  created_at: string;
-  decision: string;
-  client_name: string;
-  business_group: string | null;
-  job_requisition_id: string;
-  rules_evaluated: number;
-};
-
-type Flag = {
-  rule_id: string;
-  rule_name_snapshot: string;
-  severity: string;
-  applicable: boolean;
-  result: "PASS" | "FAIL" | "NOT_APPLICABLE" | "PENDING" | "INSUFFICIENT_INFO" | "NOT_EXECUTED" | string;
-};
-
-type AuditDetail = {
-  audit_id: string;
-  decision: string;
-  created_at: string;
-  client_name: string;
-  flags: Flag[];
-};
-
-type MatrixRule = {
-  rule_id: string;
-  rule_name: string;
-  total: number;
-  pass: number;
-  fail: number;
-  not_applicable: number;
-};
-
-type OntologyRulesResponse = {
-  ok: true;
-  rules: Array<{ id: string; name?: string; severity?: string; applicableDepartment?: string }>;
-  source: "ontology-api" | "json-fallback" | "snapshot";
-  fetched_at: string;
-  api_error?: string;
-};
+type Win = "7d" | "30d" | "90d" | "all";
 
 export function RuleCheckDashboardContent() {
   const { t } = useApp();
   const { domain } = useDomain();
-  const [stats, setStats] = React.useState<Stats | null>(null);
-  const [audits, setAudits] = React.useState<AuditListRow[] | null>(null);
-  const [details, setDetails] = React.useState<Record<string, AuditDetail | "error">>({});
-  const [matrix, setMatrix] = React.useState<{ rules: MatrixRule[]; total_audits: number } | null>(null);
-  const [ontology, setOntology] = React.useState<OntologyRulesResponse | null>(null);
-  const [windowDays, setWindowDays] = React.useState<7 | 30 | 90>(7);
-  // Default 50 (was 12 — too easy to overlook the "加载更多" button, and
-  // gave the false impression that the system only had 12 audits ever).
-  // Page polls below, so this many cells × 27 rules stays performant.
-  // 只展示最新 10 条审计 — 网格更聚焦,也少 10 个详情预取(同时减轻外部源压力)。
-  const [auditLimit, setAuditLimit] = React.useState(10);
+  const [data, setData] = React.useState<RuleHealthResponse | null>(null);
+  const [err, setErr] = React.useState(false);
+  const [win, setWin] = React.useState<Win>("30d");
+  const [filter, setFilter] = React.useState<"all" | "blocking" | "idle" | "unassessed">("all");
+  const [stageFilter, setStageFilter] = React.useState<string>("");
+  const [search, setSearch] = React.useState("");
+  const [showDead, setShowDead] = React.useState(false);
+  // 点开某条规则 → 看 Neo4j 上的原规则定义(不是审计记录)。
+  const [selectedRule, setSelectedRule] = React.useState<string | null>(null);
 
-  // Load top-level stats + audit list + per-rule matrix with 10s polling
-  // so newly-completed rule-check runs surface on the open page without
-  // requiring a refresh.
+  // One window-aware fetch (no more multi-source window disagreement), 10s poll
+  // so freshly-completed checks surface without a refresh. Only replace state on
+  // a healthy (ok) payload — a transient backend error keeps the last good view
+  // instead of flashing the empty-window message.
   React.useEffect(() => {
     let cancel = false;
-    const dq = `&domain=${encodeURIComponent(domain)}`;
+    const url = `/api/rule-check-audits/rule-health?window=${win}&domain=${encodeURIComponent(domain)}`;
     const load = () => {
-      fetchJson<Stats>(`/api/rule-check-audits/stats?window=${windowDays}d${dq}`)
-        .then((s) => { if (!cancel) setStats(s); })
-        .catch(() => { /* keep prior */ });
-      fetchJson<{ rules: MatrixRule[]; total_audits: number }>(`/api/rule-check-audits/matrix?window=${windowDays}d${dq}`)
-        .then((m) => { if (!cancel) setMatrix(m); })
-        .catch(() => { /* keep prior */ });
-      fetchJson<{ rows: AuditListRow[]; total: number }>(`/api/rule-check-audits?limit=${auditLimit}${dq}`)
-        .then((d) => { if (!cancel) setAudits(d.rows); })
-        .catch(() => { /* keep prior */ });
+      fetchJson<RuleHealthResponse>(url)
+        .then((d) => { if (cancel) return; if (d.ok) { setData(d); setErr(false); } else { setErr(true); } })
+        .catch(() => { if (!cancel) setErr(true); });
     };
     load();
     const id = setInterval(load, 10_000);
     return () => { cancel = true; clearInterval(id); };
-  }, [windowDays, auditLimit, domain]);
+  }, [win, domain]);
 
-  // Fetch the active domain's ontology rule set with 30s polling
-  React.useEffect(() => {
-    let cancel = false;
-    async function load() {
-      try {
-        const r = await fetchJson<OntologyRulesResponse>(
-          `/api/ontology/rules?domain=${encodeURIComponent(domain)}`,
-        );
-        if (!cancel) setOntology(r);
-      } catch {
-        if (!cancel) setOntology(null);
-      }
-    }
-    load();
-    const timer = setInterval(load, 30_000); // 30s polling
-    return () => { cancel = true; clearInterval(timer); };
-  }, [domain]);
-
-  // Fetch per-audit flags for the grid cells
-  React.useEffect(() => {
-    if (!audits) return;
-    const missing = audits.filter((a) => !details[a.audit_id]);
-    if (missing.length === 0) return;
-    let cancel = false;
-    (async () => {
-      await Promise.all(missing.map(async (a) => {
-        try {
-          const res = await fetch(`/api/rule-check-audits/${encodeURIComponent(a.audit_id)}`);
-          if (!res.ok) {
-            if (!cancel) setDetails((d) => ({ ...d, [a.audit_id]: "error" }));
-            return;
-          }
-          const body = await res.json();
-          const detail = (body.detail ?? body) as AuditDetail;
-          if (!cancel) setDetails((d) => ({ ...d, [a.audit_id]: detail }));
-        } catch {
-          if (!cancel) setDetails((d) => ({ ...d, [a.audit_id]: "error" }));
-        }
-      }));
-    })();
-    return () => { cancel = true; };
-  }, [audits, details]);
-
-  // Build the grid: rule_id × audit_id → result
-  const grid = React.useMemo(() => {
-    if (!audits || !matrix || !ontology) return null;
-
-    // Build per-rule audit counts from matrix for the badge data
-    const matrixByRuleId = new Map(matrix.rules.map((r) => [r.rule_id, r]));
-
-    // Rows = ontology full set (including dead rules)
-    const rows: MatrixRule[] = ontology.rules.map((or) => {
-      const m = matrixByRuleId.get(or.id);
-      return {
-        rule_id: or.id,
-        rule_name: m?.rule_name ?? or.name ?? or.id,
-        total: m?.total ?? 0,
-        pass: m?.pass ?? 0,
-        fail: m?.fail ?? 0,
-        not_applicable: m?.not_applicable ?? 0,
-      };
-    });
-
-    // Sort: dead rules sink to bottom; among the rest, by fail desc then total desc
-    rows.sort((a, b) => {
-      const aDead = a.total === 0 ? 1 : 0;
-      const bDead = b.total === 0 ? 1 : 0;
-      if (aDead !== bDead) return aDead - bDead;
-      if (a.fail !== b.fail) return b.fail - a.fail;
-      return b.total - a.total;
-    });
-
-    const cellByRuleAudit = new Map<string, Map<string, string>>();
-    for (const a of audits) {
-      const d = details[a.audit_id];
-      if (!d || d === "error") continue;
-      for (const f of d.flags) {
-        if (!cellByRuleAudit.has(f.rule_id)) cellByRuleAudit.set(f.rule_id, new Map());
-        cellByRuleAudit.get(f.rule_id)!.set(a.audit_id, f.result);
-      }
-    }
-    return { rules: rows, cells: cellByRuleAudit };
-  }, [audits, matrix, ontology, details]);
-
-  const passRate = stats && stats.total > 0 ? (stats.pass / stats.total) * 100 : null;
-  const lowCoverage = (matrix?.rules ?? []).filter(
-    (r) => r.total <= Math.max(1, Math.floor((matrix?.total_audits ?? 1) * 0.1)),
+  const totals = data?.totals;
+  const rules = data?.rules ?? [];
+  // 全部阶段(去重排序),给阶段下拉用。
+  const stages = React.useMemo(
+    () => [...new Set(rules.map((r) => r.stage).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [rules],
   );
+  // 搜索:匹配 rule_id / 规则名 / 阶段 / 规则内容(logic),大小写不敏感。
+  const q = search.trim().toLowerCase();
+  const shownRules = rules.filter(
+    (r) =>
+      (filter === "all" || r.health === filter) &&
+      (stageFilter === "" || r.stage === stageFilter) &&
+      (q === "" ||
+        r.rule_id.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
+        r.stage.toLowerCase().includes(q) ||
+        (r.logic || "").toLowerCase().includes(q)),
+  );
+  const parked = data?.infra_parked ?? [];
 
   return (
     <div className="flex flex-col gap-6" style={{ padding: "20px 32px 40px" }}>
+      {/* header */}
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: "-0.01em" }}>
-            {t("rc_dash_overview")}
+            {t("rc_rh_title")}
           </h2>
           <div className="text-ink-3 mt-1" style={{ fontSize: 12.5 }}>
-            {t("rc_dash_overview_sub")
-              .replace("{days}", String(windowDays))
-              .replace("{audits}", String(audits?.length ?? 0))
-              .replace("{rules}", String(matrix?.rules.length ?? 0))}
+            {t("rc_rh_sub").replace("{fired}", String(totals?.rules_fired ?? 0)).replace("{total}", String(totals?.rules_total ?? 0))}
           </div>
         </div>
-        <WindowToggle value={windowDays} onChange={setWindowDays} t={t} />
+        <WindowToggle value={win} onChange={setWin} t={t} />
       </div>
 
-      {/* Source badge: degraded json fallback (warn) vs authoritative local snapshot (info). */}
-      {ontology?.source === "json-fallback" && (
-        <div
-          className="border border-line rounded inline-flex items-center gap-2"
-          style={{
-            padding: "6px 10px",
-            background: "var(--c-warn-bg)",
-            color: "oklch(0.45 0.14 75)",
-            fontSize: 12,
-            alignSelf: "flex-start",
-          }}
-          title={ontology.api_error}
+      {/* infra banner — only when LLM 没钱/故障 parked something this window */}
+      {parked.length > 0 && (
+        <Link
+          href="/fleet"
+          className="flex items-center gap-2 rounded-md no-underline"
+          style={{ padding: "9px 14px", background: "var(--c-warn-bg)", border: "1px solid color-mix(in oklab, var(--c-warn) 40%, transparent)", fontSize: 12.5 }}
         >
-          <span>⚠</span>
-          <span>{t("rc_rules_fallback_warn")}</span>
-        </div>
-      )}
-      {ontology?.source === "snapshot" && (
-        <div
-          className="border border-line rounded inline-flex items-center gap-2"
-          style={{
-            padding: "6px 10px",
-            background: "var(--c-accent-bg)",
-            color: "var(--c-accent)",
-            fontSize: 12,
-            alignSelf: "flex-start",
-          }}
-          title={t("rc_rules_snapshot_detail")}
-        >
-          <span>📦</span>
-          <span>{t("rc_rules_snapshot_info")}</span>
-        </div>
+          <span style={{ color: "var(--c-warn)" }}>⚠</span>
+          <span className="text-ink-1">
+            {t("rc_rh_infra_banner").replace("{n}", String(parked.length))}
+          </span>
+          <span className="ml-auto" style={{ color: "var(--c-accent)" }}>{t("rc_rh_infra_link")} →</span>
+        </Link>
       )}
 
-      {/* KPI strip */}
-      <div className="grid gap-x-8 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
-        <Kpi label={t("rc_kpi_total")} value={stats?.total != null ? String(stats.total) : "—"} />
-        <Kpi label={t("rc_kpi_pass")} value={stats?.pass != null ? String(stats.pass) : "—"} tone="ok" sub={passRate != null ? `${passRate.toFixed(1)}%` : undefined} />
-        <Kpi label={t("rc_kpi_fail")} value={stats?.fail != null ? String(stats.fail) : "—"} tone={stats && stats.fail > 0 ? "err" : "muted"} />
-        <Kpi label={t("rc_kpi_blocked_robohire")} value={stats?.blocked_robohire_calls != null ? String(stats.blocked_robohire_calls) : "—"} tone="ok" sub={stats ? `${t("rc_kpi_savings_prefix")}${stats.estimated_robohire_savings_usd.toFixed(2)}` : undefined} />
-        <Kpi label={t("rc_kpi_covered_rules")} value={matrix ? String(matrix.rules.length) : "—"} sub={lowCoverage.length > 0 ? t("rc_kpi_low_coverage_sub").replace("{n}", String(lowCoverage.length)) : undefined} />
-        {ontology && matrix ? (
-          <Kpi
-            label={t("rc_kpi_coverage")}
-            value={`${Math.round((matrix.rules.length / Math.max(1, ontology.rules.length)) * 100)}%`}
-            sub={`${matrix.rules.length}/${ontology.rules.length}`}
-          />
-        ) : (
-          <Kpi label={t("rc_kpi_coverage")} value="—" />
-        )}
-      </div>
-
-      {/* Main: rule×audit heatmap (left) + failure / coverage summaries (right).
-          The matrix is intrinsically narrow, so the side panels balance the row
-          and fill the width instead of leaving a big right-hand gap. */}
-      <div
-        className="grid gap-6 items-start"
-        style={{ gridTemplateColumns: "minmax(0, 1.7fr) minmax(260px, 1fr)" }}
-      >
-        {/* left column — heatmap + legend */}
-        <div className="flex flex-col gap-4 min-w-0">
-          <Section
-            title={t("rc_grid_title")}
-            hint={grid ? t("rc_grid_hint").replace("{rules}", String(grid.rules.length)).replace("{audits}", String(audits?.length ?? 0)) : t("rc_loading")}
-            action={
-              audits && audits.length === auditLimit && (
-                <button onClick={() => setAuditLimit((n) => n + 12)} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 12 }}>
-                  {t("rc_load_more")}
-                </button>
-              )
-            }
-          >
-            {grid && audits ? (
-              <RuleAuditGrid grid={grid} audits={audits} t={t} />
-            ) : (
-              <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{t("rc_loading")}</div>
-            )}
-          </Section>
-          <Legend t={t} />
-        </div>
-
-        {/* right column — top-failure + low-coverage, stacked */}
-        <div className="flex flex-col gap-6 min-w-0">
-          <Section title={t("rc_section_top_fail")}>
-            {stats?.top_failure_rules && stats.top_failure_rules.length > 0 ? (
-              <div className="border-t border-line">
-                {stats.top_failure_rules.map((r) => {
-                  const meta = matrix?.rules.find((m) => m.rule_id === r.rule_id);
-                  return (
-                    <Link
-                      key={r.rule_id}
-                      href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
-                      className="grid items-center border-b border-line hover:bg-panel transition-colors"
-                      style={{ gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, padding: "10px 6px", textDecoration: "none" }}
-                    >
-                      <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 12 }}>{r.rule_id}</code>
-                      <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{meta?.rule_name && meta.rule_name !== r.rule_id ? meta.rule_name : ""}</span>
-                      <span className="tabular-nums" style={{ textAlign: "right", fontSize: 13, color: "var(--c-err)" }}>✗ {r.count}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{stats ? t("rc_empty_no_recent_fail") : t("rc_loading")}</div>
-            )}
-          </Section>
-
-          <Section title={t("rc_section_low_coverage")} hint={t("rc_section_low_coverage_hint")}>
-            {lowCoverage.length > 0 ? (
-              <div className="border-t border-line">
-                {lowCoverage.slice(0, 8).map((r) => (
-                  <Link
-                    key={r.rule_id}
-                    href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
-                    className="grid items-center border-b border-line hover:bg-panel transition-colors"
-                    style={{ gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, padding: "10px 6px", textDecoration: "none" }}
-                  >
-                    <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 12 }}>{r.rule_id}</code>
-                    <span className="text-ink-2 truncate" style={{ fontSize: 12.5 }}>{r.rule_name && r.rule_name !== r.rule_id ? r.rule_name : ""}</span>
-                    <span className="tabular-nums" style={{ textAlign: "right", fontSize: 12, color: "var(--c-ink-3)" }}>{r.total} {t("rc_times_suffix")}</span>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="text-ink-3 py-6 text-center" style={{ fontSize: 12.5 }}>{matrix ? t("rc_empty_all_above_threshold") : t("rc_loading")}</div>
-            )}
-          </Section>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── The hero rule × audit grid ────────────────────────────────────────
-
-const CELL_STYLE: Record<string, { bg: string; fg: string; symbol: string; labelKey: string }> = {
-  PASS:              { bg: "var(--c-ok-bg)",   fg: "var(--c-ok)",          symbol: "✓", labelKey: "rc_status_pass" },
-  FAIL:              { bg: "var(--c-err-bg)",  fg: "var(--c-err)",         symbol: "✗", labelKey: "rc_status_fail" },
-  NOT_APPLICABLE:    { bg: "var(--c-surface)", fg: "var(--c-ink-4)",       symbol: "·", labelKey: "rc_status_not_applicable" },
-  NOT_EXECUTED:      { bg: "var(--c-panel)",   fg: "var(--c-ink-4)",       symbol: "⊘", labelKey: "rc_status_not_executed" },
-  PENDING:           { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)",   symbol: "⏸", labelKey: "rc_status_pending" },
-  INSUFFICIENT_INFO: { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)",   symbol: "?", labelKey: "rc_status_insufficient_info" },
-};
-const MISSING_CELL = { bg: "transparent", fg: "var(--c-ink-4)", symbol: "·", labelKey: "rc_status_missing" };
-
-function RuleAuditGrid({
-  grid, audits, t,
-}: {
-  grid: { rules: MatrixRule[]; cells: Map<string, Map<string, string>> };
-  audits: AuditListRow[];
-  t: (k: string) => string;
-}) {
-  const cellSize = 26;
-  const cellGap = 4;
-  const [showAll, setShowAll] = React.useState(false);
-  // Name column is capped; the audit cells share the remaining width (each a
-  // 1fr track ≥ cellSize), so the heatmap fills its column with no gaps. When
-  // many audits load the tracks hit their min and the box scrolls horizontally.
-  const colTemplate = `minmax(140px, 200px) repeat(${audits.length}, minmax(${cellSize}px, 1fr))`;
-
-  // Only rules that actually fired in the window (have a cell, or matrix
-  // coverage > 0) show by default; the untriggered long tail collapses behind a
-  // toggle so the grid isn't a wall of empty "未触发" dots.
-  const isActive = (r: MatrixRule) => grid.cells.has(r.rule_id) || r.total > 0;
-  const activeRules = grid.rules.filter(isActive);
-  const visibleRules = showAll || activeRules.length === 0 ? grid.rules : activeRules;
-  const inactiveCount = grid.rules.length - activeRules.length;
-
-  return (
-    <div
-      className="border border-line rounded"
-      style={{ padding: "10px 12px", background: "var(--c-surface)", overflowX: "auto" }}
-    >
-      {/* column header — audit IDs (truncated) + decision dot */}
-      <div
-        className="grid items-end"
-        style={{ gridTemplateColumns: colTemplate, gap: cellGap, marginBottom: 6 }}
-      >
-        <div className="text-ink-3" style={{ fontSize: 11.5 }}>Rule \ Audit →</div>
-        {audits.map((a, i) => (
-          <Link
-            key={a.audit_id}
-            href={`/rule-check?view=audits&auditId=${encodeURIComponent(a.audit_id)}`}
-            className="flex flex-col items-center gap-1 hover:opacity-80 transition-opacity"
-            style={{ width: "100%", textDecoration: "none" }}
-            title={t("rc_grid_audit_col_tip")
-              .replace("{n}", String(i + 1))
-              .replace("{id}", a.audit_id)
-              .replace("{decision}", verdictLabel(a.decision, t))
-              .replace("{client}", a.client_name)
-              .replace("{date}", fmtDate(a.created_at))}
-          >
-            <span
-              className="rounded-full"
-              style={{
-                width: 5, height: 5,
-                background: a.decision === "PASS" ? "var(--c-ok)" : a.decision === "FAIL" ? "var(--c-err)" : "var(--c-ink-4)",
-              }}
+      {/* body: rule table (left) + infra-parked / dead (right) */}
+      <div className="grid gap-6 items-start" style={{ gridTemplateColumns: "minmax(0, 1.9fr) minmax(260px, 1fr)" }}>
+        {/* left — rule table */}
+        <div className="flex flex-col gap-3 min-w-0">
+          {/* 搜索:按 id / 规则名 / 阶段 / 规则内容 过滤 */}
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("rc_rh_search_ph")}
+              className="rounded text-ink-1"
+              style={{ flex: 1, padding: "6px 12px", fontSize: 12.5, background: "var(--c-surface)", border: "1px solid var(--c-line)" }}
             />
-            <span className="tabular-nums text-ink-3" style={{ fontSize: 9, lineHeight: 1 }}>
-              {String(i + 1).padStart(2, "0")}
-            </span>
-          </Link>
-        ))}
-      </div>
-
-      {/* rows: rule × cells */}
-      {visibleRules.map((r) => {
-        const active = isActive(r);
-        return (
-        <div
-          key={r.rule_id}
-          className="grid items-center"
-          style={{
-            gridTemplateColumns: colTemplate,
-            gap: cellGap,
-            marginBottom: cellGap,
-          }}
-        >
-          <Link
-            href={`/rule-check?view=audits&ruleId=${encodeURIComponent(r.rule_id)}`}
-            className="flex items-baseline gap-2 truncate hover:bg-panel transition-colors rounded"
-            style={{ padding: "2px 6px", textDecoration: "none", opacity: active ? 1 : 0.5 }}
-            title={r.rule_name}
-          >
-            <code className="text-ink-1 tabular-nums" style={{ fontFamily: "var(--f-mono)", fontSize: 11, minWidth: 48 }}>
-              {r.rule_id}
-            </code>
-            {r.rule_name && r.rule_name !== r.rule_id && (
-              <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.rule_name}</span>
-            )}
-            {!active && (
-              <span
-                className="tabular-nums"
-                style={{ fontSize: 9.5, color: "var(--c-ink-4)", marginLeft: "auto", letterSpacing: "0.05em" }}
-              >
-                {t("rc_rule_dead")}
+            {q !== "" && (
+              <span className="text-ink-3 flex-none" style={{ fontSize: 11.5 }}>
+                {t("rc_rh_search_count").replace("{n}", String(shownRules.length))}
               </span>
             )}
-          </Link>
-          {audits.map((a) => {
-            const cell = grid.cells.get(r.rule_id)?.get(a.audit_id);
-            const style = cell ? CELL_STYLE[cell] ?? MISSING_CELL : MISSING_CELL;
-            return (
-              <Link
-                key={a.audit_id}
-                href={`/rule-check?view=audits&auditId=${encodeURIComponent(a.audit_id)}`}
-                title={cell ? `${r.rule_id} · ${t(style.labelKey)} · audit ${a.audit_id.slice(-10)}` : t("rc_cell_not_loaded")}
-                className="grid place-items-center rounded transition-transform hover:scale-105"
-                style={{
-                  width: "100%", height: cellSize,
-                  background: style.bg,
-                  color: style.fg,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border:
-                    cell === "FAIL"
-                      ? "1px solid color-mix(in oklab, var(--c-err) 30%, transparent)"
-                      : cell === "PASS"
-                        ? "1px solid color-mix(in oklab, var(--c-ok) 22%, transparent)"
-                        : "1px solid transparent",
-                  textDecoration: "none",
-                }}
-              >
-                {style.symbol}
-              </Link>
-            );
-          })}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label={`${t("rc_rh_filter_all")} ${rules.length}`} />
+            <FilterChip active={filter === "blocking"} onClick={() => setFilter("blocking")} label={`${t("rc_rh_filter_blocking")} ${rules.filter((r) => r.health === "blocking").length}`} tone="err" />
+            <FilterChip active={filter === "idle"} onClick={() => setFilter("idle")} label={`${t("rc_rh_filter_idle")} ${rules.filter((r) => r.health === "idle").length}`} />
+            <FilterChip active={filter === "unassessed"} onClick={() => setFilter("unassessed")} label={`${t("rc_rh_filter_unassessed")} ${rules.filter((r) => r.health === "unassessed").length}`} />
+            {/* 阶段筛选 —— 31 个阶段太多用下拉 */}
+            <select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              className="rounded-full"
+              style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 11.5, background: stageFilter ? "var(--c-panel)" : "transparent", border: "1px solid var(--c-line)", color: stageFilter ? "var(--c-ink-1)" : "var(--c-ink-3)" }}
+            >
+              <option value="">{t("rc_rh_stage_all")}（{stages.length}）</option>
+              {stages.map((s) => (
+                <option key={s} value={s}>{s}（{rules.filter((r) => r.stage === s).length}）</option>
+              ))}
+            </select>
+          </div>
+
+          {!data ? (
+            <div className="text-ink-3 py-10 text-center border border-line rounded" style={{ fontSize: 12.5 }}>{err ? t("rc_rh_error") : t("rc_loading")}</div>
+          ) : shownRules.length === 0 ? (
+            <div className="text-ink-3 py-10 text-center border border-line rounded" style={{ fontSize: 12.5 }}>{t("rc_rh_empty")}</div>
+          ) : (
+            <div className="border border-line rounded" style={{ background: "var(--c-surface)" }}>
+              <div className="grid items-center text-ink-3" style={{ gridTemplateColumns: "minmax(0, 2.3fr) 56px minmax(0, 2fr) 88px", gap: 12, padding: "8px 14px", fontSize: 10.5, borderBottom: "1px solid var(--c-line)" }}>
+                <span>{t("rc_rh_col_rule")}</span>
+                <span style={{ textAlign: "right" }}>{t("rc_rh_col_fired")}</span>
+                <span>{t("rc_rh_col_passfail")}</span>
+                <span>{t("rc_rh_col_health")}</span>
+              </div>
+              {shownRules.map((r) => <RuleRow key={r.rule_id} r={r} t={t} onSelect={setSelectedRule} />)}
+            </div>
+          )}
         </div>
-        );
-      })}
-      {activeRules.length > 0 && inactiveCount > 0 ? (
-        <button
-          type="button"
-          onClick={() => setShowAll((s) => !s)}
-          className="text-ink-3 hover:text-ink-1 transition-colors"
-          style={{ fontSize: 11.5, marginTop: 8, padding: "4px 6px", background: "transparent", border: 0, cursor: "pointer" }}
-        >
-          {showAll
-            ? `▾ ${t("rc_grid_collapse_inactive")}`
-            : `▸ ${t("rc_grid_show_inactive").replace("{n}", String(inactiveCount))}`}
-        </button>
-      ) : null}
+
+        {/* right — infra-parked + dead rules */}
+        <div className="flex flex-col gap-6 min-w-0">
+          <section>
+            <h3 className="m-0 text-ink-1 flex items-baseline gap-2" style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500 }}>
+              <span style={{ color: parked.length ? "var(--c-warn)" : "var(--c-ink-3)" }}>⚠</span>{t("rc_rh_parked_title")}
+            </h3>
+            <div className="text-ink-3 mb-2 mt-0.5" style={{ fontSize: 11 }}>{t("rc_rh_parked_sub")}</div>
+            {parked.length === 0 ? (
+              <div className="text-ink-4 py-3" style={{ fontSize: 11.5 }}>{data ? t("rc_rh_parked_none") : t("rc_loading")}</div>
+            ) : (
+              <div className="border-t border-line">
+                {parked.slice(0, 10).map((p) => <ParkedRow key={p.audit_id} p={p} t={t} />)}
+                {parked.length > 10 && (
+                  <div className="text-ink-4 pt-2" style={{ fontSize: 10.5 }}>
+                    {t("rc_rh_parked_more").replace("{shown}", "10").replace("{total}", String(parked.length))}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <h3 className="m-0 text-ink-3 flex items-baseline gap-2" style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500 }}>
+              💤 {t("rc_rh_dead_title")} ({data?.dead_rules.length ?? 0})
+            </h3>
+            <div className="text-ink-3 mb-2 mt-0.5" style={{ fontSize: 11 }}>{t("rc_rh_dead_hint")}</div>
+            {(data?.dead_rules.length ?? 0) === 0 ? (
+              <div className="text-ink-4 py-3" style={{ fontSize: 11.5 }}>{data ? t("rc_rh_dead_none") : t("rc_loading")}</div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(showDead ? data!.dead_rules : data!.dead_rules.slice(0, 12)).map((d) => (
+                  <button
+                    key={d.rule_id}
+                    type="button"
+                    onClick={() => setSelectedRule(d.rule_id)}
+                    title={d.name}
+                    className="rounded text-ink-3 hover:text-ink-1 transition-colors"
+                    style={{ fontFamily: "var(--f-mono)", fontSize: 11, padding: "2px 7px", background: "var(--c-panel)", border: "1px solid var(--c-line)", cursor: "pointer" }}
+                  >
+                    {d.rule_id}
+                  </button>
+                ))}
+                {(data?.dead_rules.length ?? 0) > 12 && (
+                  <button type="button" onClick={() => setShowDead((s) => !s)} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 11, padding: "2px 4px" }}>
+                    {showDead ? t("rc_rh_dead_collapse") : `+${data!.dead_rules.length - 12}…`}
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {selectedRule && (
+        <RuleDefinitionDrawer
+          ruleId={selectedRule}
+          domain={domain}
+          onClose={() => setSelectedRule(null)}
+        />
+      )}
     </div>
   );
 }
 
-function Legend({ t }: { t: (k: string) => string }) {
-  const items = [
-    { ...CELL_STYLE.PASS },
-    { ...CELL_STYLE.FAIL },
-    { ...CELL_STYLE.NOT_APPLICABLE },
-    { ...CELL_STYLE.PENDING },
-    { ...CELL_STYLE.INSUFFICIENT_INFO },
-    { ...CELL_STYLE.NOT_EXECUTED },
-  ];
+// 点开某条规则 → 抽屉里展示 Neo4j 上的**原规则定义**(live render),不是审计记录。
+function RuleDefinitionDrawer({ ruleId, domain, onClose }: { ruleId: string; domain: string; onClose: () => void }) {
+  const { t } = useApp();
+  const [data, setData] = React.useState<OntologyRuleResponse | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    setErr(null);
+    setData(null);
+    const dq = domain ? `?domain=${encodeURIComponent(domain)}` : "";
+    fetchJson<OntologyRuleResponse>(`/api/ontology/rules/${encodeURIComponent(ruleId)}${dq}`)
+      .then((d) => { if (!cancel) setData(d); })
+      .catch((e) => { if (!cancel) setErr((e as { message?: string })?.message || t("rc_rule_def_load_failed")); })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [ruleId, domain, t]);
+
+  // Esc 关闭
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-      <span className="text-ink-3" style={{ fontSize: 11.5 }}>{t("rc_legend")}</span>
-      {items.map((it) => (
-        <span key={it.labelKey} className="flex items-center gap-1.5 text-ink-2" style={{ fontSize: 11.5 }}>
-          <span
-            className="grid place-items-center rounded"
-            style={{
-              width: 18, height: 18,
-              background: it.bg, color: it.fg,
-              fontSize: 11, fontWeight: 500,
-              border: "1px solid var(--c-line)",
-            }}
-          >
-            {it.symbol}
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.32)", zIndex: 40 }} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 540, maxWidth: "92vw", background: "var(--c-surface)", borderLeft: "1px solid var(--c-line)", zIndex: 41, overflowY: "auto", padding: "20px 24px", boxShadow: "-8px 0 28px rgba(0,0,0,0.14)" }}
+      >
+        <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+          <span className="text-ink-1" style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500 }}>
+            {t("rc_rh_rule_def_title")} · {ruleId}
           </span>
-          {t(it.labelKey)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-// ── small components ────────────────────────────────────────────
-
-function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "ok" | "warn" | "err" | "muted" }) {
-  const color =
-    tone === "ok"   ? "var(--c-ok)" :
-    tone === "warn" ? "oklch(0.5 0.14 75)" :
-    tone === "err"  ? "var(--c-err)" :
-    "var(--c-ink-1)";
-  return (
-    <div>
-      <div className="text-ink-4 uppercase font-medium" style={{ fontSize: 10.5, letterSpacing: "0.06em" }}>{label}</div>
-      <div className="mt-1.5">
-        <span
-          className="tabular-nums"
-          style={{ fontFamily: SERIF, fontSize: 30, fontWeight: 500, letterSpacing: "-0.02em", color, lineHeight: 1.05 }}
-        >
-          {value}
-        </span>
-      </div>
-      {sub && <div className="text-ink-3 mt-1" style={{ fontSize: 12 }}>{sub}</div>}
-    </div>
-  );
-}
-
-function Section({ title, hint, action, children }: { title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section>
-      <div className="flex items-baseline justify-between gap-3 mb-2">
-        <div className="flex items-baseline gap-2.5">
-          <h3 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, letterSpacing: "-0.01em" }}>
-            {title}
-          </h3>
-          {hint && <span className="text-ink-3" style={{ fontSize: 12 }}>{hint}</span>}
+          <button type="button" onClick={onClose} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 22, lineHeight: 1, padding: "0 6px", background: "transparent", border: 0, cursor: "pointer" }}>
+            ×
+          </button>
         </div>
-        {action}
+        {loading ? (
+          <div className="text-ink-3" style={{ fontSize: 12.5 }}>{t("rc_loading")}</div>
+        ) : err ? (
+          <div className="text-err" style={{ fontSize: 12.5 }}>{t("rc_rule_def_load_failed")}: {err}</div>
+        ) : !data ? null : !data.ok ? (
+          <div style={{ fontSize: 12.5, color: "var(--c-warn)" }}>
+            {data.reason === "not_found"
+              ? `${t("rc_rule_def_not_found")}: "${ruleId}" ${t("rc_rule_def_drift")}`
+              : `${t("rc_rule_def_load_err")}: ${data.error ?? ""}`}
+          </div>
+        ) : (
+          <RuleDefinitionBody rule={data.rule} source={data.source} />
+        )}
       </div>
-      {children}
-    </section>
+    </>
   );
 }
 
-function WindowToggle({ value, onChange, t }: { value: 7 | 30 | 90; onChange: (v: 7 | 30 | 90) => void; t: (k: string) => string }) {
-  const opts: { id: 7 | 30 | 90; label: string }[] = [
-    { id: 7, label: t("rc_range_7d") },
-    { id: 30, label: t("rc_range_30d") },
-    { id: 90, label: t("rc_range_90d") },
+// ── rule row ────────────────────────────────────────────────────────────────
+
+function RuleRow({ r, t, onSelect }: { r: RuleHealthRow; t: (k: string) => string; onSelect: (id: string) => void }) {
+  const passW = Math.max(r.passed, 0);
+  const failW = Math.max(r.failed, 0);
+  const redline = r.severity === "terminal";
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(r.rule_id)}
+      className="grid items-center w-full text-left hover:bg-panel transition-colors"
+      style={{ gridTemplateColumns: "minmax(0, 2.3fr) 56px minmax(0, 2fr) 88px", gap: 12, padding: "10px 14px", borderBottom: "1px solid var(--c-line)", borderLeft: `2px solid ${r.health === "blocking" ? "var(--c-err)" : "transparent"}`, background: "transparent", cursor: "pointer" }}
+      title={r.name}
+    >
+      <span className="flex items-baseline gap-2 min-w-0">
+        <code className="text-ink-1 tabular-nums flex-none" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>{r.rule_id}</code>
+        <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.name !== r.rule_id ? r.name : ""}</span>
+        {r.stage && (
+          <span className="flex-none text-ink-3" style={{ fontSize: 9, border: "1px solid var(--c-line)", padding: "0 4px", borderRadius: 3, background: "var(--c-panel)", whiteSpace: "nowrap" }}>
+            {r.stage}
+          </span>
+        )}
+        {redline && (
+          <span className="flex-none" style={{ fontSize: 9, color: "var(--c-err)", border: "1px solid color-mix(in oklab, var(--c-err) 40%, transparent)", padding: "0 4px", borderRadius: 3 }}>
+            {t("rc_rh_redline")}
+          </span>
+        )}
+      </span>
+      <span className="tabular-nums text-ink-2" style={{ textAlign: "right", fontSize: 12 }}>{r.evaluated}</span>
+      <span className="min-w-0">
+        <span className="flex rounded-full overflow-hidden" style={{ height: 7, background: "var(--c-panel)" }} title={t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}>
+          {passW > 0 && <span style={{ flex: passW, background: "var(--c-ok)" }} />}
+          {failW > 0 && <span style={{ flex: failW, background: "var(--c-err)" }} />}
+        </span>
+        <span className="text-ink-3" style={{ fontSize: 9.5 }}>
+          {t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}
+        </span>
+      </span>
+      <span>
+        {r.health === "blocking" ? (
+          <span style={{ background: "var(--c-err-bg)", color: "var(--c-err)", padding: "1px 8px", borderRadius: 10, fontSize: 10 }}>{t("rc_rh_health_blocking")}</span>
+        ) : r.health === "unassessed" ? (
+          <span className="text-ink-4" style={{ fontSize: 10.5 }}>{t("rc_rh_health_unassessed")}</span>
+        ) : r.health === "dead" ? (
+          <span className="text-ink-4" style={{ fontSize: 10.5 }}>{t("rc_rh_health_dead")}</span>
+        ) : (
+          <span className="text-ink-3" style={{ fontSize: 10.5 }}>{t("rc_rh_health_idle")}</span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+function ParkedRow({ p, t }: { p: InfraParkedEntry; t: (k: string) => string }) {
+  return (
+    <Link
+      href={`/rule-check/audits/${encodeURIComponent(p.audit_id)}`}
+      className="grid no-underline border-b border-line hover:bg-panel transition-colors"
+      style={{ gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, padding: "8px 4px" }}
+    >
+      <span className="min-w-0">
+        <span className="text-ink-1 truncate block" style={{ fontSize: 12 }} title={[p.candidate_name, p.jr_title, p.client_name].filter(Boolean).join(" · ")}>
+          {p.candidate_name || t("rc_rh_parked_anon")}
+          {p.jr_title ? <span className="text-ink-3"> · {p.jr_title}</span> : null}
+        </span>
+        <span className="text-ink-3 truncate block" style={{ fontSize: 10.5 }} title={p.reason_label || t("rc_rh_parked_generic")}>
+          {p.reason_label || t("rc_rh_parked_generic")}
+        </span>
+      </span>
+      <span className="text-ink-4 tabular-nums flex-none" style={{ fontSize: 10 }}>{fmtDate(p.created_at)}</span>
+    </Link>
+  );
+}
+
+// ── small components ─────────────────────────────────────────────────────────
+
+function FilterChip({ active, onClick, label, tone }: { active: boolean; onClick: () => void; label: string; tone?: "err" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-full transition-colors"
+      style={{
+        padding: "3px 12px",
+        fontSize: 11.5,
+        background: active ? "var(--c-panel)" : "transparent",
+        border: "1px solid var(--c-line)",
+        color: active ? (tone === "err" ? "var(--c-err)" : "var(--c-ink-1)") : "var(--c-ink-3)",
+        fontWeight: active ? 500 : 400,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function WindowToggle({ value, onChange, t }: { value: Win; onChange: (v: Win) => void; t: (k: string) => string }) {
+  const opts: { id: Win; label: string }[] = [
+    { id: "7d", label: t("rc_range_7d") },
+    { id: "30d", label: t("rc_range_30d") },
+    { id: "90d", label: t("rc_range_90d") },
+    { id: "all", label: t("rc_range_all") },
   ];
   return (
     <div className="flex items-center gap-1">
@@ -610,6 +410,6 @@ function WindowToggle({ value, onChange, t }: { value: 7 | 30 | 90; onChange: (v
 function fmtDate(iso: string): string {
   try {
     const d = new Date(iso);
-    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  } catch { return iso.slice(0, 16); }
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  } catch { return iso.slice(5, 10); }
 }

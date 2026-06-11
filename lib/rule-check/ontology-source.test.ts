@@ -10,6 +10,12 @@ vi.mock('@/lib/ontology-gen', async () => {
   };
 });
 
+// live 目录 stub 成空 Map(不打网络)→ fetchRulesForMatchResume 的 contentFor
+// 回退到打包 jsonIndex,本测试的 id/drift 断言不变。
+vi.mock('./live-rule-catalog', () => ({
+  getLiveRuleCatalog: vi.fn(async () => new Map()),
+}));
+
 import { fetchAction, OntologyContractError } from '@/lib/ontology-gen';
 import { fetchRulesForMatchResume } from './ontology-source';
 

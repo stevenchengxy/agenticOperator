@@ -148,12 +148,32 @@ model CandidateLock {
   clientId     String
   jdId         String?
   recruiterId  String
-  expiresAt    DateTime
+  expiresAt    DateTime?
   reason       String?
   releasedAt   DateTime?
   createdAt    DateTime @default(now())
 
+  // RMHR lock-truth mirror (2026-06-08 candidate-lock alignment).
+  // AO-local cache of the company RMHR uploadByRecruiterEmail response. Company RMHR is
+  // the enforcing source of truth; this row records the last-known answer per (candidate, rmhrResumeId).
+  uploadId            String?   // ingestion event id — idempotency guard for manual replay
+  rmhrResumeId        String?   // company resumeId — cross-system correlation key
+  lockState           Int?      // 1=未锁定 / 2=锁定 / 3=保护 (LockState)
+  blacklisted         Boolean   @default(false)
+  lockOwnerEmployeeId String?   // RMHR lockBy (工号) — who actually owns the lock
+  lockByName          String?
+  lockByEmail         String?   // RMHR lockByEmail — the gate comparison key
+  lockTime            String?   // RMHR lockTime RAW "yyyy-MM-dd HH:mm:ss" (not coerced)
+  lockMessage         String?   // RMHR model.message
+  requestedByEmail    String?   // recruiterEmail WE tried to lock under (distinct from owner)
+  lockDecision        String?   // 'proceed' | 'lock-only' | 'fault'
+  lockReason          String?   // LockOutcomeReason
+  lastCheckedAt       DateTime? // when we last called RMHR for this upload
+  updatedAt           DateTime  @default(now()) @updatedAt
+
   @@index([candidateId, clientId])
+  @@index([candidateId, rmhrResumeId])
+  @@index([uploadId])
   @@index([clientId, expiresAt])
 }
 
@@ -645,6 +665,10 @@ model RuleCheckAudit {
   decision              String   // PASS | FAIL
   llm_decision          String   // PASS | FAIL | KEEP | DROP | PAUSE | UNKNOWN
   failure_reasons       String   // JSON array
+  // 基础设施失败原因(llm-call-error / ontology-graph-unavailable / parse-error …)。
+  // 非空 = 这条 FAIL 是基础设施挂起(没钱/故障),候选人未被拒;总览/漏斗的
+  // 通过-未通过计数据此排除。业务判定(真·通过/未通过)此列为 NULL。
+  fail_reason           String?
 
   // LLM observability
   llm_model             String

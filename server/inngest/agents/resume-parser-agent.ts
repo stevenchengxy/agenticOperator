@@ -40,6 +40,11 @@ import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { prisma } from '@/server/db';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import { runLockCheck } from '@/lib/candidate-lock/run-lock-check';
+// 查重前移(在 save 之前判同一人,用结果驱动落库挂老 Candidate 1:N)。
+import { resolveIdentityMatch } from '@/lib/rule-check/candidate-match/resolve-identity';
+import { loadCandidateMatchRules, identityRulesByPriority } from '@/lib/rule-check/candidate-match/rules-data';
+import { candidateFromResumeProcessed, partnerPgCandidateRepo } from '@/lib/rule-check/candidate-match/candidate-repo';
+import { makeAiFieldJudge } from '@/lib/rule-check/candidate-match/ai-equivalence';
 
 // Local alias mirroring the RoboHire parse-resume `data` shape that we
 // historically imported from raas-api-client.ts. After the 2026-05-20
@@ -266,6 +271,34 @@ export const resumeParserAgent = inngest.createFunction(
     const finalEtag =
       typeof eventEtag === 'string' && eventEtag.trim() ? eventEtag.trim() : computedEtag;
 
+    // ── 查重前移(9-15):在落库之前判是否同一人,用结果驱动 saveCandidate。
+    //    强命中(auto-merged)→ same_as_candidate_id=老人 ID → 复用老行 UPDATE、新简历挂
+    //    老 Candidate(1:N);弱信号/无命中 → null → 走正常 dedup/新建。soft-fail+flag 门控:
+    //    任何异常或 partner-pg 不可达都退回 null,绝不阻断入库。
+    const sameAsCandidateId = (await step.run('compute-candidate-identity', async () => {
+      if (process.env.CANDIDATE_IDENTITY_ENABLED === '0') return null;
+      try {
+        const rec = candidateFromResumeProcessed({
+          parsed: { data: parsed },
+          candidate_id: String(upload_id), // 候选人尚未建库 → upload_id 占位(self 排除无影响)
+        });
+        const rules = identityRulesByPriority(loadCandidateMatchRules());
+        const resolution = await resolveIdentityMatch(rec, partnerPgCandidateRepo, rules, makeAiFieldJudge());
+        fileLogger.event('candidate-identity.resolved', {
+          upload_id,
+          dedup_action: resolution.dedupAction,
+          same_as_candidate_id: resolution.sameAsCandidateId,
+          matched_candidate_id: resolution.matchedCandidateId,
+          matched_candidate_name: resolution.matchedCandidateName,
+          pool: resolution.poolSize,
+        });
+        return resolution.sameAsCandidateId;
+      } catch (e) {
+        fileLogger.event('candidate-identity.error', { upload_id, error: (e as Error).message });
+        return null;
+      }
+    })) as string | null;
+
     // ── 直写 Partner Postgres (2026-05-20: 不再走 RAAS API) ──
     const saveResult = await step.run('save-candidate', async () => {
       const input: SaveCandidateInput = {
@@ -279,6 +312,8 @@ export const resumeParserAgent = inngest.createFunction(
         client_id: client_id ?? undefined,
         job_requisition_id: job_requisition_id ?? undefined,
         sourcing_channel_id: sourcing_channel_id ?? undefined,
+        // 同一人 → 复用老 candidate_id(UPDATE 挂新简历到老 Candidate,1:N);null → 走兜底 dedup。
+        same_as_candidate_id: sameAsCandidateId ?? undefined,
         parsed: { data: parsed as Record<string, unknown> },
       };
 

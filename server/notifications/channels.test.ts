@@ -16,7 +16,7 @@ describe('dispatchExternal', () => {
   it('is a no-op when no external channels enabled (default)', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await dispatchExternal({
-      id: 'n1', severity: 'critical', category: 'system', source: 'rule-check',
+      id: 'n1', kind: 'alert', severity: 'critical', category: 'system', source: 'rule-check',
       title: 't', body: 'b', runId: null,
     });
     expect(spy).not.toHaveBeenCalled();

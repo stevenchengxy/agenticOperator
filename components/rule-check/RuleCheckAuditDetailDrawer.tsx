@@ -10,6 +10,7 @@ import {
 } from "@/components/rule-check/RuleSelectionVerifyTab";
 import { CandidateProfileCard } from "@/components/rule-check/CandidateProfileCard";
 import { verdictLabel } from "@/components/rule-check/verdict-label";
+import { isInfraFailure } from "@/lib/rule-check/infra-failure";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type {
@@ -142,7 +143,7 @@ export function RuleCheckAuditDetailBody({
           <div className="text-[14px] font-semibold tracking-tight truncate">
             {t("rc_drawer_title")}
           </div>
-          <div className="mono text-[11px] text-ink-3 truncate">{auditId}</div>
+          <IdReveal id={auditId} label={t("rc_audit_id_label")} />
         </div>
         <Btn
           size="sm"
@@ -274,6 +275,59 @@ export function RuleCheckAuditDetailBody({
  */
 export function RuleCheckAuditDetailDrawer(props: { auditId: string; onClose: () => void }) {
   return <RuleCheckAuditDetailBody {...props} chrome="drawer" />;
+}
+
+/** 平时只显示一个文字标签(如「标识符」/ 候选人名);点击弹出一个浮层展示完整 ID,
+ *  再点浮层复制。让长 cm_ / ULID 不占版面又随时可查/可复制。 */
+function IdReveal({ id, label }: { id: string; label: string }) {
+  const [open, setOpen] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  if (!id) return null;
+  return (
+    <span className="relative inline-flex" style={{ verticalAlign: "middle" }}>
+      <button
+        type="button"
+        className="mono text-[11px] text-ink-3 hover:text-ink-1"
+        style={{ textDecoration: "underline dotted", textUnderlineOffset: 3 }}
+        title={id}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+          setCopied(false);
+        }}
+      >
+        {label}
+      </button>
+      {open ? (
+        <span
+          className="absolute z-50 mono text-[11px] text-ink-1"
+          style={{
+            top: "calc(100% + 4px)",
+            left: 0,
+            padding: "6px 9px",
+            background: "var(--c-surface)",
+            border: "1px solid var(--c-line)",
+            borderRadius: 6,
+            whiteSpace: "nowrap",
+            boxShadow: "0 6px 18px -8px rgba(0,0,0,0.35)",
+            cursor: "pointer",
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigator.clipboard?.writeText(id).then(
+              () => setCopied(true),
+              () => {},
+            );
+          }}
+        >
+          {id}
+          <span className="text-ink-3" style={{ marginLeft: 8 }}>
+            {copied ? "✓" : "⧉"}
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function DetailHeader({
@@ -413,7 +467,10 @@ function DecisionBanner({
 }) {
   const { t } = useApp();
   const pass = detail.decision === "PASS";
-  const accent = pass ? "var(--c-ok)" : "var(--c-err)";
+  // Infra park (没钱/故障): show as 未完成 in warn-amber, NOT a red 未通过 — the
+  // candidate was not rejected, evaluation just couldn't finish.
+  const infra = isInfraFailure(detail.fail_reason);
+  const accent = infra ? "var(--c-warn)" : pass ? "var(--c-ok)" : "var(--c-err)";
   return (
     <div
       className="rc-banner-in border-b border-line flex items-center gap-5"
@@ -437,18 +494,36 @@ function DecisionBanner({
           textShadow: `0 0 22px color-mix(in oklab, ${accent} 35%, transparent)`,
         }}
       >
-        {verdictLabel(detail.decision, t)}
+        {infra ? t("rc_verdict_parked") : verdictLabel(detail.decision, t)}
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-ink-1" style={{ fontSize: 14, lineHeight: 1.55 }}>
           {summary}
         </div>
-        <div className="text-ink-3 mono text-[11px] mt-2 truncate">
-          {detail.candidate_id?.slice(0, 8)} · {detail.job_requisition_id?.split("-").pop() || "?"}
-          {detail.client_display_name || detail.client_name
-            ? ` · ${detail.client_display_name || detail.client_name}`
-            : ""}
-          {detail.business_group ? ` × ${detail.business_group}` : ""}
+        <div className="text-ink-2 text-[11.5px] mt-2 flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+          {(() => {
+            // candidate_name / agent_label 是 ontology 审计源加的扩展字段,不在主 contract 类型上。
+            const ext = detail as unknown as {
+              candidate_name?: string | null;
+              agent_label?: string | null;
+              selection?: Record<string, unknown>;
+            };
+            const sel = (ext.selection ?? {}) as Record<string, unknown>;
+            const candName =
+              ext.candidate_name ||
+              (typeof sel.matchedCandidateName === "string" ? sel.matchedCandidateName : null);
+            return candName ? <span className="text-ink-1">{candName}</span> : null;
+          })()}
+          {(detail as unknown as { agent_label?: string | null }).agent_label ? (
+            <span className="text-ink-3">· {(detail as unknown as { agent_label?: string }).agent_label}</span>
+          ) : null}
+          {detail.client_display_name || detail.client_name ? (
+            <span className="text-ink-3">
+              · {detail.client_display_name || detail.client_name}
+              {detail.business_group ? ` × ${detail.business_group}` : ""}
+            </span>
+          ) : null}
+          {detail.candidate_id ? <IdReveal id={detail.candidate_id} label={t("rc_audit_id_label")} /> : null}
         </div>
       </div>
       {/* Replay button moved to the top toolbar */}
@@ -519,8 +594,9 @@ function TabBtn({
 function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
   const [view, setView] = React.useState<"rendered" | "raw">("rendered");
-  // Deterministic ontology rule-check (energy / 费控): no LLM, no user prompt.
-  if (detail.deterministic) {
+  // 纯确定性(能源 / 费控)且无大模型提示词时才显示「无 LLM」;混合型(查重:确定性核心
+  // + 大模型纳入依据)有 user_prompt → 落到下面正常渲染该提示词。
+  if (detail.deterministic && !detail.user_prompt) {
     return (
       <EmptyState
         icon={<Ic.shield />}
@@ -627,9 +703,9 @@ function ViewToggle({
 
 function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
   const { t } = useApp();
-  // Deterministic ontology rule-check (energy / 费控): no LLM response. Show the
-  // synthesized verdict + hit rules instead of the recruitment candidate card.
-  if (detail.deterministic) {
+  // 纯确定性(能源 / 费控)且无大模型响应时才显示「无 LLM 响应」;混合型(查重)有
+  // llm_raw_text → 落到下面正常渲染大模型纳入依据的原始响应。
+  if (detail.deterministic && !detail.llm_raw_text) {
     return (
       <div className="flex flex-col gap-4">
         <EmptyState

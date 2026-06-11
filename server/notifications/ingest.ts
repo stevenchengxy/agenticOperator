@@ -26,17 +26,23 @@ type NotifyRowLike = {
   runId?: string | null;
 };
 
-// Fan a freshly-notified row out to external channels (no-op by default).
-function dispatchIfNotified(draft: NotificationDraft, row: NotifyRowLike): void {
-  if (!draft.shouldNotify) return;
+// Offer every persisted row to external channels (no-op by default).
+// External send policy lives in each channel (severity gate / event whitelist /
+// repeat suppression) — shouldNotify only drives the in-app red-dot semantics,
+// so lifecycle messages (shouldNotify=false) can still reach e.g. 企业微信.
+function dispatchToExternal(draft: NotificationDraft, row: NotifyRowLike): void {
   void dispatchExternal({
     id: row.id,
+    kind: draft.kind,
     severity: draft.severity,
     category: draft.category,
     source: draft.source,
     title: draft.title,
     body: draft.body,
     runId: draft.runId,
+    signal: draft.signal,
+    agent: draft.agent,
+    shouldNotify: draft.shouldNotify,
   }).catch(() => {});
 }
 
@@ -100,11 +106,11 @@ export async function recordNotification(
       if (draft.severity === 'critical' && row.count === 1) {
         void summarizeAlert(row.id).catch(() => {});
       }
-      dispatchIfNotified(draft, row);
+      dispatchToExternal(draft, row);
       return { id: row.id };
     }
     const row = await prisma.notification.create({ data });
-    dispatchIfNotified(draft, row);
+    dispatchToExternal(draft, row);
     return { id: row.id };
   } catch (e) {
     console.warn(`[notifications] recordNotification failed: ${(e as Error).message}`);

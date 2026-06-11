@@ -91,7 +91,7 @@ export function RuleDefinitionPanel({ ruleId }: { ruleId: string }) {
   );
 }
 
-function RuleDefinitionBody({
+export function RuleDefinitionBody({
   rule,
   source,
 }: {

@@ -71,7 +71,7 @@ function sendWecom(text) {
       execFile(
         DOCKER,
         ['exec', '-i', CONTAINER, 'node', 'dist/index.js', 'message', 'send',
-          '--channel', 'wecom', '--target', t, '-m', text],
+          '--channel', 'wecom', '--account', 'default', '--target', t, '-m', text],
         { timeout: 20_000 },
         (err) => {
           if (err) {

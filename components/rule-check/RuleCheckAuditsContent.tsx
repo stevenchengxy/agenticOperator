@@ -5,7 +5,7 @@ import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
 import { Ic } from "@/components/shared/Ic";
 import { Btn, EmptyState } from "@/components/shared/atoms";
-import { verdictLabel } from "@/components/rule-check/verdict-label";
+import { agentsForDomain, lookupAgent } from "@/lib/rule-check/agent-registry";
 import { fetchJson } from "@/lib/api/client";
 import type {
   RuleCheckAuditListResponse,
@@ -22,9 +22,14 @@ export function RuleCheckAuditsContent() {
   const searchParams = useSearchParams();
   const { t, lang } = useApp();
   const { domain } = useDomain();
-  const decision = searchParams.get("decision") ?? "";
+  // Unified-surface facets: which agent ran + folded verdict (pass/fail/parked).
+  // `verdict` replaces the old PASS/FAIL `decision` dropdown (it splits FAIL into
+  // 真违规 vs 基础设施故障挂起).
+  const agent = searchParams.get("agent") ?? "";
+  const verdict = searchParams.get("verdict") ?? "";
   const client = searchParams.get("client") ?? "";
   const jrId = searchParams.get("jrId") ?? "";
+  const ruleId = searchParams.get("ruleId") ?? "";
 
   const [data, setData] = React.useState<RuleCheckAuditListResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -33,9 +38,11 @@ export function RuleCheckAuditsContent() {
   React.useEffect(() => {
     setLoading(true);
     const sp = new URLSearchParams();
-    if (decision) sp.set("decision", decision);
+    if (agent) sp.set("agent", agent);
+    if (verdict) sp.set("verdict", verdict);
     if (client) sp.set("client", client);
     if (jrId) sp.set("jrId", jrId);
+    if (ruleId) sp.set("ruleId", ruleId);
     sp.set("domain", domain);
     const qs = sp.toString();
     fetchJson<RuleCheckAuditListResponse>(
@@ -43,7 +50,7 @@ export function RuleCheckAuditsContent() {
     )
       .then(setData)
       .finally(() => setLoading(false));
-  }, [decision, client, jrId, domain]);
+  }, [agent, verdict, client, jrId, ruleId, domain]);
 
   // value-anchor stats (7d window)
   React.useEffect(() => {
@@ -52,12 +59,25 @@ export function RuleCheckAuditsContent() {
       .catch(() => {});
   }, [domain]);
 
-  const setFilter = (k: "decision" | "client" | "jrId", v: string) => {
+  const setFilter = (k: "agent" | "verdict" | "client" | "jrId" | "ruleId", v: string) => {
     const sp = new URLSearchParams(searchParams.toString());
     if (v) sp.set(k, v);
     else sp.delete(k);
     router.replace(`/rule-check?${sp.toString()}`);
   };
+
+  // 执行 agent 选项:招聘域走本地注册表(可本地化 + 标注规划中);其它域用
+  // 接口返回的 facets(由 OntologyRuleCheck 数据驱动)。
+  const registryAgents = agentsForDomain(domain);
+  const agentOptions = [
+    { value: "", label: t("rc_filter_all") },
+    ...(registryAgents.length
+      ? registryAgents.map((a) => ({
+          value: a.id,
+          label: a.status === "planned" ? `${a.label[lang]} · ${t("rc_agent_planned")}` : a.label[lang],
+        }))
+      : (data?.meta.facets?.agents ?? []).map((a) => ({ value: a.id, label: a.label }))),
+  ];
 
   // Per user request (2026-05-25): open audit detail in a dedicated
   // fullscreen route rather than a right-side drawer. Gives the detail
@@ -67,7 +87,7 @@ export function RuleCheckAuditsContent() {
     router.push(`/rule-check/audits/${encodeURIComponent(auditId)}`);
   };
 
-  const hasFilters = !!(decision || client || jrId);
+  const hasFilters = !!(agent || verdict || client || jrId || ruleId);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -86,13 +106,21 @@ export function RuleCheckAuditsContent() {
           </div>
         </div>
         <FilterSelect
-          label={t("rc_filter_decision")}
-          value={decision}
-          onChange={(v) => setFilter("decision", v)}
+          label={t("rc_filter_agent")}
+          value={agent}
+          onChange={(v) => setFilter("agent", v)}
+          options={agentOptions}
+          width={150}
+        />
+        <FilterSelect
+          label={t("rc_filter_verdict")}
+          value={verdict}
+          onChange={(v) => setFilter("verdict", v)}
           options={[
             { value: "", label: t("rc_filter_all") },
-            { value: "PASS", label: verdictLabel("PASS", t) },
-            { value: "FAIL", label: verdictLabel("FAIL", t) },
+            { value: "pass", label: t("rc_verdict_pass") },
+            { value: "fail", label: t("rc_verdict_fail") },
+            { value: "parked", label: t("rc_verdict_parked") },
           ]}
         />
         <FilterInput
@@ -107,6 +135,17 @@ export function RuleCheckAuditsContent() {
           onChange={(v) => setFilter("jrId", v)}
           placeholder="JR_..."
         />
+        {ruleId && (
+          <button
+            type="button"
+            onClick={() => setFilter("ruleId", "")}
+            className="inline-flex items-center gap-1.5 rounded-full transition-colors"
+            style={{ padding: "3px 10px", fontSize: 11.5, background: "var(--c-accent-bg)", color: "var(--c-accent)", border: "1px solid color-mix(in oklab, var(--c-accent) 35%, transparent)" }}
+            title={t("rc_audits_rule_filter_clear")}
+          >
+            {t("rc_audits_rule_filter").replace("{id}", ruleId)} ✕
+          </button>
+        )}
         {hasFilters && (
           <Btn size="sm" variant="ghost" onClick={() => router.replace("/rule-check?view=audits")}>
             {t("rc_clear_filters")}
@@ -155,7 +194,7 @@ export function RuleCheckAuditsContent() {
                   className="rc-row-in"
                   style={{ ["--rc-i"]: Math.min(i, 14) } as React.CSSProperties}
                 >
-                  <AuditCard row={r} onOpen={openDetail} t={t} lang={lang} />
+                  <AuditCard row={r} onOpen={openDetail} t={t} lang={lang} domain={domain} />
                 </div>
               ))}
             </div>
@@ -270,11 +309,13 @@ function FilterSelect({
   value,
   onChange,
   options,
+  width = 100,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  width?: number;
 }) {
   return (
     <label className="flex flex-col gap-px">
@@ -283,7 +324,7 @@ function FilterSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-7 border border-line bg-panel rounded-sm text-[12px] text-ink-1 outline-none"
-        style={{ padding: "0 8px", width: 100 }}
+        style={{ padding: "0 8px", width }}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -302,14 +343,28 @@ function AuditCard({
   onOpen,
   t,
   lang,
+  domain,
 }: {
   row: RuleCheckAuditRow;
   onOpen: (auditId: string) => void;
   t: (k: string) => string;
   lang: "zh" | "en";
+  domain: string;
 }) {
-  const pass = row.decision === "PASS";
-  const accent = pass ? "var(--c-ok)" : "var(--c-err)";
+  // Folded verdict drives the badge: pass(ok) / fail(err) / parked(amber 未完成,
+  // 候选人 not rejected — infra 故障挂起).
+  const verdict = row.verdict;
+  const accent =
+    verdict === "parked" ? "var(--c-warn)" : verdict === "pass" ? "var(--c-ok)" : "var(--c-err)";
+  const verdictBg =
+    verdict === "parked" ? "var(--c-warn-bg)" : verdict === "pass" ? "var(--c-ok-bg)" : "var(--c-err-bg)";
+  const verdictText =
+    verdict === "parked" ? t("rc_verdict_parked") : verdict === "pass" ? t("rc_verdict_pass") : t("rc_verdict_fail");
+  // Localize the agent/stage badges via the registry (recruitment); fall back to
+  // the server-provided label / raw stage for data-driven (energy…) agents.
+  const reg = lookupAgent(domain, row.agent_id);
+  const agentText = reg?.label[lang] ?? row.agent_label;
+  const stageText = reg?.stage[lang] ?? row.stage;
   return (
     <button
       type="button"
@@ -338,14 +393,43 @@ function AuditCard({
             className="rounded-full font-mono text-[11px] flex-shrink-0"
             style={{
               padding: "2px 9px",
-              background: pass ? "var(--c-ok-bg)" : "var(--c-err-bg)",
+              background: verdictBg,
               color: accent,
               fontWeight: 600,
             }}
           >
-            {verdictLabel(row.decision, t)}
+            {verdictText}
           </span>
           <div className="min-w-0 flex-1">
+            {/* 执行 agent + 阶段:同一领域里不同 rule-check agent / 不同位置的执行记录。 */}
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span
+                className="rounded-sm"
+                style={{
+                  fontFamily: "var(--f-mono)",
+                  fontSize: 10,
+                  padding: "1px 6px",
+                  background: "var(--c-accent-bg)",
+                  color: "var(--c-accent)",
+                }}
+              >
+                {agentText}
+              </span>
+              {stageText ? (
+                <span
+                  className="rounded-sm"
+                  style={{
+                    fontFamily: "var(--f-mono)",
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    background: "var(--c-panel)",
+                    color: "var(--c-ink-3)",
+                  }}
+                >
+                  {stageText}
+                </span>
+              ) : null}
+            </div>
             <div className="text-[13px] text-ink-1 truncate" style={{ fontFamily: SERIF, fontWeight: 500 }}>
               {row.candidate_name || (row.candidate_id ? row.candidate_id.slice(0, 8) : "—")}
               <span className="text-ink-3" style={{ fontWeight: 400 }}> · </span>

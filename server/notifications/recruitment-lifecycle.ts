@@ -61,6 +61,7 @@ export async function notifyRecruitmentLifecycle(
         runId: ctx.runId ?? null,
         traceId: ctx.traceId ?? null,
         anchors: ctx.anchors,
+        signal, // 外部通道(企微)按信号白名单决定是否推送
       });
     } catch {
       /* fire-and-forget: a notification failure must never break the agent */

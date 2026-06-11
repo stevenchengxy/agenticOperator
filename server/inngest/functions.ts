@@ -38,6 +38,10 @@ import { createJdAgent } from "./agents/create-jd-agent";
 import { matchResumeAgent } from "./agents/match-resume-agent";
 import { ruleCheckAgent } from "./agents/rule-check-agent";  // NEW PR-4
 import { interviewInviterAgent } from "./agents/interview-inviter-agent"; // 2026-05-25
+// Candidate identity (去重) + ownership (归属) rule-check agents. Dark-launched:
+// registered only when their flag is set, so default deployments add no extra runs.
+import { candidateIdentityAgent } from "./agents/candidate-identity-agent";
+import { candidateOwnershipAgent } from "./agents/candidate-ownership-agent";
 
 // Energy-dispatch agents are intentionally NOT registered into this app.
 // agentic-operator-main is the RECRUITMENT app — it must only ever serve the real
@@ -48,11 +52,14 @@ import { interviewInviterAgent } from "./agents/interview-inviter-agent"; // 202
 // the registration is removed here so a restart / re-sync can never bring it back,
 // regardless of the ENERGY_AGENTS env flag. 2026-06-02.
 
-// wsIds owned by the real agents above. Stub-factory MUST skip these to
-// avoid double-handling of trigger events (race condition).
+// wsIds owned by the real agents above. Stub-factory MUST skip these to avoid
+// double-handling of trigger events (race condition) AND a duplicate function in the
+// Inngest dashboard (real fn + stub fn for the same AGENT_MAP row).
 // "11-1" = interviewInviterAgent;AGENT_MAP wsId 11-1 已从 shell 升 real(见
 // lib/agent-mapping.ts 2026-05-25 注释)。
-const RPA_OWNED_WSIDS = new Set(["4", "9-1", "10", "10-5", "11-1"]);
+// "9-3"/"9-4" = rule-check-candidate-{identity,ownership}-agent(real,下方注册)→
+// 不让 stub-factory 再为它们生成同名 stub(否则 Inngest 上重复出现 RuleCheckCandidate*)。
+const RPA_OWNED_WSIDS = new Set(["4", "9-1", "9-3", "9-4", "10", "10-5", "11-1"]);
 
 // Set STUB_RPA_OWNED=1 to re-enable stubs for these wsIds (dev/isolation).
 const STUB_RPA_OWNED = process.env.STUB_RPA_OWNED === "1";
@@ -86,6 +93,15 @@ const realFunctions = [
   matchResumeAgent,
   ruleCheckAgent,
   interviewInviterAgent,
+  // Candidate identity (去重) + ownership (归属) rule-check agents. Registered
+  // UNCONDITIONALLY so they appear in the Inngest dashboard + Fleet (/api/agents
+  // surfaces live functions even when not in AGENT_MAP). They are AUDIT-ONLY — they
+  // write OntologyRuleCheck rows for /rule-check and emit NO events, so they never
+  // gate the recruitment pipeline. Enabled by default; set CANDIDATE_IDENTITY_ENABLED=0
+  // / CANDIDATE_OWNERSHIP_ENABLED=0 to make a registered agent no-op without
+  // unregistering it.
+  candidateIdentityAgent,
+  candidateOwnershipAgent,
 ];
 
 export const allFunctions = [

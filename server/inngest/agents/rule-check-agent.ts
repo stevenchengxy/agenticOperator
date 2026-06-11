@@ -20,6 +20,7 @@
 import { NonRetriableError } from 'inngest';
 import { buildRuleCheckInput, runRuleCheck, formatExplanation } from '@/lib/rule-check';
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
+import { getLiveRuleCatalog } from '@/lib/rule-check/live-rule-catalog';
 import { isInfraFailure, friendlyInfraReason } from '@/lib/rule-check/infra-failure';
 import { recordNotification } from '@/server/notifications/ingest';
 import { classifyLlm } from '@/lib/dependency-health/classify';
@@ -575,7 +576,10 @@ export async function ruleCheckAgentHandler({
         // Persist every evaluated rule as a RuleCheckFlag row so 总览
         // (matrix/coverage) reads the same data as 审计 — straight from
         // Postgres, no read-time recovery from llm_raw_text needed.
+        // 规则名/severity 从 live 目录取(Neo4j 优先、打包兜底),改 Neo4j 立即对齐。
+        const liveCat = await getLiveRuleCatalog();
         const flagRows = result.rule_results.map((rr) => {
+          const liveRule = liveCat.get(rr.rule_id);
           const s = rr.status.toLowerCase();
           const resultUpper =
             s === 'pass'
@@ -593,8 +597,8 @@ export async function ruleCheckAgentHandler({
             flag_id: `${auditId}::${rr.rule_id}`,
             audit_id: auditId,
             rule_id: rr.rule_id,
-            rule_name_snapshot: '',
-            severity: severityForRuleId(rr.rule_id),
+            rule_name_snapshot: liveRule?.businessLogicRuleName ?? '',
+            severity: liveRule?.severity ?? severityForRuleId(rr.rule_id),
             applicable_client: dims.client_id || null,
             applicable: s !== 'not_triggered',
             result: resultUpper,

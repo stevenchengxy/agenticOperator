@@ -1,21 +1,20 @@
 // GET /api/ontology/rules/[ruleId]
 //
-// Resolves a single matchResume rule by id. Used by the Rule Check audit
-// drawer's "查看原规则定义" expander to surface the canonical rule definition
-// without re-fetching the whole action.
+// Resolves a single rule's canonical definition by id, for ANY domain + ANY
+// stage. Used by the 规则检查·总览 rule-definition drawer and the audit drawer's
+// "查看原规则定义" expander to surface the live Neo4j 原规则.
 //
-// Resolution order (mirrors fetchRulesForMatchResume in lib/rule-check/ontology-source.ts):
-//   1. ALLMETA_BASE_URL + ALLMETA_API_KEY configured →
-//      fetch the matchResume action via fetchAction(), intersect by rule_id,
-//      hydrate metadata from JSON (the JSON file remains source-of-truth for
-//      fields like applicableDepartment / standardizedLogicRule until allmeta
-//      exposes them on ActionRule).
-//   2. Falls back to bundled rules.json (json-fallback) when ontology API is
-//      unreachable or doesn't contain the id.
+// Resolution (same source the 总览 lists — fetchDomainOntology, the raw :Rule
+// nodes off /api/v1/ontology/rules, covering ALL stages, not just matchResume):
+//   1. ALLMETA configured → fetchDomainOntology(domain), match by rule id OR
+//      parsed business code, return the whole live rule (every stage). For
+//      runnable non-recruitment domains, fall back to the in-repo snapshot when
+//      live serves numeric ids but the audit flag uses the snapshot's code.
+//   2. Recruitment: bundled rules.json (json-fallback) when ALLMETA is
+//      unreachable or lacks the id.
 
 import { NextResponse } from 'next/server';
 import { loadAllRules } from '@/lib/rule-check/ontology';
-import { fetchAction, OntologyGenError } from '@/lib/ontology-gen';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import {
   fetchDomainOntology,
@@ -95,12 +94,21 @@ export async function GET(
     }
   }
 
+  // Recruitment domain: resolve from the FULL domain ontology (ALL stages, raw
+  // :Rule nodes) — the live Neo4j 原规则, the SAME source + domain the 总览 lists
+  // (loadDomainRuleCatalog → fetchDomainOntology(ontoDomain)). We deliberately do
+  // NOT use the matchResume action snapshot here: it only knows 简历匹配 rules
+  // (~43) and its embedded standardizedLogicRule can drift from the rule node,
+  // yet 总览 lets you click ANY stage's rule → the drawer must resolve all of
+  // them. Bundled rules.json stays as the offline fallback (ALLMETA down).
+  const ontoDomain = domain && domain.trim() ? domain : RECRUITMENT_DOMAIN_ID;
   const jsonRules = loadAllRules();
   const fromJson = jsonRules.find((r) => r.id === ruleId);
 
   const apiBase = process.env.ALLMETA_BASE_URL;
   const apiToken = process.env.ALLMETA_API_KEY;
 
+  // ALLMETA 未配置 → 回退打包 JSON
   if (!apiBase || !apiToken) {
     if (fromJson) {
       return NextResponse.json<Success>({ ok: true, rule: fromJson, source: 'json-fallback' });
@@ -111,39 +119,35 @@ export async function GET(
     );
   }
 
+  // 优先 live ontology(fetchDomainOntology = /api/v1/ontology/rules 的生 :Rule
+  // 节点,含**全部阶段**)→ 返回整条 live 规则(跟总览同源,id 或 业务 code 都能命中)。
+  // API 失败 / 缺该 id 才回退打包 JSON。
   try {
-    const action = await fetchAction({
-      actionRef: 'matchResume',
-      domain: process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID,
-      apiBase,
-      apiToken,
-      timeoutMs: 5000,
-    });
-    const apiIds = new Set<string>();
-    for (const step of action.actionSteps ?? []) {
-      for (const rule of step.rules ?? []) {
-        if (typeof rule.id === 'string' && rule.id.trim()) apiIds.add(rule.id);
-      }
-    }
-    if (apiIds.has(ruleId) && fromJson) {
-      return NextResponse.json<Success>({ ok: true, rule: fromJson, source: 'ontology-api' });
+    const onto = await fetchDomainOntology(ontoDomain);
+    const match = toEngineRules(
+      (onto.rules as Array<Record<string, unknown>>).map((r) => normalizeOntologyRule(r)),
+    ).find((r) => r.id === ruleId || r.code === ruleId);
+    if (match) {
+      return NextResponse.json<Success>({
+        ok: true,
+        rule: match.raw,
+        source: onto.source === 'allmeta' ? 'ontology-api' : 'snapshot',
+      });
     }
     if (fromJson) {
       return NextResponse.json<Success>({ ok: true, rule: fromJson, source: 'json-fallback' });
     }
     return NextResponse.json<Failure>(
-      { ok: false, reason: 'not_found', error: `rule_id="${ruleId}" not in matchResume action` },
+      { ok: false, reason: 'not_found', error: `rule_id="${ruleId}" not in domain ontology (${ontoDomain})` },
       { status: 404 },
     );
   } catch (err) {
     if (fromJson) {
       return NextResponse.json<Success>({ ok: true, rule: fromJson, source: 'json-fallback' });
     }
-    const errType =
-      err instanceof OntologyGenError ? err.name : err instanceof Error ? err.name : 'Unknown';
     const errMsg = err instanceof Error ? err.message : String(err);
     return NextResponse.json<Failure>(
-      { ok: false, reason: 'api_error', error: `${errType}: ${errMsg.slice(0, 200)}` },
+      { ok: false, reason: 'api_error', error: errMsg.slice(0, 200) },
       { status: 502 },
     );
   }

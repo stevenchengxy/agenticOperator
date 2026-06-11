@@ -9,6 +9,7 @@ import neo4j, { type Driver } from 'neo4j-driver';
 import { prisma } from '@/server/db';
 import { severityForRuleId } from '@/lib/rule-check/ontology';
 import { enrichProvenanceWithNames } from '@/lib/rule-check/excluded-rule-enrich';
+import { getLiveRuleCatalog } from '@/lib/rule-check/live-rule-catalog';
 import { ontologyAuditDetail } from '@/lib/rule-check/ontology-audit-source';
 
 export const dynamic = 'force-dynamic';
@@ -378,17 +379,21 @@ export async function GET(
       next_action: f.next_action ?? '',
     }));
 
+    // live 规则目录(Neo4j 优先,打包兜底)—— 规则名/severity 都从这里取,改 Neo4j 立即对齐。
+    const liveCatalog = await getLiveRuleCatalog();
+
     // 兜底:从 llm_raw_text 抠 LLM 全量输出,把 DB 漏写的 flag(早期 writer 过滤了
     // applicable=false 的 NOT_APPLICABLE)合进来,让前端能完整渲染 27 条评估结果。
+    // 每条 flag 的 severity 用 live 目录覆盖(改 Neo4j 的 enforcement/failurePolicy 立即对齐)。
     const rawFlagsByRuleId = extractRawFlagsByRuleId(audit.llm_raw_text);
-    const flags = mergeFlagsWithRawFallback(dbFlags, rawFlagsByRuleId, audit.audit_id).sort(
-      (a, b) => a.rule_id.localeCompare(b.rule_id),
-    );
+    const flags = mergeFlagsWithRawFallback(dbFlags, rawFlagsByRuleId, audit.audit_id)
+      .map((f) => ({ ...f, severity: liveCatalog.get(f.rule_id)?.severity ?? f.severity }))
+      .sort((a, b) => a.rule_id.localeCompare(b.rule_id));
 
     // 全量 provenance(已补 rule_name)。规则库总数读时从它派生 —— 早期 writer
     // 把 rules_total_in_ontology 错写成 rules_evaluated(只数选中的),导致 KPI
     // 「规则库 N」偏小。provenance 才是真实候选规则全集(含被排除的)。
-    const enrichedProvenance = enrichProvenanceWithNames(parseProvenance(audit.rule_provenance));
+    const enrichedProvenance = await enrichProvenanceWithNames(parseProvenance(audit.rule_provenance));
     const rulesTotal =
       enrichedProvenance.length > 0 ? enrichedProvenance.length : audit.rules_total_in_ontology;
 

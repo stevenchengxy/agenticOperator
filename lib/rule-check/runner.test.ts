@@ -301,6 +301,28 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(out.rule_results).toEqual([]);
   });
 
+  it('carries fetched-rules provenance + resolved client/bg through an LLM-call-error failSafe', async () => {
+    // 没钱(402): rules WERE fetched but the LLM never judged them. The parked
+    // audit needs the provenance so /rule-check can still show 抓取了哪些规则.
+    mFetchRules.mockResolvedValueOnce({
+      rules: [],
+      source: 'ontology-api',
+      steps: [],
+      provenance: [{ rule_id: '10-25', tier: 'general', included: true, reason: '通用规则' }],
+      client_name_resolved: '腾讯',
+      business_group_resolved: 'IEG',
+    } as any);
+    mockGraphEmpty();
+    mChat.mockRejectedValueOnce(new Error('402 This request requires more credits'));
+    const out = await runRuleCheck(fakeInput());
+    expect(out.audit.fail_reason).toBe('llm-call-error');
+    expect(out.audit.rule_provenance).toEqual([
+      { rule_id: '10-25', tier: 'general', included: true, reason: '通用规则' },
+    ]);
+    expect(out.audit.client_name_resolved).toBe('腾讯');
+    expect(out.audit.business_group_resolved).toBe('IEG');
+  });
+
   it('fail-safe FAIL with ontology-graph-unavailable when getInstance throws 401', async () => {
     mockRulesOneStepOneRule();
     mBuildGraph.mockRejectedValueOnce(

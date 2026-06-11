@@ -32,7 +32,11 @@
     "publish:test": "tsx --env-file=.env.local scripts/publish-test-event.ts",
     "minio:list": "tsx --env-file=.env.local scripts/list-minio-resumes.ts",
     "minio:pick": "tsx --env-file=.env.local scripts/pick-test-resume.ts",
-    "gen:v4-snapshot": "node --env-file=.env.local --import tsx scripts/gen-v4-snapshot.ts"
+    "gen:v4-snapshot": "node --env-file=.env.local --import tsx scripts/gen-v4-snapshot.ts",
+    "simulate:rule-check": "tsx --env-file=.env.local scripts/simulate-rule-check-real-run.ts",
+    "emit:real-run": "tsx --env-file=.env.local scripts/publish-real-run-event.ts",
+    "raas-mirror:up": "tsx --env-file=.env.local scripts/raas-mirror-up.ts",
+    "raas-mirror:seed-demo": "tsx --env-file=.env.local scripts/raas-mirror-seed-demo.ts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

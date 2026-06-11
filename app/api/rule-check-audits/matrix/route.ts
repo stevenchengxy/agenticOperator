@@ -1,4 +1,9 @@
 // GET /api/rule-check-audits/matrix — Prisma 版
+//
+// NOTE (2026-06): the in-app 规则检查 · 总览 no longer fetches this — it was
+// rebuilt around /api/rule-check-audits/rule-health. This endpoint is retained
+// (no in-repo consumer; possible external/curl use). Don't let a dead-code
+// sweep (knip) flag the live route entry point as removable without checking.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
