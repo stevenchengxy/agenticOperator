@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agentic Operator · Inngest App 不稳定根因诊断报告</title>
+<style>
+  :root{
+    --bg:#0e1116; --surface:#161b22; --surface2:#1c2230; --line:#2a3140;
+    --ink:#e6edf3; --ink2:#9aa7b4; --ink3:#6b7785;
+    --accent:#4c8dff; --accent-bg:#13243f;
+    --ok:#3fb950; --ok-bg:#0f2417; --warn:#d29922; --warn-bg:#2a210a;
+    --bad:#f85149; --bad-bg:#2d1115; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft Yahei",sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 24px 120px}
+  header.title{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:8px}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:.2px}
+  .sub{color:var(--ink2);font-size:14px}
+  .meta-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .pill{font:12px/1 var(--mono);padding:6px 10px;border-radius:999px;border:1px solid var(--line);
+    background:var(--surface);color:var(--ink2)}
+  .pill b{color:var(--ink)}
+  h2{font-size:19px;margin:44px 0 4px;padding-top:12px;display:flex;align-items:center;gap:10px}
+  h2 .n{font:13px/1 var(--mono);color:var(--accent);background:var(--accent-bg);
+    border:1px solid #24405f;border-radius:7px;padding:6px 9px}
+  h3{font-size:15px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--ink2);margin:6px 0 18px}
+  code{font-family:var(--mono);font-size:.86em;background:#0b0f14;border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px;color:#cfe0ff}
+  a{color:var(--accent)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+  .verdict{border-left:4px solid var(--accent);background:linear-gradient(90deg,var(--accent-bg),var(--surface) 55%)}
+  .verdict.bad{border-left-color:var(--bad);background:linear-gradient(90deg,var(--bad-bg),var(--surface) 55%)}
+  .verdict.ok{border-left-color:var(--ok);background:linear-gradient(90deg,var(--ok-bg),var(--surface) 55%)}
+  .tag{display:inline-block;font:11px/1 var(--mono);padding:4px 8px;border-radius:6px;margin-right:6px;vertical-align:middle}
+  .t-ok{background:var(--ok-bg);color:var(--ok);border:1px solid #1b4426}
+  .t-warn{background:var(--warn-bg);color:var(--warn);border:1px solid #4a3a10}
+  .t-bad{background:var(--bad-bg);color:var(--bad);border:1px solid #5a1f23}
+  .t-info{background:var(--accent-bg);color:#7db1ff;border:1px solid #24405f}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink2);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.4px}
+  td.k{color:var(--ink2);white-space:nowrap;font-family:var(--mono);font-size:13px}
+  tr:hover td{background:#12161d}
+  .mono{font-family:var(--mono);font-size:13px}
+  pre{background:#0b0f14;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;
+    font-family:var(--mono);font-size:12.5px;line-height:1.55;color:#c9d4e0}
+  pre .c{color:var(--ink3)} pre .g{color:var(--ok)} pre .r{color:var(--bad)} pre .y{color:var(--warn)} pre .b{color:#7db1ff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:16px 0}
+  .stat{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .stat .lbl{color:var(--ink2);font-size:12px;margin-bottom:6px}
+  .stat .val{font-size:18px;font-weight:600}
+  .stat .val small{font-size:12px;color:var(--ink3);font-weight:400}
+  ol.causes{list-style:none;counter-reset:c;padding:0;margin:18px 0}
+  ol.causes>li{counter-increment:c;background:var(--surface);border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px 16px 56px;position:relative;margin:12px 0}
+  ol.causes>li::before{content:counter(c);position:absolute;left:16px;top:16px;width:26px;height:26px;
+    border-radius:8px;background:var(--accent-bg);border:1px solid #24405f;color:#7db1ff;
+    font:600 13px/26px var(--mono);text-align:center}
+  ol.causes>li.c-bad::before{background:var(--bad-bg);border-color:#5a1f23;color:var(--bad)}
+  ol.causes>li.c-warn::before{background:var(--warn-bg);border-color:#4a3a10;color:var(--warn)}
+  .li-title{font-weight:600;font-size:15px;margin-bottom:4px}
+  .ev{color:var(--ink2);font-size:13.5px;margin-top:6px}
+  .ev b{color:var(--ink)}
+  .flow{background:#0b0f14;border:1px solid var(--line);border-radius:12px;padding:18px;margin:16px 0;
+    font-family:var(--mono);font-size:13px;line-height:1.9;white-space:pre;overflow:auto;color:#c9d4e0}
+  .tree{font-family:var(--mono);font-size:13px;line-height:1.8;white-space:pre;overflow:auto}
+  ul.rec{list-style:none;padding:0;margin:14px 0}
+  ul.rec li{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:10px;padding:14px 16px;margin:10px 0}
+  ul.rec li .rt{font-weight:600}
+  ul.rec li.p1{border-left-color:var(--bad)} ul.rec li.p2{border-left-color:var(--warn)} ul.rec li.p3{border-left-color:var(--accent)}
+  .why{color:var(--ink2);font-size:13.5px;margin-top:6px}
+  .foot{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);color:var(--ink3);font-size:12.5px}
+  .toc{columns:2;column-gap:32px;font-size:14px}
+  .toc a{display:block;padding:3px 0;color:var(--ink2);text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+  .callout{border-radius:10px;padding:12px 16px;margin:14px 0;font-size:14px}
+  .callout.info{background:var(--accent-bg);border:1px solid #24405f}
+  .callout.warn{background:var(--warn-bg);border:1px solid #4a3a10}
+  .nb{color:var(--ink3);font-size:12.5px;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="title">
+  <h1>Agentic Operator · Inngest 稳定性根因诊断（两个问题）</h1>
+  <div class="sub">问题一：App 在 Inngest 面板"自动消失" &nbsp;·&nbsp; 问题二：AO 报"事件引擎不可达 / Unexpected token '&lt;'" — 仅诊断，未改动任何代码</div>
+  <div class="meta-row">
+    <span class="pill">生成时间 · <b>2026-06-01 ~15:25 (UTC+8)</b></span>
+    <span class="pill">主机 · <b>macOS · uptime 25d</b></span>
+    <span class="pill">范围 · <b>Inngest dev server · 后端 next dev · Docker · 归档器</b></span>
+    <span class="pill">改动代码 · <b>否（仅读取/探测）</b></span>
+  </div>
+</header>
+
+<div class="card">
+  <h3 style="margin-top:4px">目录</h3>
+  <div style="font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin:2px 0 6px">问题一 · App 在 Inngest 面板"自动消失"</div>
+  <div class="toc">
+    <a href="#tldr">① 结论速览：后端到底有没有挂？</a>
+    <a href="#snapshot">② 现场快照（此刻的真实状态）</a>
+    <a href="#mechanism">③ 核心机制：App 为什么会"消失"</a>
+    <a href="#causes">④ 根因清单（按可能性排序）</a>
+    <a href="#decide">⑤ 下次"消失"时如何当场判断</a>
+    <a href="#recommend">⑥ 修复建议（分优先级，未执行）</a>
+    <a href="#evidence">⑦ 附录：原始证据</a>
+  </div>
+  <div style="font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">问题二 · AO 显示"事件引擎不可达 / Unexpected token '&lt;'"</div>
+  <div class="toc">
+    <a href="#q2-verdict">⑧ 结论速览：Inngest 没问题，是 AO 读不到</a>
+    <a href="#q2-chain">⑨ 失败链路（从报错倒推到代码）</a>
+    <a href="#q2-cause">⑩ 根因复现：HTML 当 JSON 解析</a>
+    <a href="#q2-why">⑪ 为什么"能跑却不显示"</a>
+    <a href="#q2-decide">⑫ 怎么确认 + 修复建议（未执行）</a>
+  </div>
+  <div style="font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">问题三 · 生产机实锤 + "能否在总览里配置"</div>
+  <div class="toc">
+    <a href="#q3-verdict">⑬ 生产证据：根因 = INNGEST_BASE_URL 结尾多了 "/"</a>
+    <a href="#q3-ui">⑭ 能不能在总览里直接配？（你的问题）</a>
+    <a href="#q3-fix">⑮ 真正的修法（改配置，不改代码）</a>
+  </div>
+</div>
+
+<!-- ───────────────────────── 1 ───────────────────────── -->
+<h2 id="tldr"><span class="n">01</span> 结论速览</h2>
+<p class="lead">直接回答你的核心疑问——"App 在 Inngest 面板上消失了，是不是后端挂了？"</p>
+
+<div class="card verdict ok">
+  <p style="margin-top:0"><span class="tag t-ok">结论 A</span> <b>后端现在没有挂，而且不是在反复崩溃。</b></p>
+  <p>当前 <code>next-server (v16.2.4)</code>（PID 88657）自 <b>11:56</b> 起稳定运行，<code>GET /api/inngest</code> 7ms 返回 200。系统里那一堆 <code>next dev</code> 进程是 <b>被 Ctrl-Z 挂起（状态 T = stopped）</b>、不是崩溃——崩溃会消失、不会留下进程。说明后端是被你手动挂起/反复重启的，而非自己 crash-loop。</p>
+</div>
+
+<div class="card verdict bad">
+  <p style="margin-top:0"><span class="tag t-bad">结论 B</span> <b>"App 消失" ≠ "后端挂了"，二者在 Inngest 面板上长得一模一样——这正是你分不清的原因。</b></p>
+  <p>Inngest dev server 的 "Apps" 列表<b>不是持久状态，而是一个"此刻能不能同步上 SDK"的实时视图</b>。只要 dev server 某一次回调 <code>http://host.docker.internal:3002/api/inngest</code> 失败（超时 / 拒绝 / 慢），它就把 App 从面板移除；下次成功又自己冒出来。所以 App 消失可能是后端真死了，<b>也可能只是那一刻同步超时</b>（后端好好的）。光看面板无法区分——需要第 ⑤ 节的方法。</p>
+</div>
+
+<div class="card verdict bad">
+  <p style="margin-top:0"><span class="tag t-bad">结论 C</span> <b>没有任何进程守护——这是"不稳定"最致命的一环。</b></p>
+  <p>整个后端跑在<b>一个前台终端里</b>（<code>ttys011</code>，状态 <code>S+</code>），没有 pm2 / launchd / systemd。一旦后端真的崩溃、终端被关、或笔记本合盖休眠，<b>没有任何东西会把它拉起来</b>——这时 App 才是"真·长期消失"。本质上：你把一套<b>开发模式（<code>next dev</code> + <code>inngest dev</code>）当成了部署在跑</b>，而且是在一台会休眠、被十几个其它服务挤占的共享笔记本上。</p>
+</div>
+
+<div class="grid">
+  <div class="stat"><div class="lbl">后端进程</div><div class="val" style="color:var(--ok)">UP <small>稳定 3.5h</small></div></div>
+  <div class="stat"><div class="lbl">Inngest dev server</div><div class="val" style="color:var(--ok)">UP <small>Docker · 健康</small></div></div>
+  <div class="stat"><div class="lbl">App 当前注册</div><div class="val" style="color:var(--ok)">connected ✓ <small>5 functions</small></div></div>
+  <div class="stat"><div class="lbl">进程守护 / 自动重启</div><div class="val" style="color:var(--bad)">无 <small>裸终端前台</small></div></div>
+  <div class="stat"><div class="lbl">归档器观测到的 Inngest 超时</div><div class="val" style="color:var(--warn)">6 次 <small>5s timeout</small></div></div>
+  <div class="stat"><div class="lbl">被挂起的僵尸 next 进程</div><div class="val" style="color:var(--warn)">多个 <small>Thu/Fri/今天</small></div></div>
+</div>
+
+<!-- ───────────────────────── 2 ───────────────────────── -->
+<h2 id="snapshot"><span class="n">02</span> 现场快照</h2>
+<p class="lead">此刻（报告生成时）所有相关组件的真实状态——它们现在都是健康的，说明问题是<b>间歇性</b>的，与你说的"有时候"一致。</p>
+
+<table>
+  <thead><tr><th>组件</th><th>状态</th><th>关键证据</th></tr></thead>
+  <tbody>
+    <tr><td class="k">后端 next dev</td><td><span class="tag t-ok">UP</span></td>
+      <td>PID 88657 · <code>next-server v16.2.4</code> · 监听 <code>:3002</code> · 启动 <b>11:56:45</b> · <code>GET /api/inngest → 200 (7ms)</code></td></tr>
+    <tr><td class="k">Inngest dev</td><td><span class="tag t-ok">UP</span></td>
+      <td>Docker 容器 <code>ao-inngest</code> · <code>inngest/inngest:latest</code> · <code>restart=unless-stopped</code> · <b>RestartCount=0</b> · <code>/health → 200 (3ms)</code></td></tr>
+    <tr><td class="k">App 注册</td><td><span class="tag t-ok">connected</span></td>
+      <td><code>agentic-operator-main</code> · <code>connected:true</code> · <code>functionCount:5</code> · <code>error:null</code> · url=<code>host.docker.internal:3002/api/inngest</code></td></tr>
+    <tr><td class="k">Postgres</td><td><span class="tag t-ok">healthy</span></td>
+      <td>Docker <code>ao-postgres</code> · <code>postgres:17-alpine</code> · Up 3 days (healthy) · <code>:5433→5432</code></td></tr>
+    <tr><td class="k">归档器</td><td><span class="tag t-ok">running</span></td>
+      <td>PID 93808 · 自周四 17:00 起后台常驻（detached，无 TTY）· 30s 轮询 · 监控 UI 可在 Inngest 宕机时回退读 Postgres</td></tr>
+    <tr><td class="k">进程守护</td><td><span class="tag t-bad">缺失</span></td>
+      <td>无 pm2 / 无 launchd 条目 · 后端链 <code>sh -c dev-bootstrap && next dev</code> 跑在前台终端 <code>ttys011</code>（<code>S+</code>）</td></tr>
+    <tr><td class="k">主机负载</td><td><span class="tag t-warn">偏高</span></td>
+      <td>load avg <b>3.56 / 4.41 / 4.77</b> · 同机还跑着 12+ 个 allmeta next dev + raas backend(3×tsx) + Apifox/Cursor</td></tr>
+    <tr><td class="k">Docker Desktop</td><td><span class="tag t-info">VM 8GB</span></td>
+      <td>10 vCPU · 8.3GB 内存 VM · <code>ao-inngest</code> 实测仅用 76MB/CPU 14.6%（<b>没有 OOM</b>，超时来自 VM 网络/调度 stall 而非内存）</td></tr>
+  </tbody>
+</table>
+
+<div class="callout info">
+  <b>一个反而是好消息的设计：</b><code>MONITOR_READ_SOURCE=auto</code>（见 <code>lib/inngest-source.ts</code>）让 AO 自己的监控页<b>优先读 Postgres 归档、Inngest 不可达时自动回退</b>。所以——当 Inngest 面板上 App 消失、但 AO 的 <code>/monitor</code> 页历史数据还在时，这本身就是一个强信号：<b>问题在 Inngest dev server 侧，数据没丢</b>。
+</div>
+
+<!-- ───────────────────────── 3 ───────────────────────── -->
+<h2 id="mechanism"><span class="n">03</span> 核心机制：App 为什么会"消失"</h2>
+<p class="lead">理解这一条，后面所有根因都串起来了。</p>
+
+<p>Inngest dev server 在 dev 模式下用 <b>pull / 周期回调</b>来维护 App 列表：它拿着容器启动参数 <code>-u http://host.docker.internal:3002/api/inngest</code>，<b>反复去回调你后端的这个 URL</b>来确认 App 还活着、抓取最新的函数清单。</p>
+
+<div class="flow">环境拓扑（当前 = Docker 版 Inngest，跨了一道 Docker 网络边界）
+
+  ┌─────────────────────── macOS 主机 (会休眠的共享笔记本) ───────────────────────┐
+  │                                                                              │
+  │   <span class="b">next dev :3002</span>  ◀───── ② dev server 周期回调 /api/inngest ──┐         │
+  │   (前台终端, 无守护)                                            │         │
+  │      │  每次回调都会跑 getPausedSlugs() ──▶ <span class="y">Postgres :5433</span>  │         │
+  │      │                                                          │         │
+  │      └──── ① 发事件/注册 ─────────────────────────────┐         │         │
+  │                                                        ▼         │         │
+  │                              ┌──── Docker Desktop VM (8GB) ──────┴──────┐  │
+  │                              │   <span class="b">ao-inngest :8288</span>  (dev server)            │  │
+  │                              │     -u host.docker.internal:3002 ────────┘  │
+  │                              └──────────────────────────────────────────────┘
+  │                                        ▲                                     │
+  │   <span class="g">归档器</span> ──── 每30s 拉 events/runs ──┘  (这条也观测到 6 次 5s 超时)      │
+  └──────────────────────────────────────────────────────────────────────────────┘</div>
+
+<p><b>关键事实：</b>"Apps" 列表不持久化。只要 ② 这次回调失败（超时 / 连接拒绝 / 500 / 太慢），dev server 立刻把该 App 标记为不可达并<b>从面板移除</b>；下次回调成功再重新出现。于是：</p>
+
+<div class="card" style="text-align:center;font-size:16px">
+  <b style="color:var(--bad)">"App 消失"</b> &nbsp;⟺&nbsp; <b>dev server 在那一刻够不到 <code>host.docker.internal:3002/api/inngest</code></b>
+</div>
+
+<p>而"够不到"有<b>一大堆彼此独立的原因</b>，且每一个在本机都已观测到迹象——这就是它"有时候挂、有时候好"的本质：不是单一 bug，而是多条脆弱链路叠加。逐条列在下一节。</p>
+
+<!-- ───────────────────────── 4 ───────────────────────── -->
+<h2 id="causes"><span class="n">04</span> 根因清单（按可能性 / 证据强度排序）</h2>
+
+<ol class="causes">
+  <li class="c-bad">
+    <div class="li-title">无进程守护 + 后端被反复挂起/重启 <span class="tag t-bad">已证实</span></div>
+    <div>后端跑在前台终端，没有 pm2/launchd。每次你 Ctrl-Z 挂起、关终端、或 <code>npm run dev</code> 重启，后端就够不到 → App 立刻消失。崩溃后也<b>无人重启</b>。</div>
+    <div class="ev"><b>证据：</b>多个 <code>next dev</code> 进程处于 <code>T</code>（stopped/挂起）状态，时间戳横跨周四 17:00、周五 11:00、今天 11:23 / 11:25 / 11:28；当前进程链 <code>S+</code> 挂在 <code>ttys011</code>；<code>launchctl</code>/<code>pm2</code> 均无对应条目。</div>
+  </li>
+
+  <li class="c-bad">
+    <div class="li-title">/api/inngest 的存活被耦合到了 Postgres <span class="tag t-bad">架构脆弱点</span></div>
+    <div><code>app/api/inngest/route.ts</code> 在<b>每一次</b> dev server 回调里都先 <code>await getPausedSlugs()</code>（一次 DB 查询）才返回函数清单。Postgres 抖一下 / 慢一下 → 这个回调超时 → App 被判不可达 → 掉线。本该只是"列出函数"的探活，被绑上了一次数据库往返。</div>
+    <div class="ev"><b>证据：</b><code>route.ts</code> 的 <code>pickHandler()</code> 每个 GET/POST/PUT 都调 <code>getPausedSlugs()</code>；<code>bootOnce()</code> 在首个请求时还会跑 env 检查 + 启动 raas-bridge + Neo4j sync。</div>
+  </li>
+
+  <li class="c-warn">
+    <div class="li-title">Inngest dev server（Docker）间歇性无响应 <span class="tag t-warn">已观测</span></div>
+    <div>归档器每 30s 拉一次 Inngest，<b>有 6 次直接 5s 超时</b>。容器本身只吃 76MB、没 OOM——所以超时来自 <b>Docker Desktop VM 在主机高负载下的网络转发(vpnkit)/vCPU 调度 stall</b>。这一刻 dev server 对所有人（归档器 + 它自己的回调循环）都变慢，App 也会同步掉线。</div>
+    <div class="ev"><b>证据：</b><code>logs/inngest-archiver.log</code> 出现 6 行 <code>tick FAILED: Inngest dev server timeout after 5000ms</code>，分散在不同时段（前后都是正常 tick，说明是瞬时 stall 后自愈，非崩溃）。</div>
+  </li>
+
+  <li class="c-warn">
+    <div class="li-title">把 dev 模式当部署 + 跨 Docker 网络边界 <span class="tag t-warn">与已知经验冲突</span></div>
+    <div>此前记录的经验是 <b>"AO 的 Inngest 要用 native <code>inngest-cli</code>，不要 Docker"</b>。但现在 Inngest 又跑在 Docker 里——因为 <code>scripts/dev-bootstrap.mjs</code> <b>每次 <code>npm run dev</code> 都优先 <code>docker compose up</code> 重建容器</b>，把 native 选择覆盖掉了。Docker 版多了一道 <code>host.docker.internal</code> + VM 端口转发，正是上一条超时的来源；native CLI 直连 localhost 没有这层。</div>
+    <div class="ev"><b>证据：</b>端口 8288/8289/5433 的 LISTEN 属主是 <code>com.docker</code>（PID 94968）；<code>docker-compose.inngest.yml</code> 用 <code>-u host.docker.internal:3002</code>；<code>dev-bootstrap.mjs</code> 注释明写 "prefer Docker"。</div>
+  </li>
+
+  <li class="c-warn">
+    <div class="li-title">启动顺序：Inngest 先起、后端后起 <span class="tag t-info">时间窗口</span></div>
+    <div><code>dev-bootstrap</code> 先把 Inngest 容器拉起，<code>&&</code> 之后才 <code>next dev</code>。所以容器启动后有一段时间后端还没起来，dev server 的 <code>-u</code> 回调必然失败 → 这段窗口里 App 是缺失/报错的，直到后端起来并被成功回调。今早 11:23–11:56 的反复重启期间，App 会跟着每次重启一并闪掉。</div>
+    <div class="ev"><b>证据：</b>容器 Started <code>03:25:29Z</code>(≈11:25 本地)，而当前后端起于 <b>11:56:45</b>；其间多个被挂起的 next 进程印证了这段重启churn。</div>
+  </li>
+
+  <li class="c-warn">
+    <div class="li-title">笔记本休眠 <span class="tag t-warn">高度怀疑</span></div>
+    <div>合盖/休眠会把后端、Docker、归档器一起冻住。唤醒后 Docker 容器恢复，但 App 要等 dev server 重新成功回调后端才会回来——这中间面板上就是"消失"。</div>
+    <div class="ev"><b>证据：</b>归档器自周四 17:00 常驻至今（≈3 天）按 30s 应有 ~8000+ tick，但日志只有 3276 行 → 中间有大段停顿，符合笔记本夜间休眠。</div>
+  </li>
+
+  <li>
+    <div class="li-title">主机资源争抢拖慢回调 <span class="tag t-info">放大因素</span></div>
+    <div>同机并行跑 12+ 个 allmeta <code>next dev</code> + raas backend + Apifox + Cursor，load avg ~4。AO 的 next dev 被 CPU 饿着时，<code>/api/inngest</code> 回应变慢，更容易在 dev server 的同步超时阈值内掉线。这条单独不致命，但会把上面每一条的概率往上推。</div>
+    <div class="ev"><b>证据：</b><code>ps</code> 列出大量 allmeta/raas node 进程；load average 3.56/4.41/4.77；Docker VM 仅 8GB。</div>
+  </li>
+</ol>
+
+<!-- ───────────────────────── 5 ───────────────────────── -->
+<h2 id="decide"><span class="n">05</span> 下次"消失"时，如何当场判断是哪一种</h2>
+<p class="lead">不用猜——下次发现 App 没了，按这棵树跑一遍命令，30 秒定位。</p>
+
+<div class="card">
+<div class="tree"><b>Q1. 后端进程还在 + 还在听 :3002 吗？</b>
+  <span class="c">$ lsof -nP -iTCP:3002 -sTCP:LISTEN</span>
+  ├─ 没有输出 ───────────▶ <span class="r">后端真的没了</span>（崩溃 / 被关 / 休眠没醒）。
+  │                         因为无守护 → 需手动 <code>npm run dev</code> 重启。→ 对应根因 ①/⑥
+  └─ 有 PID ──────────────▶ 后端活着，继续 Q2。
+
+<b>Q2. 从主机直接打后端的 serve 端点，通不通、快不快？</b>
+  <span class="c">$ curl -m6 -o/dev/null -w '%{http_code} %{time_total}s\n' http://localhost:3002/api/inngest</span>
+  ├─ 超时 / 5xx / 很慢(>2s) ─▶ 后端活着但<span class="y">回调被拖住</span>：多半是 Postgres 慢
+  │                            (根因 ②) 或主机被 CPU 饿着 (根因 ⑦)。
+  └─ 200 且 <100ms ─────────▶ 后端这条没问题，继续 Q3。
+
+<b>Q3. Inngest dev server 自己健康吗？</b>
+  <span class="c">$ curl -m6 -o/dev/null -w '%{http_code} %{time_total}s\n' http://localhost:8288/health</span>
+  ├─ 超时 / 慢 ──────────────▶ <span class="y">Inngest/Docker 侧 stall</span>（根因 ③/④）。
+  │                            看 <code>docker logs --tail=50 ao-inngest</code> + <code>docker stats ao-inngest</code>。
+  └─ 200 快 ────────────────▶ 继续 Q4。
+
+<b>Q4. App 此刻到底注册上了没？</b>
+  <span class="c">$ curl -s http://localhost:8288/v0/gql -XPOST -H 'content-type: application/json' \
+      --data '{"query":"query{apps{name connected functionCount error}}"}'</span>
+  ├─ connected:false / error 非空 ▶ 回调握手失败，对照 error 文案（常是 dial host.docker.internal 失败 → 根因 ④/⑤）。
+  └─ 不在列表里 ─────────────────▶ 触发一次重新同步：浏览器开 <code>http://localhost:8288</code> 点 App 的
+                                   "Resync"，或 <code>curl http://localhost:3002/api/inngest</code> 戳一下让 SDK 重注册。
+
+<b>始终别慌的一点：</b> AO 自己的 <code>/monitor</code> 页有 Postgres 兜底——即便 Inngest 面板空了，历史 runs/events 不丢。</div>
+</div>
+
+<!-- ───────────────────────── 6 ───────────────────────── -->
+<h2 id="recommend"><span class="n">06</span> 修复建议（按优先级，<u>本次未执行</u>）</h2>
+<p class="lead">按你的要求只诊断、不动代码。下面是建议清单，确认后我可以逐条实施。</p>
+
+<ul class="rec">
+  <li class="p1">
+    <div class="rt">P0 · 给后端加进程守护 + 自动重启</div>
+    <div class="why">这是把"偶发消失"变"自愈"的最高杠杆。最轻量：用 <code>pm2</code> 托管 <code>npm run dev</code>（崩溃自动拉起、开机自启、脱离终端）；或写个 <code>until node …; do sleep 2; done</code> 的 keepalive，配合 <code>caffeinate -dimsu</code> 防休眠。当前裸前台终端 = 任何一次崩溃/关窗/合盖都是永久下线。</div>
+  </li>
+  <li class="p1">
+    <div class="rt">P0 · 解耦 /api/inngest 探活与 Postgres</div>
+    <div class="why">给 <code>getPausedSlugs()</code> 加<b>短 TTL 缓存 + 超时兜底</b>（拿不到就按"全部启用"返回，别让回调卡在 DB 上）。让 dev server 的同步回调几乎纯内存、毫秒级返回，Postgres 抖动不再能把 App 拽下线。对应根因 ②。</div>
+  </li>
+  <li class="p2">
+    <div class="rt">P1 · Inngest 回到 native inngest-cli（与已记录经验一致）</div>
+    <div class="why">去掉 Docker VM 那道网络/转发边界（根因 ③/④ 的来源）。具体做法：把 <code>dev-bootstrap.mjs</code> 的 "prefer Docker" 改成<b>探测到 native <code>inngest-cli</code> 在跑就不 <code>docker compose up</code></b>，并常驻 <code>inngest-cli dev --host 0.0.0.0</code>。若坚持 Docker，至少让 bootstrap 不要每次重建容器、并修启动顺序（先后端后 Inngest，或让 dev server 起来后重试）。</div>
+  </li>
+  <li class="p2">
+    <div class="rt">P1 · 加一条"App 掉线"主动告警</div>
+    <div class="why">不要靠人盯面板。归档器已经在 30s 轮询——给它加一句：连续 N 次同步不到 <code>agentic-operator-main</code>（或 <code>connected:false</code>）就打日志/发通知。这样"消失"被主动捕获、且自带时间戳，便于回溯到底是哪一类。</div>
+  </li>
+  <li class="p3">
+    <div class="rt">P2 · 如要长期稳定，别用 dev 模式当部署</div>
+    <div class="why">长远看，<code>next dev</code>（HMR/按需重编译）+ <code>inngest dev</code>（明确的开发工具、状态易失）不适合当"部署"。稳定形态是 <code>next build && next start</code>（无重编译）+ 独占/不休眠的机器 + 一个真正常驻的 Inngest。至少先把 AO 从这台挤了 12+ 服务的共享笔记本上挪开，或给它 <code>caffeinate</code> + 降低同机并发。</div>
+  </li>
+  <li class="p3">
+    <div class="rt">P2 · 给归档器日志加时间戳</div>
+    <div class="why">当前 <code>[archive] tick ok…</code> 没有时间戳，导致没法把 6 次超时对到具体时刻、也看不出休眠停顿的确切区间。加上 ISO 时间戳后，这份报告里的多数"高度怀疑"就能升级成"已证实"。</div>
+  </li>
+</ul>
+
+<!-- ───────────────────────── 7 ───────────────────────── -->
+<h2 id="evidence"><span class="n">07</span> 附录：原始证据</h2>
+
+<h3>A. 进程 / 端口（节选）</h3>
+<pre><span class="c"># 后端：前台终端、无守护</span>
+88657  next-server (v16.2.4)        <span class="b">S+  ttys011</span>   started 11:56:45   TCP *:3002 (LISTEN)
+88656  next dev -p 3002             S+  ttys011
+88570  sh -c node scripts/dev-bootstrap.mjs && STUB_AGENTS=1 next dev -p 3002
+
+<span class="c"># 被 Ctrl-Z 挂起的僵尸 next（状态 T = stopped），横跨多天 —— 非崩溃</span>
+53876  next dev -p 3002    <span class="y">T</span>  11:25AM
+ 4606  next dev -p 3002    <span class="y">T</span>  Fri 11AM
+ 8859  next dev -p 3002    <span class="y">T</span>  Thu 05PM
+ 1359  next dev -p 3002    <span class="y">T</span>  Thu 05PM   …
+
+<span class="c"># 端口属主 = Docker（不是 native inngest-cli）</span>
+com.docker  94968   TCP *:8288 (LISTEN)   <span class="c"># Inngest dev</span>
+com.docker  94968   TCP *:8289 (LISTEN)   <span class="c"># connect-gateway</span>
+com.docker  94968   TCP *:5433 (LISTEN)   <span class="c"># ao-postgres</span>
+
+<span class="c"># 归档器：detached 常驻、无 TTY（所以后端重启它不受影响）</span>
+93808  node … scripts/inngest-archiver.ts   ??  SN  Thu 05PM
+
+<span class="c"># 主机负载（同机还有 12+ allmeta next dev + raas backend）</span>
+15:22  up 25 days,  load averages: 3.56 4.41 4.77</pre>
+
+<h3>B. Docker 容器状态</h3>
+<pre>NAMES        IMAGE                     STATUS              PORTS
+ao-inngest   inngest/inngest:latest    Up 4 hours          0.0.0.0:8288-8289->8288-8289
+ao-postgres  postgres:17-alpine        Up 3 days (healthy) 0.0.0.0:5433->5432
+
+ao-inngest : RestartCount=<span class="g">0</span>  Started=2026-06-01T03:25:29Z  OOMKilled=<span class="g">false</span>  RestartPolicy=unless-stopped
+docker stats ao-inngest : CPU <span class="y">14.6%</span>  MEM <span class="g">76MiB / 7.75GiB (0.96%)</span>   <span class="c"># 没有 OOM</span>
+Docker Desktop : 10 vCPU · 8.3GB VM</pre>
+
+<h3>C. 归档器日志里的 Inngest 超时（间歇、自愈）</h3>
+<pre>logs/inngest-archiver.log（共 3276 行，6 次失败，前后均为正常 tick）
+
+…tick ok (371ms)
+<span class="r">tick FAILED: Inngest dev server timeout after 5000ms</span>
+<span class="r">tick FAILED: Inngest dev server timeout after 5000ms</span>   <span class="c"># 连续 2 次 ≈ 一个 ~60s 的 stall 窗口</span>
+…tick ok (473ms)
+ …
+<span class="r">tick FAILED: Inngest dev server timeout after 5000ms</span>   <span class="c"># 另外 4 次散布在不同时段</span>
+…tick ok (186ms)</pre>
+
+<h3>D. 当前 App 注册状态（已自愈）</h3>
+<pre>$ curl http://localhost:8288/v0/gql -d '{"query":"{apps{name connected functionCount error url}}"}'
+{"data":{"apps":[{
+  "name":"<span class="g">agentic-operator-main</span>",
+  "connected":<span class="g">true</span>,
+  "functionCount":5,
+  "error":<span class="g">null</span>,
+  "url":"http://host.docker.internal:3002/api/inngest"
+}]}}
+
+$ curl http://localhost:8288/health         → <span class="g">200</span> (0.003s)
+$ curl http://localhost:3002/api/inngest    → <span class="g">200</span> (0.007s)</pre>
+
+<h3>E. 关键配置（<code>.env.local</code> / compose / route）</h3>
+<pre><span class="c"># .env.local — 注意两个方向用了不同 host</span>
+INNGEST_BASE_URL   = http://localhost:8288            <span class="c"># ① AO→Inngest 发事件（主机视角）</span>
+INNGEST_DEV        = http://localhost:8288
+INNGEST_SERVE_HOST = <span class="y">http://host.docker.internal:3002</span>   <span class="c"># ② Inngest→AO 回调（容器视角）</span>
+MONITOR_READ_SOURCE= auto                             <span class="c"># 监控读：Postgres 优先、live 兜底（好）</span>
+
+<span class="c"># docker-compose.inngest.yml</span>
+command: inngest dev --host 0.0.0.0 --port 8288 -u <span class="y">http://host.docker.internal:3002/api/inngest</span>
+restart: unless-stopped
+
+<span class="c"># app/api/inngest/route.ts — 每次回调都过一次 DB</span>
+async function pickHandler(){ const paused = <span class="y">await getPausedSlugs()</span>; … }  <span class="c"># ← 探活耦合 Postgres</span>
+
+<span class="c"># package.json — dev 即 = 一条裸前台命令链，无守护</span>
+"dev": "node scripts/dev-bootstrap.mjs && STUB_AGENTS=1 next dev -p 3002"</pre>
+
+
+<!-- ═══════════════════════════ 问题二 ═══════════════════════════ -->
+<div style="margin:64px 0 8px;padding:18px 22px;border-radius:14px;
+     background:linear-gradient(90deg,var(--bad-bg),var(--surface) 60%);border:1px solid #5a1f23">
+  <div style="font:12px/1 var(--mono);color:var(--bad);letter-spacing:1px;text-transform:uppercase">问题二 · 独立分析</div>
+  <div style="font-size:21px;font-weight:700;margin-top:6px">AO 显示"事件引擎暂时不可达 · 显示的是缓存数据"
+    <br><span class="mono" style="font-size:14px;color:var(--bad)">Unexpected token '&lt;', "&lt;!DOCTYPE "... is not valid JSON</span></div>
+  <div class="sub" style="margin-top:8px">现象：Inngest 上 app + functions 都部署好、也能跑，但 AO 监控页读不到、报上面这串错。<b>已 1:1 复现根因。</b></div>
+</div>
+
+<!-- ───── 8 ───── -->
+<h2 id="q2-verdict"><span class="n">08</span> 结论速览</h2>
+
+<div class="card verdict ok">
+  <p style="margin-top:0"><span class="tag t-ok">结论 A</span> <b>Inngest 本身没问题 —— app + functions 注册成功且能运行。</b></p>
+  <p>实测 <code>POST :8288/v0/gql</code> 返回了完整 5 个 function（resume-parser / create-jd / match-resume / rule-check / interview-inviter），<code>connected:true</code>。Agent 确实在跑。所以问题<b>不在 Inngest，也不在 agent 执行</b>。</p>
+</div>
+
+<div class="card verdict bad">
+  <p style="margin-top:0"><span class="tag t-bad">结论 B</span> <b>问题 100% 在 AO 的"读取 / 显示"这一侧。</b></p>
+  <p>AO 监控页去拉 Inngest 数据时，拿回来的<b>是一个 HTML 网页（以 <code>&lt;!DOCTYPE html&gt;</code> 开头），不是 JSON</b>。代码对这个响应直接调 <code>res.json()</code> 去解析，第一个字符 <code>&lt;</code> 就让 JSON 解析器爆掉 —— 这就是 <code>Unexpected token '&lt;'</code> 的字面来源。AO 随后落到降级分支，显示"事件引擎不可达 · 缓存数据"横幅。</p>
+</div>
+
+<div class="card verdict bad">
+  <p style="margin-top:0"><span class="tag t-bad">结论 C</span> <b>根因：AO 服务端解析出的 Inngest 读取地址，指向了一个"会返回 HTML 的源"，而不是真正的 Inngest <code>:8288</code> JSON API。</b></p>
+  <p>我把这个报错<b>逐字复现出来了</b>（见第 ⑩ 节）：当读取 URL 落到 AO 自己的应用（<code>:3002</code> / 部署域名 / 反向代理）时，<code>POST &lt;那个地址&gt;/v0/gql</code> 返回的正是 Next.js 的 <code>&lt;!DOCTYPE html&gt;&lt;html lang="zh"&gt;…</code> 页面 —— 连 <code>lang="zh"</code> 都和你的报错对得上。极可能是<b>部署机上 <code>INNGEST_BASE_URL</code> 配错</b>（指到了应用 / 域名 / 漏了 <code>:8288</code> 端口），或在远程主机上保持了默认 <code>localhost:8288</code>（那台机上没有 Inngest）。</p>
+</div>
+
+<!-- ───── 9 ───── -->
+<h2 id="q2-chain"><span class="n">09</span> 失败链路（从你看到的报错，倒推到具体代码）</h2>
+<div class="flow"><span class="b">前端</span>  components/monitor/MonitorContent.tsx:100  每 5s 轮询
+   └─▶ fetch <span class="y">/api/inngest-admin/runs?limit=200</span>
+
+<span class="b">服务端路由</span>  app/api/inngest-admin/runs/route.ts:16
+   └─▶ listRecentRuns()   <span class="c">// lib/inngest-source.ts —— MONITOR_READ_SOURCE=auto</span>
+        ├─ ① 先查 Postgres 归档
+        └─ ② <span class="r">窗口内 0 行 / 归档为空 → 落到 live</span>   <span class="c">// auto 模式的兜底分支</span>
+             └─▶ live.listRecentRuns()  →  <span class="b">gql()</span>  lib/inngest-admin-client.ts:100
+
+<span class="b">gql()</span>  POST  <span class="y">${INNGEST_BASE_URL}/v0/gql</span>
+   └─▶ 服务器回了 <span class="r">&lt;!DOCTYPE html&gt;…</span>（HTTP 200，但是网页不是 JSON）
+        └─▶ <span class="r">const body = await res.json()</span>   <span class="c">// :107 —— 没有 res.ok / content-type 守卫!</span>
+             └─▶ <span class="r">throw: Unexpected token '&lt;', "&lt;!DOCTYPE "... is not valid JSON</span>
+
+<span class="b">路由 catch</span>  route.ts:33  →  502  { message: "<span class="r">Unexpected token '&lt;'…</span>" }
+
+<span class="b">前端 catch</span>  MonitorContent.tsx:109/124  →  setRunsError(message)
+   └─▶ 渲染横幅 :240  <span class="y">"事件引擎暂时不可达 · 显示的是缓存数据"</span>
+        + :241  原始报错  <span class="r">Unexpected token '&lt;'…</span>          ← 你截图的两行，逐行对上</div>
+
+<div class="callout warn">
+  <b>关键代码缺陷（<code>lib/inngest-admin-client.ts</code>）：</b>同文件里 <code>restGet()</code>（:80）<b>先判 <code>if (!res.ok) throw</code></b> 再解析；而 <code>gql()</code>（:107）<b>直接 <code>res.json()</code>、不判 <code>res.ok</code>、不看 content-type</b>。这个不一致，把"URL 配错 / 拿到 HTML"这种一眼能定位的问题，变成了看不懂的 <code>Unexpected token '&lt;'</code>。
+</div>
+
+<!-- ───── 10 ───── -->
+<h2 id="q2-cause"><span class="n">10</span> 根因复现：HTML 被当 JSON 解析</h2>
+<p class="lead">我对三种情况各打了一枪，只有一种产出和你完全一致的报错。</p>
+<table>
+  <thead><tr><th>情形</th><th>实际命令 → 返回</th><th>JSON.parse 会抛什么</th><th>是不是你的报错</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="k">(A) 对的服务器<br>错的路径<br><span class="nb">（版本挪了 /v0/gql）</span></td>
+      <td><code>POST :8288/v0/gql-WRONG</code><br>→ <code>404 page not found</code>（<b>纯文本</b>）</td>
+      <td><code>Unexpected token 'o'/'4'…</code><br>（不是 <code>&lt;</code>）</td>
+      <td><span class="tag t-warn">不是</span></td>
+    </tr>
+    <tr style="background:#1a1115">
+      <td class="k">(B) URL 指到<br><b>AO 应用</b> :3002<br><span class="nb">（域名 / 反代同理）</span></td>
+      <td><code>POST :3002/v0/gql</code><br>→ <code>&lt;!DOCTYPE html&gt;&lt;html <b>lang="zh"</b>&gt;…</code></td>
+      <td><code class="mono" style="color:var(--bad)">Unexpected token '&lt;', "&lt;!DOCTYPE "... is not valid JSON</code></td>
+      <td><span class="tag t-bad">★ 逐字命中</span></td>
+    </tr>
+    <tr>
+      <td class="k">(C) 健康<br>（本机此刻）</td>
+      <td><code>GET /api/inngest-admin/runs</code><br>→ <code>{"runs":[…],"meta":…}</code></td>
+      <td>—（正常 JSON）</td>
+      <td><span class="tag t-ok">正常</span></td>
+    </tr>
+  </tbody>
+</table>
+<p><b>定论：</b>读取 URL 落到了"返回 HTML 的源"。Inngest dev server 对未知 <code>/v0/*</code> 路径回的是<b>纯文本 404</b>（情形 A，报错开头不是 <code>&lt;</code>），唯独打到 <b>Next.js 应用</b>才会回 <code>&lt;!DOCTYPE html&gt;</code>（情形 B）。所以读取地址被解析成了 AO 应用 / 域名 / 代理，而非 Inngest <code>:8288</code>。</p>
+
+<!-- ───── 11 ───── -->
+<h2 id="q2-why"><span class="n">11</span> 为什么"Inngest 能跑、AO 却不显示"能同时成立</h2>
+<p class="lead">因为"执行"和"显示"走的是<b>两条完全独立的链路</b>——不同 env、不同方向、不同端点。</p>
+<div class="grid">
+  <div class="stat" style="border-left:3px solid var(--ok)">
+    <div class="lbl">① 执行方向（这条是通的 → agent 真在跑）</div>
+    <div style="font-size:13.5px;line-height:1.6;margin-top:4px">
+      Inngest <b>──回调──▶</b> AO<br>
+      用 <code>INNGEST_SERVE_HOST</code> = <code>host.docker.internal:3002/api/inngest</code><br>
+      <span class="nb">→ 函数被调起来，run 正常产生</span></div>
+  </div>
+  <div class="stat" style="border-left:3px solid var(--bad)">
+    <div class="lbl">② 显示方向（这条断了 → 监控读不到）</div>
+    <div style="font-size:13.5px;line-height:1.6;margin-top:4px">
+      AO <b>──读 runs/functions──▶</b> Inngest<br>
+      用 <code>INNGEST_BASE_URL</code> + <code>/v0/gql</code><br>
+      <span class="nb">→ URL 错 / 回 HTML → 解析爆 → 横幅</span></div>
+  </div>
+</div>
+<p>两条链路毫无关系，所以"① 通 + ② 断"完全可能 —— 这恰好就是你看到的现象。<b>放大问题的几处代码 / 配置：</b></p>
+<ol class="causes">
+  <li class="c-bad"><div class="li-title">监控的 live 读取硬依赖 dev-server-only 的 <code>/v0/gql</code></div>
+    <div class="ev"><code>inngest-admin-client.ts</code> 顶部注释写"prod 应指向 Inngest Cloud 的 REST API"，<b>但代码里根本没有 Cloud 那条路</b> —— <code>listFunctions / listRecentRuns / getRunHistory</code> 全打 <code>/v0/gql</code>。所以监控只在"读取 URL = 一台真正的 Inngest dev server、版本对、返回 JSON"时才工作。</div></li>
+  <li class="c-warn"><div class="li-title"><code>listFunctions</code> 永远走 live，无归档兜底</div>
+    <div class="ev"><code>inngest-source.ts:86</code> 把 <code>listFunctions</code> 直接 = live 版。所以"函数列表 / agent 健康"面板<b>永远暴露</b>在这个失败下，即使 runs 有归档保护。</div></li>
+  <li class="c-warn"><div class="li-title">归档只在"窗口里有行"时兜底</div>
+    <div class="ev">auto 模式下 <code>archive.listRecentRuns()</code> 返回 0 行（空闲时段 / 窗口内没 run）就<b>落到 live</b>。所以哪怕归档表里有历史（本机 runs=62/events=97），一个没有近期 run 的时间窗也会触发 live <code>gql()</code> → 暴露在 URL 故障下。</div></li>
+  <li class="c-warn"><div class="li-title">与问题一联动 → "有时候"才出现</div>
+    <div class="ev">问题一里 Inngest（Docker）会偶发 stall / 重启。那些瞬间 live <code>gql()</code> 可能拿到非 JSON（代理 502 页 / 启动中的 SPA HTML），叠加 <code>gql()</code> 无守卫 → 横幅<b>间歇闪现</b>，与你说的"有时候不稳定"吻合。</div></li>
+</ol>
+
+<!-- ───── 12 ───── -->
+<h2 id="q2-decide"><span class="n">12</span> 怎么确认 + 修复建议（<u>未执行</u>）</h2>
+
+<h3>一条命令确认到底配到哪了</h3>
+<p>项目已内置诊断端点 <code>/api/system/config</code>，在<b>那台部署机</b>上打开 / curl：</p>
+<pre><span class="c"># 在部署机上执行（把 host 换成 AO 实际地址）</span>
+$ curl -s http://&lt;AO-host&gt;:3002/api/system/config | python3 -m json.tool
+
+<span class="c"># 看这几个字段：</span>
+"inngest": {
+  "url":  "<span class="y">??? </span>",            <span class="c"># ← 必须是【真正 Inngest 那台】的 host:8288</span>
+  "sourceEnv": "INNGEST_BASE_URL",  <span class="c"># ← 哪个 env 提供的值</span>
+  "registeredFunctionCount": <span class="y">???</span>,  <span class="c"># ← 0 = 读路径断；5 = 正常</span>
+  "healthy": <span class="y">???</span>               <span class="c"># ← false = 读不到</span>
+}</pre>
+<div class="callout info">
+  <b>判读：</b>若 <code>url</code> 不是真正 Inngest 的 <code>host:8288</code>（而是 AO 域名 / IP / 漏了端口 / 还停在 <code>localhost:8288</code> 但那台机没 Inngest）→ <b>配置错实锤</b>。<br>
+  <span class="nb">本机此刻实测：<code>url=http://localhost:8288 · sourceEnv=INNGEST_BASE_URL · functionCount=5 · healthy=true</code> —— 本机是好的，说明问题出在<b>那台部署机的 env</b>（或问题一的间歇 stall），不在代码逻辑。</span>
+</div>
+
+<h3>修复建议（按优先级）</h3>
+<ul class="rec">
+  <li class="p1"><div class="rt">P0 · 改部署机的 <code>INNGEST_BASE_URL</code> 指向真正的 Inngest <code>host:8288</code></div>
+    <div class="why">不要指到 AO 域名 / 应用端口，别漏 <code>:8288</code>。若 AO 与 Inngest 同机 → <code>http://localhost:8288</code>；不同机 → 填 Inngest 那台的 LAN IP/host。<b>同时 <code>NEXT_PUBLIC_INNGEST_URL</code> 要等于它</b>（浏览器侧 dashboard 链接用）。改完用上面的 <code>/api/system/config</code> 复验 <code>healthy:true</code> + <code>functionCount:5</code>。</div></li>
+  <li class="p1"><div class="rt">P0 · 给 <code>gql()</code> 加 <code>res.ok</code> + content-type 守卫（对齐 <code>restGet()</code>）</div>
+    <div class="why">解析前先判：非 2xx 或 content-type 不是 JSON 就抛<b>清晰报错</b>，例如 <code>"Inngest 在 &lt;url&gt;/v0/gql 返回了 HTML(status 200) —— INNGEST_BASE_URL 可能指到了应用而非 :8288"</code>。一行守卫，就把"看不懂的 <code>Unexpected token '&lt;'</code>"变成"指哪修哪"。这是根治"报错难懂"的最高杠杆。</div></li>
+  <li class="p2"><div class="rt">P1 · 给 <code>listFunctions</code> 加注册表/归档兜底 + 区分空窗</div>
+    <div class="why"><code>listFunctions</code> 失败时回退到 <code>AGENT_MAP</code> 静态注册表（functions 路由已有 <code>buildMonitoredFallback()</code>，可复用），别让函数列表整个空掉。auto 模式区分"归档为空"vs"窗口内无 run"，后者不必无谓落 live。</div></li>
+  <li class="p3"><div class="rt">P2 · 横幅文案区分"读取超时"和"URL 配错"</div>
+    <div class="why">当前不管哪种都说"显示缓存数据"——但 URL 配错时<b>可能根本没缓存</b>（空闲窗口落 live）。区分两类，URL 配错时直接提示"检查 INNGEST_BASE_URL"，省得每次靠人去翻日志。</div></li>
+</ul>
+
+<div class="card" style="border-left:4px solid var(--accent)">
+  <b>问题一 ↔ 问题二 的关系：</b>两者独立、但相互放大。问题一让 Inngest（Docker）<b>偶发 stall/重启</b>；问题二是 AO 读取侧<b>缺少守卫 + URL 易配错</b>。稳态部署里若 <code>INNGEST_BASE_URL</code> 配对，问题二的"持续不显示"会消失，只剩问题一 stall 时的<b>偶发闪现</b>；而问题一的"App 消失"则与读取无关，是 dev server 同步回调的另一回事。两份建议可独立实施。
+</div>
+
+
+<!-- ═══════════════════════════ 问题三 ═══════════════════════════ -->
+<div style="margin:64px 0 8px;padding:18px 22px;border-radius:14px;
+     background:linear-gradient(90deg,var(--ok-bg),var(--surface) 60%);border:1px solid #1b4426">
+  <div style="font:12px/1 var(--mono);color:var(--ok);letter-spacing:1px;text-transform:uppercase">问题三 · 生产机实锤（来自截图）</div>
+  <div style="font-size:21px;font-weight:700;margin-top:6px">根因坐实：<code style="font-size:16px">INNGEST_BASE_URL</code> 结尾多了一个 <code style="font-size:16px;color:var(--ok)">/</code>
+    <br><span style="font-size:14px;color:var(--ink2)">外加回答："能不能直接在 AO 总览里配置 Inngest 连接？"</span></div>
+</div>
+
+<!-- ───── 13 ───── -->
+<h2 id="q3-verdict"><span class="n">13</span> 生产证据 → 根因坐实</h2>
+<p class="lead">两张生产截图把问题二从"高度怀疑"升级成"已证实"，而且指向一个<b>单字符</b>的配置错误。</p>
+
+<table>
+  <thead><tr><th>来源</th><th>关键值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td class="k">Inngest dev<br>(Synced Apps)</td>
+      <td><code>agentic-operator-main</code> · <code>http://ao-main:3002/api/inngest</code> · Serve · SDK v4.3.0 · <b>23 functions</b></td>
+      <td><span class="tag t-ok">执行方向 OK</span> AO 已同步进 Inngest，函数齐全，agent 能跑。</td></tr>
+    <tr><td class="k">AO 系统配置<br>(/api/system/config)</td>
+      <td>事件引擎 URL = <code style="color:var(--bad)">http://raas-inngest:8288<b>/</b></code> · 来源 <code>INNGEST_BASE_URL</code> · 状态 <b style="color:var(--bad)">unreachable</b> · 已注册函数 <b style="color:var(--bad)">0</b></td>
+      <td><span class="tag t-bad">读取方向 断</span> 注意 URL <b>结尾那个 <code>/</code></b>。</td></tr>
+  </tbody>
+</table>
+
+<div class="card verdict ok">
+  <p style="margin-top:0"><span class="tag t-ok">实测复现</span> <b>结尾的 <code>/</code> 让每次读取都拼成双斜杠，Inngest 回的是自己的 dashboard 网页。</b></p>
+<pre><span class="c"># BASE = "http://raas-inngest:8288/" ，client 拼 `${BASE}/v0/gql` →</span>
+POST  http://host:8288<span class="g">/</span>v0/gql    → <span class="g">{"data":{"apps":[…]}}</span>            <span class="c"># 单斜杠：正常 JSON</span>
+POST  http://host:8288<span class="r">//</span>v0/gql   → <span class="r">&lt;!DOCTYPE html&gt;…&lt;title&gt;Inngest Server&lt;/title&gt;</span>  <span class="c"># 双斜杠：回了 SPA 网页!</span>
+GET   http://host:8288<span class="r">//</span>v1/events → <span class="r">&lt;!DOCTYPE html&gt;…</span>                       <span class="c"># 同样</span>
+
+<span class="c"># 于是 gql() 对 HTML 调 res.json() → throw "Unexpected token '<'…"</span>
+<span class="c"># → system/config 捕获 → healthy=false, fnCount=0 → 总览显示 "unreachable / 0"</span></pre>
+  <p style="margin-bottom:0">这同时解释了<b>问题二的 <code>Unexpected token '&lt;'</code></b> 和<b>问题三的 unreachable / 0 函数</b> —— 同一个根因，两个探针看到的两副面孔。</p>
+</div>
+
+<div class="callout warn">
+  <b>为什么"同步成功但读不到"：</b>注册/同步走的 <code>sync-app</code> 路由有 <code>.replace(/\/+$/, '')</code> 把结尾斜杠<b>去掉了</b>（route.ts:70），所以 app 能正常注册进 Inngest（截图里 23 functions 在）；但<b>读取 client（<code>inngest-admin-client.ts</code>）没有这个 strip</b> → 双斜杠 → 读全废。一个 strip、一个没 strip，正是这个"半通"现象的来源。
+</div>
+
+<!-- ───── 14 ───── -->
+<h2 id="q3-ui"><span class="n">14</span> 能不能直接在 AO 总览里配置？<span style="font-size:14px;color:var(--ink2);font-weight:400">（你的问题）</span></h2>
+<div class="card verdict bad">
+  <p style="margin-top:0"><span class="tag t-bad">答案</span> <b>不能。总览里那个"同步新 App"按钮修不了这个问题——它管的是另一个方向，而且那个方向已经通了。</b></p>
+</div>
+<table>
+  <thead><tr><th>总览里的"同步新 App"实际做什么</th><th>而 unreachable 需要改的是</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>POST /api/inngest-admin/sync-app {url}</code><br>→ <code>${INNGEST_BASE_URL}/fn/register</code><br>把 <b>AO 的 serve 地址注册给 Inngest</b>（执行方向，Inngest→AO）。<br><span class="nb">生产里这条<b>已经成功</b>（截图：23 functions 在）。再点也是冗余。</span></td>
+      <td>读取方向用的 <b><code>INNGEST_BASE_URL</code></b>。<br>它在 <code>inngest-admin-client.ts</code> 里是 <code>const BASE = getInngestUrl()</code>，<b>模块加载时一次性从服务端 env 读取</b>。<br><span class="nb">浏览器 UI 改不了服务端 env；UI 里也<b>没有</b>设置读取 URL 的输入框。</span></td>
+    </tr>
+  </tbody>
+</table>
+<p>三个独立理由叠加，决定了"总览配置"这条路走不通：</p>
+<ol class="causes">
+  <li class="c-bad"><div class="li-title">方向不对</div><div class="ev">"同步新 App" = 注册 AO→Inngest（执行）；unreachable = AO→Inngest 读取。前者已通、后者才是病灶，两者不是一回事。</div></li>
+  <li class="c-bad"><div class="li-title">读取 URL 是 boot-time 常量</div><div class="ev"><code>const BASE = getInngestUrl()</code> 在模块加载时定死；要变更必须改 env + <b>重启 AO 进程</b>。UI 点按钮不会重读 env。</div></li>
+  <li class="c-warn"><div class="li-title">连按钮本身都依赖那个坏 URL</div><div class="ev">sync 按钮也走 <code>${getInngestUrl()}/fn/register</code>。好在它 strip 了结尾斜杠，所以按钮可能"能用"——但它修的不是读取路径，点了也不会让总览变绿。</div></li>
+</ol>
+<p class="nb">（若真想"在 UI 里改 Inngest 地址并立即生效"，那需要<b>改代码</b>：把 <code>getInngestUrl()</code> 从读 env 改成读运行时设置（DB/配置表）、并让 <code>BASE</code> 不再是 const。但对当前这个 bug 来说没必要——根因只是一个多余的斜杠。）</p>
+
+<!-- ───── 15 ───── -->
+<h2 id="q3-fix"><span class="n">15</span> 真正的修法（改配置，不改代码）</h2>
+<ul class="rec">
+  <li class="p1"><div class="rt">P0 · 去掉 <code>INNGEST_BASE_URL</code> 结尾的 <code>/</code> 然后重启 AO</div>
+    <div class="why">在那台生产机的 AO 部署 env 里：<br>
+      <code>INNGEST_BASE_URL=http://raas-inngest:8288</code> &nbsp;<b>（删掉结尾斜杠）</b><br>
+      顺手把 <code>NEXT_PUBLIC_INNGEST_URL</code> 也设成同样无斜杠的值。改完<b>重启 AO 容器</b>（env 在启动时读）。然后回到总览的「系统配置」弹窗看：状态应翻成健康、已注册函数 → <b>23</b>。</div></li>
+  <li class="p2"><div class="rt">P1 · 顺带确认 <code>raas-inngest</code> 这个服务名从 ao-main 容器能解析</div>
+    <div class="why">既然之前能收到 HTML，说明 <code>raas-inngest:8288</code> 是<b>可达的</b>（不是 DNS 死）——所以去斜杠极可能直接修好。万一去斜杠后变成连接错误（而非 HTML），那就是 ao-main 与 raas-inngest 不在同一 Docker network / 服务名不对，再核对 compose 的 networks + service 名。</div></li>
+  <li class="p3"><div class="rt">P2 · （可选，需改代码）让读取 client 也 strip 结尾斜杠</div>
+    <div class="why">在 <code>getInngestUrl()</code> 里 <code>.replace(/\/+$/, '')</code>，或 <code>inngest-admin-client.ts</code> 的 <code>BASE</code> 处理一次。一行就根除这一整类"多打个斜杠就全挂"的脆弱，和 <code>sync-app</code> 的既有写法对齐。问题二建议里的 <code>gql()</code> 加 <code>res.ok</code>/content-type 守卫一并做更好。</div></li>
+</ul>
+
+
+<div class="foot">
+  方法论：本报告遵循 systematic-debugging（先定根因再谈修复）。<b>未对任何代码或运行中的服务做改动</b>，仅执行只读探测（<code>ps / lsof / docker inspect / curl / GraphQL 查询 / 源码追踪</code>）。<br>
+  问题一局限：归档器日志无时间戳，故"笔记本休眠""资源争抢"两条标注为"高度怀疑"而非"已证实"——见建议 P2（加时间戳）即可升级确认。<br>
+  问题二：报错链路已从前端→路由→client 逐行追到代码，并用 <code>curl</code> 把 <code>Unexpected token '&lt;'</code> 逐字复现。<br>
+  问题三：两张生产截图坐实了根因 = <code>INNGEST_BASE_URL=http://raas-inngest:8288<b>/</b></code> 结尾多一个斜杠 → 双斜杠 <code>//v0/gql</code> → Inngest 回 dashboard 网页。已实测双斜杠确实返回 SPA HTML。修法是<b>去斜杠 + 重启 AO</b>（改配置，非改代码）；总览的"同步新 App"按钮修不了（属另一方向，且已同步成功）。
+</div>
+
+</div>
+</body>
+</html>

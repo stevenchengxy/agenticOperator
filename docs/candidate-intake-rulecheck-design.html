@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>候选人查重 agent 设计书(锁定下线 · 查重前移驱动存储 · Neo4j 一人多简历)</title>
+<style>
+  :root{
+    --bg:#0f1115; --surface:#171a21; --panel:#1d212b; --line:#2b3140;
+    --ink1:#e7ebf2; --ink2:#aeb6c5; --ink3:#7b8497;
+    --agent:#3b82f6; --agentbg:#16243d;
+    --event:#10b981; --eventbg:#0f2a23;
+    --gate:#f59e0b; --gatebg:#2e2410;
+    --fail:#ef4444; --failbg:#2c1517;
+    --new:#a855f7; --newbg:#241430;
+    --store:#22d3ee; --storebg:#0c2a30;
+    --off:#6b7280; --offbg:#1a1d24;
+    --code:#0b0d12;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink1);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;line-height:1.7;font-size:15px}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 28px 90px}
+  h1{font-size:25px;font-weight:700;margin:0 0 6px}
+  h2{font-size:21px;font-weight:650;margin:46px 0 14px;padding-bottom:9px;border-bottom:2px solid var(--line)}
+  h3{font-size:16.5px;font-weight:650;margin:24px 0 10px}
+  .sub{color:var(--ink3);font-size:13.5px;margin-bottom:24px}
+  p{margin:10px 0}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#ffd9a3;padding:1px 5px;border-radius:4px;background:#21262f}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55;color:#cdd6e4}
+  pre .k{color:#7fb2ff} pre .s{color:#9ece6a} pre .add{color:#79e6a8} pre .del{color:#ff8189} pre .c{color:#5f6b80}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:16px 0}
+  .lead{background:var(--panel);border-left:4px solid var(--agent);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+  .lead.gate{border-color:var(--gate)} .lead.fail{border-color:var(--fail)} .lead.ok{border-color:var(--event)} .lead.new{border-color:var(--new)} .lead.store{border-color:var(--store)} .lead.off{border-color:var(--off)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-weight:650}
+  td code{font-size:11.5px}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:20px;vertical-align:middle;margin-left:6px}
+  .tag.new{background:var(--newbg);color:#d8b4fe;border:1px solid #6b3fa0}
+  .tag.mod{background:var(--gatebg);color:#fcd581;border:1px solid #8a6a1f}
+  .tag.keep{background:#1b2430;color:#8fb6e8;border:1px solid #335}
+  .tag.fix{background:var(--failbg);color:#ff9d9d;border:1px solid #7a2c2c}
+  .tag.off{background:var(--offbg);color:#9aa3b2;border:1px solid #444}
+  .tag.p0{background:#3a1418;color:#ff8a8a;border:1px solid #7a2c2c}
+  .flow{margin:18px 0}
+  .node{border-radius:9px;padding:10px 15px;margin:0 auto;max-width:600px;text-align:center;font-size:13.5px;border:1.5px solid var(--line);background:var(--panel)}
+  .node b{font-size:14px} .node small{display:block;color:var(--ink3);font-size:11.5px;margin-top:3px}
+  .n-agent{border-color:var(--agent);background:var(--agentbg)}
+  .n-store{border-color:var(--store);background:var(--storebg)}
+  .n-event{border-color:var(--event);background:var(--eventbg);max-width:430px;font-size:12.5px}
+  .n-off{border-color:var(--off);background:var(--offbg);opacity:.7;max-width:520px}
+  .n-new{box-shadow:0 0 0 2px var(--new)}
+  .arrow{text-align:center;color:var(--ink3);font-size:19px;line-height:1.05;margin:5px 0}
+  .arrow small{display:block;font-size:11px;color:var(--event)}
+  .row{display:flex;gap:14px;align-items:flex-start;justify-content:center;flex-wrap:wrap}
+  ul{margin:8px 0;padding-left:22px} li{margin:5px 0}
+  .ok{color:#5fd9a0} .bad{color:#ff8a8a} .warn{color:#f1c069} .dim{color:var(--ink3)}
+  .toc{columns:2;font-size:13px;color:var(--ink2)} .toc a{color:#8fb6e8;text-decoration:none}
+  .foot{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink3);font-size:12.5px}
+  .rev{background:#221a10;border:1px solid #6b4f1f;border-radius:8px;padding:12px 16px;margin:14px 0;font-size:13.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>候选人查重 agent — 设计书</h1>
+<div class="sub">锁定 agent 暂下线(惰性,不影响流程,未来可重启)· 查重前移到 save 之前 · 查重判定驱动落库 · 同一人 → 新简历挂老 Candidate node(Neo4j 1:N)<br>域:招聘-v1 ｜ 数据源:rules_v0_1_003 · actions_v0_1_002 · objects_v0_1_015 · identity-engine.ts · candidates.ts · resume.ts</div>
+
+<div class="rev">
+<b>⟳ 本版重大修订(锁定下线 + 查重为主):</b>
+<ul>
+<li><b>锁定 agent 暂下线</b>:三 flag 默认关 → <code>runLockCheck</code> 惰性 <code>proceed('disabled')</code>,存储层本就<b>无锁定列</b> → 下线对落库零影响。未来改 flag 即重启。</li>
+<li><b>查重前移到 save 之前</b>:从"事后只审计的独立 agent"改为"<b>resume-parser 内联、save 之前的 step</b>",判定结果<b>驱动落库</b>。</li>
+<li><b>同一人 → 挂老 Candidate node</b>:查重产出老人 <code>candidate_id</code> → <code>saveCandidate</code> 复用它 UPDATE(不建新)→ <code>writeResumeInstance</code> 把新 Resume 的 FK 指老 Candidate → <b>Neo4j 自动 1:N</b>。</li>
+<li class="bad"><b>⛔ 发现一个 P0 缺口</b>:查重引擎 <code>IdentityMatchResult</code> <b>根本不含命中对象的 candidate_id</b> —— 这是 <code>same_as_candidate_id</code> 的唯一来源,必须先补这个出口(§三)。</li>
+</ul>
+</div>
+
+<div class="card"><b>目录</b>
+<div class="toc">
+<a href="#s1">一、整体事件流(查重前移 · 锁定下线)</a><br>
+<a href="#s2">二、查重 ⊥ 存储 两层解耦</a><br>
+<a href="#s3">三、查重 → 存储 连接方案(含 P0 缺口)</a><br>
+<a href="#s4">四、查重 agent 完整流程(内联 save 之前)</a><br>
+<a href="#s5">五、抓 9-15 判定 ≠ LLM 自由判</a><br>
+<a href="#s6">六、锁定 agent 安全下线</a><br>
+<a href="#s7">七、还没完善的 8 点(逐条处置)</a><br>
+<a href="#s8">八、本体改动(actions / objects)</a><br>
+<a href="#s9">九、落地步骤 + 开放决策</a>
+</div>
+</div>
+
+<!-- ===================================================== -->
+<h2 id="s1">一、整体事件流(查重前移 · 锁定下线)</h2>
+<div class="card">
+<div class="flow">
+  <div class="node n-event">RESUME_DOWNLOADED</div>
+  <div class="arrow">↓ <small>resume-parser(单一原子 function,顺序 step)</small></div>
+  <div class="node n-agent"><b>S1 RoboHire 解析</b><small>→ 姓名/手机/邮箱/性别/学校/专业/学历/毕业时间</small></div>
+  <div class="arrow">↓</div>
+  <div class="node n-agent n-new"><b>S2 查重(9-15,前移到 save 之前)</b> <span class="tag new">新位置</span><small>rec + 对比池(≤25)→ applyIdentityRules → {samePerson, <b>matchedCandidateId</b>, needsHumanReview}</small></div>
+  <div class="arrow">↓ <small>same_as_candidate_id 驱动</small></div>
+  <div class="node n-store"><b>S3 落库 saveCandidate(同一人 → 复用老 candidate_id)</b><small>强命中 → UPDATE 老 Candidate,不建新;新人/弱信号 → 建新</small></div>
+  <div class="arrow">↓</div>
+  <div class="node n-store"><b>S4–S5 写 Neo4j</b><small>writeCandidateInstance(可能=老人)+ writeResumeInstance(resume_id=新, candidate_id=老人)→ <b>1:N 自动</b></small></div>
+  <div class="arrow">↓</div>
+  <div class="node n-off"><b>S6 rmhr-lock-check(锁定下线 · 惰性 no-op)</b><small>三 flag 默认关 → proceed('disabled'),不外呼、不落库、不拦截</small></div>
+  <div class="arrow">↓ <small>始终 emit(不再被 lockOnly 抑制)</small></div>
+  <div class="node n-event">RESUME_PROCESSED</div>
+  <div class="arrow">↓ <small>并联消费</small></div>
+  <div class="row">
+    <div>
+      <div class="node n-agent"><b>ruleCheckForMatchResume</b><small>岗位合规(已有)</small></div>
+      <div class="arrow">↓<small>MATCH_RULE_CHECK_PASSED</small></div>
+      <div class="node n-agent"><b>matchResume</b><small>RoboHire 评分(由 PASSED 触发,非直接接 RESUME_PROCESSED)</small></div>
+    </div>
+    <div>
+      <div class="node n-off">candidate-identity-agent<small>降级:事后核对/留痕(非判定源),或灭活(开放决策)</small></div>
+      <div class="node n-off" style="margin-top:8px">candidate-ownership-agent<small>(锁定下线 → no-context skip)</small></div>
+    </div>
+  </div>
+</div>
+</div>
+<div class="lead store"><b>本质变化:</b>查重从"并联只观察"变成"<b>入库主链路、在 save 之前驱动归属</b>"。同一人不再被弱去重误建新行,而是新简历挂到老 Candidate node 下(1:N)。锁定下线只是把 S6 置为惰性,主链路照常 emit。</div>
+
+<!-- ===================================================== -->
+<h2 id="s2">二、查重 ⊥ 存储 两层解耦</h2>
+<table>
+<tr><th></th><th>L1 确定性存储层(机械落库)</th><th>L2 查重判定层(硬编码引擎)</th></tr>
+<tr><td>职责</td><td>只按入参 INSERT/UPDATE,<b>不判断</b></td><td>三级规则 + fuzzy 字段 LLM → 算出 same_as_candidate_id</td></tr>
+<tr><td>输入</td><td><code>same_as_candidate_id</code>(本轮唯一新增字段)+ parsed</td><td>当前简历 rec + partner-pg 对比池</td></tr>
+<tr><td>禁止</td><td>调 LLM、判 samePerson、做三级比对</td><td>直接写库</td></tr>
+<tr><td>实现</td><td><code>saveCandidateToPartnerPg</code> + <code>writeResumeInstance</code></td><td><code>identity-engine.applyIdentityRules</code></td></tr>
+</table>
+<div class="lead off"><b>锁定层暂缺席:</b>上一版的"锁定三字段(is_locked/lock_start_time/locked_by)"<b>本轮不接</b> —— 锁定下线,存储层也没有这些列。本轮存储层<b>只多一个 <code>same_as_candidate_id</code></b>。未来锁定重启再补锁定字段(那是另一次改动)。</div>
+
+<!-- ===================================================== -->
+<h2 id="s3">三、查重 → 存储 连接方案</h2>
+<div class="lead fail"><b>⛔ P0 缺口(必须先补):</b> 查重引擎 <code>IdentityMatchResult</code>(identity-engine.ts:28-36)只返回 <code>{samePerson, matchedRule, needsHumanReview}</code>,<b>不含命中对象的 candidate_id</b>;agent 循环命中即 <code>break</code>(candidate-identity-agent.ts:82-90)把 <code>other.candidate_id</code> <b>丢了</b>。→ <code>same_as_candidate_id</code> 没有来源。<b>这是连接的第一块拼图,不补则后面全断。</b></div>
+
+<h3>3.1 连接三件套(缺一不可)</h3>
+<table>
+<tr><th>#</th><th>改动</th><th>细节</th></tr>
+<tr><td class="bad">1 <span class="tag p0">P0</span></td><td><b>引擎补命中 ID 出口</b></td><td>给 <code>IdentityMatchResult</code> 加 <code>matchedCandidateId?: string</code>;或在 agent 内联循环命中时显式记 <code>other.candidate_id</code>(更轻,不改引擎签名)。这是 <code>same_as_candidate_id</code> 的唯一来源</td></tr>
+<tr><td>2</td><td><b><code>SaveCandidateInput</code> 加字段</b></td><td>candidates.ts:32-62 新增 <code>same_as_candidate_id?: string | null</code>(<b>只此一个</b>,不加 lock 字段)</td></tr>
+<tr><td>3</td><td><b>dedup 档序插第②档</b></td><td>candidates.ts:246-281:<code>candidate_id = input.candidate_id ?? input.same_as_candidate_id ?? null</code>;手机号/邮箱档<b>降为 fallback</b>(查重未命中时才用)。命中 same_as → 走既有 UPDATE 分支(COALESCE 刷联系方式),<b>不 INSERT</b></td></tr>
+</table>
+
+<h3>3.2 Neo4j 一人多简历(已支持,零改 writer)<span class="tag keep">验证</span></h3>
+<p>同一人时 <code>saveResult.candidate_id = 老人 ID</code>,后面三点保证"新简历挂老 Candidate node":</p>
+<pre>  <span class="c">// 1) Resume 写入带老人 candidate_id(allmeta-writers/resume.ts:62)</span>
+  writeResumeInstance({ resume_id: <span class="s">新</span>, candidate_id: <span class="s">老人</span>, ... })
+  <span class="c">// 2) Resume 对象 FK:candidate_id → Candidate(objects_v0_1_015)→ "Resume 归属于 Candidate",天然 1:N</span>
+  <span class="c">// 3) Postgres Resume UPSERT key=(candidate_id, object_key)(candidates.ts:364)→ 同一人不同文件 = 多 Resume 行,Candidate 不重复建</span></pre>
+<div class="lead store"><b>结果:</b>同一人 → 复用老 <code>candidate_id</code>,<b>1 Candidate : N Resume</b>,Postgres 与 Neo4j 一致;新人 → 走第⑤档新建。<b>Candidate 绝不重复建。</b>writeCandidateInstance/writeResumeInstance <b>本身不用改</b> —— 只要传进去的 candidate_id 是老人 ID。</div>
+
+<!-- ===================================================== -->
+<h2 id="s4">四、查重 agent 完整流程(内联在 save 之前)</h2>
+<p>从"独立 agent 收 RESUME_PROCESSED 后跑"改为"<b>resume-parser 在 save-candidate 之前的内联 step <code>compute-candidate-identity</code></b>"。架构选择:<b>内联(否决独立 agent + 事件串)</b> —— 原子性(解析→查重→保存同一 function retry)、低延迟、避免 Inngest 事件膨胀。</p>
+<div class="card">
+<table>
+<tr><th>#</th><th>步骤</th><th>细节</th></tr>
+<tr><td>1</td><td>构建候选人记录</td><td><code>candidateFromResumeProcessed(parsed.data)</code> → rec{name, phone, email, gender, school, major, degree, graduationYear}</td></tr>
+<tr><td>2</td><td>取对比池</td><td><code>partnerPgCandidateRepo.findComparisonCandidates(rec)</code> 按 email/姓名/手机尾号<b>预筛 ≤25</b></td></tr>
+<tr><td>3</td><td>加载规则</td><td><code>loadCandidateMatchRules()</code> → IDENTITY-1/2/3(= 本体 9-15 的三级展开)</td></tr>
+<tr><td>4</td><td><b>逐池 × 逐级比对</b></td><td>对每个 <code>other</code> 跑 <code>applyIdentityRules(rec, other, rules, judge)</code>;<b>命中即停</b></td></tr>
+<tr><td>5</td><td>三级(按 priority)</td><td>① 手机号<code>[exact]</code> ② 姓名<code>[fuzzy]</code>+邮箱<code>[exact]</code> ③ 六字段<code>[4 fuzzy/2 exact]</code> <code>needsHumanReview=true</code></td></tr>
+<tr><td class="bad">6 <span class="tag p0">P0</span></td><td><b>记下命中对象 ID</b></td><td>命中时 <code>matchedCandidateId = other.candidate_id</code>(当前引擎丢了这个值,必补)</td></tr>
+<tr><td>7</td><td><b>驱动落库</b></td><td><code>same_as_candidate_id = (samePerson && !needsHumanReview) ? matchedCandidateId : null</code> → 传入 <code>saveCandidate</code></td></tr>
+</table>
+</div>
+<div class="lead"><b>字段等价(步5 内部):</b><code>fieldEquivalent</code> 先 exact-normalized;失败且该字段 fuzzy → LLM judge(<code>confidence≥0.8</code>);<b>缺字段 / AI 故障一律保守判不等价</b>。<b>soft-fail:查重异常只落审计,绝不 throw 进招聘管道。</b></div>
+
+<!-- ===================================================== -->
+<h2 id="s5">五、抓 9-15 判定 ≠ LLM 自由判(关键澄清)</h2>
+<div class="lead ok"><b>"通过抓 rule 判断是否同一人" = 抓到结构化三级规则后,用确定性引擎逐字段比对;<u>不是</u>把两份简历整体丢给大模型让它自由裁量。</b></div>
+<table>
+<tr><th>层</th><th>谁做</th><th>是不是 LLM</th></tr>
+<tr><td>规则结构(比哪些字段、优先级、客户 scope)</td><td>数据(rules.json / 本体 9-15)</td><td>否</td></tr>
+<tr><td>命中与否</td><td>引擎 <code>every(f => f.equivalent)</code>(identity-engine.ts:63)</td><td>否,布尔确定性</td></tr>
+<tr><td>单个 fuzzy 字段的语义等价</td><td>LLM judge(清华 vs 清华大学、本科 vs Bachelor)</td><td><b>是,但仅字段级、且 exact 失败才降级</b></td></tr>
+</table>
+<h3>5.1 抓 9-15 的两阶段(切数据源,不改逻辑)</h3>
+<ul>
+<li><b>阶段一(现在,推荐):</b> 引擎继续读 bundled <code>rules.json</code> 的 IDENTITY-1/2/3(<code>source='snapshot'</code>)。把 <b>9-15 在本体 <code>processResume</code> 里从"散文"提升为真 step</b>(<code>checkCandidateIdentity</code>,消孤儿、蓝图与代码一致)。这步是本体对齐,不阻塞落库。</li>
+<li><b>阶段二(未来,可选):</b> Neo4j 配齐 Rule 节点后,复用已实现的 <code>fetchRulesViaOntologyApi()</code> 加 <code>ruleType='identity'</code> 分支;切换只改 <code>rules.json metadata.source='ontology-api'</code>(<code>loadCandidateMatchRules</code> 已预留读 source)。</li>
+</ul>
+
+<!-- ===================================================== -->
+<h2 id="s6">六、锁定 agent 安全下线</h2>
+<div class="lead off"><b>现状已等价于下线(已核实):</b>内联 <code>rmhr-lock-check</code> step 受 <code>LOCK_CHECK_ENABLED / CANDIDATE_LOCK_PG_WRITE / LOCK_CHECK_ENFORCE</code> 三 flag 控,<code>.env.local</code> 未设 → 全关 → <code>runLockCheck</code> 直接 <code>proceed('disabled')</code>,不外呼 RMHR、不落库。存储层 INSERT/UPDATE <b>根本没有 is_locked/lock_start_time/locked_by 列</b> → 下线对落库零影响。</div>
+<table>
+<tr><th>下线动作(最小)</th><th>说明</th></tr>
+<tr><td>保持三 flag off</td><td>已是默认;<code>.env.example</code> 标注"锁定 2026-06 暂下线"</td></tr>
+<tr><td>解耦 lockOnly → emit 的 gating</td><td>resume-parser:455 的 <code>if(!lockOnly)</code> 下线期不应让锁定能抑制下游;<code>rmhr-lock-check</code> step 保留为惰性 no-op(零成本、可秒级重启)。<code>RESUME_LOCKED_CONFLICT</code> 分支随之 dark</td></tr>
+<tr><td>ownership agent</td><td>保留代码(no-context skip),便于未来重启;或从 functions.ts 摘下彻底静默(开放决策)</td></tr>
+</table>
+<div class="lead fail"><b>红线:下线锁定绝不能给 <code>saveCandidate</code> 新增 is_locked/lock_start_time 字段</b> —— 那是"接锁定进存储",与"下线锁定"矛盾。本轮存储层只接 <code>same_as_candidate_id</code>。</div>
+<p><b>未来重启:</b>仅改三 flag,查重/存储结构零改;<code>rmhr-lock-check</code> step 在位,flag on 即接回(若已解耦 emit gating,重启时重新接 <code>lockOnly → emit</code> 这一处 if)。</p>
+
+<!-- ===================================================== -->
+<h2 id="s7">七、还没完善的 8 点(逐条处置)</h2>
+<table>
+<tr><th>#</th><th>问题</th><th>处置(定论)</th></tr>
+<tr><td class="bad">1 <span class="tag p0">P0</span></td><td><b>引擎缺命中 candidate_id 出口</b></td><td>必做:agent 内联命中时记 <code>other.candidate_id</code>(或加 <code>matchedCandidateId</code>)。<code>same_as_candidate_id</code> 的唯一来源</td></tr>
+<tr><td>2</td><td><b>弱信号(IDENTITY-3 六字段)</b></td><td><b>保守不自动合并</b>:弱信号命中 → <code>same_as_candidate_id=null</code> 走正常 dedup/新建,审计记 <code>linkedCandidateId + dedupAction='pending-review'</code> 留运营复核。误合并代价 &gt; 漏合并</td></tr>
+<tr><td>3</td><td><b>对比池命中多个老人</b></td><td>取 priority 最小者驱动;命中数&gt;1 时审计 <code>conflictingMatches[]</code> 标"库内疑似重复,待人工合并"(库内合并 UI = 开放决策)</td></tr>
+<tr><td>4</td><td><b>缺手机号/邮箱字段退化</b></td><td><b>保守漏判优于误合并</b>:不自动放宽;仅因某字段缺失而未命中 → 审计记 <code>partial-miss</code> 供复核。默认不加 fallbackIfMissing</td></tr>
+<tr><td class="bad">5 <span class="tag p0">P0</span></td><td><b>phone-dedup vs 9-15 冲突</b></td><td><b>查重赢</b>:dedup 档序 <code>same_as_candidate_id &gt; 手机号 &gt; 邮箱+姓名</code>;手机号/邮箱仅 fallback。口径="查重前移后,查重是唯一权威归属源"</td></tr>
+<tr><td>6</td><td><b>一人多简历主字段(覆盖 vs 追加)</b></td><td>维持现行 <b>COALESCE(最近非空才覆盖)</b>,声明 <code>policy='most-recent-non-empty'</code>;Resume 行只追加。append-array / HAS_LATEST_RESUME = 开放决策</td></tr>
+<tr><td>7</td><td><b>审计可见性</b></td><td>扩 <code>selectionNote</code>:<code>linkedCandidateId / matchedCandidateName / dedupAction(auto-merged|pending-review|conflict)</code>;/rule-check 页新增"待复核"区 + 可跳转关联候选人</td></tr>
+<tr><td>8</td><td><b>幂等(同 upload 重放)</b></td><td>现状足够:Resume UPSERT 按 <code>(candidate_id, object_key)</code>,etag 为空时 resume-parser 自算 MD5。可选加 <code>UNIQUE(candidate_id,etag)</code></td></tr>
+</table>
+
+<!-- ===================================================== -->
+<h2 id="s8">八、本轮 schema 改动一览(我实际改了什么)</h2>
+<p>本轮产出已落盘到 <code>neo4j_data/招聘- v1/candidate-identity/</code>(三个<b>增量</b>文件 + README),供你下载 → 手动上传 Neo4j → 生成 links。</p>
+
+<h3>8.1 本体 schema(Neo4j) — 新增 <span class="tag new">3 个增量文件</span></h3>
+<table>
+<tr><th>文件</th><th>新增项</th><th>内容</th></tr>
+<tr><td><code>objects_v0_1_016.json</code> <span class="tag new">objects</span></td><td><b>Candidate_Identity_Result</b>(新对象)</td><td>pk <code>candidate_identity_result_id</code>;字段 <code>candidate_id</code>(FK→Candidate)/ <code>resume_id</code>(FK→Resume)/ <code>same_person</code> / <code>same_as_candidate_id</code>(FK→Candidate,自引用)/ <code>matched_rule_id</code> / <code>dedup_action</code> / <code>needs_review</code> / <code>decision_reason</code> / <code>checked_at</code></td></tr>
+<tr><td><code>actions_v0_1_004.json</code> <span class="tag new">actions</span></td><td><b>ruleCheckForCandidateIdentity (10-3)</b>(新 action)</td><td>actor=Agent;trigger=<code>RESUME_PROCESSED</code>;step <code>checkCandidateIdentity</code> 的 <code>rules:[{id:"9-15"}]</code>;target_objects=Candidate/Resume/Candidate_Identity_Result;triggered_event=<code>CANDIDATE_IDENTITY_CHECKED</code></td></tr>
+<tr><td><code>events_v0_1_004.json</code> <span class="tag new">events</span></td><td><b>CANDIDATE_IDENTITY_CHECKED</b>(新事件)</td><td>source_action=ruleCheckForCandidateIdentity;event_data 带 same_person/same_as_candidate_id/matched_rule_id/dedup_action/needs_review;state_mutations 写 Candidate_Identity_Result(CREATE)</td></tr>
+</table>
+
+<h3>8.2 要手动生成的 links(关系边)</h3>
+<table>
+<tr><th>关系</th><th>起点 → 终点</th></tr>
+<tr><td class="bad">⭐ action_step 检查规则(最关键)</td><td><code>(Action 10-3).checkCandidateIdentity</code> → <code>(:Rule {id:"9-15"})</code> —— 建这条边 9-15 才不再是孤儿、才能被「action→step→rule」抓取</td></tr>
+<tr><td>action 触发于事件</td><td><code>RESUME_PROCESSED</code> → <code>(Action 10-3)</code></td></tr>
+<tr><td>action 产出事件</td><td><code>(Action 10-3)</code> → <code>CANDIDATE_IDENTITY_CHECKED</code></td></tr>
+<tr><td>action 作用对象</td><td><code>(Action 10-3)</code> → Candidate / Resume / Candidate_Identity_Result</td></tr>
+<tr><td>事件改变对象</td><td><code>CANDIDATE_IDENTITY_CHECKED</code> → Candidate_Identity_Result(CREATE)</td></tr>
+<tr><td>结果对象外键</td><td><code>Candidate_Identity_Result.{candidate_id, same_as_candidate_id}</code> → Candidate;<code>.resume_id</code> → Resume</td></tr>
+</table>
+
+<h3>8.3 代码侧 schema(Postgres / 审计) — <span class="tag mod">改了审计内容,未改表结构</span></h3>
+<table>
+<tr><th>位置</th><th>改动</th></tr>
+<tr><td><code>OntologyRuleCheck.selectionNote</code></td><td><b>无表结构改动</b>(本就是 <code>String?</code> 存 JSON)。本轮往里多写了 <code>matchedCandidateId / matchedCandidateName / dedupAction / sameAsCandidateId</code> —— 即"关联到哪个老候选人 + 去重动作"</td></tr>
+<tr><td><code>candidate-identity-agent.ts</code> 返回值</td><td>新增 <code>matchedCandidateId / sameAsCandidateId / dedupAction</code>(P0:引擎原本丢掉的命中 candidate_id 现已捕获)</td></tr>
+</table>
+
+<h3>8.4 没动的 schema <span class="tag keep">确认零改</span></h3>
+<ul>
+<li><b>Prisma 表结构</b>:零改(Candidate / Resume / OntologyRuleCheck 表均不动;Resume 1:N 靠既有 <code>resume.candidate_id</code>)。</li>
+<li><b>Resume.candidate_id → Candidate(1:N)</b>:本体里已存在,无需改 objects(只靠传老 candidate_id 即可挂多简历)。</li>
+<li><b>rules</b>:9-15 字段零改,只靠 §8.2 的 link 挂载。</li>
+<li><b>锁定相关</b>:锁定 agent 下线,本轮不动任何锁定 action/object/event。</li>
+</ul>
+
+<!-- ===================================================== -->
+<h2 id="s9">九、落地步骤 + 开放决策</h2>
+<h3>9.1 落地步骤(按依赖)</h3>
+<table>
+<tr><td>1 <span class="tag p0">P0</span></td><td>引擎/agent 补 <code>matchedCandidateId</code> 出口(命中时记 other.candidate_id)</td></tr>
+<tr><td>2</td><td><code>SaveCandidateInput</code> 加 <code>same_as_candidate_id</code> + dedup 档序插第②档(查重 &gt; 手机 &gt; 邮箱)</td></tr>
+<tr><td>3</td><td>resume-parser 调用链重组:<b>parse → 查重(内联 step)→ save</b>;same_as_candidate_id 驱动</td></tr>
+<tr><td>4</td><td>验证 Neo4j 1:N:同一人新简历 → writeResumeInstance(老 candidate_id) → 老 Candidate node 下多 Resume</td></tr>
+<tr><td>5</td><td>锁定下线:保持 flag off + 解耦 lockOnly→emit;ownership agent 留惰性</td></tr>
+<tr><td>6</td><td>审计扩 <code>selectionNote</code>(linkedCandidateId/dedupAction)+ /rule-check 待复核区</td></tr>
+<tr><td>7</td><td>本体:9-15 提升为 processResume 真 step(消孤儿)</td></tr>
+</table>
+<h3>9.2 需用户拍板的开放决策</h3>
+<ul>
+<li><b>candidate-identity-agent 去留</b>:查重前移后,旧独立 agent 是"事后核对留痕"还是 <code>CANDIDATE_IDENTITY_ENABLED=0</code> 灭活?</li>
+<li><b>弱信号(IDENTITY-3)运营确认合并</b>的 write-back action(/rule-check 点"确认合并"→ 把 resume 迁到老 Candidate)要不要这一版做?</li>
+<li><b>库内多重复</b>(池里命中多个老人)的合并 UI / 事务。</li>
+<li><b>主/附简历语义</b>:挂老 Candidate 的新 resume 是否覆盖老的 current_title/skills(现 COALESCE),要不要 HAS_LATEST_RESUME 指针。</li>
+<li><b>缺字段 fallback</b>:要不要 rules.json 加"缺字段放宽"档(默认不加,防误合并)。</li>
+</ul>
+
+<div class="foot">
+设计书(查重为主 · 锁定下线)· 数据源逐条核实(identity-engine.ts / candidate-identity-agent.ts / candidates.ts / resume.ts / rules-data.ts / run-lock-check.ts / objects_v0_1_015 / actions_v0_1_002)<br>
+本文件为<b>设计/分析文档</b>,未改动任何代码或本体快照。P0 项(引擎补 matchedCandidateId 出口)是连接查重→存储的第一块拼图。
+</div>
+
+</div>
+</body>
+</html>
