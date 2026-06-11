@@ -92,11 +92,14 @@ export async function recordNotification(
         update: {
           count: { increment: 1 },
           lastSeenAt: new Date(),
-          // refresh the latest framing + (possibly re-escalated) severity/notify
+          // refresh the latest framing + (possibly re-escalated) severity/notify.
+          // disposition 也要跟着升级 — warn→critical 升级如果不刷它,告警永远
+          // 进不了 needs_human 待办(2026-06-11 审计:dep 监视器的说不准升级)。
           title: draft.title,
           body: draft.body,
           severity: draft.severity,
           shouldNotify: draft.shouldNotify,
+          disposition: draft.disposition,
         },
       });
       // Eager-on-critical: the FIRST occurrence of a critical alert (count===1)
@@ -105,6 +108,16 @@ export async function recordNotification(
       // deterministic fallback when the gateway is down (summarizeAlert handles it).
       if (draft.severity === 'critical' && row.count === 1) {
         void summarizeAlert(row.id).catch(() => {});
+      }
+      // 长 firing 告警的 AI 摘要超龄重开:缓存的 aiSummary 会一直顶替 body 展示
+      // ("停滞超过67小时"挂 8 天不变,2026-06-11 审计)。re-fire 且摘要超过
+      // 1 小时 → 置 aiGeneratedAt=null,lazy 富化(summarizePendingAlerts)下次
+      // 自然重写,≈每告警每小时至多 1 次 LLM。
+      const STALE_MS = 60 * 60_000;
+      if (row.count > 1 && row.aiGeneratedAt && Date.now() - row.aiGeneratedAt.getTime() > STALE_MS) {
+        await prisma.notification
+          .update({ where: { id: row.id }, data: { aiGeneratedAt: null } })
+          .catch(() => {});
       }
       dispatchToExternal(draft, row);
       return { id: row.id };

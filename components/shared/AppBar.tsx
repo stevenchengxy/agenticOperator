@@ -126,7 +126,9 @@ function Sep() {
   return <div className="w-px h-5 bg-line" aria-hidden />;
 }
 
-// 铃铛 → 消息通知中心入口 + 域内未读红点(与通知页/LeftNav 同口径,10s 轮询)。
+// 铃铛 → 消息通知中心入口 + 域内红点(10s 轮询)。红点口径 = unreadNotify
+// (shouldNotify=true 的未读):普通业务消息(shouldNotify=false)不点亮,
+// 否则红点常亮失去信号价值(2026-06-11 审计)。
 function BellLink() {
   const { t } = useApp();
   const { domain } = useDomain();
@@ -135,8 +137,8 @@ function BellLink() {
   React.useEffect(() => {
     const qs = domain ? `&domain=${encodeURIComponent(domain)}` : "";
     const tick = () => {
-      fetchJson<{ counts: { unread: number } | null }>(`/api/notifications?countsOnly=1${qs}`, { cache: "no-store" })
-        .then((j) => setUnread(j.counts?.unread ?? 0))
+      fetchJson<{ counts: { unreadNotify?: number } | null }>(`/api/notifications?countsOnly=1${qs}`, { cache: "no-store" })
+        .then((j) => setUnread(j.counts?.unreadNotify ?? 0))
         .catch(() => {/* keep last value */});
     };
     tick();

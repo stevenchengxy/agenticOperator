@@ -57,6 +57,15 @@ export interface MonitorReadPort {
   errorWindow(windowMs: number): Promise<ErrorWindow>;
   /** Degraded external-dependency signals (LogEvent category 'dependency') in the window. */
   dependencyFailures(windowMs: number): Promise<DepFailure[]>;
+  /** 超龄人工待办:firing 且 needs_human、首次出现早于 cutoff 的告警(催办用)。 */
+  staleNeedsHuman(olderThanMs: number): Promise<StaleHumanItem[]>;
+}
+
+/** 一条超龄人工待办(hitl 催办监视器的输入)。 */
+export interface StaleHumanItem {
+  dedupeKey: string | null;
+  title: string;
+  ageMs: number;
 }
 
 /**
@@ -82,6 +91,7 @@ export interface MonitorThresholds {
   depFailWindowMs: number; // dependency: lookback window for degraded-call signals
   depFailMinCount: number; // dependency: min failures before a fault/unknown fires (quota fires at 1)
   depUnknownEscalateCount: number; // dependency: 'unknown' warn → critical at/above this count
+  hitlStaleMs: number; // hitl: a needs_human alert older than this triggers the 催办 digest
 }
 
 export const DEFAULT_THRESHOLDS: MonitorThresholds = {
@@ -94,6 +104,7 @@ export const DEFAULT_THRESHOLDS: MonitorThresholds = {
   depFailWindowMs: 15 * 60_000,
   depFailMinCount: 2,
   depUnknownEscalateCount: 6,
+  hitlStaleMs: 48 * 3600_000,
 };
 
 /**

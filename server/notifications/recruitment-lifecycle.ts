@@ -44,6 +44,24 @@ interface Ctx {
 
 type StepRun = { run: (id: string, fn: () => Promise<unknown>) => Promise<unknown> };
 
+// 长 id 截短展示(候选人/岗位 id 是数据值,允许出现在 UI;>16 字符截 8 位)。
+function shortId(v: string): string {
+  return v.length > 16 ? `${v.slice(0, 8)}…` : v;
+}
+
+// 把主体(谁的简历/哪个岗位)拼进标题 — 不然 N 条"面试邀约已发送"在列表里
+// 一模一样,无法区分(2026-06-11 审计)。优先人名,缺省回落 id。
+export function subjectSuffix(anchors: Record<string, string | null | undefined>): string {
+  const parts: string[] = [];
+  const name = anchors.candidate_name;
+  const cid = anchors.candidate_id;
+  if (typeof name === 'string' && name.trim()) parts.push(name.trim());
+  else if (typeof cid === 'string' && cid.trim()) parts.push(`候选人 ${shortId(cid)}`);
+  const jr = anchors.job_requisition_id;
+  if (typeof jr === 'string' && jr.trim()) parts.push(`岗位 ${shortId(jr)}`);
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
+}
+
 export async function notifyRecruitmentLifecycle(
   step: StepRun,
   signal: RecruitmentSignal,
@@ -57,7 +75,7 @@ export async function notifyRecruitmentLifecycle(
         category: 'agent_lifecycle',
         source: displayNameFor(short, 'zh'),
         agent: short,
-        message: COPY[signal],
+        message: `${COPY[signal]}${subjectSuffix(ctx.anchors)}`,
         runId: ctx.runId ?? null,
         traceId: ctx.traceId ?? null,
         anchors: ctx.anchors,

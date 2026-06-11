@@ -23,6 +23,7 @@ import { slaMonitor } from "../lib/monitor/sla";
 import { costMonitor } from "../lib/monitor/cost";
 import { errorRateMonitor } from "../lib/monitor/error-rate";
 import { dependencyMonitor } from "../lib/monitor/dependency";
+import { hitlStaleMonitor } from "../lib/monitor/hitl";
 import { runEvalSample } from "../lib/monitor/run-eval";
 import { resolveMonitorConfig } from "../lib/monitor/monitor-config";
 import { makeLlmJudge, makeJury } from "../lib/monitor/llm-judge";
@@ -35,7 +36,59 @@ const INTERVAL_MS = Number(process.env.MONITOR_SWEEP_INTERVAL_MS) || 60_000;
 const EVAL_WINDOW_MS = 60 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor, dependencyMonitor];
+// ── 保留策略(每小时跑一次,挂在 sweep tick 上)──────────────────────────
+// notification:已读消息 + 已解除/已确认告警过期清理(未读/firing 永不清);
+// monitor_eval:90d(2026-06-04 spec §9.2 承诺,一直没实现);
+// log_event:默认不清(审计全量保留是显式需求),要清设 LOG_EVENT_RETENTION_DAYS。
+const NOTIFICATION_RETENTION_DAYS = Number(process.env.NOTIFICATION_RETENTION_DAYS) || 30;
+const MONITOR_EVAL_RETENTION_DAYS = Number(process.env.MONITOR_EVAL_RETENTION_DAYS) || 90;
+const LOG_EVENT_RETENTION_DAYS = Number(process.env.LOG_EVENT_RETENTION_DAYS) || 0; // 0 = 永久保留
+const PRUNE_EVERY_MS = 60 * 60_000;
+let lastPruneAt = 0;
+
+async function pruneTick(now = Date.now()): Promise<void> {
+  if (now - lastPruneAt < PRUNE_EVERY_MS) return;
+  lastPruneAt = now;
+  const cut = (days: number) => new Date(now - days * 86_400_000);
+  try {
+    const ntf = cut(NOTIFICATION_RETENTION_DAYS);
+    const msgs = await prisma.notification.deleteMany({
+      where: { kind: "message", readAt: { not: null }, ts: { lt: ntf } },
+    });
+    const alerts = await prisma.notification.deleteMany({
+      where: { kind: "alert", status: { in: ["resolved", "ack"] }, lastSeenAt: { lt: ntf } },
+    });
+    const evals = await prisma.monitorEval.deleteMany({
+      where: { ts: { lt: cut(MONITOR_EVAL_RETENTION_DAYS) } },
+    });
+    let logs = 0;
+    if (LOG_EVENT_RETENTION_DAYS > 0) {
+      logs = (await prisma.logEvent.deleteMany({ where: { ts: { lt: cut(LOG_EVENT_RETENTION_DAYS) } } })).count;
+    }
+    if (msgs.count + alerts.count + evals.count + logs > 0) {
+      console.log(
+        `[monitor] prune — messages-${msgs.count} alerts-${alerts.count} evals-${evals.count} logs-${logs}`,
+      );
+    }
+  } catch (e) {
+    console.warn(`[monitor] prune failed: ${(e as Error).message}`);
+  }
+}
+
+// ── 自身心跳 — watchdog 据此判定 sweeper 死活(监控骨干自身无人监控,
+//    2026-06-11 审计)。复用 ServiceHeartbeat 表,行 id='monitor-sweeper'。
+async function beatHeartbeat(): Promise<void> {
+  const now = new Date();
+  await prisma.serviceHeartbeat
+    .upsert({
+      where: { id: "monitor-sweeper" },
+      create: { id: "monitor-sweeper", lastBootAt: now, lastHeartbeatAt: now, pid: process.pid },
+      update: { lastHeartbeatAt: now, pid: process.pid },
+    })
+    .catch(() => {});
+}
+
+const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor, dependencyMonitor, hitlStaleMonitor];
 
 // AI fact-monitor — sampled groundedness eval over recent rule-check audits.
 // Fire-and-forget so it NEVER blocks or breaks the deterministic sweep; judges
@@ -86,6 +139,8 @@ async function loop(): Promise<void> {
     } catch (e) {
       console.error(`[monitor] tick FAILED: ${(e as Error).message}`);
     }
+    await beatHeartbeat();
+    await pruneTick();
     // fire-and-forget AI eval — must not block or break the deterministic sweep
     if (EVAL_ENABLED) {
       void runEvalTick().catch((e) =>

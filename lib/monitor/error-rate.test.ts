@@ -11,6 +11,7 @@ function fakePort(win: ErrorWindow): MonitorReadPort {
     toolStepCounts: async () => ({}),
     errorWindow: async () => win,
     dependencyFailures: async () => [],
+    staleNeedsHuman: async () => [],
   };
 }
 

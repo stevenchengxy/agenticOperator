@@ -58,6 +58,27 @@ vi.mock('@/lib/agent-logger', () => ({
   })),
 }));
 
+// 6) 业务里程碑通知 — 不 mock 会把"面试邀约已发送"写进真 Postgres
+//    (2026-06-11 审计:413 条 r1 测试残留的成因)。Pattern 同 rule-check-agent.test.ts。
+const notifyRecruitmentLifecycle = vi.fn(async () => {});
+vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
+  notifyRecruitmentLifecycle: (...a: unknown[]) => notifyRecruitmentLifecycle(...a),
+}));
+
+// 7) dependency-health — recordDependencySignal 直写真 LogEvent,测试跑出的
+//    "降级"信号会被 live sweeper 判成真告警(2026-06-11 审计:'RoboHire 额度
+//    不足' r1 残留的成因)。用模块自带的 DI 注 noop recordLogEvent,throw/park
+//    语义原样保留。
+vi.mock('@/lib/dependency-health/report', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/dependency-health/report')>();
+  const noopLog = { recordLogEvent: async () => {} };
+  return {
+    ...actual,
+    recordDependencySignal: (o: never, ctx: never) => actual.recordDependencySignal(o, ctx, noopLog),
+    reportDependencyDegraded: (o: never, ctx: never) => actual.reportDependencyDegraded(o, ctx, noopLog),
+  };
+});
+
 import { interviewInviterAgentHandler } from './interview-inviter-agent';
 import { inviteCandidateDirect, RobohireApiError } from '@/lib/robohire-client';
 import {

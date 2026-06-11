@@ -11,6 +11,10 @@
 // deterministic, no LLM in the path (same load-bearing rule as derive.ts).
 
 import { execFile } from 'node:child_process';
+import { recordLogEvent } from '@/server/log/log-event';
+
+/** 告警解除的外推信号(server/notifications/resolve.ts 构造)— 报警也报平安。 */
+export const RECOVERY_SIGNAL = '__ALERT_RESOLVED';
 
 export interface NotifyTarget {
   id: string;
@@ -58,6 +62,12 @@ interface WecomCfg {
   account: string;
   baseUrl: string;
   suppressMs: number;
+  /** 同一告警行在窗口抑制之外最多补发几次(首发不计)— 永不解除的告警不能无限轰炸。 */
+  maxResends: number;
+  /** 解除推送(报平安)开关,默认开。 */
+  sendRecovery: boolean;
+  /** message 类全局限流(条/分钟)— 白名单业务事件突发时不打爆网关。 */
+  msgRatePerMin: number;
 }
 
 type EnvLike = Record<string, string | undefined>;
@@ -82,8 +92,17 @@ function readWecomCfg(env: EnvLike): WecomCfg | null {
     // AO 告警固定走 AICOE(default)机器人,不与会议总结(meeting)混账号。
     account: env.OPENCLAW_WECOM_ACCOUNT?.trim() || 'default',
     baseUrl: env.AO_BASE_URL?.trim() || 'http://localhost:3002',
-    suppressMs: Math.max(0, Number(env.WECOM_REPEAT_SUPPRESS_MIN ?? '15')) * 60_000,
+    suppressMs: numEnv(env.WECOM_REPEAT_SUPPRESS_MIN, 15) * 60_000,
+    maxResends: numEnv(env.WECOM_MAX_RESENDS, 3),
+    sendRecovery: env.WECOM_SEND_RECOVERY !== '0',
+    msgRatePerMin: numEnv(env.WECOM_MSG_RATE_PER_MIN, 10),
   };
+}
+
+/** 数字 env 解析 — 非法值回落默认,不会 NaN 把策略静默打穿。 */
+function numEnv(raw: string | undefined, fallback: number): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 0 ? v : fallback;
 }
 
 function formatWecomText(n: NotifyTarget, baseUrl: string): string {
@@ -109,8 +128,11 @@ function execDockerSend(cmd: string, args: string[]): Promise<void> {
 
 export class OpenClawWecomChannel implements NotifyChannel {
   readonly id = 'openclaw-wecom';
-  /** firing 告警 upsert 复用同一行 id → 以行 id 做窗口抑制,重复发生不刷屏。 */
-  private lastSentAt = new Map<string, number>();
+  /** firing 告警 upsert 复用同一行 id → 以行 id 做窗口抑制 + 补发限次。
+   *  sends 达到上限的条目不被清理(永不解除的告警必须记住"已发够了")。 */
+  private sent = new Map<string, { lastSentAt: number; sends: number }>();
+  /** message 类限流窗口(最近 1 分钟的发送时间戳)。 */
+  private msgWindow: number[] = [];
 
   constructor(
     private readonly deps: {
@@ -120,40 +142,76 @@ export class OpenClawWecomChannel implements NotifyChannel {
     } = {},
   ) {}
 
-  /** 纯策略判断,可单测:alert 按严重级门槛,message 按信号白名单。 */
-  shouldSend(n: NotifyTarget, cfg: Pick<WecomCfg, 'minSeverity' | 'eventWhitelist'>): boolean {
+  /** 纯策略判断,可单测:alert 按严重级门槛,message 按信号白名单(+解除推送)。 */
+  shouldSend(
+    n: NotifyTarget,
+    cfg: Pick<WecomCfg, 'minSeverity' | 'eventWhitelist' | 'sendRecovery'>,
+  ): boolean {
     if (n.kind === 'alert') {
       return (SEV_RANK[n.severity] ?? 0) >= (SEV_RANK[cfg.minSeverity] ?? 1);
     }
+    if (n.signal === RECOVERY_SIGNAL) return cfg.sendRecovery;
     return Boolean(n.signal && cfg.eventWhitelist.has(n.signal));
   }
 
   async send(n: NotifyTarget): Promise<void> {
     const cfg = readWecomCfg(this.deps.env ?? process.env);
     if (!cfg || !this.shouldSend(n, cfg)) return;
+    const now = (this.deps.now ?? Date.now)();
 
     if (n.kind === 'alert' && cfg.suppressMs > 0) {
-      const now = (this.deps.now ?? Date.now)();
-      const last = this.lastSentAt.get(n.id);
-      if (last != null && now - last < cfg.suppressMs) return;
-      this.lastSentAt.set(n.id, now);
-      if (this.lastSentAt.size > 500) {
-        // 粗粒度清理,防长期运行泄漏;窗口外的记录已无抑制价值。
-        const cutoff = now - cfg.suppressMs;
-        for (const [k, v] of this.lastSentAt) if (v < cutoff) this.lastSentAt.delete(k);
+      const prev = this.sent.get(n.id);
+      if (prev) {
+        // 永不解除的告警 × 固定窗口 = 无限轰炸(2026-06-11 审计:~480 条/天)。
+        // 首发后最多补发 maxResends 次,之后静默直到解除(解除走 RECOVERY_SIGNAL)。
+        if (prev.sends > cfg.maxResends) return;
+        if (now - prev.lastSentAt < cfg.suppressMs) return;
       }
+      if (this.sent.size > 500) {
+        // 粗粒度清理,防长期运行泄漏;窗口外且未达上限的记录已无抑制价值。
+        const cutoff = now - cfg.suppressMs;
+        for (const [k, v] of this.sent) {
+          if (v.lastSentAt < cutoff && v.sends <= cfg.maxResends) this.sent.delete(k);
+        }
+      }
+    }
+
+    if (n.kind === 'message') {
+      // 全局限流:白名单业务事件批量突发(如批量邀约)时丢弃超额,不打爆网关
+      // (每次 docker exec ~2.6s)。丢弃只影响外推,站内行不受影响。
+      this.msgWindow = this.msgWindow.filter((t) => now - t < 60_000);
+      if (this.msgWindow.length >= cfg.msgRatePerMin) {
+        // eslint-disable-next-line no-console
+        console.warn(`[notify:${this.id}] message rate limit (${cfg.msgRatePerMin}/min) — dropped: ${n.title}`);
+        return;
+      }
+      this.msgWindow.push(now);
     }
 
     const text = formatWecomText(n, cfg.baseUrl);
     const exec = this.deps.exec ?? execDockerSend;
+    let okCount = 0;
+    let lastErr: Error | null = null;
     for (const target of cfg.targets) {
       // 企微规则:target 必须是「给机器人发过消息」的原始大小写 userId/groupId。
-      await exec('docker', [
-        'exec', '-i', cfg.container,
-        'node', 'dist/index.js', 'message', 'send',
-        '--channel', 'wecom', '--account', cfg.account, '--target', target, '-m', text,
-      ]);
+      try {
+        await exec('docker', [
+          'exec', '-i', cfg.container,
+          'node', 'dist/index.js', 'message', 'send',
+          '--channel', 'wecom', '--account', cfg.account, '--target', target, '-m', text,
+        ]);
+        okCount++;
+      } catch (e) {
+        lastErr = e as Error; // 单 target 失败不中断其余 target
+      }
     }
+    // 邮戳后移:至少一个 target 真发出去才记账 — 发送失败不该把这条告警
+    // 静音一整个抑制窗口(2026-06-11 审计)。
+    if (n.kind === 'alert' && okCount > 0) {
+      const prev = this.sent.get(n.id);
+      this.sent.set(n.id, { lastSentAt: now, sends: (prev?.sends ?? 0) + 1 });
+    }
+    if (lastErr) throw lastErr; // 交给 dispatchExternal 统一落审计
   }
 }
 
@@ -184,6 +242,13 @@ export async function dispatchExternal(n: NotifyTarget): Promise<void> {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn(`[notify:${ch.id}] send failed: ${(e as Error).message}`);
+      // 落审计日志 — 只有 console 的话运维永远不知道外推通道死了
+      // (2026-06-11 审计)。fire-and-forget,自身失败也吞。
+      void recordLogEvent({
+        type: 'anomaly',
+        source: 'system',
+        message: `外部通知推送失败(${ch.id}):${(e as Error).message?.slice(0, 200)} · ${n.title.slice(0, 80)}`,
+      }).catch(() => {});
     }
   }
 }

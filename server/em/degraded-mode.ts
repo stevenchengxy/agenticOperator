@@ -12,6 +12,8 @@
 // `recoverIfPossible()` which probes dependencies and clears the flag.
 
 import { prisma } from "../db";
+import { recordNotification } from "../notifications/ingest";
+import { resolveAlerts } from "../notifications/resolve";
 
 let _state: "healthy" | "degraded" | "down" = "healthy";
 let _lastError: { message: string; at: Date } | null = null;
@@ -75,6 +77,19 @@ export function activate(err: Error | string): void {
   if (_state === "healthy") {
     _state = "degraded";
     _degradedSince = new Date();
+    // 进入降级 → 消息通知中心(critical:dedupeHint 'em_degraded' 在 derive 的
+    // broad-impact 名单里)。之前 derive 专门写了这条升级逻辑却零生产者
+    // (2026-06-11 审计)。best-effort:若 DB 本身就是故障源,写失败被吞,
+    // AppBar 的 EM 状态丸仍兜底可见。
+    if (!process.env.VITEST) {
+      void recordNotification({
+        level: "error",
+        category: "system",
+        source: "EM",
+        message: `事件管理进入降级模式:${msg.slice(0, 200)} — 业务事件改走直通兜底,审计/生命周期记录可能缺失`,
+        dedupeHint: "em_degraded",
+      }).catch(() => {});
+    }
   }
   void persist();
 }
@@ -88,6 +103,17 @@ export async function recoverIfPossible(): Promise<boolean> {
     _state = "healthy";
     _degradedSince = null;
     void persist();
+    // 退出降级 → 解除告警 + 落一条恢复消息(进入有声、退出也要有声;
+    // 之前 recoverIfPossible 静默清状态,2026-06-11 审计)。
+    if (!process.env.VITEST) {
+      void resolveAlerts(["em_degraded"]).catch(() => {});
+      void recordNotification({
+        level: "info",
+        category: "system_lifecycle",
+        source: "EM",
+        message: "事件管理已从降级模式恢复",
+      }).catch(() => {});
+    }
     return true;
   } catch {
     return false;

@@ -11,6 +11,7 @@ const port: MonitorReadPort = {
   toolStepCounts: async () => ({}),
   errorWindow: async () => ({ total: 0, byAgent: {} }),
   dependencyFailures: async () => [],
+    staleNeedsHuman: async () => [],
 };
 
 describe('runSweep', () => {

@@ -22,6 +22,7 @@ import { inngest } from "@/server/inngest/client";
 import { prisma } from "@/server/db";
 import { chatComplete } from "@/server/llm/gateway";
 import { recordNotification } from "@/server/notifications/ingest";
+import { resolveAlerts } from "@/server/notifications/resolve";
 import { createAgentLogger, runWithLogger } from "@/lib/agent-logger";
 import type { DerivedAgent } from "@/lib/ontology-generator/analyze";
 import { isAgentActive } from "./is-active";
@@ -63,7 +64,7 @@ async function safeLlm(system: string, user: string): Promise<string> {
 // thing is wrapped soft-fail so it can never block the agent chain.
 async function setRunStatus(
   caseId: string,
-  status: "running" | "suspended" | "completed",
+  status: "running" | "suspended" | "completed" | "failed",
   opts?: { suspendedReason?: string | null; completed?: boolean },
 ): Promise<{ status: string }> {
   try {
@@ -189,6 +190,27 @@ export function makeOntologyAgent<TData = unknown>(
               if: `async.data.caseId == "${caseId}" && async.data.gate == "${g.gateKey}"`,
             });
             if (!decisionEvt) {
+              // 30 天没人决策:不能只写一行日志就吞掉 run(2026-06-11 审计:
+              // run 永久 suspended、原 firing 告警永挂、零通知)。超时 =
+              // (1) 解除原闸口告警,(2) 发超时 critical,(3) run 标失败终态。
+              await step.run("gate-timeout-cleanup", async () => {
+                await resolveAlerts([`${dedupePrefix}.${g.gateKey}.${caseId}`], {
+                  managerAction: "超时未决策 · 系统",
+                });
+                await recordNotification({
+                  level: "critical",
+                  category: "agent_lifecycle",
+                  source: g.source,
+                  agent: spec.short,
+                  domain: domainId,
+                  message: `人工闸口超时:「${g.title}」等待 30 天无人决策,流程已终止 — 如仍需处理请重新触发`,
+                  runId: caseId,
+                  anchors: g.anchors,
+                  dedupeHint: `${dedupePrefix}.timeout.${g.gateKey}.${caseId}`,
+                }).catch(() => {});
+                await setRunStatus(caseId, "failed", { suspendedReason: `gate_timeout:${g.gateKey}` });
+                return null;
+              });
               logger.event("gate_timeout", { gate: g.gateKey });
               return { skipped: "gate-timeout" };
             }

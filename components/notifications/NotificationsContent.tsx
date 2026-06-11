@@ -111,6 +111,41 @@ export function NotificationsContent() {
       .catch(() => {});
   };
 
+  // 确认处理(ack):needs_human 的 firing 告警离开待办的人工出口 — 之前 API
+  // 有 ack 动作但没有任何 UI 调用方(2026-06-11 审计)。
+  const ack = (id: string) => {
+    void fetchJson(`/api/notifications`, { method: "POST", body: JSON.stringify({ action: "ack", id }) })
+      .then(() => load())
+      .catch(() => {});
+  };
+
+  // 加载更多:之前 nextCursor 从未被消费,60 条之外不可达(2026-06-11 审计)。
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const loadMore = async () => {
+    const cursor = data?.nextCursor;
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const qs = new URLSearchParams();
+      if (kind !== "all") qs.set("kind", kind);
+      if (category !== "all") qs.set("category", category);
+      if (needsHumanFilter) qs.set("needsHuman", "1");
+      if (domain) qs.set("domain", domain);
+      qs.set("limit", "60");
+      qs.set("cursor", cursor);
+      const res = await fetchJson<NotificationsResponse>(`/api/notifications?${qs.toString()}`);
+      setData((prev) =>
+        prev
+          ? { ...res, notifications: [...prev.notifications, ...res.notifications] }
+          : res,
+      );
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   const counts = data?.counts;
   const rows = data?.notifications ?? [];
   const autoHandled = rows.filter((r) => r.disposition === "auto_handled").length;
@@ -134,7 +169,13 @@ export function NotificationsContent() {
             <Ic.check />
             {t("ntf_mark_all_read")}
           </button>
-          <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-line text-ink-2 hover:bg-raised">
+          {/* 通知偏好设置尚未实现 — visible-but-disabled(同 Fleet 占位惯例),
+              别让它看起来像能点(2026-06-11 审计:死按钮)。 */}
+          <button
+            disabled
+            title={t("ntf_settings_todo")}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-line text-ink-4 opacity-50 cursor-not-allowed"
+          >
             <Ic.bell />
             {t("ntf_settings")}
           </button>
@@ -237,8 +278,17 @@ export function NotificationsContent() {
           ) : (
             <div className="flex flex-col gap-2.5">
               {rows.map((n) => (
-                <NotifCard key={n.id} n={n} rel={rel} t={t} onOpen={() => openDetail(n.id)} />
+                <NotifCard key={n.id} n={n} rel={rel} t={t} onOpen={() => openDetail(n.id)} onAck={() => ack(n.id)} />
               ))}
+              {data?.nextCursor && (
+                <button
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  className="text-xs px-3 py-2 rounded-lg border border-line text-ink-3 hover:text-ink-1 hover:bg-raised disabled:opacity-50"
+                >
+                  {loadingMore ? "…" : t("ntf_load_more")}
+                </button>
+              )}
             </div>
           )}
         </>
@@ -284,16 +334,22 @@ function NotifCard({
   rel,
   t,
   onOpen,
+  onAck,
 }: {
   n: NotificationRow;
   rel: (iso: string) => string;
   t: (k: string) => string;
   onOpen: () => void;
+  onAck: () => void;
 }) {
   const sev = SEV[n.severity];
   const CatIcon = Ic[CAT_ICON[n.category]];
   const isCritical = n.kind === "alert" && n.severity === "critical";
   const unread = n.readAt === null;
+  // 告警的展示时间用最近一次发生(lastSeenAt);按 ts 显示会把今天还在 firing
+  // 的告警标成"6d 前"(2026-06-11 审计)。
+  const when = n.kind === "alert" ? (n.lastSeenAt ?? n.ts) : n.ts;
+  const isFiring = n.kind === "alert" && n.status === "firing";
   const inner = (
     <div
       className="rounded-xl border border-line bg-surface px-4 py-3 transition-colors hover:bg-raised cursor-pointer"
@@ -319,7 +375,27 @@ function NotifCard({
             {n.count > 1 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-raised text-ink-3">×{n.count}</span>
             )}
-            <span className="text-[11px] text-ink-3 ml-auto shrink-0">{rel(n.ts)}</span>
+            {/* 告警生命周期状态 — 之前 firing 和 resolved 在列表里长得一模一样 */}
+            {n.kind === "alert" && n.status === "firing" && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium anim-pulse"
+                style={{ background: "color-mix(in oklch, var(--c-err) 14%, transparent)", color: "var(--c-err)" }}
+              >
+                {t("ntf_status_firing")}
+              </span>
+            )}
+            {n.kind === "alert" && n.status === "resolved" && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full"
+                style={{ background: "color-mix(in oklch, var(--c-ok) 14%, transparent)", color: "var(--c-ok)" }}
+              >
+                {t("ntf_status_resolved")}
+              </span>
+            )}
+            {n.kind === "alert" && n.status === "ack" && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-raised text-ink-3">{t("ntf_status_ack")}</span>
+            )}
+            <span className="text-[11px] text-ink-3 ml-auto shrink-0">{rel(when)}</span>
           </div>
           <p className="text-[13px] text-ink-2 mt-1 line-clamp-2">{n.body}</p>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -328,7 +404,7 @@ function NotifCard({
             {n.aiSource === "fallback" && (
               <span className="text-[10px] px-1.5 py-0.5 rounded border border-line text-ink-3">{t("ntf_ai_fallback")}</span>
             )}
-            <span className="ml-auto text-[11px] flex items-center gap-1">
+            <span className="ml-auto text-[11px] flex items-center gap-2">
               {n.disposition === "auto_handled" ? (
                 <span className="flex items-center gap-1 text-ok">
                   <Ic.sparkle />
@@ -340,6 +416,26 @@ function NotifCard({
                   {t("ntf_disp_needs_human")}
                 </span>
               ) : null}
+              {isFiring && n.disposition === "needs_human" && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAck();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.stopPropagation();
+                      onAck();
+                    }
+                  }}
+                  className="text-[11px] px-2 py-0.5 rounded border border-line text-ink-2 hover:bg-raised hover:text-ink-1 cursor-pointer"
+                  title={t("ntf_ack_hint")}
+                >
+                  {t("ntf_ack_action")}
+                </span>
+              )}
             </span>
           </div>
         </div>

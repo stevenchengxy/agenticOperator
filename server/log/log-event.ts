@@ -46,6 +46,10 @@ export function levelCategoryFor(type: string): LevelCategory {
     case 'event_received':
     case 'event_emitted':
       return { level: 'info', category: 'event' };
+    case 'manage_action':
+      // 运维写操作(暂停/恢复/重放/改配置)— writeManageAudit 镜像进来,
+      // 让统一审计日志一处可查(2026-05-22 spec 欠的账,2026-06-11 补)。
+      return { level: 'info', category: 'manage' };
     case 'agent_start':
     case 'agent_complete':
       return { level: 'info', category: 'lifecycle' };
@@ -107,7 +111,10 @@ export interface RecordLogEventInput {
   durationMs?: number | null;
 }
 
-/** Fire-and-forget write into the unified audit log. Never throws. */
+/** Fire-and-forget write into the unified audit log. Never throws.
+ *  注意:不能加全局 VITEST 保护 — reset 路由等测试 mock 掉 prisma 后会断言
+ *  本函数的真实写入;测试污染问题在污染源头按 DI 注 noop(见 interview-
+ *  inviter-agent.test.ts 的 dependency-health mock)。 */
 export async function recordLogEvent(input: RecordLogEventInput): Promise<void> {
   const { level, category } = levelCategoryFor(input.type);
   try {

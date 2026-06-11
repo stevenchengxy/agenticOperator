@@ -1142,6 +1142,7 @@ model Notification {
 
   @@unique([dedupeKey, status]) // one firing alert per dedupeKey; messages have null key (distinct in PG)
   @@index([ts])
+  @@index([lastSeenAt]) // 列表排序键(告警 re-fire 只 bump lastSeenAt 不动 ts)
   @@index([kind, ts])
   @@index([severity, ts])
   @@index([category, ts])

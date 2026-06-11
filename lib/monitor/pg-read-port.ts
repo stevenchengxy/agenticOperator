@@ -15,6 +15,7 @@ import type {
 } from './monitor-types';
 import { parseDependencyRow } from '../dependency-health/parse-signal';
 import { parseResetRow, applyResets, type DepReset } from '../dependency-health/reset';
+import { notifyResolvedExternally } from '../../server/notifications/resolve';
 import type { ResolveDeps } from './resolve';
 
 export function createPgReadPort(): MonitorReadPort {
@@ -150,6 +151,26 @@ export function createPgReadPort(): MonitorReadPort {
       // Drop signals the operator already reset away ("I topped up").
       return applyResets(failures, resets);
     },
+    async staleNeedsHuman(olderThanMs: number) {
+      const cutoff = new Date(Date.now() - olderThanMs);
+      const rows = await prisma.notification.findMany({
+        where: {
+          status: 'firing',
+          disposition: 'needs_human',
+          firstSeenAt: { lt: cutoff },
+          // 催办 digest 自己不算待办(它是 warning/info_only),防御性排除前缀。
+          NOT: { dedupeKey: { startsWith: 'hitl_stale.' } },
+        },
+        select: { dedupeKey: true, title: true, firstSeenAt: true },
+        orderBy: { firstSeenAt: 'asc' },
+      });
+      const now = Date.now();
+      return rows.map((r) => ({
+        dedupeKey: r.dedupeKey,
+        title: r.title,
+        ageMs: now - r.firstSeenAt.getTime(),
+      }));
+    },
   };
 }
 
@@ -169,13 +190,25 @@ export function createPgResolveDeps(): ResolveDeps {
       if (keys.length === 0) return;
       // Delete any prior resolved row for these keys first, so flipping firing→
       // resolved can't collide on the @@unique([dedupeKey, status]) constraint.
+      const firing = await prisma.notification.findMany({
+        where: { status: 'firing', dedupeKey: { in: keys } },
+        select: { dedupeKey: true, title: true, severity: true },
+      });
       await prisma.notification.deleteMany({
         where: { status: 'resolved', dedupeKey: { in: keys } },
       });
+      // 已解除的告警不再需要关注 → 顺手标已读,否则 resolved 行一直撑大未读
+      // 红点(2026-06-11 审计)。先补 readAt 再翻状态,只动未读行。
       await prisma.notification.updateMany({
+        where: { status: 'firing', dedupeKey: { in: keys }, readAt: null },
+        data: { readAt: new Date() },
+      });
+      const r = await prisma.notification.updateMany({
         where: { status: 'firing', dedupeKey: { in: keys } },
         data: { status: 'resolved' },
       });
+      // 报警也报平安:critical 解除推一条企微恢复消息(通道侧把关)。
+      if (r.count > 0) notifyResolvedExternally(firing);
     },
   };
 }

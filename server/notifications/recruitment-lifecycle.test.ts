@@ -32,7 +32,7 @@ describe('notifyRecruitmentLifecycle', () => {
     expect(arg.level).toBe('info');
     expect(arg.category).toBe('agent_lifecycle');
     expect(arg.eventName).toBeUndefined();
-    expect(arg.message).toBe('简历解析完成');
+    expect(arg.message).toBe('简历解析完成 · 候选人 c1'); // 标题带主体(2026-06-11)
     expect(arg.source).toBe('简历解析');
     expect(arg.agent).toBe('ResumeParser');
     expect(arg.anchors).toEqual({ candidate_id: 'c1', upload_id: 'u1' });
@@ -46,7 +46,7 @@ describe('notifyRecruitmentLifecycle', () => {
       anchors: { job_requisition_id: 'jr1' },
     });
     const arg = recordNotification.mock.calls[0][0] as Record<string, unknown>;
-    expect(arg.message).toBe('职位描述已生成');
+    expect(arg.message).toBe('职位描述已生成 · 岗位 jr1'); // 标题带主体(2026-06-11)
     expect(arg.agent).toBe('JDGenerator');
     expect(arg.source).toBe('JD 生成');
   });

@@ -13,6 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { prisma } from '@/server/db';
 import { recordNotification } from '@/server/notifications/ingest';
+import { resolveAlerts } from '@/server/notifications/resolve';
 import type { CaptureInput } from '@/server/notifications/derive';
 
 const HEARTBEAT_ID = 'default';
@@ -123,6 +124,11 @@ export async function recordBoot(now = new Date()): Promise<BootVerdict | null> 
 
     // Fire-and-forget — a notification failure must not block startup.
     void recordNotification(bootNotification(verdict)).catch(() => {});
+    // 干净启动 = 上一次的"异常重启"告警条件已消失 → 解除 firing 行。
+    // 没有这步 backend_crash_restart 永远 firing(2026-06-11 审计:count=11)。
+    if (verdict.kind !== 'crash') {
+      void resolveAlerts(['backend_crash_restart']).catch(() => {});
+    }
 
     await prisma.serviceHeartbeat.upsert({
       where: { id: HEARTBEAT_ID },

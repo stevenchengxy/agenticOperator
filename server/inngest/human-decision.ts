@@ -10,6 +10,7 @@
 
 import { inngest } from "@/server/inngest/client";
 import { prisma } from "@/server/db";
+import { resolveAlerts } from "@/server/notifications/resolve";
 import { eventNsForDomain, ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID } from "@/lib/domain-ids";
 
 /** Per-domain gate → allowed decision verbs. Drives both validation here and the
@@ -67,16 +68,24 @@ export async function resolveHumanDecision(input: HumanDecisionInput): Promise<H
   // 1. Resolve every card for this (caseId, gate): a replay can leave a duplicate
   //    firing row, and the operator decides a gate once. Soft-fail so a DB hiccup
   //    never blocks the resume.
+  //    走 resolveAlerts(先删同 key 旧 resolved 行)— 直接 updateMany 翻 resolved
+  //    会在同 key 第二个 incarnation 上撞 @@unique([dedupeKey,status]),P2002
+  //    被吞后 needs_human 卡永远清不掉(2026-06-11 审计实锤过 2 对)。
   const action = `${decision} · ${operator}`;
-  const resolved = { managerAction: action, disposition: "auto_handled", status: "resolved", readAt: new Date() };
   let notificationUpdated = false;
   try {
-    if (input.notificationId) await prisma.notification.update({ where: { id: input.notificationId }, data: resolved }).catch(() => {});
-    const res = await prisma.notification.updateMany({
-      where: { runId: caseId, dedupeKey: `${eventNs}_human_gate.${gate}.${caseId}`, disposition: "needs_human" },
-      data: resolved,
-    });
-    notificationUpdated = res.count > 0 || !!input.notificationId;
+    const key = `${eventNs}_human_gate.${gate}.${caseId}`;
+    const count = await resolveAlerts([key], { managerAction: action, disposition: "auto_handled" });
+    if (input.notificationId && count === 0) {
+      // 兜底:卡片行不带该 dedupeKey(旧数据/手工行)时按 id 标记已处理。
+      await prisma.notification
+        .update({
+          where: { id: input.notificationId },
+          data: { managerAction: action, disposition: "auto_handled", readAt: new Date() },
+        })
+        .catch(() => {});
+    }
+    notificationUpdated = count > 0 || !!input.notificationId;
   } catch {
     /* soft-fail */
   }

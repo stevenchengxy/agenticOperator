@@ -23,6 +23,7 @@ import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
 import { getLiveRuleCatalog } from '@/lib/rule-check/live-rule-catalog';
 import { isInfraFailure, friendlyInfraReason } from '@/lib/rule-check/infra-failure';
 import { recordNotification } from '@/server/notifications/ingest';
+import { resolveAlertsByPrefix } from '@/server/notifications/resolve';
 import { classifyLlm } from '@/lib/dependency-health/classify';
 import { recordDependencySignal } from '@/lib/dependency-health/report';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
@@ -486,6 +487,11 @@ export async function ruleCheckAgentHandler({
 
       return r;
     });
+
+    // 跑到这里 = 本次规则校验没有 park → 网关/基础设施已恢复。把还在 firing 的
+    // rule_check_parked.* 告警解除 — 告警 body 承诺"网关恢复后将自动重放",
+    // 续跑成功却不关告警会让 firing 行永久挂着(2026-06-11 审计)。Fire-and-forget。
+    void resolveAlertsByPrefix('rule_check_parked.').catch(() => {});
 
     const dims = extractDims(req as unknown as Record<string, unknown>);
     const audit: RuleCheckAuditMeta = {

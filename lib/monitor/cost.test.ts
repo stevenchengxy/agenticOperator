@@ -16,6 +16,7 @@ function fakePort(opts: {
     toolStepCounts: async () => opts.tools,
     errorWindow: async () => ({ total: 0, byAgent: {} }),
     dependencyFailures: async () => [],
+    staleNeedsHuman: async () => [],
   };
 }
 

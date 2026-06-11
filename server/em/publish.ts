@@ -47,6 +47,22 @@ function notifySchemaReject(name: string, eventId: string, reason: string): void
   }).catch(() => {});
 }
 
+// Passthrough 模式(EM_PASSTHROUGH≠0,本地默认)下 schema 不符不拒收、放行
+// 转发 — 但数据质量问题同样要浮出,否则默认配置下格式漂移永远静默
+// (2026-06-11 审计:strict 分支的通知在默认模式下不可达)。独立 dedupe 前缀,
+// 和真拒收区分。
+function notifySchemaMismatchPassthrough(name: string, eventId: string, reason: string): void {
+  void recordNotification({
+    level: "warn",
+    category: "event_publish",
+    source: "EM",
+    eventName: name,
+    eventInstanceId: eventId,
+    message: `事件 ${name} 格式与定义不符(已放行转发):${reason} — 请检查事件定义或上游数据`,
+    dedupeHint: `em_schema_passthrough.${name}`,
+  }).catch(() => {});
+}
+
 // ── Public types ──────────────────────────────────────────────────────────
 
 export type PublishOpts = {
@@ -260,6 +276,7 @@ async function publishInner(
           triedVersions: parsed.triedVersions,
           payloadForSummary: data,
         });
+        notifySchemaMismatchPassthrough(name, eventId, summarized);
         degradedMode.recordPublish();
         const idempotencyKey = opts.idempotencyKey ?? opts.externalEventId ?? eventId;
         await inngest.send({ id: idempotencyKey, name, data: data as Record<string, unknown> });

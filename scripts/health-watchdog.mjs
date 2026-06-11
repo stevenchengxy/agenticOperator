@@ -35,6 +35,18 @@ const TARGETS = [
   { key: 'inngest', name: 'Inngest (:8288)', url: env('WATCH_INNGEST_URL', 'http://localhost:8288/health') },
   { key: 'openclaw', name: 'OpenClaw 网关 (:18789)', url: env('WATCH_OPENCLAW_URL', 'http://127.0.0.1:18789/healthz') },
 ];
+
+// DB 探针目标 — 监控骨干自身也要有人盯(2026-06-11 审计:archiver 卡死、
+// sweeper 死亡之前零信号,整个告警层可以静默熄灯)。
+//   postgres : pg 连接本身(审计落库的地基)
+//   archiver : inngest_archive_cursor.last_poll_at 新鲜度(30s 轮询,>10min=死)
+//   sweeper  : service_heartbeat id='monitor-sweeper' 心跳(60s tick,>10min=死)
+const DB_STALE_MS = Number(env('WATCH_DB_STALE_MS', '')) || 10 * 60_000;
+const DB_TARGETS = [
+  { key: 'postgres', name: '本地审计数据库 (ao-postgres)' },
+  { key: 'archiver', name: 'Inngest 归档器 (npm run archive)' },
+  { key: 'sweeper', name: '监控扫描器 (monitor-sweeper)' },
+];
 const STATE_FILE = env('WATCH_STATE_FILE', join(homedir(), '.ao-watchdog', 'state.json'));
 const WECOM_TARGETS = (process.env.WECOM_ALERT_TARGETS ?? '')
   .split(',').map((s) => s.trim()).filter(Boolean);
@@ -87,15 +99,72 @@ function sendWecom(text) {
 
 const fmtMin = (ms) => Math.max(1, Math.round(ms / 60_000));
 
-// ─── AO 消息通知中心直写 ────────────────────────────────────────────────
-// 宕机:critical alert,(dedupeKey,'firing') upsert,重复宕机只 bump count;
-// 恢复:firing 翻 resolved(先删旧 resolved 行防唯一约束冲突)+ info message。
-// 失败只 console.error,绝不影响企微推送链路。
-async function recordInAoCenter(transitions) {
-  if (transitions.length === 0) return false;
+// ─── DB 探针:postgres 连通性 + archiver/sweeper 心跳新鲜度 ─────────────
+// 返回 { client, results }:client 为 null 表示 pg 不可达(此时 archiver/
+// sweeper 状态不可知,跳过判定,不误报)。client 由调用方负责 end()。
+async function probeDbTargets() {
+  const [pgT, arT, swT] = DB_TARGETS;
   const client = new pg.Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 5000 });
   try {
     await client.connect();
+  } catch (e) {
+    console.error(`[watchdog] postgres unreachable: ${e.message}`);
+    return { client: null, results: [{ t: pgT, up: false }] };
+  }
+  const results = [{ t: pgT, up: true }];
+  try {
+    // 新鲜度在 SQL 端算(EXTRACT EPOCH):Prisma 存的是 UTC 的 timestamp
+    // without tz,node-pg 会按本地时区解析 — JS 端比较会差 8 小时误报。
+    const a = await client.query(
+      `SELECT EXTRACT(EPOCH FROM (now() - last_poll_at)) * 1000 AS age_ms FROM inngest_archive_cursor LIMIT 1`,
+    );
+    const aAge = a.rows[0]?.age_ms != null ? Number(a.rows[0].age_ms) : null;
+    results.push({ t: arT, up: aAge != null && aAge < DB_STALE_MS });
+    const s = await client.query(
+      `SELECT EXTRACT(EPOCH FROM (now() - "lastHeartbeatAt")) * 1000 AS age_ms FROM service_heartbeat WHERE id = 'monitor-sweeper'`,
+    );
+    const sAge = s.rows[0]?.age_ms != null ? Number(s.rows[0].age_ms) : null;
+    results.push({ t: swT, up: sAge != null && sAge < DB_STALE_MS });
+  } catch (e) {
+    console.error(`[watchdog] db-target probe failed: ${e.message}`);
+  }
+  return { client, results };
+}
+
+// ─── DB 对账恢复 — state 文件无关的兜底 ────────────────────────────────
+// state.json 丢失/恢复写失败时,firing 的 watchdog.* 行会永挂(2026-06-11
+// 审计)。以 DB 为权威:服务当前在线、却还有它的 firing 行 → 解除。
+// 在 transitions 处理之后跑,本轮正常恢复的行已被翻掉,剩下的就是孤儿。
+async function reconcileOrphanFiring(client, upKeys) {
+  if (!client || upKeys.length === 0) return;
+  try {
+    const keys = upKeys.map((k) => `watchdog.${k}`);
+    const r = await client.query(
+      `SELECT "dedupeKey", title FROM notification WHERE status = 'firing' AND "dedupeKey" = ANY($1)`,
+      [keys],
+    );
+    for (const row of r.rows) {
+      await client.query(`DELETE FROM notification WHERE "dedupeKey" = $1 AND status = 'resolved'`, [row.dedupeKey]);
+      await client.query(
+        `UPDATE notification SET status = 'resolved', "readAt" = COALESCE("readAt", now())
+         WHERE "dedupeKey" = $1 AND status = 'firing'`,
+        [row.dedupeKey],
+      );
+      console.log(`[watchdog] reconciled orphan firing alert: ${row.dedupeKey}`);
+    }
+  } catch (e) {
+    console.error(`[watchdog] reconcile failed: ${e.message}`);
+  }
+}
+
+// ─── AO 消息通知中心直写 ────────────────────────────────────────────────
+// 宕机:critical alert,(dedupeKey,'firing') upsert,重复宕机只 bump count;
+// 恢复:firing 翻 resolved(先删旧 resolved 行防唯一约束冲突)+ info message。
+// 失败只 console.error,绝不影响企微推送链路。client 来自 probeDbTargets,
+// 为 null(pg 不可达)时直接放弃落库 — 企微链路照常。
+async function recordInAoCenter(client, transitions) {
+  if (transitions.length === 0 || !client) return false;
+  try {
     for (const tr of transitions) {
       const key = `watchdog.${tr.key}`;
       if (!tr.up) {
@@ -120,7 +189,8 @@ async function recordInAoCenter(transitions) {
           [key],
         );
         await client.query(
-          `UPDATE notification SET status = 'resolved' WHERE "dedupeKey" = $1 AND status = 'firing'`,
+          `UPDATE notification SET status = 'resolved', "readAt" = COALESCE("readAt", now())
+           WHERE "dedupeKey" = $1 AND status = 'firing'`,
           [key],
         );
         await client.query(
@@ -139,8 +209,6 @@ async function recordInAoCenter(transitions) {
   } catch (e) {
     console.error(`[watchdog] AO notification write failed: ${e.message}`);
     return false;
-  } finally {
-    await client.end().catch(() => {});
   }
 }
 
@@ -148,6 +216,8 @@ const now = Date.now();
 const state = loadState();
 const results = [];
 for (const t of TARGETS) results.push({ t, up: await probe(t.url) });
+const dbProbe = await probeDbTargets();
+results.push(...dbProbe.results);
 
 const transitions = [];
 for (const { t, up } of results) {
@@ -181,7 +251,14 @@ if (transitions.length > 0) {
   );
   const [sent, recorded] = await Promise.all([
     sendWecom(`🛡 AO 存活探针\n${lines.join('\n')}`),
-    recordInAoCenter(transitions),
+    recordInAoCenter(dbProbe.client, transitions),
   ]);
   console.log(`[watchdog] transition alert sent=${sent} aoCenter=${recorded}: ${lines.join(' | ')}`);
 }
+
+// 对账兜底:本轮在线的服务若 DB 里还挂着 firing 行(state 丢失等),解除之。
+await reconcileOrphanFiring(
+  dbProbe.client,
+  results.filter((r) => r.up).map((r) => r.t.key),
+);
+if (dbProbe.client) await dbProbe.client.end().catch(() => {});

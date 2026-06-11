@@ -34,6 +34,12 @@ function hrefFor(linkKind: string | null, linkId: string | null): string | null 
     case 'rule_check':
       return `/rule-check/audits/${linkId}`;
     case 'run':
+      // /monitor/runs/[id] 只解析 WorkflowRun cuid;监控骨干产的告警带的是
+      // Inngest ULID(26 位 Crockford)→ 之前 96% 深链 404(2026-06-11 审计)。
+      // ULID 形状的 id 走 /monitor?run= 过滤视图(MonitorContent 认这个参数)。
+      if (/^[0-9A-HJKMNP-TV-Z]{26}$/.test(linkId)) {
+        return `/monitor?run=${encodeURIComponent(linkId)}`;
+      }
       return `/monitor/runs/${linkId}`;
     case 'trace':
       return `/correlations/${linkId}`;
@@ -72,30 +78,50 @@ export async function GET(req: Request): Promise<Response> {
   if (kind === 'message' || kind === 'alert') where.kind = kind;
   if (category) where.category = category;
   if (severity && severity.length) where.severity = { in: severity };
-  if (needsHuman) where.disposition = 'needs_human';
+  // 待办列表与徽标同口径:排除已解除的(needs_human 行都是 alert,status 非空)。
+  if (needsHuman) {
+    where.disposition = 'needs_human';
+    where.status = { not: 'resolved' };
+  }
   if (unread) where.readAt = null;
-  if (cursor) where.ts = { lt: new Date(cursor) };
+  if (cursor) where.lastSeenAt = { lt: new Date(cursor) }; // 翻页游标跟排序键一致
   Object.assign(where, scope); // domain scope (system always shown)
+
+  // 待办口径:needs_human 且未解除(resolved 行不再需要人;needs_human 行都是
+  // alert,status 非空,not 'resolved' 安全)。
+  const needsHumanWhere = {
+    disposition: 'needs_human',
+    readAt: null,
+    status: { not: 'resolved' },
+  } as const;
+  // 红点口径:只数 shouldNotify=true 的未读 — 不然 426 条 info 消息让红点常亮
+  // 失去信号价值(2026-06-11 审计;spec 2026-06-01:红点语义由 shouldNotify 驱动)。
+  const unreadNotifyWhere = { readAt: null, shouldNotify: true } as const;
 
   try {
     if (countsOnly) {
-      const [needsHumanCount, unreadCount] = await Promise.all([
-        prisma.notification.count({ where: { disposition: 'needs_human', readAt: null, ...scope } }),
+      const [needsHumanCount, unreadCount, unreadNotifyCount] = await Promise.all([
+        prisma.notification.count({ where: { ...needsHumanWhere, ...scope } }),
         prisma.notification.count({ where: { readAt: null, ...scope } }),
+        prisma.notification.count({ where: { ...unreadNotifyWhere, ...scope } }),
       ]);
       return NextResponse.json({
         notifications: [],
         nextCursor: null,
-        counts: { byCategory: {}, byKind: {}, needsHuman: needsHumanCount, unread: unreadCount },
+        counts: { byCategory: {}, byKind: {}, needsHuman: needsHumanCount, unread: unreadCount, unreadNotify: unreadNotifyCount },
         meta: { generatedAt: new Date().toISOString() },
       });
     }
-    const [rows, byCategory, byKind, needsHumanCount, unreadCount] = await Promise.all([
-      prisma.notification.findMany({ where, orderBy: { ts: 'desc' }, take: limit + 1 }),
+    const [rows, byCategory, byKind, needsHumanCount, unreadCount, unreadNotifyCount] = await Promise.all([
+      // 排序用 lastSeenAt:告警 re-fire 只 bump lastSeenAt 不动 ts,按 ts 排会让
+      // 正在 firing 的 critical 被更新的消息埋没(2026-06-11 审计:5 条停滞告警
+      // 压在 400+ 行下面);message 的 lastSeenAt 恒等于 ts,排序不变。
+      prisma.notification.findMany({ where, orderBy: { lastSeenAt: 'desc' }, take: limit + 1 }),
       prisma.notification.groupBy({ by: ['category'], _count: { _all: true }, where: scope }),
       prisma.notification.groupBy({ by: ['kind'], _count: { _all: true }, where: scope }),
-      prisma.notification.count({ where: { disposition: 'needs_human', readAt: null, ...scope } }),
+      prisma.notification.count({ where: { ...needsHumanWhere, ...scope } }),
       prisma.notification.count({ where: { readAt: null, ...scope } }),
+      prisma.notification.count({ where: { ...unreadNotifyWhere, ...scope } }),
     ]);
 
     const hasMore = rows.length > limit;
@@ -117,6 +143,7 @@ export async function GET(req: Request): Promise<Response> {
       managerAction: n.managerAction,
       status: n.status,
       readAt: n.readAt,
+      lastSeenAt: n.lastSeenAt,
       anchors: n.anchorsJson ? safeJson(n.anchorsJson) : null,
       href: hrefFor(n.linkKind, n.linkId),
       runId: n.runId,
@@ -125,12 +152,13 @@ export async function GET(req: Request): Promise<Response> {
 
     return NextResponse.json({
       notifications,
-      nextCursor: hasMore ? page[page.length - 1]?.ts ?? null : null,
+      nextCursor: hasMore ? page[page.length - 1]?.lastSeenAt ?? null : null,
       counts: {
         byCategory: Object.fromEntries(byCategory.map((g) => [g.category, g._count._all])),
         byKind: Object.fromEntries(byKind.map((g) => [g.kind, g._count._all])),
         needsHuman: needsHumanCount,
         unread: unreadCount,
+        unreadNotify: unreadNotifyCount,
       },
       meta: { generatedAt: new Date().toISOString() },
     });
@@ -168,6 +196,17 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({ ok: true, updated: r.count });
     }
     if (body.action === 'ack' && body.id) {
+      // 同 key 的旧 ack 行先删 — 否则第二个 incarnation 翻 'ack' 时撞
+      // @@unique([dedupeKey,status]) → P2002 → 500(与 resolveAlerts 同约定)。
+      const row = await prisma.notification.findUnique({
+        where: { id: body.id },
+        select: { dedupeKey: true },
+      });
+      if (row?.dedupeKey) {
+        await prisma.notification.deleteMany({
+          where: { dedupeKey: row.dedupeKey, status: 'ack', id: { not: body.id } },
+        });
+      }
       await prisma.notification.update({ where: { id: body.id }, data: { status: 'ack', readAt: now } });
       return NextResponse.json({ ok: true });
     }

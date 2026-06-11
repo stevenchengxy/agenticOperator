@@ -26,6 +26,7 @@ function fakePort(failures: DepFailure[]): MonitorReadPort {
     toolStepCounts: async () => ({}),
     errorWindow: async () => ({ total: 0, byAgent: {} }),
     dependencyFailures: async () => failures,
+    staleNeedsHuman: async () => [],
   };
 }
 

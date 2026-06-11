@@ -11,6 +11,7 @@ function fakePort(inflight: RunHeartbeat[]): MonitorReadPort {
     toolStepCounts: async () => ({}),
     errorWindow: async () => ({ total: 0, byAgent: {} }),
     dependencyFailures: async () => [],
+    staleNeedsHuman: async () => [],
   };
 }
 
@@ -36,6 +37,28 @@ describe('healthMonitor', () => {
     expect(res.findings[0].dedupeHint).toBe('run_stalled.r1');
     expect(res.findings[0].runId).toBe('r1');
     expect(res.activeKeys).toEqual(['run_stalled.r1']);
+  });
+
+  it('skips HITL gate runs (waitForEvent 挂起等人工 ≠ 停滞)', async () => {
+    const port = fakePort([
+      {
+        runId: 'r3',
+        functionSlug: 'agentic-operator-main-energy-manual-confirm',
+        eventName: null,
+        startedAt: ago(9 * 86_400_000), // 挂 9 天也不算停滞
+        lastStepAt: null,
+      },
+      {
+        runId: 'r4',
+        functionSlug: 'agentic-operator-费控-v1-feikong-dispose-risk-event',
+        eventName: null,
+        startedAt: ago(86_400_000),
+        lastStepAt: null,
+      },
+    ]);
+    const res = await healthMonitor(port, DEFAULT_THRESHOLDS, now);
+    expect(res.findings).toHaveLength(0);
+    expect(res.activeKeys).toEqual([]);
   });
 
   it('does not flag a run with a recent step', async () => {

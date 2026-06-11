@@ -22,6 +22,8 @@ export type NotificationRow = {
   managerAction: string | null;
   status: string | null;
   readAt: string | null;
+  /** 告警最近一次发生时间(re-fire 只 bump 这个,不动 ts);message 恒等于 ts。 */
+  lastSeenAt?: string | null;
   anchors: Record<string, string> | null;
   href: string | null;
   // Present in the API response; consumed by the overview deep-link / scoping.
@@ -38,5 +40,7 @@ export type NotificationsResponse = {
     byKind: Partial<Record<NotifKind, number>>;
     needsHuman: number;
     unread: number;
+    /** 红点口径:shouldNotify=true 的未读(铃铛用)。 */
+    unreadNotify?: number;
   } | null;
 };
