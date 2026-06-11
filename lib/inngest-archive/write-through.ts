@@ -16,9 +16,14 @@ export async function recordSentEvents(
   payloads: { name: string; data?: unknown; ts?: number }[],
   ids: string[],
 ): Promise<number> {
-  const events: InngestEvent[] = payloads
-    .map((p, i) => ({ id: ids[i], name: p.name, data: p.data ?? null, ts: p.ts }))
-    .filter((e): e is InngestEvent => Boolean(e.id));
+  const events: InngestEvent[] = [];
+  payloads.forEach((p, i) => {
+    const id = ids[i];
+    if (!id) return;
+    const ev: InngestEvent = { id, name: p.name, data: p.data ?? null };
+    if (p.ts !== undefined) ev.ts = p.ts;
+    events.push(ev);
+  });
   if (events.length === 0) return 0;
   return archiveEvents(events);
 }

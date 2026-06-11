@@ -18,6 +18,7 @@
 // to avoid circular import (agents → client → agents).
 
 import { Inngest } from "inngest";
+import { WriteThroughMiddleware } from "./write-through-middleware";
 
 // ─── §3.1 输入事件（来自 RAAS）──────────────────────────────
 export type ResumeDownloadedData = {
@@ -496,6 +497,7 @@ export type JdGeneratedEnvelope = {
 export const inngest = new Inngest({
   id: "agentic-operator-main",
   eventKey: process.env.INNGEST_EVENT_KEY,
+  middleware: [WriteThroughMiddleware],
 });
 
 // 字段映射版本号 (RoboHire output → RAAS schema)
