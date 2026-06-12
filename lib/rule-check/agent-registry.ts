@@ -40,12 +40,8 @@ const RECRUITMENT_AGENTS: ReadonlyArray<RuleCheckAgent> = [
     stage: { zh: '候选人入库', en: 'Candidate Intake' },
     status: 'live',
   },
-  {
-    id: 'rule-check-candidate-ownership',
-    label: { zh: '候选人归属核验', en: 'Candidate Ownership' },
-    stage: { zh: '候选人认领', en: 'Candidate Claim' },
-    status: 'live',
-  },
+  // 候选人归属核验 (rule-check-candidate-ownership) withdrawn 2026-06-11 — not
+  // deployed; removed from the /rule-check facet. Re-add to restore.
 ];
 
 /** Registered rule-check agents for a domain. Recruitment (incl. legacy ids and

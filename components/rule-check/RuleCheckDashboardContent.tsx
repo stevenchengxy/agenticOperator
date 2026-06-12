@@ -50,6 +50,19 @@ export function RuleCheckDashboardContent() {
     return () => { cancel = true; clearInterval(id); };
   }, [win, domain]);
 
+  // 手动「刷新规则库」—— 立即重新拉取当前领域的全量规则(fetchDomainOntology 是
+  // no-store,每次都读 Neo4j 当前值)。给编辑完 Neo4j 想马上看到改动的人,不必等下一次
+  // 10s 轮询。后台 10s 自动轮询仍在跑。
+  const [refreshing, setRefreshing] = React.useState(false);
+  const refreshNow = React.useCallback(() => {
+    setRefreshing(true);
+    const url = `/api/rule-check-audits/rule-health?window=${win}&domain=${encodeURIComponent(domain)}`;
+    fetchJson<RuleHealthResponse>(url)
+      .then((d) => { if (d.ok) { setData(d); setErr(false); } else { setErr(true); } })
+      .catch(() => setErr(true))
+      .finally(() => setRefreshing(false));
+  }, [win, domain]);
+
   const totals = data?.totals;
   const rules = data?.rules ?? [];
   // 全部阶段(去重排序),给阶段下拉用。
@@ -83,7 +96,31 @@ export function RuleCheckDashboardContent() {
             {t("rc_rh_sub").replace("{fired}", String(totals?.rules_fired ?? 0)).replace("{total}", String(totals?.rules_total ?? 0))}
           </div>
         </div>
-        <WindowToggle value={win} onChange={setWin} t={t} />
+        <div className="flex items-center" style={{ gap: 10, marginLeft: "auto" }}>
+          <button
+            type="button"
+            onClick={refreshNow}
+            disabled={refreshing}
+            title={t("rc_rh_refresh_hint")}
+            className="flex items-center text-ink-2 hover:text-ink-1"
+            style={{
+              gap: 6,
+              fontSize: 12,
+              padding: "4px 11px",
+              background: "var(--c-surface)",
+              border: "1px solid var(--c-line)",
+              borderRadius: 7,
+              cursor: refreshing ? "default" : "pointer",
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            <span aria-hidden className={refreshing ? "animate-spin" : ""} style={{ display: "inline-block" }}>
+              ⟳
+            </span>
+            {refreshing ? t("rc_rh_refreshing") : t("rc_rh_refresh")}
+          </button>
+          <WindowToggle value={win} onChange={setWin} t={t} />
+        </div>
       </div>
 
       {/* infra banner — only when LLM 没钱/故障 parked something this window */}

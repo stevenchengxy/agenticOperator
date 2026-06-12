@@ -12,11 +12,12 @@
 
 import { Inngest } from "inngest";
 import { serve } from "inngest/next";
+import { WriteThroughMiddleware } from "@/server/inngest/write-through-middleware";
 import { prisma } from "@/server/db";
 import { ensureWorkflowRun, markRunComplete, createAgentLogger } from "@/server/agent-logger";
 import { getInngestUrl } from "@/lib/inngest-url";
 import { ONTOLOGY_GEN_SOURCE } from "@/lib/ontology-generator/draft-store";
-import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID } from "@/lib/domain-ids";
+import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID, isRecruitmentDomain } from "@/lib/domain-ids";
 import { buildEnergyFunctions } from "@/server/inngest/domains/energy";
 import { buildCostControlFunctions } from "@/server/inngest/domains/feikong";
 import type { ShellCardData } from "@/lib/ontology-generator/types";
@@ -97,7 +98,7 @@ function makeShellFunction(client: Inngest, domain: string, shell: ShellRow, car
 /** Build the live functions for a domain from its DEPLOYED agents. */
 async function buildDomainFunctions(client: Inngest, domain: string) {
   // raas is served by agentic-operator-main, not a per-domain app.
-  if (domain === MAIN_DOMAIN) return [];
+  if (isRecruitmentDomain(domain)) return [];
   const app = await prisma.domainInngestApp.findUnique({ where: { domain } });
   // Offline (or never registered) → serve zero functions.
   if (!app || app.status !== "online") return [];
@@ -137,7 +138,11 @@ const clientCache = new Map<string, Inngest>();
 function getDomainClient(domain: string): Inngest {
   let c = clientCache.get(domain);
   if (!c) {
-    c = new Inngest({ id: domainAppId(domain), eventKey: process.env.INNGEST_EVENT_KEY });
+    c = new Inngest({
+      id: domainAppId(domain),
+      eventKey: process.env.INNGEST_EVENT_KEY,
+      middleware: [WriteThroughMiddleware],
+    });
     clientCache.set(domain, c);
   }
   return c;
@@ -195,10 +200,87 @@ export type DomainAppState = {
   boundToMain: boolean;
   callbackUrl: string | null;
   registeredAt: string | null;
+  sync: DomainAppSyncState | null;
 };
 
+export type DomainAppSyncState = {
+  healthy: boolean;
+  error: string | null;
+  connected: boolean | null;
+  functionCount: number | null;
+  url: string | null;
+  lastProbeAt: string;
+};
+
+const APP_PROBE_TIMEOUT_MS = 3000;
+
+async function probeInngestApp(appId: string): Promise<DomainAppSyncState> {
+  const lastProbeAt = new Date().toISOString();
+  try {
+    const res = await fetch(`${getInngestUrl()}/v0/gql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "{ apps { name url error connected functionCount } }" }),
+      signal: AbortSignal.timeout(APP_PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      return {
+        healthy: false,
+        error: `Inngest GraphQL ${res.status}`,
+        connected: null,
+        functionCount: null,
+        url: null,
+        lastProbeAt,
+      };
+    }
+    const body = (await res.json()) as {
+      data?: { apps?: Array<{ name: string; url?: string | null; error?: string | null; connected: boolean; functionCount: number }> };
+      errors?: unknown;
+    };
+    if (body.errors) {
+      return {
+        healthy: false,
+        error: `Inngest GraphQL: ${JSON.stringify(body.errors)}`,
+        connected: null,
+        functionCount: null,
+        url: null,
+        lastProbeAt,
+      };
+    }
+    const app = body.data?.apps?.find((a) => a.name === appId);
+    if (!app) {
+      return {
+        healthy: false,
+        error: "App not registered in Inngest",
+        connected: false,
+        functionCount: null,
+        url: null,
+        lastProbeAt,
+      };
+    }
+    const error = typeof app.error === "string" && app.error.length > 0 ? app.error : null;
+    return {
+      healthy: error === null,
+      error,
+      connected: app.connected,
+      functionCount: app.functionCount,
+      url: app.url ?? null,
+      lastProbeAt,
+    };
+  } catch (e) {
+    return {
+      healthy: false,
+      error: (e as Error).message,
+      connected: null,
+      functionCount: null,
+      url: null,
+      lastProbeAt,
+    };
+  }
+}
+
 export async function getDomainApp(domain: string): Promise<DomainAppState> {
-  if (domain === MAIN_DOMAIN) {
+  if (isRecruitmentDomain(domain)) {
     // Bound to the existing main app — always online, never a separate app.
     return {
       domain,
@@ -207,22 +289,25 @@ export async function getDomainApp(domain: string): Promise<DomainAppState> {
       boundToMain: true,
       callbackUrl: `${await resolveCallbackOrigin()}/api/inngest`,
       registeredAt: null,
+      sync: await probeInngestApp(MAIN_APP_ID),
     };
   }
   const row = await prisma.domainInngestApp.findUnique({ where: { domain } });
+  const status = (row?.status as "online" | "offline") ?? "offline";
   return {
     domain,
     appId: domainAppId(domain),
-    status: (row?.status as "online" | "offline") ?? "offline",
+    status,
     boundToMain: false,
     callbackUrl: row?.callbackUrl ?? null,
     registeredAt: row?.registeredAt ? row.registeredAt.toISOString() : null,
+    sync: status === "online" ? await probeInngestApp(domainAppId(domain)) : null,
   };
 }
 
 /** Register (or re-register) the domain's Inngest app. */
 export async function registerDomainApp(domain: string): Promise<{ ok: boolean; error?: string; callbackUrl: string }> {
-  if (domain === MAIN_DOMAIN) {
+  if (isRecruitmentDomain(domain)) {
     // raas is already the main app — registering a separate one is wrong.
     return { ok: true, callbackUrl: `${await resolveCallbackOrigin()}/api/inngest` };
   }
@@ -244,7 +329,7 @@ export async function registerDomainApp(domain: string): Promise<{ ok: boolean; 
 /** Take the domain's app offline: serve zero functions + re-sync so Inngest
  *  drops them. The app row stays (status=offline) so it can be re-registered. */
 export async function offlineDomainApp(domain: string): Promise<{ ok: boolean; error?: string }> {
-  if (domain === MAIN_DOMAIN) {
+  if (isRecruitmentDomain(domain)) {
     return { ok: false, error: "raas is bound to agentic-operator-main and cannot be taken offline" };
   }
   const existing = await prisma.domainInngestApp.findUnique({ where: { domain } });

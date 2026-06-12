@@ -72,6 +72,7 @@ export function LeftNav() {
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), count: "1", href: "/workflow" },
     { type: "item", id: "ontology-gen", icon: "branch", label: t("nav_ontology_gen"), href: "/behavior/ontology-generator" },
     { type: "group", title: t("nav_group_govern") },
+    { type: "item", id: "system-config", icon: "gear", label: t("settings_env_title"), href: "/settings/system" },
     { type: "item", id: "integrations", icon: "plug",   label: t("nav_integrations"), href: "/datasources" },
     { type: "item", id: "audit",      icon: "book",     label: t("nav_audit"), href: "/audit" },
     { type: "item", id: "permissions",icon: "key",      label: t("nav_permissions"), href: "#" },
@@ -145,13 +146,6 @@ export function LeftNav() {
         );
       })}
       <div className="flex-1" />
-      <div
-        title={t("nav_settings")}
-        className="flex items-center gap-[9px] px-2 py-[6px] rounded-md cursor-pointer text-ink-2 hover:bg-panel hover:text-ink-1 justify-center min-[1440px]:justify-start"
-      >
-        <Ic.gear />
-        <span className="hidden min-[1440px]:inline">{t("nav_settings")}</span>
-      </div>
     </nav>
   );
 }

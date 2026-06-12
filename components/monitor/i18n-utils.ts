@@ -62,6 +62,7 @@ export function subsystemLabel(id: string, fallback: string, t: T): string {
     raas: "monitor_ss_raas",
     neo4j: "monitor_ss_neo4j",
     inngest: "monitor_ss_inngest",
+    deployment: "monitor_ss_deployment",
   };
   return map[id] ? t(map[id]) : fallback;
 }
@@ -81,12 +82,24 @@ export function subsystemMetricLabel(label: string, t: T): string {
     "upserted last": "monitor_ss_metric_upserted_last",
     endpoint: "monitor_ss_metric_endpoint",
     "http status": "monitor_ss_metric_http_status",
+    server: "monitor_ss_metric_server",
+    callback: "monitor_ss_metric_callback",
+    apps: "monitor_ss_metric_apps",
+    functions: "monitor_ss_metric_functions",
+    configured: "monitor_ss_metric_configured",
+    database: "monitor_ss_metric_database",
+    upserted: "monitor_ss_metric_upserted_last",
+    registered: "monitor_ss_metric_registered",
+    env: "monitor_ss_metric_env",
   };
   return map[label] ? t(map[label]) : label;
 }
 
 export function subsystemDetail(detail: string | null, t: T): string | null {
   if (!detail) return null;
+  if (detail.startsWith("RAAS API Server unreachable")) {
+    return t("monitor_ss_detail_raas_probe_down");
+  }
   const map: Record<string, string> = {
     "External Kafka inbound · classified via gateway filter rules.": "monitor_ss_detail_raas",
     "RAAS API Server reachability probe.": "monitor_ss_detail_raas_probe_ok",

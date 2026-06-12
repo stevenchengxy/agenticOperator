@@ -260,7 +260,7 @@ export type MonitorInstancesResponse = {
 // ── System Status ──────────────────────────────────────────────────
 
 export type SubsystemHealth = {
-  id: 'em' | 'raas' | 'neo4j' | 'inngest';
+  id: 'em' | 'raas' | 'neo4j' | 'inngest' | 'deployment';
   label: string;
   state: 'healthy' | 'degraded' | 'down' | 'unknown';
   lastUpdate: string | null;

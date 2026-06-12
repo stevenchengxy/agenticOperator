@@ -23,6 +23,7 @@ import { slaMonitor } from "../lib/monitor/sla";
 import { costMonitor } from "../lib/monitor/cost";
 import { errorRateMonitor } from "../lib/monitor/error-rate";
 import { dependencyMonitor } from "../lib/monitor/dependency";
+import { infraMonitor } from "../lib/monitor/infra";
 import { hitlStaleMonitor } from "../lib/monitor/hitl";
 import { runEvalSample } from "../lib/monitor/run-eval";
 import { resolveMonitorConfig } from "../lib/monitor/monitor-config";
@@ -88,7 +89,7 @@ async function beatHeartbeat(): Promise<void> {
     .catch(() => {});
 }
 
-const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor, dependencyMonitor, hitlStaleMonitor];
+const monitors: Monitor[] = [healthMonitor, slaMonitor, costMonitor, errorRateMonitor, dependencyMonitor, infraMonitor, hitlStaleMonitor];
 
 // AI fact-monitor — sampled groundedness eval over recent rule-check audits.
 // Fire-and-forget so it NEVER blocks or breaks the deterministic sweep; judges

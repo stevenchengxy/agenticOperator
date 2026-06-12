@@ -2,19 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { AGENT_MAP, byShort, byWsId } from './agent-mapping';
 
 describe('AGENT_MAP', () => {
-  it('has exactly 26 entries', () => {
-    // 24 base + CandidateIdentity + CandidateOwnership (2026-06-09, domain 招聘-v1).
-    expect(AGENT_MAP).toHaveLength(26);
+  it('has exactly 25 entries', () => {
+    // 24 base + CandidateIdentity (CandidateOwnership withdrawn 2026-06-11, domain 招聘-v1).
+    expect(AGENT_MAP).toHaveLength(25);
   });
 
   it('every short name is unique', () => {
     const shorts = AGENT_MAP.map((a) => a.short);
-    expect(new Set(shorts).size).toBe(26);
+    expect(new Set(shorts).size).toBe(25);
   });
 
   it('every wsId is unique', () => {
     const ids = AGENT_MAP.map((a) => a.wsId);
-    expect(new Set(ids).size).toBe(26);
+    expect(new Set(ids).size).toBe(25);
   });
 
   it('uses only the 9 valid stages', () => {

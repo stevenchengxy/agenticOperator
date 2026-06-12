@@ -477,7 +477,7 @@ export async function saveCandidateToPartnerPg(
             skills_extracted, languages, certifications,
             work_history, education_history, project_history,
             awards, skills_detail, certifications_detail, languages_detail,
-            parse_status,
+            uploaded_by, parse_status,
             uploaded_at, created_at, updated_at
           ) VALUES (
             $1, $2,
@@ -487,7 +487,7 @@ export async function saveCandidateToPartnerPg(
             $10::text[], $11::text[], $12::text[],
             $13::jsonb, $14::jsonb, $15::jsonb,
             $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
-            'completed',
+            $20, 'completed',
             NOW(), NOW(), NOW()
           )`,
         [

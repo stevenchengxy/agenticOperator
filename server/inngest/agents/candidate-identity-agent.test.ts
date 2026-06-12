@@ -136,6 +136,9 @@ describe('candidateIdentityHandler', () => {
       { enabled: true, persist, repo, judge: judgeYes },
     );
     expect(r.skipped).toBe(false);
-    expect(r.error).toBeTruthy();
+    // invoke 模式新语义:persist 失败被审计模块吞掉(只丢审计),判定结论照常返回 ——
+    // 调用方(简历解析)依旧能拿 sameAsCandidateId 驱动落库,绝不因审计故障误判新人。
+    expect((r as { error?: string }).error).toBeUndefined();
+    expect((r as { auditId?: string | null }).auditId).toBeNull();
   });
 });

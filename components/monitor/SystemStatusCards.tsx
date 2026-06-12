@@ -3,6 +3,7 @@ import React from "react";
 import { usePoll } from "@/lib/monitor/usePoll";
 import { ClaudeCard } from "./atoms";
 import { useApp } from "@/lib/i18n";
+import { fetchJson } from "@/lib/api/client";
 import {
   formatRelativeTime,
   subsystemDetail,
@@ -34,18 +35,55 @@ function localizedMetricValue(label: string, value: string, lang: "zh" | "en"): 
   return value;
 }
 
+function compactMetricValue(label: string, value: string, lang: "zh" | "en"): string {
+  const localized = localizedMetricValue(label, value, lang);
+  if (!["server", "callback", "registered", "endpoint"].includes(label)) return localized;
+  try {
+    const u = new URL(value);
+    return `${u.host}${u.pathname === "/" ? "" : u.pathname}`;
+  } catch {
+    return localized;
+  }
+}
+
 // ── Single card ────────────────────────────────────────────────────
 
-function StatusCard({ sub }: { sub: SubsystemHealth }) {
+function StatusCard({ sub, onActionComplete }: { sub: SubsystemHealth; onActionComplete?: () => void }) {
   const { t, lang } = useApp();
   const [showTooltip, setShowTooltip] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState<string | null>(null);
   const label = subsystemLabel(sub.id, sub.label, t);
   const detail = subsystemDetail(sub.detail, t);
+  const action =
+    sub.id === "inngest"
+      ? { label: t("monitor_infra_action_sync_inngest"), run: syncInngestApp }
+      : sub.id === "neo4j"
+        ? { label: t("monitor_infra_action_sync_neo4j"), run: syncNeo4j }
+        : sub.id === "deployment" || sub.id === "raas"
+          ? { label: t("monitor_infra_action_check"), run: checkInfra }
+          : null;
+
+  async function doAction(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!action || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      await action.run();
+      setResult(t("monitor_infra_action_done"));
+      onActionComplete?.();
+    } catch (err) {
+      setResult((err as Error).message || t("monitor_infra_action_failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="relative">
       <ClaudeCard
-        className="p-4 cursor-default"
+        className="p-4 h-full min-w-0 overflow-hidden cursor-default"
         onMouseEnter={() => detail ? setShowTooltip(true) : undefined}
         onMouseLeave={() => setShowTooltip(false)}
       >
@@ -70,13 +108,35 @@ function StatusCard({ sub }: { sub: SubsystemHealth }) {
         </div>
 
         {/* Metrics */}
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+        <div className="space-y-1 min-w-0">
           {sub.metrics.map((m) => (
-            <span key={m.label} className="text-[11.5px] text-claude-ink-3">
-              <span className="text-claude-ink-4">{subsystemMetricLabel(m.label, t)}:</span> {localizedMetricValue(m.label, m.value, lang)}
-            </span>
+            <div
+              key={m.label}
+              className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-1.5 text-[11.5px] leading-5 min-w-0"
+            >
+              <span className="text-claude-ink-4 whitespace-nowrap">
+                {subsystemMetricLabel(m.label, t)}:
+              </span>
+              <span className="text-claude-ink-3 min-w-0 truncate tabular-nums" title={m.value}>
+                {compactMetricValue(m.label, m.value, lang)}
+              </span>
+            </div>
           ))}
         </div>
+
+        {action && (
+          <div className="mt-3 flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={doAction}
+              disabled={busy}
+              className="h-6 px-2 shrink-0 rounded-md border border-claude-line text-[11px] text-claude-ink-2 hover:bg-claude-surface disabled:opacity-50"
+            >
+              {busy ? "…" : action.label}
+            </button>
+            {result && <span className="min-w-0 text-[10.5px] text-claude-ink-4 truncate">{result}</span>}
+          </div>
+        )}
       </ClaudeCard>
 
       {/* Tooltip */}
@@ -87,6 +147,33 @@ function StatusCard({ sub }: { sub: SubsystemHealth }) {
       )}
     </div>
   );
+}
+
+async function syncInngestApp(): Promise<void> {
+  const cfg = await fetchJson<{ inngest: { serveEndpointUrl: string } }>("/api/system/config", { cache: "no-store" });
+  const r = await fetch("/api/inngest-admin/sync-app", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: cfg.inngest.serveEndpointUrl }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.error ?? "sync failed");
+}
+
+async function syncNeo4j(): Promise<void> {
+  const r = await fetch("/api/em/sync/event-definitions/run-now", { method: "POST" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.error ?? j.result?.error ?? "sync failed");
+}
+
+async function checkInfra(): Promise<void> {
+  const r = await fetch("/api/infra/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "check" }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.error ?? "check failed");
 }
 
 // ── Section ────────────────────────────────────────────────────────
@@ -110,7 +197,7 @@ export function SystemStatusCards({ paused = false }: { paused?: boolean }) {
     });
   }, []);
 
-  const { data, error } = usePoll<MonitorSystemStatusResponse>(
+  const { data, error, refresh } = usePoll<MonitorSystemStatusResponse>(
     "/api/monitor/system-status",
     15_000,
     paused,
@@ -142,18 +229,19 @@ export function SystemStatusCards({ paused = false }: { paused?: boolean }) {
               {t("monitor_polling_error")} {error}
             </p>
           )}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             {subsystems.length === 0
               ? [
                   { id: "em", label: t("monitor_ss_em"), state: "unknown", lastUpdate: null, metrics: [], detail: null },
                   { id: "raas", label: t("monitor_ss_raas"), state: "unknown", lastUpdate: null, metrics: [{ label: "endpoint", value: "—" }, { label: "http status", value: "—" }], detail: null },
                   { id: "neo4j", label: t("monitor_ss_neo4j"), state: "unknown", lastUpdate: null, metrics: [], detail: null },
                   { id: "inngest", label: t("monitor_ss_inngest"), state: "unknown", lastUpdate: null, metrics: [], detail: null },
+                  { id: "deployment", label: t("monitor_ss_deployment"), state: "unknown", lastUpdate: null, metrics: [], detail: null },
                 ].map((s) => (
-                  <StatusCard key={s.id} sub={s as SubsystemHealth} />
+                  <StatusCard key={s.id} sub={s as SubsystemHealth} onActionComplete={refresh} />
                 ))
               : subsystems.map((s) => (
-                  <StatusCard key={s.id} sub={s} />
+                  <StatusCard key={s.id} sub={s} onActionComplete={refresh} />
                 ))
             }
           </div>

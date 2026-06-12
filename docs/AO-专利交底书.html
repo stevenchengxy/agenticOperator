@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic Operator · 专利建议(全程白话)</title>
+<style>
+:root{--page:#e7e9de;--card:#fbf9f3;--field:#fffdf6;--field2:#f6f3e9;--line:#e6e0d0;--line2:#efe9da;--ink:#2b2a26;--ink2:#524f47;--muted:#938c7f;--gold:#a9842f;--gold2:#85661f;--goldsoft:#f3ecd8;--red:#b03f2e;--ok:#5f7d4f;--serif:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC","Source Han Serif CN",ui-serif,Georgia,serif;--sans:"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;}
+*{box-sizing:border-box;}html{scroll-behavior:smooth;}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--serif);line-height:1.9;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+.wrap{max-width:880px;margin:0 auto;padding:36px 20px 90px;}
+.cover{text-align:center;padding:22px 10px 30px;}
+.cover .mono{font-family:var(--sans);letter-spacing:.3em;font-size:12px;color:var(--gold);font-weight:700;text-transform:uppercase;}
+.cover h1{font-size:30px;margin:14px 0 6px;letter-spacing:.04em;}
+.cover .sub{color:var(--muted);font-size:14px;font-family:var(--sans);}
+.cover .rule{width:54px;height:2px;background:var(--gold);margin:18px auto 0;opacity:.7;}
+.tabs{position:sticky;top:0;z-index:9;display:flex;flex-wrap:wrap;gap:8px;justify-content:center;padding:12px 10px;margin-bottom:18px;background:linear-gradient(var(--page) 70%,rgba(231,233,222,0));}
+.tab{font-family:var(--serif);font-size:15px;color:var(--ink2);background:#fdfbf4;border:1px solid var(--line);border-radius:999px;padding:7px 18px;cursor:pointer;transition:.15s;letter-spacing:.04em;}
+.tab:hover{border-color:var(--gold);color:var(--gold2);}
+.tab.on{background:var(--gold);border-color:var(--gold);color:#fff;box-shadow:0 2px 8px rgba(169,132,47,.28);}
+.sheet{display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:38px 40px 42px;box-shadow:0 1px 0 #fff inset,0 10px 34px rgba(60,52,30,.07);}
+.sheet.on{display:block;animation:fade .25s ease;}
+@keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+.phead{border-bottom:1px solid var(--line2);padding-bottom:16px;margin-bottom:22px;}
+.pmeta{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+.rank{font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.1em;color:#fff;background:var(--gold);border-radius:6px;padding:3px 11px;}
+.ptag{font-family:var(--sans);font-size:12.5px;color:var(--gold2);letter-spacing:.06em;}
+.ptitle{font-size:22px;line-height:1.5;margin:0;letter-spacing:.02em;font-weight:700;}
+.plain{margin-bottom:6px;}
+.pl-what{font-size:17.5px;font-weight:700;color:var(--ink);background:var(--goldsoft);border-left:4px solid var(--gold);border-radius:9px;padding:16px 18px;line-height:1.75;}
+.pl-block{margin:20px 0;}
+.pl-lab{font-family:var(--sans);font-size:13px;font-weight:700;color:var(--gold2);letter-spacing:.08em;margin-bottom:9px;}
+.pl-pain{background:#fbf6ea;border:1px dashed #e0d8c2;border-radius:9px;padding:14px 16px;color:var(--ink2);font-size:15.5px;line-height:1.85;}
+ul.howlist{list-style:none;margin:0;padding:0;}
+ul.howlist>li{position:relative;padding:11px 0 11px 24px;border-bottom:1px solid var(--line2);font-size:15.5px;color:var(--ink2);line-height:1.8;}
+ul.howlist>li:last-child{border-bottom:none;}
+ul.howlist>li::before{content:"";position:absolute;left:2px;top:18px;width:7px;height:7px;background:var(--gold);border-radius:50%;}
+ul.howlist b{color:var(--ink);}
+ul.effect{list-style:none;margin:0;padding:0;}
+ul.effect>li{position:relative;padding:9px 0 9px 28px;color:var(--ink2);font-size:15.5px;line-height:1.8;border-bottom:1px solid var(--line2);}
+ul.effect>li:last-child{border-bottom:none;}
+ul.effect>li::before{content:"✓";position:absolute;left:0;top:9px;color:var(--ok);font-weight:700;font-size:15px;}
+ul.protect{list-style:none;margin:0;padding:0;}
+ul.protect>li{padding:12px 0;border-bottom:1px solid var(--line2);}
+ul.protect>li:last-child{border-bottom:none;}
+.ptop{margin-bottom:5px;}
+.pbody{color:var(--ink2);font-size:15px;line-height:1.8;}
+.cb{font-family:var(--sans);font-size:11px;font-weight:700;border-radius:4px;padding:2px 8px;}
+.cb-ind{background:var(--gold);color:#fff;}
+.cb-dep{background:var(--field2);color:var(--muted);border:1px solid var(--line);}
+.ovcard{background:var(--field);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;padding:16px 18px;margin:14px 0;}
+.ovtop{display:flex;align-items:center;gap:11px;margin-bottom:7px;}
+.ovrank{font-family:var(--sans);font-size:12px;font-weight:700;color:#fff;background:var(--gold);border-radius:5px;padding:2px 9px;letter-spacing:.06em;}
+.ovtag{font-family:var(--sans);font-size:12px;color:var(--gold2);letter-spacing:.06em;}
+.ovtitle{font-size:16.5px;font-weight:700;color:var(--ink);line-height:1.5;margin-bottom:7px;}
+.ovwhat{color:var(--ink2);font-size:14.5px;line-height:1.8;}
+.slgroup{margin:14px 0;}
+.slg-h{font-family:var(--sans);font-size:12.5px;font-weight:700;color:var(--ink);letter-spacing:.05em;padding:7px 0;border-bottom:2px solid var(--line);margin-bottom:4px;}
+ul.sl{list-style:none;margin:0;padding:0;}
+ul.sl>li{padding:10px 0;border-bottom:1px solid var(--line2);font-size:14.5px;line-height:1.7;}
+ul.sl>li:last-child{border-bottom:none;}
+ul.sl>li b{color:var(--ink);margin-right:8px;}
+ul.sl>li span{color:var(--ink2);}
+details.full{margin-top:24px;border-top:1px solid var(--line2);padding-top:18px;}
+details.full>summary{cursor:pointer;font-family:var(--sans);font-size:14px;color:var(--gold2);font-weight:700;list-style:none;padding:11px 16px;background:var(--field2);border:1px solid var(--line);border-radius:9px;transition:.15s;}
+details.full>summary:hover{border-color:var(--gold);}
+details.full>summary::-webkit-details-marker{display:none;}
+details.full>summary::before{content:"▸  ";}
+details.full[open]>summary::before{content:"▾  ";}
+details.full[open]>summary{margin-bottom:6px;}
+dl.terms{margin:0;display:grid;grid-template-columns:max-content 1fr;}
+dl.terms dt{font-weight:700;color:var(--gold2);font-size:14px;padding:9px 18px 9px 0;border-bottom:1px solid var(--line2);white-space:nowrap;}
+dl.terms dd{margin:0;color:var(--ink2);font-size:14.4px;padding:9px 0;border-bottom:1px solid var(--line2);line-height:1.7;}
+@media(max-width:620px){dl.terms{grid-template-columns:1fr;}dl.terms dt{border-bottom:none;padding-bottom:2px;}}
+.foot{text-align:center;color:var(--muted);font-size:12.5px;font-family:var(--sans);margin-top:30px;line-height:1.9;}
+.foot b{color:var(--gold2);}
+@media(max-width:640px){.sheet{padding:26px 18px 30px;}.wrap{padding:24px 12px 70px;}.cover h1{font-size:24px;}}
+@media print{body{background:#fff;}.tabs{display:none;}.sheet{display:block!important;page-break-after:always;box-shadow:none;}details.full>summary{display:none;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cover">
+    <div class="mono">Agentic Operator · Patent Ideas</div>
+    <h1>我们可以申请的专利</h1>
+    <div class="sub">全程大白话 · 想看更深也是人话 · 2026-06-12</div>
+    <div class="rule"></div>
+  </div>
+  <div class="tabs"><button class="tab on" data-t="ov">总览</button><button class="tab" data-t="p1">专利一</button><button class="tab" data-t="p2">专利二</button><button class="tab" data-t="p3">专利三</button></div>
+  <div class="sheet on" id="ov">
+  <div class="phead">
+    <div class="pmeta"><span class="rank">总览</span><span class="ptag">从代码库挖掘 · 优先报 3 项</span></div>
+    <h2 class="ptitle">我们可以申请哪些专利</h2>
+  </div>
+  <div class="plain">
+    <div class="pl-what">我们把 Agentic Operator 的真实代码翻了一遍,挑出最值得申请的 3 项专利;另外还有 10 个方向也能报。全程大白话,每项点开还能看更深一层(也是人话)。</div>
+    <div class="pl-block"><div class="pl-lab">这三项分别管什么</div>
+      <ul class="howlist">
+        <li><b>专利一 · 管"对外开放"。</b>让外部安全试用我们的 AI,只空跑、不碰真实业务。</li>
+        <li><b>专利二 · 管"系统可靠"。</b>系统宕机也不丢运行记录,监控照常能看。</li>
+        <li><b>专利三 · 管"AI 质量"。</b>用多个不同厂商的 AI 互相核查结论靠不靠谱。</li>
+      </ul>
+    </div>
+  </div>
+  
+  <div class="ovcard">
+    <div class="ovtop"><span class="ovrank">专利 一</span><span class="ovtag">管"对外开放"</span></div>
+    <div class="ovtitle">影子模式 · 对外安全开放 AI agent</div>
+    <div class="ovwhat">让外部合作伙伴能"试用"我们内部的 AI 招聘审核 agent —— 只是空跑演练,绝不动一条真实数据、不触发一个真实流程。</div>
+  </div>
+  <div class="ovcard">
+    <div class="ovtop"><span class="ovrank">专利 二</span><span class="ovtag">管"系统可靠"</span></div>
+    <div class="ovtitle">运行记录随手存 · 宕机也不丢</div>
+    <div class="ovwhat">一种让"谁在什么时候跑了什么、结果如何"这些运行记录,在系统崩溃时也不丢的方法。</div>
+  </div>
+  <div class="ovcard">
+    <div class="ovtop"><span class="ovrank">专利 三</span><span class="ovtag">管"AI 质量"</span></div>
+    <div class="ovtitle">多厂商 AI 陪审团 · 核查结论靠不靠谱</div>
+    <div class="ovwhat">一种持续抽查 AI 业务结论"靠不靠谱"的方法 —— 请多个不同厂商的大模型组成"陪审团"来评判。</div>
+  </div>
+  <div class="pl-block" style="margin-top:26px;"><div class="pl-lab">其它也能申请的方向(简版)</div>
+  <div class="slgroup">
+    <div class="slg-h">评审已识别的备选</div>
+    <ul class="sl"><li><b>外部依赖状态判别</b><span>自动分清供应商是"没钱了 / 故障了 / 说不准",能恢复的自动续跑。</span></li><li><b>运行轨迹防误报总结</b><span>把"系统故障"和"候选人没通过"分开,AI 总结不再把宕机说成人没通过。</span></li><li><b>三级身份去重</b><span>强匹配自动合并、弱匹配只挂人工审、AI 识别同人不同写法,绝不静默合并。</span></li><li><b>业务手册生成可运行 agent</b><span>把领域 SOP 直接编译成能跑的多 agent 工作流,部署即生效。</span></li><li><b>长流程人工卡点续跑</b><span>agent 跑到关键步骤暂停等人点"是 / 否",再从断点继续。</span></li></ul>
+  </div>
+  <div class="slgroup">
+    <div class="slg-h">新增可考虑方向</div>
+    <ul class="sl"><li><b>跨模型族二次校验</b><span>关键判定再用"另一家厂商的模型"复核一遍,消除自我偏好、降误判。</span></li><li><b>简历内容抗注入</b><span>把简历里的文字当"数据"而非"指令"做清洗,防恶意简历操纵 AI。</span></li><li><b>确定性监控旁路</b><span>健康 / 超时 / 成本 / 错误率在引擎外纯计算,告警自动去重、恢复即自动消失。</span></li><li><b>数据双写一致性</b><span>同一候选人同时写图数据库和关系库并保持一致,断一边不丢另一边。</span></li><li><b>"部署即激活"版本门控</b><span>一行版本状态控制 agent 上线 / 暂停,出问题默认关闭、超时自动清理。</span></li></ul>
+  </div></div>
+</div><div class="sheet" id="p1">
+    <div class="phead">
+      <div class="pmeta"><span class="rank">专利 一</span><span class="ptag">管"对外开放"</span></div>
+      <h2 class="ptitle">影子模式 · 对外安全开放 AI agent</h2>
+    </div>
+    <div class="plain">
+      <div class="pl-what">让外部合作伙伴能"试用"我们内部的 AI 招聘审核 agent —— 只是空跑演练,绝不动一条真实数据、不触发一个真实流程。</div>
+      <div class="pl-block"><div class="pl-lab">为什么需要它</div><div class="pl-pain">我们的 AI 审核 agent 一旦运行,就会真写数据库、真发通知、真推进招聘流程。如果直接让外部来调用测试,就会污染真实数据、误启动真实业务,还可能因为反复请求而重复花掉大模型的钱(每次推理都很贵)。</div></div>
+      <div class="pl-block"><div class="pl-lab">我们是怎么做的</div><ul class="howlist"><li><b>空跑演练(影子模式)。</b>照常算出结论,但所有"本该写库、发通知、推进流程"的动作,只列出来给你看、不真执行。</li><li><b>同一请求只算一次。</b>每个请求带个编号,重复发来直接返回上次结果,不重复花大模型的钱。</li><li><b>太忙就请你稍后再来。</b>同时在跑的任务超过上限,就回一句"请 5 秒后重试",保护后端大模型不被压垮。</li><li><b>结果可核对版本。</b>能告诉你当时用的是哪一版规则、原文是什么,外部可以一字不差地核对。</li><li><b>痕迹单独存放。</b>外部的试用记录单独归档,不混进我们自己的监控和报表里。</li></ul></div>
+      <div class="pl-block"><div class="pl-lab">带来什么好处</div><ul class="effect"><li>外部放心试用、我们零风险:不写一条真实数据、不误触发一个真实流程。</li><li>同一请求不重复跑大模型,省钱。</li><li>后端大模型不会被外部并发打垮。</li><li>测试结果可复现,用的是哪版规则可追溯。</li></ul></div>
+    </div>
+    <details class="full">
+      <summary>了解更多(还是大白话):新在哪 · 想保护什么 · 配图 · 名词</summary>
+      <div class="pl-block"><div class="pl-lab">和常规做法比,新在哪</div><div class="pl-pain">一般人想把自家AI对外开放给人试用,通常会另起一套假环境、做个"沙箱"让外面去空跑,等于要养两套东西,还容易跟真的那套跑偏、对不上。我们不另搭环境:外面跑的还是同一套真AI,只是把"本该写真实数据、本该发通知、本该往下推流程"这几件事,改成"只在结果里写一句'这一步本来要干啥',但就是不真干"。再叠上几招——同一个请求只算一次不重复烧钱、后台太忙就回一句"5秒后再来"护住贵的大模型、结果里带着"用的哪版规则的原文指纹"能让对方核对、外面留下的痕迹单独存放不混进自家监控。这几招是咬在一起的一整组,别人想照抄就得把整组都复制下来,单抄一两条没用,所以不好绕。</div></div>
+      <div class="pl-block"><div class="pl-lab">我们想保护什么</div><ul class="protect"><li><div class="ptop"><span class="cb cb-ind">最核心</span></div><div class="pbody">把一个本来会写真实数据、发通知、推进流程的内部AI,对外开成可调用的试用服务:外面来的请求照常算结论,但所有会改真实数据、发通知、推流程的动作只'记一笔说本该干啥'而不真干;同一请求只算一次不重复烧钱;后台太忙就回'稍后重试'护住后端大模型;外面的痕迹单独存放不混进自家监控。这整套合起来是我们最核心要圈住的。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">同一个请求只算一次:每个请求带一个自己的编号,先查有没有算过,算过就直接把上次结果还回去;就算两个一模一样的请求同时挤进来,数据库这一层也卡死只让一个真算,另一个自动当成重复。这样贵的AI推理绝不会因为网络重发而白跑两遍。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">忙的时候自动'软刹车'护住后端大模型:系统盯着'手头正在算的有几单',超过设定的上限就直接回一句'5秒后再来',让外面按这个秒数等一等再来,而不是把请求硬塞给后端把它压垮。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">空跑演练时把'本该做的真实动作'写成清单但不执行:针对不同结论(比如通过/不通过),把它在真实流程里本该做的事(写主表、发不通过的消息、发通知)一条条列出来放进结果里,看得见全貌但一件都不真做,真实数据零改动。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">外面的试用痕迹单独存、不污染自家监控:每次试用只往一张专门的记录表里写,并打上'这是对外试用'的专属标签,故意不写进那几张会被错误率、成本、依赖、流程血缘这些监控读到的表里;所以试用全程都有痕迹可查,却不会把自家的监控数字搅乱。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">结果能核对用了哪版规则、用错版本直接报错不偷换:每条用到的规则都带上它原文的一个'指纹'随结论一起返回,对方能验明白当时到底按哪版规则、原文是不是这条;如果对方点名的规则版本我们没有,就直接报错并列出现有版本,绝不偷偷换成最新版来糊弄。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">分清'机器故障'和'业务没通过',故障绝不冒充结论:算的时候设了超时,卡住就判'超时';后端连不上、被限流、AI调用出错这些机器层面的毛病,各自标成可重试的故障码,绝不会被当成'这个人没通过'这种业务结论丢回去。</div></li></ul></div>
+      <div class="pl-block"><div class="pl-lab">如果画一张图,怎么画</div><div class="pl-pain">画一条从左到右的流水线,分五段:最左是"外部合作方",往右依次是"门口验票""调度台""真正算账的AI""存档和留痕"。外面递进来一个请求,先过"验票"岔路:票不对就退回。进来后第一个岔路问"这请求以前算过没"——算过就抄上次结果直接还回去(标一条'重复,不占名额'的捷径绕过后面所有步骤)。没算过再问"手头在算的是不是太多了"——太多就回"稍后再来";不多就开一单、立刻先回一句"收到了"。然后后台慢慢算,算完把真实动作写成"本该干啥"的清单(但不真干),并把"用的哪版规则指纹"一起塞进结果。最后所有痕迹落到一张专门的试用记录表;底下用一条虚线圈出"隔离墙",墙外那些自家监控表都打叉,表示试用碰不到它们。</div></div>
+      <div class="pl-block"><div class="pl-lab">名词小词典</div><dl class="terms"><dt>影子模式(空跑演练)</dt><dd>让外面把我们的AI当真跑一遍,结论照常算,但所有会动真实数据、发通知、推流程的动作都只'记一笔本该干啥'而不真干,像彩排不上台。</dd><dt>同一请求只算一次</dt><dd>每个请求带个自己的编号,算过就直接还上次结果,绝不让贵的AI因为网络重发而白跑两遍。</dd><dt>软刹车 / 稍后重试</dt><dd>系统盯着手头正在算的有几单,太多了就回一句'5秒后再来',让外面等一等,免得把后端贵的AI压垮。</dd><dt>后端大模型</dt><dd>真正干推理活的那个AI,算一次又慢又费钱,所以前面要又是去重又是限流地护着它。</dd><dt>本该干啥清单(被抑制的动作)</dt><dd>针对这次结论,把真实流程里本来要做的事(写主表、发消息、发通知)一条条列出来放进结果里,看得见但一件都不真做。</dd><dt>规则版本指纹</dt><dd>每条用到的规则都附上它原文算出来的一串校验码,随结论一起返回,对方能核对当时到底按哪版规则、原文对不对。</dd><dt>用错版本直接报错</dt><dd>对方点名的规则版本我们没有,就明确报错并列出现有版本,绝不偷偷换成最新版蒙混过去,保证结果可复现可核对。</dd><dt>专属来源标签 / 隔离墙</dt><dd>给每条试用痕迹打上'这是对外试用'的标记,只往专门的记录表里写;靠这个标记把试用从自家的错误率、成本、监控里干净地摘出去,有痕迹可查却不搅乱监控。</dd><dt>故障与'没通过'分开</dt><dd>机器层面的毛病(超时、连不上、被限流)各自标成可重试的故障,绝不会被当成'这个人没通过'这种业务结论丢回去。</dd></dl></div>
+    </details>
+  </div><div class="sheet" id="p2">
+    <div class="phead">
+      <div class="pmeta"><span class="rank">专利 二</span><span class="ptag">管"系统可靠"</span></div>
+      <h2 class="ptitle">运行记录随手存 · 宕机也不丢</h2>
+    </div>
+    <div class="plain">
+      <div class="pl-what">一种让"谁在什么时候跑了什么、结果如何"这些运行记录,在系统崩溃时也不丢的方法。</div>
+      <div class="pl-block"><div class="pl-lab">为什么需要它</div><div class="pl-pain">我们用一个"运行引擎"来跑各种 AI 任务,它像现场记录员,但记录是临时的 —— 一重启或崩溃,还没存档的就没了。常规做法是另开个程序每 30 秒去抄一次,可 30 秒内就跑完、又恰好赶上崩溃的任务,记录会永久丢失。</div></div>
+      <div class="pl-block"><div class="pl-lab">我们是怎么做的</div><ul class="howlist"><li><b>事情一发生就顺手存。</b>任务一开始 / 一结束 / 一出错,就地立刻写进数据库,不用等那固定周期的抄写。</li><li><b>存档出错绝不连累正事。</b>存档万一失败只记一条告警,正在跑的业务任务照常完成。</li><li><b>状态只进不退。</b>已经"完成 / 失败"的记录,不会被一条迟到的"进行中"消息覆盖回去。</li><li><b>看板双保险。</b>看监控时同时读"实时引擎"和"数据库存档",引擎挂了就自动切到存档,恢复了又自动切回实时。</li></ul></div>
+      <div class="pl-block"><div class="pl-lab">带来什么好处</div><ul class="effect"><li>监控数据几乎不丢:丢失窗口从约 30 秒降到接近 0。</li><li>引擎宕机 / 重启时,监控看板照样能看;恢复后自动回到实时。</li><li>存档数据库出故障,也不影响业务任务正常跑完。</li></ul></div>
+    </div>
+    <details class="full">
+      <summary>了解更多(还是大白话):新在哪 · 想保护什么 · 配图 · 名词</summary>
+      <div class="pl-block"><div class="pl-lab">和常规做法比,新在哪</div><div class="pl-pain">老办法是另派一个人每隔半分钟去运行引擎那儿抄一遍账,本质是"事后旁观",所以快进快出的小任务整个发生在两次抄账的空当里,根本抄不到;引擎一崩,这半分钟的活儿就没了。也有人干脆把"存账"塞进正事里同步做,可一旦数据库卡住,正事就被拖死。本方案的新在于:把存账动作直接挂进引擎跑活儿的几个关键节点上,在同一个进程里就地随手存,任务刚结束那一刻账就落地了,不用等下一次抄。同时立了几条死规矩:存账出错只记一句告警绝不往正事上甩;已经"完成/失败"的状态绝不会被一条迟到的"进行中"覆盖回去。看监控时还同时问实时引擎和数据库两边,谁活着信谁。别人想绕,得把"就地随手存+出错不连累正事+状态不回退+两边对账"这一整套都凑齐,单抄一条没用。</div></div>
+      <div class="pl-block"><div class="pl-lab">我们想保护什么</div><ul class="protect"><li><div class="ptop"><span class="cb cb-ind">最核心</span></div><div class="pbody">把存档动作直接挂到运行引擎干活的关键节点上(开始、结束、出错、发消息),在同一个进程里就地随手存;一旦出错只记一句告警,绝不往正在跑的正事上甩，让存档坏了也不影响业务跑完；看监控时同时问实时引擎和数据库存档两边,谁活着信谁，引擎挂了自动看存档、恢复了自动切回实时。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">记录开始时按任务编号存一条'进行中',但更新这条记录时故意不去改它的状态字段；这样哪怕那个慢半拍的定时抄账员后到，也没法把一条已经标了'完成/失败'的记录打回'进行中'。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">任务真正结束后,再去把每一步的详细脚印补上;补的时候强行用'我这边已经确定的最终结果'盖掉从实时引擎抓回来的字段,免得抓到一份还没跑完的旧数据把已知的结局冲掉；补脚印是在一个事务里先全删旧的再重灌新的,重复补多少次结果都一样。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">发消息时先让消息真正发出去,再拿引擎返回的消息编号配对存档,重复存也只算一次；万一某条任务的脚印没补上,就留个'没补全'的记号,等那个定时抄账员当兜底网回头补,两边写的是同一批账、能互相盖、最终对齐。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">看列表时同时向实时引擎和数据库存档要数据,以实时的为准、用存档补全更早的历史；一边挂了就只用另一边,两边都挂才报错；还没跑完、没有时间戳的任务排在最前,免得被旧的已完成任务挤掉。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">看单个任务的详细脚印时,只有当存档里这条任务已经是'完成/失败'状态、并且脚印记号显示已补全,才信存档；否则就回头去问实时引擎要还在进行中的步骤——这个判断靠业务规律,不是简单的'缓存有没有命中'。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">用一个开关在'只看实时/只看存档/自动两边对账'之间切换,默认自动；引擎的目录信息和所有写操作(发消息、重放)永远走实时,只有看运行记录这类'读'才走两边对账,所以这套容灾对正常业务和写操作零打扰。</div></li></ul></div>
+      <div class="pl-block"><div class="pl-lab">如果画一张图,怎么画</div><div class="pl-pain">画成上中下三层。最上层是"运行引擎里正在干活的任务",从它分出四条小路:开始、完成、出错、发消息。每条小路口先画个岔路菱形:"存档成功了吗?"——不成功就拐到"记一句告警、绝不打扰正事"再绕回任务;成功才往下存。出错那条还要再问一句"是最后一次尝试了吗?",还要重试就先回去不记终态。中间画一个数据库圆桶当存档,四条路都汇进去;桶旁边再画一个独立的"每半分钟抄一次的定时员"当兜底网,用虚线连进桶,补没补全的账。最下层是"看监控",入口先分三条:只看实时、只看存档、自动;自动这条同时问两边、谁活信谁。右边写一句大字总结:实时引擎是会丢的活账本,数据库是不丢的存档,出错绝不连累正事。</div></div>
+      <div class="pl-block"><div class="pl-lab">名词小词典</div><dl class="terms"><dt>运行引擎</dt><dd>负责真正跑各种自动任务的那台'发动机',它脑子里记着每个任务现在跑到哪、出了啥结果。问题是它一关机或重启,脑子里没存盘的就全没了，像个临时记录员。</dd><dt>易失/会丢</dt><dd>指引擎记在'脑子里'(内存)的东西没落到硬盘,断电或重启就消失。所以才要赶紧抄一份到能长期保存的地方。</dd><dt>存档/数据库</dt><dd>把运行记录长期保存下来的那本'正式账本',断电也不丢。监控查历史、引擎挂了时都靠它。</dd><dt>就地随手存(穿透写)</dt><dd>不另派人事后抄账,而是在引擎干活的当口直接顺手把账记下来,任务一结束那一刻账就落地了,不用等下一轮抄。</dd><dt>钩子(挂点)</dt><dd>引擎特意留出来的几个'插口',让你能在'任务开始/完成/出错/发消息'这几个时刻插进自己的动作。本方案就是在这几个插口上随手存账。</dd><dt>状态永不降级</dt><dd>一条记录一旦标成'完成'或'失败',就绝不允许被一条慢半拍、迟到的'进行中'消息打回'还在跑'。结局只许往前走,不许倒退。</dd><dt>最后一次尝试</dt><dd>任务失败时引擎常会自动重试几次。只有重试到头、确实还是失败的那一次,才算真失败记进账;中间的临时失败不算,免得虚报。</dd><dt>零执行污染</dt><dd>记账这件事万一出岔子(比如数据库卡了),绝不能拖累正在干的正事——存档报错只在旁边记一句告警,正事照常跑完。存档和正事彻底隔开。</dd><dt>两边对账(双源仲裁)</dt><dd>看监控时同时向实时引擎和数据库存档两边要数据:都在就以实时为准、用存档补历史;一边挂了就只信另一边;两边都挂才报错。引擎一崩,监控自动改看存档,引擎恢复又自动切回实时。</dd><dt>对账网(定时抄账员)</dt><dd>原来每隔半分钟抄一遍账的老办法,在新方案里被降级成'兜底网':平时不指望它,只用来补那些随手存时漏掉、没补全的账。</dd></dl></div>
+    </details>
+  </div><div class="sheet" id="p3">
+    <div class="phead">
+      <div class="pmeta"><span class="rank">专利 三</span><span class="ptag">管"AI 质量"</span></div>
+      <h2 class="ptitle">多厂商 AI 陪审团 · 核查结论靠不靠谱</h2>
+    </div>
+    <div class="plain">
+      <div class="pl-what">一种持续抽查 AI 业务结论"靠不靠谱"的方法 —— 请多个不同厂商的大模型组成"陪审团"来评判。</div>
+      <div class="pl-block"><div class="pl-lab">为什么需要它</div><div class="pl-pain">AI 给出的判断(比如"这个候选人不合格")到底有没有依据?用同一家的 AI 去检查它自己,它会偏袒自己的结论、查不出问题;而且检查用的 AI 自己也会随版本"飘",还可能因为没钱 / 故障中断,反而拖累主业务。</div></div>
+      <div class="pl-block"><div class="pl-lab">我们是怎么做的</div><ul class="howlist"><li><b>跨厂商组陪审团。</b>参与核查的几个 AI 必须来自不同厂商,互不偏袒,消除"自己查自己"的偏心。</li><li><b>有分歧才投票。</b>主评委和陪审团意见一致就直接采纳,只有不一致才走多数表决,既省钱又更准。</li><li><b>核查 AI 挂了不影响主业务。</b>核查用的 AI 一旦不可用就跳过这条、不报错,真正权威的规则判定照常运行。</li><li><b>拿人工抽检当标尺。</b>用人工标注当标准答案,算出核查 AI 的准确率,知道它到底值不值得信。</li><li><b>分清"改了规则"还是"AI 飘了"。</b>把人为调整和模型自身漂移区分开,不误报。</li></ul></div>
+      <div class="pl-block"><div class="pl-lab">带来什么好处</div><ul class="effect"><li>核查更客观:不同厂商互查,避免 AI 偏袒自己。</li><li>成本可控、可复现:同一条最多只花一次钱核查。</li><li>核查环节出故障,不连累真正的业务判定。</li><li>能用数字说清"这个 AI 评委到底有多可信"。</li></ul></div>
+    </div>
+    <details class="full">
+      <summary>了解更多(还是大白话):新在哪 · 想保护什么 · 配图 · 名词</summary>
+      <div class="pl-block"><div class="pl-lab">和常规做法比,新在哪</div><div class="pl-pain">常规做法只请一个 AI 来给答案打分,而且常常跟生产用的是同一家 AI,等于让人给自己的卷子打分,容易偏袒。本方案有四处别人不容易绕过的设计拧成一股绳:一是用一套死规矩硬性挑出几家不同厂商的 AI 当陪审,谁跟生产同厂就不许进,杜绝偏袒;二是主评委和陪审一致就直接定,不一致才召集投票,既省钱又只在吵架处加码;三是核查 AI 挂了就当这条没查、绝不报错也不拖累正经业务;四是给评分标准打了版本号,从而能分清是人改了规则还是 AI 自己飘了。少一环都达不到这个又准又稳又省的效果。</div></div>
+      <div class="pl-block"><div class="pl-lab">我们想保护什么</div><ul class="protect"><li><div class="ptop"><span class="cb cb-ind">最核心</span></div><div class="pbody">一套专门给 AI 业务结论做事实核查的运行系统:它从已有的正经判定记录里取样本,用一组互查的 AI 当评委来判断结论有没有依据;关键是它只在旁边查、永远不挡也不脏正经业务的判定,核查 AI 一挂就跳过这条、绝不报错。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">保护这套挑评委的死规矩:陪审 AI 必须来自彼此不同的厂商,而且都不能跟生产用的那家是同一家,从根上堵住自己人偏袒自己人。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">保护这套省钱的判法:先让主评委判,陪审一致就直接采纳;只有主评委和陪审吵起来才召集投票,谁多数听谁的,拿不准的一律不算赢、平票也算拿不准。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">保护这套不重复花钱、可复现的取样:不用掷骰子式随机取,而是按固定间隔挑;同一条记录认死一个标识,查过的就跳过,哪怕监控窗口重叠也只花一次钱、每次结果都一样。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">保护这套人工对答案的校准回路:让人工标好正确答案,跟评委的判断逐条对账,算出评委的准确率等一串可信度指标,据此决定是否调参或停用某个评委。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">保护这套分清飘没飘的本事:给评分标准打版本号,只拿同版本的前后两次判断来比一致率,一致率太低才算 AI 自己飘了,从而不会把人为改了标准误当成 AI 飘了。</div></li><li><div class="ptop"><span class="cb cb-dep">细分</span></div><div class="pbody">保护这套受控报警:只有核查判为没依据、且系统不是只看不动的模式时才发提醒,并带上能点回原始记录的深链;只看不动的模式下只默默记账、不打扰人。</div></li></ul></div>
+      <div class="pl-block"><div class="pl-lab">如果画一张图,怎么画</div><div class="pl-pain">画一条横贯顶部的"正经业务线":规则预筛对候选人和岗位给出通过或不通过,存进审计本。下面挂一条独立的"核查线",画成一串方框接龙:先从审计本取样本、把查过的剔掉;再按固定间隔挑一批;送给一位主评委 AI 打分。这里画第一个岔路:主评委挂了就走"跳过"小框,正经业务线照常不受影响;正常就送进一圈不同厂商的陪审 AI。第二个岔路:陪审跟主评委一致就直接定,不一致才进"投票"框。结果统一记账。第三个岔路:判为没依据且不是只看模式才发提醒。右边再画两条往回的反馈线:一条人工对答案算准确率,一条按版本比前后判断看 AI 有没有飘,结果回头调评委配置。</div></div>
+      <div class="pl-block"><div class="pl-lab">名词小词典</div><dl class="terms"><dt>结论有没有依据(接地性)</dt><dd>AI 给的判断是不是真有规则和简历、岗位这些事实撑着,而不是张口就来。撑得越足分越高。</dd><dt>陪审团</dt><dd>一组当评委的 AI,像法庭陪审一样集体判一个结论靠不靠谱,不让一家说了算。</dd><dt>主评委</dt><dd>先上场打分的那位评委 AI;它和陪审一致就直接定,意见不合才召集大家投票。</dd><dt>不同厂商的 AI(模型族)</dt><dd>把各家大模型按娘家分门别类,比如这家那家;同一家的算自己人,容易互相偏袒,所以评委要挑别家的。</dd><dt>评委挂了就跳过(故障旁路)</dt><dd>核查用的 AI 没钱了或出故障,就把这条当作没查、直接略过,绝不报错也不拖累正经业务。</dd><dt>固定间隔取样</dt><dd>不靠掷骰子随机挑样本,而是隔几个挑一个;好处是每次重跑挑到的都一样,结果能复现。</dd><dt>同一条只算一次(认死标识)</dt><dd>每条记录认一个唯一编号,查过就记上,下次撞见直接跳过,省得对同一条反复花钱让 AI 评。</dd><dt>评分标准版本号</dt><dd>给评委用的打分说明书编个版本;改了说明书就换号,这样能分清判断变了是因为换了说明书还是 AI 自己变了。</dd><dt>AI 自己飘了(漂移)</dt><dd>同一套说明书下,AI 前后对同样的东西判得不一样了,说明它自己跑偏了,该敲警钟。</dd></dl></div>
+    </details>
+  </div>
+  <div class="foot">
+    内容由多智能体评审从 <b>Agentic Operator</b> 真实代码库挖掘 · 全程白话讲解,需要正式法律版交底可随时生成。<br>
+    优先申请 3 项 + 另有 10 个可考虑方向 · 2026-06-12
+  </div>
+</div>
+<script>
+document.querySelectorAll('.tab').forEach(function(b){
+  b.addEventListener('click', function(){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on');});
+    document.querySelectorAll('.sheet').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+    document.getElementById(b.getAttribute('data-t')).classList.add('on');
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+</script>
+</body>
+</html>

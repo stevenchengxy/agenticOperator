@@ -7,6 +7,11 @@ vi.mock('@/server/db', () => ({
   },
 }));
 
+const mockGetInfraStatus = vi.fn();
+vi.mock('@/server/ops/infra-status', () => ({
+  getInfraStatus: () => mockGetInfraStatus(),
+}));
+
 import { GET } from './route';
 import { prisma } from '@/server/db';
 
@@ -28,6 +33,51 @@ const emPopulated = {
   updatedAt: new Date('2026-05-14T11:00:00.000Z'),
 };
 
+function infraStatus(opts: { inngest?: string; raas?: string; neo4j?: string; deployment?: string; neo4jLastSyncAt?: string | null } = {}) {
+  const generatedAt = '2026-05-14T11:01:00.000Z';
+  const neo4jLastSyncAt = opts.neo4jLastSyncAt ?? '2026-05-14T10:00:00.000Z';
+  const raasState = opts.raas ?? (process.env.RAAS_API_BASE_URL ? 'healthy' : 'unknown');
+  return {
+    generatedAt,
+    inngest: {
+      url: 'http://test-inngest:8288',
+      apps: [],
+      appErrors: [],
+      serveEndpointUrl: 'http://host.docker.internal:3002/api/inngest',
+      healthy: opts.inngest !== 'down',
+    },
+    raas: {
+      apiUrl: process.env.RAAS_API_BASE_URL || null,
+      reachable: raasState === 'healthy' ? true : raasState === 'down' ? false : null,
+      httpStatus: raasState === 'healthy' ? 200 : null,
+    },
+    neo4j: {
+      configured: true,
+      reachable: opts.neo4j !== 'down',
+      lastSyncAt: neo4jLastSyncAt,
+      lastError: null,
+      staleSeconds: null,
+    },
+    deployment: {
+      serveEndpointUrl: 'http://host.docker.internal:3002/api/inngest',
+      mainAppUrl: 'http://host.docker.internal:3002/api/inngest',
+      env: {
+        nodeEnv: 'test',
+        inngestBaseUrl: 'http://test-inngest:8288',
+        inngestServeHost: 'http://host.docker.internal:3002',
+        inngestServePath: '/api/inngest',
+        databaseConfigured: true,
+      },
+    },
+    subsystems: [
+      { id: 'inngest', label: 'Inngest', state: opts.inngest ?? 'healthy', lastUpdate: generatedAt, detail: null, metrics: [{ label: 'functions', value: '6' }], issue: null },
+      { id: 'raas', label: 'RaaS API', state: raasState, lastUpdate: generatedAt, detail: raasState === 'unknown' ? 'RAAS_API_BASE_URL not configured.' : raasState === 'down' ? 'RAAS API Server unreachable: ECONNREFUSED' : null, metrics: [{ label: 'endpoint', value: process.env.RAAS_API_BASE_URL ? 'raas.example.com:3001' : '—' }, { label: 'http status', value: raasState === 'healthy' ? '200' : '—' }], issue: null },
+      { id: 'neo4j', label: 'Neo4j / Allmeta', state: opts.neo4j ?? 'healthy', lastUpdate: neo4jLastSyncAt, detail: null, metrics: [{ label: 'last sync', value: neo4jLastSyncAt ?? '—' }, { label: 'upserted last', value: '42' }], issue: null },
+      { id: 'deployment', label: 'Deployment', state: opts.deployment ?? 'healthy', lastUpdate: generatedAt, detail: null, metrics: [{ label: 'callback', value: 'http://host.docker.internal:3002/api/inngest' }], issue: null },
+    ],
+  };
+}
+
 // ── Test 1: Empty EmSystemStatus → unknowns, no crash ──────────────
 
 describe('GET /api/monitor/system-status', () => {
@@ -35,6 +85,7 @@ describe('GET /api/monitor/system-status', () => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     (prisma.emSystemStatus.findUnique as any).mockResolvedValue(emEmpty);
+    mockGetInfraStatus.mockResolvedValue(infraStatus({ neo4j: 'unknown', neo4jLastSyncAt: null }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
   });
 
@@ -44,7 +95,7 @@ describe('GET /api/monitor/system-status', () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const j = await res.json();
-    expect(j.subsystems).toHaveLength(4);
+    expect(j.subsystems).toHaveLength(5);
     expect(j.fetchedAt).toBeTruthy();
 
     const em = j.subsystems.find((s: any) => s.id === 'em');
@@ -73,6 +124,7 @@ describe('GET /api/monitor/system-status', () => {
   it('populated EmSystemStatus row + reachable RAAS API → subsystems reflect actual values', async () => {
     vi.stubEnv('RAAS_API_BASE_URL', 'http://raas.example.com:3001');
     (prisma.emSystemStatus.findUnique as any).mockResolvedValue(emPopulated);
+    mockGetInfraStatus.mockResolvedValue(infraStatus());
     // Inngest + RaaS both probed via fetch; suite default returns 200.
 
     const res = await GET();
@@ -103,8 +155,7 @@ describe('GET /api/monitor/system-status', () => {
   it('RAAS API probe failure → raas.state=down, other subsystems still return', async () => {
     vi.stubEnv('RAAS_API_BASE_URL', 'http://raas.example.com:3001');
     (prisma.emSystemStatus.findUnique as any).mockResolvedValue(emPopulated);
-    // Stub global fetch to reject (simulating both probes down)
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+    mockGetInfraStatus.mockResolvedValue(infraStatus({ inngest: 'down', raas: 'down' }));
 
     const res = await GET();
     expect(res.status).toBe(200);

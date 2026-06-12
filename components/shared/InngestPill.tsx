@@ -3,6 +3,7 @@ import React from "react";
 import { fetchJson } from "@/lib/api/client";
 import type { SystemConfigResponse } from "@/app/api/system/config/route";
 import { SystemConfigModal } from "./SystemConfigModal";
+import { useApp } from "@/lib/i18n";
 
 // Always-visible Inngest health pill — shown in /fleet and /monitor headers.
 // Dot color reflects healthy (green) / unreachable (red); the URL host:port
@@ -12,6 +13,7 @@ import { SystemConfigModal } from "./SystemConfigModal";
 const POLL_MS = 5_000;
 
 export function InngestPill() {
+  const { t } = useApp();
   const [cfg, setCfg] = React.useState<SystemConfigResponse | null>(null);
   const [open, setOpen] = React.useState(false);
 
@@ -42,21 +44,29 @@ export function InngestPill() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-line bg-surface hover:bg-bg-2 text-[11.5px] text-ink-2"
-        title={cfg?.inngest.url ?? ""}
+        className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-line bg-surface hover:bg-bg-2 text-[11.5px] text-ink-2 max-w-full"
+        title={`${t("settings_env_title")} · ${cfg?.inngest.url ?? ""}`}
       >
         <span
-          className="rounded-full"
+          className="rounded-full shrink-0"
           style={{ width: 7, height: 7, background: dotColor }}
         />
-        <span className="mono">{host}</span>
+        <span className="font-medium text-ink-1 whitespace-nowrap">{t("settings_env_title")}</span>
+        <span className="text-ink-4">·</span>
+        <span className="mono min-w-0 truncate">{host}</span>
         {cfg && (
-          <span className="text-ink-3">
+          <span className="text-ink-3 whitespace-nowrap">
             · {cfg.inngest.registeredFunctionCount} fn
           </span>
         )}
       </button>
-      {open && cfg && <SystemConfigModal cfg={cfg} onClose={() => setOpen(false)} />}
+      {open && cfg && (
+        <SystemConfigModal
+          cfg={cfg}
+          onClose={() => setOpen(false)}
+          onConfigChange={setCfg}
+        />
+      )}
     </>
   );
 }

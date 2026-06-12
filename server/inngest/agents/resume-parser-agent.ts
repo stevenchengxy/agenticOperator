@@ -32,6 +32,7 @@ import {
   writeResumeInstance,
 } from '@/lib/allmeta-writers';
 import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
+import { detectResumeFormat, convertDocxBufferToPdf } from '@/lib/resume-convert/docx-to-pdf';
 import { classifyRobohire } from '@/lib/dependency-health/classify';
 import { reportDependencyDegraded } from '@/lib/dependency-health/report';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
@@ -40,11 +41,8 @@ import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { prisma } from '@/server/db';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 import { runLockCheck } from '@/lib/candidate-lock/run-lock-check';
-// 查重前移(在 save 之前判同一人,用结果驱动落库挂老 Candidate 1:N)。
-import { resolveIdentityMatch } from '@/lib/rule-check/candidate-match/resolve-identity';
-import { loadCandidateMatchRules, identityRulesByPriority } from '@/lib/rule-check/candidate-match/rules-data';
-import { candidateFromResumeProcessed, partnerPgCandidateRepo } from '@/lib/rule-check/candidate-match/candidate-repo';
-import { makeAiFieldJudge } from '@/lib/rule-check/candidate-match/ai-equivalence';
+// 查重(invoke 模式):落库前同步调用独立的「候选人查重」函数,拿结论驱动挂老档/新建。
+import { candidateIdentityAgent } from '@/server/inngest/agents/candidate-identity-agent';
 
 // Local alias mirroring the RoboHire parse-resume `data` shape that we
 // historically imported from raas-api-client.ts. After the 2026-05-20
@@ -207,13 +205,48 @@ export const resumeParserAgent = inngest.createFunction(
             `filename="${filename ?? '—'}"`,
         );
 
+        // 1b) 格式护栏(2026-06-12):RoboHire 只支持 PDF,按 magic bytes 识别真实
+        //     格式(扩展名/事件 mime 不可信)。docx → mammoth+系统 Chrome 转成 PDF
+        //     再发;转换失败/老 .doc/unknown → 原样发,由 UNPARSEABLE 路径兜底。
+        //     注意:saveCandidate 的 MD5 etag 仍用**原始字节**算(dedup 语义 = 同一
+        //     上传文件),只有发给 RoboHire 的 buffer 换成转换后的 PDF。
+        const rawFormat = detectResumeFormat(pdfBuffer);
+        let parseBuffer = pdfBuffer;
+        let parseFilename = (filename as string | undefined) ?? 'resume.pdf';
+        if (rawFormat === 'docx') {
+          try {
+            parseBuffer = await convertDocxBufferToPdf(pdfBuffer);
+            parseFilename = parseFilename.replace(/\.docx?$/i, '') + '.pdf';
+            fileLogger.event('docx-converted', {
+              upload_id,
+              original_bytes: pdfBuffer.length,
+              pdf_bytes: parseBuffer.length,
+            });
+            logger.info(
+              `[resume-persist] docx → pdf converted · upload_id=${upload_id} ` +
+                `${pdfBuffer.length}B → ${parseBuffer.length}B`,
+            );
+          } catch (e) {
+            // 转换失败:原样发碰运气(RoboHire 拒了会走 UNPARSEABLE 终止),不在这里断链。
+            fileLogger.event('docx-convert-failed', { upload_id, error: (e as Error).message });
+            logger.warn(
+              `[resume-persist] docx→pdf 转换失败,原样发 RoboHire 兜底 · ${(e as Error).message}`,
+            );
+          }
+        } else if (rawFormat === 'doc' || rawFormat === 'unknown') {
+          fileLogger.event('non-pdf-format', { upload_id, detected: rawFormat });
+          logger.warn(
+            `[resume-persist] 检测到非 PDF 格式 (${rawFormat}) · 原样发 RoboHire(老 .doc 不支持转换,建议上传方转 docx/pdf)`,
+          );
+        }
+
         // 2) POST /api/v1/parse-resume (multipart) — 直连 RoboHire
-        const pdfFilename = (filename as string | undefined) ?? 'resume.pdf';
+        const pdfFilename = parseFilename;
         let parseRes: Awaited<ReturnType<typeof parseResumeDirect>>;
         try {
           // 显式传 fileLogger → RoboHire parse-resume 完整 in/out 进 per-run 审计
           // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
-          parseRes = await parseResumeDirect(pdfBuffer, pdfFilename, { traceId, logger: fileLogger });
+          parseRes = await parseResumeDirect(parseBuffer, pdfFilename, { traceId, logger: fileLogger });
         } catch (e) {
           // Document-content failure (image-only / scanned / corrupt PDF — RoboHire
           // truthfully reports "no extractable text"). This is NOT a vendor
@@ -271,33 +304,48 @@ export const resumeParserAgent = inngest.createFunction(
     const finalEtag =
       typeof eventEtag === 'string' && eventEtag.trim() ? eventEtag.trim() : computedEtag;
 
-    // ── 查重前移(9-15):在落库之前判是否同一人,用结果驱动 saveCandidate。
+    // ── 查重(invoke 模式,2026-06-11):同步调用独立的「候选人查重」函数并等待结论。
+    // 该函数只判定 + 落审计、不做任何存储操作(职责:查重=判定,解析=操作);它有
+    // 自己的 run(舰队可管理/可下线)。落库前拿到 sameAsCandidateId 驱动挂老档/新建:
     //    强命中(auto-merged)→ same_as_candidate_id=老人 ID → 复用老行 UPDATE、新简历挂
-    //    老 Candidate(1:N);弱信号/无命中 → null → 走正常 dedup/新建。soft-fail+flag 门控:
-    //    任何异常或 partner-pg 不可达都退回 null,绝不阻断入库。
-    const sameAsCandidateId = (await step.run('compute-candidate-identity', async () => {
-      if (process.env.CANDIDATE_IDENTITY_ENABLED === '0') return null;
+    //    老 Candidate(1:N);弱信号/无命中 → null → 走正常 dedup/新建。
+    // soft-fail:函数下线/超时/出错 → catch 后按「新候选人」降级,主流程零阻塞。
+    interface IdentityVerdict {
+      sameAsCandidateId?: string | null;
+      dedupAction?: string;
+      matchedCandidateId?: string | null;
+      error?: string;
+    }
+    let identityVerdict: IdentityVerdict | null = null;
+    if (process.env.CANDIDATE_IDENTITY_ENABLED !== '0') {
       try {
-        const rec = candidateFromResumeProcessed({
-          parsed: { data: parsed },
-          candidate_id: String(upload_id), // 候选人尚未建库 → upload_id 占位(self 排除无影响)
-        });
-        const rules = identityRulesByPriority(loadCandidateMatchRules());
-        const resolution = await resolveIdentityMatch(rec, partnerPgCandidateRepo, rules, makeAiFieldJudge());
-        fileLogger.event('candidate-identity.resolved', {
+        identityVerdict = (await step.invoke('invoke-candidate-dedup', {
+          function: candidateIdentityAgent,
+          data: {
+            upload_id: String(upload_id),
+            resume_id: raw.resume_id ?? null,
+            trace_id: null,
+            invoked_by: 'resume-parser',
+            // 候选人尚未建库 → candidate_id 用 upload_id 占位(self 排除无影响)。
+            candidate_id: String(upload_id),
+            parsed: { data: parsed },
+          },
+          timeout: '90s',
+        })) as unknown as IdentityVerdict | null;
+        fileLogger.event('candidate-identity.verdict', {
           upload_id,
-          dedup_action: resolution.dedupAction,
-          same_as_candidate_id: resolution.sameAsCandidateId,
-          matched_candidate_id: resolution.matchedCandidateId,
-          matched_candidate_name: resolution.matchedCandidateName,
-          pool: resolution.poolSize,
+          dedup_action: identityVerdict?.dedupAction ?? null,
+          same_as_candidate_id: identityVerdict?.sameAsCandidateId ?? null,
+          matched_candidate_id: identityVerdict?.matchedCandidateId ?? null,
+          error: identityVerdict?.error ?? null,
         });
-        return resolution.sameAsCandidateId;
       } catch (e) {
-        fileLogger.event('candidate-identity.error', { upload_id, error: (e as Error).message });
-        return null;
+        // 查重函数被下线/超时 → 按新候选人降级,绝不阻塞入库。
+        fileLogger.event('candidate-identity.invoke_failed', { upload_id, error: (e as Error).message });
+        identityVerdict = null;
       }
-    })) as string | null;
+    }
+    const sameAsCandidateId = identityVerdict?.sameAsCandidateId ?? null;
 
     // ── 直写 Partner Postgres (2026-05-20: 不再走 RAAS API) ──
     const saveResult = await step.run('save-candidate', async () => {
@@ -408,27 +456,31 @@ export const resumeParserAgent = inngest.createFunction(
     // there; we never mint or write Application rows.
 
     // ── 5c. RMHR 锁定校验 (candidate-lock alignment, 2026-06-08) ──
-    // 调公司 RMHR uploadByRecruiterEmail(上传+锁定合一)拿当前锁定真相、刷新 AO
-    // 认知并据此放行/拦截。三个 flag 默认全关 → 与 2026-06-08 前行为完全一致:
-    //   LOCK_CHECK_ENABLED 关 → runLockCheck 直接 proceed(disabled),不外呼、不落库。
-    const lockResult = await step.run('rmhr-lock-check', async () =>
-      runLockCheck({
-        candidateId: saveResult.candidate_id,
-        uploadId: String(upload_id),
-        employeeId,
-        bucket: bucket ? String(bucket) : null,
-        objectKey: object_key ? String(object_key) : null,
-        filename: (filename ?? 'resume.pdf').trim(),
-        sourcingChannelId: sourcing_channel_id,
-        clientId: client_id ?? null,
-        hasFileBytes: !parsedFromEvent,
-        logger,
-      }),
-    );
+    // 2026-06-11 锁定 agent 暂下线:LOCK_CHECK_ENABLED!=='1' 时连 step 都不进
+    // (运行轨迹里不再出现 rmhr-lock-check,主流程零影响);恢复 = 打开开关,代码不动。
+    // 开启时:调公司 RMHR uploadByRecruiterEmail(上传+锁定合一)拿当前锁定真相、
+    // 刷新 AO 认知并据此放行/拦截。
+    const lockResult =
+      process.env.LOCK_CHECK_ENABLED === '1'
+        ? await step.run('rmhr-lock-check', async () =>
+            runLockCheck({
+              candidateId: saveResult.candidate_id,
+              uploadId: String(upload_id),
+              employeeId,
+              bucket: bucket ? String(bucket) : null,
+              objectKey: object_key ? String(object_key) : null,
+              filename: (filename ?? 'resume.pdf').trim(),
+              sourcingChannelId: sourcing_channel_id,
+              clientId: client_id ?? null,
+              hasFileBytes: !parsedFromEvent,
+              logger,
+            }),
+          )
+        : null;
     // 只有显式开启 LOCK_CHECK_ENFORCE 时,lock-only 才真正拦截下游(默认关=不拦,
     // dark-launch 期只观察 lockResult、不改 announce 行为)。
     const lockOnly =
-      process.env.LOCK_CHECK_ENFORCE === '1' && lockResult.decision === 'lock-only';
+      process.env.LOCK_CHECK_ENFORCE === '1' && lockResult?.decision === 'lock-only';
 
     // ── emit RESUME_PROCESSED 触发下游 matcher ──
     // Note: 在 v7 §4.8 下,RAAS 自己在 saveCandidate 后也会按规则发
@@ -511,15 +563,15 @@ export const resumeParserAgent = inngest.createFunction(
           upload_id,
           candidate_id: saveResult.candidate_id,
           resume_id: saveResult.resume_id,
-          current_owner_employee_id: lockResult.lockOwnerEmployeeId,
-          current_owner_email: lockResult.lockByEmail,
-          reason: lockResult.reason,
+          current_owner_employee_id: lockResult?.lockOwnerEmployeeId ?? null,
+          current_owner_email: lockResult?.lockByEmail ?? null,
+          reason: lockResult?.reason ?? null,
         },
       });
       logger.info(
         `[resume-persist] 🔒 lock-only · candidate ${saveResult.candidate_id} ` +
-          `owned by ${lockResult.lockByEmail ?? lockResult.lockOwnerEmployeeId ?? '—'} ` +
-          `(reason=${lockResult.reason}) — RESUME_PROCESSED suppressed`,
+          `owned by ${lockResult?.lockByEmail ?? lockResult?.lockOwnerEmployeeId ?? '—'} ` +
+          `(reason=${lockResult?.reason}) — RESUME_PROCESSED suppressed`,
       );
     }
 

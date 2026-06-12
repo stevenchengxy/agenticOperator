@@ -157,7 +157,7 @@ export function RuleJudgmentTab({ detail, verify }: { detail: RuleCheckAuditDeta
   if (detail.deterministic) {
     return (
       <div className="flex flex-col" style={{ gap: 16 }}>
-        <DeterministicRules detail={detail} />
+        <DeterministicRules detail={detail} mode="judgment" />
         {validation}
       </div>
     );
@@ -182,7 +182,7 @@ export function RuleSelectionTab({ detail, verify }: { detail: RuleCheckAuditDet
   if (detail.deterministic) {
     return (
       <div className="flex flex-col" style={{ gap: 16 }}>
-        <DeterministicRules detail={detail} />
+        <DeterministicRules detail={detail} mode="selection" />
       </div>
     );
   }
@@ -198,7 +198,14 @@ export function RuleSelectionTab({ detail, verify }: { detail: RuleCheckAuditDet
 /** 确定性 rule-check(查重 9-15 / 归属 / 能源)的规则面板 —— 不套 matchResume 的
  *  「规则库→过滤→选中→注入用户提示词」(确定性引擎判、规则恒纳入)。展示:模式说明 +
  *  (查重时)三级判定阶梯 + 关联候选人;每条规则 = 结论徽章 + 纳入依据 + 原规则定义。 */
-function DeterministicRules({ detail }: { detail: RuleCheckAuditDetail }) {
+function DeterministicRules({
+  detail,
+  mode,
+}: {
+  detail: RuleCheckAuditDetail;
+  /** selection=「规则筛选」(为什么选了这条规则);judgment=「规则判断」(候选人×规则的匹配/违反检查)。 */
+  mode: "selection" | "judgment";
+}) {
   const { t } = useApp();
   const sel = ((detail as unknown as { selection?: Record<string, unknown> }).selection ?? {}) as Record<
     string,
@@ -213,12 +220,13 @@ function DeterministicRules({ detail }: { detail: RuleCheckAuditDetail }) {
       >
         <Badge variant="default">{t("rc_det_mode_badge")}</Badge>
         <span className="text-ink-2" style={{ fontSize: 11.5 }}>
-          {t("rc_det_mode_desc")}
+          {mode === "selection" ? t("rc_det_select_desc") : t("rc_det_mode_desc")}
         </span>
       </div>
-      {isIdentity ? <IdentityLadder sel={sel} /> : null}
+      {/* 三级判定阶梯 = 候选人×规则的匹配检查 → 只在「规则判断」(judgment)出现 */}
+      {isIdentity && mode === "judgment" ? <IdentityLadder sel={sel} /> : null}
       {detail.flags.map((f) => (
-        <DeterministicRuleRow key={f.rule_id} flag={f} />
+        <DeterministicRuleRow key={f.rule_id} flag={f} mode={mode} isIdentity={isIdentity} />
       ))}
     </div>
   );
@@ -278,11 +286,31 @@ function IdentityLadder({ sel }: { sel: Record<string, unknown> }) {
   );
 }
 
-/** 单条确定性规则:规则号 + 名 + 结论徽章 + 纳入依据 + 原规则定义(图引擎懒加载)。 */
-function DeterministicRuleRow({ flag }: { flag: RuleCheckAuditDetail["flags"][number] }) {
+/** 单条确定性规则。selection 模式 = 规则号+名 +「选取依据」(为什么纳入,无 PASS/FAIL);
+ *  judgment 模式 = 规则号+名 + 结论徽章 +「判定依据」(候选人×规则的匹配检查结论)。 */
+function DeterministicRuleRow({
+  flag,
+  mode,
+  isIdentity,
+}: {
+  flag: RuleCheckAuditDetail["flags"][number];
+  mode: "selection" | "judgment";
+  isIdentity: boolean;
+}) {
   const { t } = useApp();
   const color =
     flag.result === "PASS" ? "var(--c-ok)" : flag.result === "FAIL" ? "var(--c-err)" : "var(--c-ink-3)";
+  // 规则筛选 → 选取依据(为什么选这条规则,确定性);规则判断 → 判定依据(命中检查结论=大模型文案)。
+  const basisLabel =
+    mode === "selection"
+      ? isIdentity
+        ? t("rc_id_select_basis")
+        : t("rc_det_basis")
+      : isIdentity
+        ? t("rc_id_judge_basis")
+        : t("rc_det_basis");
+  const basisText =
+    mode === "selection" && isIdentity ? t("rc_id_select_reason") : flag.evidence;
   return (
     <div style={{ padding: 12, borderBottom: "1px solid var(--c-line)" }}>
       <div className="flex items-center" style={{ gap: 8, marginBottom: 6 }}>
@@ -292,18 +320,21 @@ function DeterministicRuleRow({ flag }: { flag: RuleCheckAuditDetail["flags"][nu
         <span className="text-ink-1" style={{ fontSize: 13, fontWeight: 600 }}>
           {flag.rule_name_snapshot}
         </span>
-        <span
-          className="mono"
-          style={{ fontSize: 10.5, color, border: `1px solid ${color}`, borderRadius: 4, padding: "1px 6px" }}
-        >
-          {verdictLabel(flag.result, t)}
-        </span>
+        {/* 结论徽章只在「规则判断」出现(规则筛选只解释为什么选,不下 PASS/FAIL) */}
+        {mode === "judgment" ? (
+          <span
+            className="mono"
+            style={{ fontSize: 10.5, color, border: `1px solid ${color}`, borderRadius: 4, padding: "1px 6px" }}
+          >
+            {verdictLabel(flag.result, t)}
+          </span>
+        ) : null}
       </div>
       <div className="hint" style={{ marginBottom: 3 }}>
-        {t("rc_det_basis")}
+        {basisLabel}
       </div>
       <div className="text-ink-2" style={{ fontSize: 12, lineHeight: 1.55, marginBottom: 8 }}>
-        {flag.evidence}
+        {basisText}
       </div>
       <RuleDefinitionPanel ruleId={flag.rule_id} />
     </div>

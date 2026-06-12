@@ -1,16 +1,20 @@
-// rule-check-candidate-identity — candidate identity / dedup RULE-CHECK agent
-// ("是不是同一个人"). It is a rule-check agent like ruleCheckAgent, just for identity.
+// rule-check-candidate-identity — 候选人查重 RULE-CHECK agent("是不是同一个人")。
 //
-// Triggered by RESUME_PROCESSED. Loads the 3 identity rules from data (rules.json,
-// not hardcoded), fetches plausible existing duplicates, and applies the rules in
-// priority order — exact for phone/email/gender, AI fuzzy-equivalence for
-// name/school/major/degree. Writes one OntologyRuleCheck audit (agentSlug
-// 'rule-check-candidate-identity') so the /rule-check facet page shows it; a weak rule-3 match
-// is flagged for human review (decision VIOLATED). Soft-fails — never throws into the
-// recruitment pipeline.
+// 2026-06-11 形态(invoke 模式):一个**独立注册、舰队可管理**的 Inngest 函数,但
+// **不具备任何存储操作** —— 只做「抽取规则(9-15)→ 三级判定 → 落审计 → 返回结论」。
+// 简历解析在落库**之前**用 step.invoke 同步调用它并等待返回值,用结论驱动落库
+// (挂老档 / 新建);查重函数自己绝不写 candidate / resume 表。
+//   - 每次 invoke 产生本函数自己的 run(舰队页运行数/成功率/耗时全真实)。
+//   - 本函数下线或失败 → 解析端 catch 后按「新候选人」降级,主链路零阻塞。
+//   - 判定完成后补发本体预留的 CANDIDATE_IDENTITY_CHECKED 事件(action 10-3 的
+//     triggered_event),当前无订阅者,纯通知/蓝图闭环。
 //
-// Registered + enabled by default (audit-only, no pipeline gating). Opt out with
-// CANDIDATE_IDENTITY_ENABLED=0 → the registered agent no-ops instantly.
+// trigger 是专用事件 CANDIDATE_IDENTITY_REQUESTED(正常链路不发,主路径是被 invoke;
+// 留作手动/独立复核入口)。判定与审计共用 lib/rule-check/candidate-match/ 的共享
+// 模块(resolveIdentityMatch + auditIdentityResolution),与解析端永远同一套逻辑。
+//
+// 三级规则:精确字段(手机号/邮箱/性别)直接比对,模糊字段(姓名/学校/专业/学历)
+// 大模型语义等价;弱命中(第3级六字段)只标人工复核,绝不自动合并。全程 soft-fail。
 
 import { inngest } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
@@ -19,10 +23,8 @@ import {
   identityRulesByPriority,
 } from '@/lib/rule-check/candidate-match/rules-data';
 import { resolveIdentityMatch, type IdentityResolution } from '@/lib/rule-check/candidate-match/resolve-identity';
-import { identityToCheck, type IdentityOntologyRule } from '@/lib/rule-check/candidate-match/to-ontology-check';
-import { fetchActionRulesLive } from '@/lib/rule-check/api-rule-fetcher';
-import { generateIdentityRationale } from '@/lib/rule-check/candidate-match/identity-rationale';
-import { persistCandidateRuleCheck, type PersistCandidateCheckArgs } from '@/lib/rule-check/candidate-match/persist';
+import { auditIdentityResolution } from '@/lib/rule-check/candidate-match/audit-identity';
+import { type PersistCandidateCheckArgs, persistCandidateRuleCheck } from '@/lib/rule-check/candidate-match/persist';
 import {
   candidateFromResumeProcessed,
   partnerPgCandidateRepo,
@@ -33,7 +35,6 @@ import type { AiFieldJudge } from '@/lib/rule-check/candidate-match/field-equiva
 
 const AGENT_ID = 'rule-check-candidate-identity-agent';
 const AGENT_NAME = '候选人查重';
-const STAGE = '候选人入库';
 
 export interface IdentityHandlerDeps {
   repo: CandidateRepo;
@@ -47,17 +48,19 @@ function defaultDeps(): IdentityHandlerDeps {
     repo: partnerPgCandidateRepo,
     judge: makeAiFieldJudge(),
     persist: persistCandidateRuleCheck,
-    // Audit-only (no gating) → enabled by default; opt out with CANDIDATE_IDENTITY_ENABLED=0.
+    // 总开关:CANDIDATE_IDENTITY_ENABLED=0 关闭查重(解析端同样跳过 invoke)。
     enabled: process.env.CANDIDATE_IDENTITY_ENABLED !== '0',
   };
 }
 
 interface HandlerCtx {
   event: { data?: Record<string, unknown> } | Record<string, unknown>;
-  step: { run: (id: string, fn: () => unknown) => Promise<unknown> };
+  step: {
+    run: (id: string, fn: () => unknown) => Promise<unknown>;
+    sendEvent?: (id: string, ev: { name: string; data: Record<string, unknown> }) => Promise<unknown>;
+  };
   runId?: string;
 }
-
 
 export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Partial<IdentityHandlerDeps> = {}) {
   const deps = { ...defaultDeps(), ...depsOverride };
@@ -65,12 +68,11 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
 
   const ev = ((ctx.event as { data?: Record<string, unknown> }).data ?? ctx.event) as Record<string, any>;
   const rec = candidateFromResumeProcessed(ev);
-  const caseId = ctx.runId ?? (ev.upload_id as string) ?? rec.candidate_id;
+  const caseId = (ev.upload_id as string) ?? ctx.runId ?? rec.candidate_id;
   const ruleset = loadCandidateMatchRules();
   const rules = identityRulesByPriority(ruleset);
 
   // 统一审计日志:handler 三相 + 嵌套 partner-pg/LLM 调用经 ALS 归属到本 run。
-  // 决策本体审计仍在 OntologyRuleCheck(persist);这里补的是运行轨迹可查。
   const fileLogger = createAgentLogger({
     agent: 'candidateIdentity',
     runId: caseId,
@@ -78,112 +80,71 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
     anchors: { candidate_id: rec.candidate_id, upload_id: (ev.upload_id as string) ?? null },
   });
   return runWithLogger(fileLogger, async () => {
-  fileLogger.event('handler.start', { trigger: 'RESUME_PROCESSED', candidate_id: rec.candidate_id });
-  try {
-    // Memoize the expensive/non-deterministic work (partner-pg query + LLM judge loop)
-    // in its own step so an Inngest retry replays the cached result instead of
-    // re-spending LLM calls.
-    // Shared resolver (also used by resume-parser before save). It runs the three-tier
-    // engine over the comparison pool and — crucially — captures WHICH existing candidate
-    // matched (the engine itself drops that), the sole source of same_as_candidate_id.
-    const computed = (await ctx.step.run('compute-identity-match', async () =>
-      resolveIdentityMatch(rec, deps.repo, rules, deps.judge),
-    )) as IdentityResolution;
-    const result = computed.result;
-    const dedupAction = computed.dedupAction;
-    const sameAsCandidateId = computed.sameAsCandidateId;
+    fileLogger.event('handler.start', { invoked_by: (ev.invoked_by as string) ?? 'event', candidate_id: rec.candidate_id });
+    try {
+      // ① 判定(纯读:对比池查询 + 三级规则;模糊字段大模型等价)。
+      const computed = (await ctx.step.run('compute-identity-match', async () =>
+        resolveIdentityMatch(rec, deps.repo, rules, deps.judge),
+      )) as IdentityResolution;
 
-    // 从 Neo4j/Allmeta 抓取本体原规则 9-15(provenance)。抓到 → 审计显示「9-15 同一候选人
-    // 判定规则」(三级折进 checkPoint),ruleSource=ontology-api;抓不到(Allmeta 不可达)
-    // → ontologyRule=null,回退展示打包 IDENTITY-1/2/3。引擎判定逻辑两路一致(不依赖它)。
-    const ontologyRule = (await ctx.step.run('fetch-identity-ontology-rule', async () => {
-      try {
-        const byId = await fetchActionRulesLive('ruleCheckForCandidateIdentity');
-        const r = byId.get('9-15');
-        return r ? { id: r.id, name: r.businessLogicRuleName || '同一候选人判定规则' } : null;
-      } catch {
-        return null;
+      // ② 同一份结论落审计(抓 9-15 + 大模型判定依据 + persist;内部全 soft-fail)。
+      const audit = (await ctx.step.run('persist-identity-audit', async () =>
+        auditIdentityResolution({
+          resolution: computed,
+          candidateName: rec.name ?? null,
+          rulesTotal: rules.length,
+          snapshotSource: ruleset.source,
+          caseId,
+          traceId: (ev.trace_id as string) ?? null,
+          persist: deps.persist,
+        }),
+      )) as { id: string } | null;
+
+      // ③ 本体蓝图闭环:发 CANDIDATE_IDENTITY_CHECKED(当前无订阅者,纯通知)。
+      if (ctx.step.sendEvent) {
+        await ctx.step.sendEvent('emit-identity-checked', {
+          name: 'CANDIDATE_IDENTITY_CHECKED',
+          data: {
+            upload_id: (ev.upload_id as string) ?? null,
+            candidate_id: rec.candidate_id,
+            resume_id: (ev.resume_id as string) ?? null,
+            same_person: computed.result.samePerson,
+            same_as_candidate_id: computed.sameAsCandidateId,
+            dedup_action: computed.dedupAction,
+            matched_rule: computed.result.matchedRule?.ruleId ?? null,
+            audit_id: audit?.id ?? null,
+          },
+        });
       }
-    })) as IdentityOntologyRule | null;
 
-    // 大模型生成「纳入依据」:把确定性判定(命中第几级、关联到谁、去重动作)交给 LLM 用
-    // 一句业务中文复述。soft-fail → null,identityToCheck 回退机械文案。LLM 只复述、不改判。
-    const rationale = (await ctx.step.run('generate-inclusion-rationale', async () => {
-      if (!ontologyRule) return { reason: null, prompt: '', raw: '' };
-      return generateIdentityRationale({
-        result,
-        candidateName: rec.name ?? null,
-        matchedCandidateId: computed.matchedCandidateId,
-        matchedCandidateName: computed.matchedCandidateName,
-        dedupAction,
-        ontologyRuleId: ontologyRule.id,
-        ontologyRuleName: ontologyRule.name,
+      fileLogger.event('handler.done', {
+        same_person: computed.result.samePerson,
+        matched_rule: computed.result.matchedRule?.ruleId ?? null,
+        dedup_action: computed.dedupAction,
+        audit_id: audit?.id ?? null,
       });
-    })) as { reason: string | null; prompt: string; raw: string };
-    const llmRationale = rationale.reason;
-
-    const check = identityToCheck(
-      result,
-      rules.length,
-      {
+      // ④ 返回结论 —— 这是 step.invoke 的返回值,简历解析用它驱动落库。
+      return {
+        skipped: false as const,
+        samePerson: computed.result.samePerson,
+        matchedRule: computed.result.matchedRule?.ruleId ?? null,
         matchedCandidateId: computed.matchedCandidateId,
         matchedCandidateName: computed.matchedCandidateName,
-        dedupAction,
-      },
-      ontologyRule ?? undefined,
-      llmRationale,
-    );
-    const { id } = (await ctx.step.run('persist-candidate-identity', () =>
-      deps.persist({
-        agentSlug: 'rule-check-candidate-identity',
-        agentName: AGENT_NAME,
-        stage: STAGE,
-        caseId,
-        traceId: (ev.trace_id as string) ?? null,
-        // 抓到本体 9-15 → 标 ontology-api(来源是 Neo4j);否则回退本地 snapshot。
-        ruleSource: ontologyRule ? 'ontology-api' : ruleset.source,
-        selectionNote: {
-          pool: computed.poolSize,
-          ontologyRuleId: ontologyRule?.id ?? null,
-          matchedRule: result.matchedRule?.ruleId ?? null,
-          matchedCandidateId: computed.matchedCandidateId,
-          matchedCandidateName: computed.matchedCandidateName,
-          dedupAction,
-          sameAsCandidateId,
-          // 大模型「纳入依据」的提示词 + 原始响应 → 审计「用户提示词」「LLM 响应」tab。
-          llmPrompt: rationale.prompt || null,
-          llmResponse: rationale.raw || null,
-        },
-        check,
-      }),
-    )) as { id: string };
-
-    fileLogger.event('handler.done', {
-      same_person: result.samePerson,
-      matched_rule: result.matchedRule?.ruleId ?? null,
-      dedup_action: dedupAction,
-      audit_id: id,
-    });
-    return {
-      skipped: false as const,
-      samePerson: result.samePerson,
-      matchedRule: result.matchedRule?.ruleId ?? null,
-      matchedCandidateId: computed.matchedCandidateId,
-      sameAsCandidateId,
-      dedupAction,
-      needsHumanReview: result.needsHumanReview,
-      auditId: id,
-    };
-  } catch (e) {
-    // Soft-fail: identity dedup must never break the recruitment pipeline.
-    // handler.error → agent_error → 审计日志 + 消息通知(经 mirrorAgentFileLog)。
-    fileLogger.event('handler.error', { error: (e as Error).message ?? String(e) });
-    return { skipped: false as const, error: (e as Error).message ?? String(e) };
-  }
+        sameAsCandidateId: computed.sameAsCandidateId,
+        dedupAction: computed.dedupAction,
+        needsHumanReview: computed.result.needsHumanReview,
+        poolSize: computed.poolSize,
+        auditId: audit?.id ?? null,
+      };
+    } catch (e) {
+      // Soft-fail:查重绝不向调用方(简历解析)抛错 —— 返回 error,解析按新人降级。
+      fileLogger.event('handler.error', { error: (e as Error).message ?? String(e) });
+      return { skipped: false as const, error: (e as Error).message ?? String(e) };
+    }
   });
 }
 
 export const candidateIdentityAgent = inngest.createFunction(
-  { id: AGENT_ID, name: '候选人查重', retries: 1, triggers: [{ event: 'RESUME_PROCESSED' }] },
+  { id: AGENT_ID, name: AGENT_NAME, retries: 1, triggers: [{ event: 'CANDIDATE_IDENTITY_REQUESTED' }] },
   async (ctx) => candidateIdentityHandler(ctx as unknown as HandlerCtx),
 );

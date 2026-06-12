@@ -1268,6 +1268,17 @@ model MonitorConfig {
   @@map("monitor_config")
 }
 
+// AO runtime infrastructure overrides. Values here intentionally cover only
+// operator-approved infrastructure keys; all other env remains deployment-owned.
+model RuntimeConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("runtime_config")
+}
+
 // 流程追踪 · 事件 AI 分析缓存。on-demand 生成（observability，不上 Inngest），
 // 按 eventId 缓存，避免每次开抽屉都重打 LLM。一个事件 → 一条分析。
 model FunnelEventAnalysis {
@@ -1307,4 +1318,36 @@ model FunnelJobAnalysis {
   createdAt        DateTime @default(now()) @map("created_at")
 
   @@map("funnel_job_analysis")
+}
+
+// Agent Execution API (partner 对接 · eval-test-builder)。一次单用例评测执行。
+// 完全旁路于生产 Inngest 链路:直接调 runRuleCheck() 纯计算引擎,不发事件、
+// 不写生产审计表、无外部副作用(shadow by construction)。仅本表为新增持久化,
+// 不影响 AO 正常流程。详见 docs/agent-execution-partner-handoff.md。
+model AgentExecution {
+  id               String    @id @map("execution_id") // exec_<cuid>
+  clientRequestId  String    @unique @map("client_request_id") // 幂等键
+  status           String    @default("pending") // pending|running|succeeded|failed|timeout|cancelled
+  runId            String?   @map("run_id") // partner correlation
+  testCaseId       String?   @map("test_case_id")
+  domain           String
+  ontologyVersion  String    @map("ontology_version")
+  scenario         String
+  mode             String    @default("shadow")
+  requestJson      String    @map("request_json") // 受理时的完整请求
+  resultJson       String?   @map("result_json") // 完成后的完整 A2 响应
+  llmFullJson      String?   @map("llm_full_json") // A3 懒加载:LLM 完整 prompt/response(不进 A2 poll)
+  aoAuditId        String?   @map("ao_audit_id")
+  model            String?
+  promptTokens     Int?      @map("prompt_tokens")
+  completionTokens Int?      @map("completion_tokens")
+  errorCode        String?   @map("error_code")
+  errorMessage     String?   @map("error_message")
+  startedAt        DateTime? @map("started_at")
+  finishedAt       DateTime? @map("finished_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("agent_execution")
 }

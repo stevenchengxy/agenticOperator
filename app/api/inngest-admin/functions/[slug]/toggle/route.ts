@@ -60,28 +60,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     //   paused agent keeps showing up as live in the fleet UI until then.
     //
     //   The "where can AO reach its own SDK endpoint?" URL is the same value
-    //   that .env.example documents as INNGEST_SERVE_HOST (the address
-    //   Inngest uses to call back to us). Prefer that name; keep
-    //   INNGEST_SERVE_ORIGIN as a legacy alias.
+    //   that .env.example documents as INNGEST_SERVE_ORIGIN (the address
+    //   Inngest uses to call back to us). Keep INNGEST_SERVE_HOST as a
+    //   legacy alias for old local env files.
     try {
       const origin =
-        process.env.INNGEST_SERVE_HOST ??
         process.env.INNGEST_SERVE_ORIGIN ??
+        process.env.INNGEST_SERVE_HOST ??
         'http://localhost:3002';
       const res = await fetch(`${origin}/api/inngest`, { method: 'PUT' });
       if (!res.ok) {
         console.warn(
           `[toggle] Inngest re-introspect PUT ${origin}/api/inngest → ${res.status}; ` +
             `Inngest may keep paused agent in its registration until next sync. ` +
-            `Check that INNGEST_SERVE_HOST is set to a URL the AO process can reach itself at.`,
+            `Check that INNGEST_SERVE_ORIGIN is set to a URL the AO process can reach itself at.`,
         );
       }
     } catch (e) {
       // Soft fail — the in-handler assertNotPaused guard still works as
-      // belt+suspenders. Log so a misconfigured INNGEST_SERVE_HOST is visible.
+      // belt+suspenders. Log so a misconfigured INNGEST_SERVE_ORIGIN is visible.
       console.warn(
         `[toggle] Inngest re-introspect failed: ${(e as Error).message}. ` +
-          `Set INNGEST_SERVE_HOST in .env.local to a URL the AO process can reach itself at.`,
+          `Set INNGEST_SERVE_ORIGIN in .env.local to a URL the AO process can reach itself at.`,
       );
     }
 

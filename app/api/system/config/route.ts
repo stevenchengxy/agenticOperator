@@ -7,7 +7,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { getInngestUrlWithSource, getRaasInngestUrl, type InngestUrlSource } from '@/lib/inngest-url';
-import { listFunctions } from '@/lib/inngest-admin-client';
+import { listApps, listFunctions, type InngestApp } from '@/lib/inngest-admin-client';
+import {
+  applyRuntimeConfigToEnv,
+  getRuntimeConfigState,
+  saveRuntimeConfig,
+  type RuntimeConfigSaveTarget,
+  type RuntimeConfigState,
+} from '@/server/ops/runtime-config';
+import { closeDriver as closeNeo4jDriver } from '@/server/em/clients/neo4j';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +27,8 @@ export type SystemConfigResponse = {
     registeredFunctionCount: number;
     runsLast24h: number | null;
     healthy: boolean;
+    appErrors: Array<{ name: string; url: string | null; error: string }>;
+    serveEndpointUrl: string;
     lastProbeAt: string;
   };
   eventEngine: {
@@ -34,12 +44,44 @@ export type SystemConfigResponse = {
     inngestSharedWithLocal: boolean;
     apiHealthy: boolean | null;
   };
+  runtimeConfig: RuntimeConfigState;
   generatedAt: string;
 };
 
-const STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
+export type SystemConfigUpdateResponse =
+  | {
+      ok: true;
+      target: RuntimeConfigSaveTarget;
+      changedKeys: string[];
+      restartRequiredKeys: string[];
+      config: SystemConfigResponse;
+    }
+  | { ok: false; error: string };
 
-export async function GET(): Promise<Response> {
+const STALENESS_THRESHOLD_MS = 5 * 60 * 1000;
+const MAIN_APP_ID = 'agentic-operator-main';
+
+function joinUrl(origin: string, path: string): string {
+  const cleanOrigin = origin.replace(/\/+$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${cleanOrigin}${cleanPath}`;
+}
+
+function resolveServeEndpointUrl(apps: InngestApp[]): string {
+  const servePath = process.env.INNGEST_SERVE_PATH ?? '/api/inngest';
+  const serveHost = process.env.INNGEST_SERVE_ORIGIN ?? process.env.INNGEST_SERVE_HOST;
+  if (serveHost) return joinUrl(serveHost, servePath);
+
+  const mainUrl = apps.find((a) => a.name === MAIN_APP_ID)?.url;
+  if (mainUrl) return mainUrl;
+
+  const host = process.env.AO_LAN_IP ?? 'host.docker.internal';
+  const port = process.env.AO_PORT ?? '3002';
+  return joinUrl(`http://${host}:${port}`, servePath);
+}
+
+async function buildResponse(): Promise<SystemConfigResponse> {
+  await applyRuntimeConfigToEnv();
   const probeStart = new Date();
   const { url: inngestUrl, sourceEnv } = getInngestUrlWithSource();
 
@@ -48,14 +90,25 @@ export async function GET(): Promise<Response> {
     INNGEST_DEV: process.env.INNGEST_DEV ?? null,
     INNGEST_LOCAL_URL: process.env.INNGEST_LOCAL_URL ?? null,
     INNGEST_ADMIN_URL: process.env.INNGEST_ADMIN_URL ?? null,
+    INNGEST_SERVE_ORIGIN: process.env.INNGEST_SERVE_ORIGIN ?? null,
+    INNGEST_SERVE_HOST: process.env.INNGEST_SERVE_HOST ?? null,
+    INNGEST_SERVE_PATH: process.env.INNGEST_SERVE_PATH ?? null,
+    AO_LAN_IP: process.env.AO_LAN_IP ?? null,
+    AO_PORT: process.env.AO_PORT ?? null,
   };
 
   let fnCount = 0;
   let inngestHealthy = false;
+  let appErrors: Array<{ name: string; url: string | null; error: string }> = [];
+  let apps: InngestApp[] = [];
   try {
-    const fns = await listFunctions();
+    const [fns, listedApps] = await Promise.all([listFunctions(), listApps()]);
+    apps = listedApps;
     fnCount = fns.length;
-    inngestHealthy = true;
+    appErrors = apps
+      .filter((a) => typeof a.error === 'string' && a.error.length > 0)
+      .map((a) => ({ name: a.name, url: a.url ?? null, error: a.error! }));
+    inngestHealthy = appErrors.length === 0;
   } catch {
     inngestHealthy = false;
   }
@@ -86,7 +139,7 @@ export async function GET(): Promise<Response> {
     .catch(() => 0);
 
   const raasInngestUrl = getRaasInngestUrl();
-  const body: SystemConfigResponse = {
+  return {
     inngest: {
       url: inngestUrl,
       sourceEnv,
@@ -94,6 +147,8 @@ export async function GET(): Promise<Response> {
       registeredFunctionCount: fnCount,
       runsLast24h: runs24h,
       healthy: inngestHealthy,
+      appErrors,
+      serveEndpointUrl: resolveServeEndpointUrl(apps),
       lastProbeAt: probeStart.toISOString(),
     },
     eventEngine: {
@@ -109,7 +164,46 @@ export async function GET(): Promise<Response> {
       inngestSharedWithLocal: raasInngestUrl === inngestUrl,
       apiHealthy: null,
     },
+    runtimeConfig: await getRuntimeConfigState(),
     generatedAt: new Date().toISOString(),
   };
+}
+
+export async function GET(): Promise<Response> {
+  const body = await buildResponse();
   return NextResponse.json(body);
+}
+
+export async function PATCH(req: Request): Promise<Response> {
+  let values: unknown;
+  let target: RuntimeConfigSaveTarget | undefined;
+  try {
+    const payload = (await req.json()) as { values?: unknown; target?: unknown };
+    values = payload.values;
+    target = payload.target === 'runtime' ? 'runtime' : 'env_local';
+  } catch {
+    return NextResponse.json<SystemConfigUpdateResponse>({ ok: false, error: 'INVALID_JSON' }, { status: 400 });
+  }
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    return NextResponse.json<SystemConfigUpdateResponse>({ ok: false, error: 'INVALID_VALUES' }, { status: 400 });
+  }
+
+  try {
+    const result = await saveRuntimeConfig(values as Record<string, unknown>, { target });
+    if (result.changedKeys.some((k) => k.startsWith('NEO4J_'))) {
+      await closeNeo4jDriver().catch(() => undefined);
+    }
+    return NextResponse.json<SystemConfigUpdateResponse>({
+      ok: true,
+      target: result.target,
+      changedKeys: result.changedKeys,
+      restartRequiredKeys: result.restartRequiredKeys,
+      config: await buildResponse(),
+    });
+  } catch (e) {
+    return NextResponse.json<SystemConfigUpdateResponse>(
+      { ok: false, error: (e as Error).message },
+      { status: 400 },
+    );
+  }
 }

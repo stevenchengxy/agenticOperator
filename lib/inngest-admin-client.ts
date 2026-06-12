@@ -34,6 +34,12 @@ function isMonitoredSlug(slug: string | undefined): boolean {
   return slug.startsWith(MONITORED_APP_PREFIX);
 }
 
+function isMonitoredAppName(name: string | undefined): boolean {
+  if (!MONITORED_APP_PREFIX) return true; // empty prefix = monitor all
+  if (!name) return false;
+  return name.startsWith(MONITORED_APP_PREFIX);
+}
+
 // ─────────────────────────────────────────────────────────────
 // REST: events
 // ─────────────────────────────────────────────────────────────
@@ -123,6 +129,23 @@ export type InngestFunction = {
   url?: string;
   appID?: string;
 };
+
+export type InngestApp = {
+  name: string;
+  url?: string | null;
+  error?: string | null;
+  connected: boolean;
+  functionCount: number;
+  sdkVersion: string;
+  framework?: string | null;
+};
+
+export async function listApps(): Promise<InngestApp[]> {
+  const data = await gql<{ apps: InngestApp[] }>(`
+    { apps { name url error connected functionCount sdkVersion framework } }
+  `);
+  return (data.apps ?? []).filter((a) => isMonitoredAppName(a.name));
+}
 
 export async function listFunctions(): Promise<InngestFunction[]> {
   const data = await gql<{ apps: Array<{ name?: string; functions: InngestFunction[] }> }>(`

@@ -12,7 +12,7 @@ describe('agentsForDomain', () => {
     const ids = agentsForDomain(RECRUITMENT_DOMAIN_ID).map((a) => a.id);
     expect(ids).toContain('jr-compliance');
     expect(ids).toContain('rule-check-candidate-identity');
-    expect(ids).toContain('rule-check-candidate-ownership');
+    expect(ids).not.toContain('rule-check-candidate-ownership'); // withdrawn 2026-06-11
   });
 
   it('treats empty/undefined domain as recruitment (app default)', () => {
@@ -36,7 +36,7 @@ describe('agentsForDomain', () => {
     const byId = new Map(agentsForDomain(RECRUITMENT_DOMAIN_ID).map((a) => [a.id, a]));
     expect(byId.get('jr-compliance')?.status).toBe('live');
     expect(byId.get('rule-check-candidate-identity')?.status).toBe('live');
-    expect(byId.get('rule-check-candidate-ownership')?.status).toBe('live');
+    expect(byId.get('rule-check-candidate-ownership')).toBeUndefined(); // withdrawn 2026-06-11
   });
 
   it('exposes the live compliance agent id as a constant for stamping audits', () => {

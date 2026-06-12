@@ -22,6 +22,8 @@ function hrefFor(linkKind: string | null, linkId: string | null): string | null 
       return `/correlations/${linkId}`;
     case 'event':
       return `/events?eventInstanceId=${encodeURIComponent(linkId)}`;
+    case 'infra':
+      return `/monitor?infra=${encodeURIComponent(linkId)}`;
     default:
       return null;
   }

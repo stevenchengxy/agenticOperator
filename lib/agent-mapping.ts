@@ -46,6 +46,12 @@ export type AgentMeta = {
    * so we annotate explicitly for clarity + zero ambiguity.
    */
   inngestId?: string;
+  /**
+   * Audit-only agent (e.g. CandidateDedup): has a real Inngest function but is
+   * NOT a deployable main-chain agent — excluded from hasRealInngestFn (Fleet
+   * deploy panel / canonical workflow graph) while still merging as 'real'.
+   */
+  auditOnly?: boolean;
 };
 
 // Raw rows (no `domain` field — auto-injected as 'raas' below). When R7
@@ -64,16 +70,17 @@ const AGENT_MAP_RAAS_RAW: Omit<AgentMeta, 'domain'>[] = [
   { short: 'ResumeCollector',  wsId: '8',       stage: 'resume',      kind: 'hybrid', ownerTeam: '招聘运营', version: 'v3.0.1', triggersEvents: ['CHANNEL_PUBLISHED'],                              emitsEvents: ['RESUME_DOWNLOADED'],                                                        terminal: false },
   { short: 'ResumeParser',     wsId: '9-1',     stage: 'resume',      kind: 'auto',   ownerTeam: '招聘运营', version: 'v2.8.0', triggersEvents: ['RESUME_DOWNLOADED'],                              emitsEvents: ['RESUME_PROCESSED', 'RESUME_PARSE_ERROR'],                                   terminal: false, inngestName: 'Resume Parser Agent', inngestId: 'resume-parser-agent' },
   { short: 'ResumeFixer',      wsId: '9-2',     stage: 'resume',      kind: 'hitl',   ownerTeam: '招聘运营', version: 'v1.0.0', triggersEvents: ['RESUME_PARSE_ERROR'],                             emitsEvents: ['RESUME_PROCESSED'],                                                         terminal: false },
-  // Candidate identity (去重·是不是同一人) + ownership (归属·锁定/腾讯) rule-check agents —
-  // independent, AUDIT-ONLY agents at the intake seam (between ResumeParser and RuleCheck).
-  // They consume RESUME_PROCESSED,调规则判断后写 OntologyRuleCheck 审计(/rule-check 面板),
-  // 不 emit 任何事件 → 永不拦截主链路。实现见 server/inngest/agents/candidate-{identity,ownership}-agent.ts。
-  // No explicit inngestId: the live fn id derives from short via the kebab convention
-  // (RuleCheckCandidateIdentity → rule-check-candidate-identity-agent), so the registry
-  // merges them as 'real' without adding them to the "canonical 5 deployable" set
-  // (hasRealInngestFn).
-  { short: 'RuleCheckCandidateIdentity',  wsId: '9-3',   stage: 'resume',      kind: 'auto',   ownerTeam: '合规',     version: 'v0.1.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: [],                                                                           terminal: false, inngestName: 'Rule Check Candidate Identity' },
-  { short: 'RuleCheckCandidateOwnership', wsId: '9-4',   stage: 'resume',      kind: 'auto',   ownerTeam: '合规',     version: 'v0.1.0', triggersEvents: ['RESUME_PROCESSED'],                              emitsEvents: [],                                                                           terminal: false, inngestName: 'Rule Check Candidate Ownership' },
+  // Candidate identity (去重·是不是同一人) rule-check agent — an independent, AUDIT-ONLY
+  // agent at the intake seam (between ResumeParser and RuleCheck). It consumes
+  // RESUME_PROCESSED,调规则判断后写 OntologyRuleCheck 审计(/rule-check 面板),
+  // 不 emit 任何事件 → 永不拦截主链路。实现见 server/inngest/agents/candidate-identity-agent.ts。
+  // 2026-06-11 改名 RuleCheckCandidateIdentity → CandidateDedup:舰队页对齐 Inngest
+  // 注册名「候选人查重」(中文主标),短英文 CandidateDedup 做副标。short 改了之后
+  // kebab 推导(candidate-dedup-agent)不再命中真函数 ID,所以必须显式 inngestId
+  // 保住 registry merge('real'),不进 "canonical 5 deployable"(hasRealInngestFn)。
+  // (RuleCheckCandidateOwnership · 归属 withdrawn 2026-06-11 — not deployed, cleared
+  //  from this roster; handler source kept at candidate-ownership-agent.ts.)
+  { short: 'CandidateDedup',   wsId: '9-3',     stage: 'resume',      kind: 'auto',   ownerTeam: '合规',     version: 'v0.1.0', triggersEvents: ['CANDIDATE_IDENTITY_REQUESTED'],                              emitsEvents: ['CANDIDATE_IDENTITY_CHECKED'],                                                                           terminal: false, inngestName: '候选人查重', inngestId: 'rule-check-candidate-identity-agent' , auditOnly: true },
   // 2026-05-19 consolidation: matchResume 收敛成只订 MATCH_RULE_CHECK_PASSED;
   // 第一段(RESUME_PROCESSED → 拉 JR + 派发)整段并进 RuleCheck。
   // wsId 保持 '10' / '10-5' 以兼容 monitor / topology / workflow-graph 现有节点 ID;
@@ -194,7 +201,10 @@ export function isReal(short: string): boolean {
  * deploy panel to the agents we actually have (vs the legacy design-era roster).
  */
 export function hasRealInngestFn(short: string): boolean {
-  return Boolean(byShort(short)?.inngestId);
+  const a = byShort(short);
+  // auditOnly(如 CandidateDedup):有真函数但不属于「可部署的主链路 agent」——
+  // 它有显式 inngestId 只是为了 registry merge,不进 Fleet 部署面板/canonical 图。
+  return Boolean(a?.inngestId) && !a?.auditOnly;
 }
 
 /**

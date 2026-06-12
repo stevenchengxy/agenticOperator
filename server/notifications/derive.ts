@@ -9,7 +9,7 @@
 export type NotificationKind = 'message' | 'alert';
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 export type NotificationCategory = 'system' | 'agent' | 'event' | 'candidate' | 'job';
-export type LinkKind = 'run' | 'trace' | 'rule_check' | 'event' | 'none';
+export type LinkKind = 'run' | 'trace' | 'rule_check' | 'event' | 'infra' | 'none';
 export type Disposition = 'needs_human' | 'auto_handled' | 'info_only';
 
 export interface CaptureInput {
@@ -37,6 +37,9 @@ export interface CaptureInput {
   domain?: string | null;
   /** 业务里程碑信号(RecruitmentSignal 等)。透传给外部通知通道做白名单过滤,不落库。 */
   signal?: string | null;
+  /** Optional explicit deep link for non-run operational alerts. */
+  linkKind?: LinkKind;
+  linkId?: string | null;
 }
 
 export interface NotificationDraft {
@@ -112,6 +115,7 @@ export function categoryOf(input: CaptureInput): NotificationCategory {
 }
 
 export function resolveLink(input: CaptureInput): { linkKind: LinkKind; linkId: string | null } {
+  if (input.linkKind) return { linkKind: input.linkKind, linkId: input.linkId ?? null };
   if (input.auditId) return { linkKind: 'rule_check', linkId: input.auditId };
   if (input.runId) return { linkKind: 'run', linkId: input.runId };
   if (input.traceId) return { linkKind: 'trace', linkId: input.traceId };
