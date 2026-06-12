@@ -387,6 +387,10 @@ export type MatchRuleCheckPassedData = {
   upload_id: string | null;
   employee_id: string;
   audit: RuleCheckAuditMeta;
+  /** 逐条规则判定结论(2026-06-12)— matchResume 把它追加进发给 RoboHire 的 jd
+   *  文本做深度匹配(领导要求:rule check 结果进 jd;接口仍是 {resume, jd})。
+   *  bypass 路径不带 → 匹配端不追加。 */
+  rule_check_rules?: Array<{ rule_id: string; rule_name: string; status: string; reason?: string }>;
   /** Full JR object — 第二段调 matchResumeDirect 时拼 jd text。 */
   job_requisition: Record<string, unknown>;
   /** Parsed resume(可能为 null,如果 RoboHire parse 之后没拿到)。 */

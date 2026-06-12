@@ -30,6 +30,7 @@ import {
   type MatchEventData,
   type MatchRuleCheckPassedData,
 } from '@/server/inngest/client';
+import { appendRuleCheckToJd } from '@/lib/rule-check/match-jd-augment';
 
 // Loose shape — the merged JR object from rule-check carries arbitrary
 // keys (path A flatten + path B agent-view item). Field-name probes below.
@@ -103,7 +104,12 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
   const resumeSource: 'parsed_content' | 'parsed_resume_json' = parsedContent
     ? 'parsed_content'
     : 'parsed_resume_json';
-  const jdText = flattenRequirementForMatch(req);
+  // 2026-06-12(领导要求):把规则检查结论追加进 jd 文本发给 RoboHire 做深度匹配
+  // (接口仍是 {resume, jd})。MATCH_ATTACH_RULECHECK=0 可关回纯 JD。
+  const jdText =
+    process.env.MATCH_ATTACH_RULECHECK === '0'
+      ? flattenRequirementForMatch(req)
+      : appendRuleCheckToJd(flattenRequirementForMatch(req), data.rule_check_rules);
 
   if (!resumeText.trim()) {
     throw new NonRetriableError(

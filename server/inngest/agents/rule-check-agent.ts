@@ -672,6 +672,13 @@ export async function ruleCheckAgentHandler({
         upload_id: uploadId ?? null,
         employee_id: employeeId,
         audit,
+        // 逐条判定结论 → matchResume 追加进 jd 文本(深度匹配参考)。reason 截 300 防事件过大。
+        rule_check_rules: result.rule_results.map((r) => ({
+          rule_id: r.rule_id,
+          rule_name: r.rule_name,
+          status: r.status,
+          reason: r.reason ? r.reason.slice(0, 300) : undefined,
+        })),
         job_requisition: req as unknown as Record<string, unknown>,
         parsed_resume: parsedData ?? null,
         parsed_content: parsedContent,
