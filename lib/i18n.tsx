@@ -1378,9 +1378,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     // /rule-check page chrome
     rc_page_title: "规则检查",
     rc_view_dashboard: "总览",
-    rc_view_dashboard_sub: "覆盖率 · 失败率最高的 rules · 客户分布",
+    rc_view_dashboard_sub: "规则健康",
     rc_view_audits: "审计",
-    rc_view_audits_sub: "历史审计列表 · 按客户 / 决策 / JR 筛选",
+    rc_view_audits_sub: "审计记录",
     // /rule-check?view=audits header + filters
     rc_audits_title: "Rule Check 审计",
     rc_audits_sub: "简历匹配前的规则适用性预判 · 含完整提示词 / 大模型响应",
@@ -1813,7 +1813,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_anchor_jr_note: "must_have_skills / work_years / salary_range 等",
 
     // Global chat bubble (Task γ.D)
-    chat_open: "打开追踪助手",
+    chat_open: "打开万能助手",
     chat_close: "关闭",
     chat_context_label: "当前页面",
     chat_empty_hint: "问我关于 run / event / audit / 候选人的问题。AI 会用工具查实数据。",
@@ -1830,14 +1830,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_role_user: "你",
 
     // Global chat full-screen page (Task γ.E)
-    nav_trace_chat: "追踪助手",
-    chat_direction_tag: "Direction D — 跨域追踪",
+    nav_trace_chat: "万能助手",
+    chat_direction_tag: "AO Copilot — Agent Loop",
     chat_history_title: "会话历史",
     chat_history_empty: "暂无历史会话",
     chat_history_delete: "删除",
     chat_history_delete_confirm: "删除此会话?",
-    chat_header_title: "追踪助手",
-    chat_header_subtitle: "用工具查实数据 · 只读",
+    chat_header_title: "AO Copilot",
+    chat_header_subtitle: "推理 · 工具 · 审计日志",
     chat_empty_greeting: "嗨,问点什么?",
     chat_new_session_short: "新会话",
     chat_time_just_now: "刚刚",
@@ -4183,9 +4183,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     // /rule-check page chrome
     rc_page_title: "Rule Check",
     rc_view_dashboard: "Overview",
-    rc_view_dashboard_sub: "Coverage · top failure rules · client distribution",
+    rc_view_dashboard_sub: "Rule health",
     rc_view_audits: "Audits",
-    rc_view_audits_sub: "History list · filter by client / decision / JR",
+    rc_view_audits_sub: "Audit records",
     // /rule-check?view=audits header + filters
     rc_audits_title: "Rule Check Audits",
     rc_audits_sub: "Rule-applicability pre-check before resume-job matching · includes the full prompt / model response",
@@ -4618,7 +4618,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     rc_anchor_jr_note: "must_have_skills / work_years / salary_range etc.",
 
     // Global chat bubble (Task γ.D)
-    chat_open: "Open tracing assistant",
+    chat_open: "Open Copilot",
     chat_close: "Close",
     chat_context_label: "Current page",
     chat_empty_hint: "Ask about runs, events, audits, or candidates. AI calls tools to look up real data.",
@@ -4635,14 +4635,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     chat_role_user: "You",
 
     // Global chat full-screen page (Task γ.E)
-    nav_trace_chat: "Tracing Assistant",
-    chat_direction_tag: "Direction D — Cross-domain tracing",
+    nav_trace_chat: "AO Copilot",
+    chat_direction_tag: "AO Copilot — Agent Loop",
     chat_history_title: "Session history",
     chat_history_empty: "No history yet",
     chat_history_delete: "Delete",
     chat_history_delete_confirm: "Delete this session?",
-    chat_header_title: "Tracing Assistant",
-    chat_header_subtitle: "Tool-grounded · read-only",
+    chat_header_title: "AO Copilot",
+    chat_header_subtitle: "Reasoning · tools · audit log",
     chat_empty_greeting: "Hi, ask anything",
     chat_new_session_short: "New",
     chat_time_just_now: "just now",

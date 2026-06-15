@@ -5,6 +5,8 @@ export type ChatRole = "user" | "assistant" | "system";
 export type ChatMessage = {
   role: ChatRole;
   content: string;
+  kind?: "normal" | "compact";
+  createdAt?: string;
 };
 
 export type ChatSource = {
@@ -40,6 +42,7 @@ export type ToolDef = {
 };
 
 export type GlobalChatRequest = {
+  sessionId?: string;
   messages: ChatMessage[];
   pageContext?: PageContext;
 };

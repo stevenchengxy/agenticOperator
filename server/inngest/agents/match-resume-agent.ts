@@ -29,6 +29,7 @@ import {
   inngest,
   type MatchEventData,
   type MatchRuleCheckPassedData,
+  type RuleCheckAuditMeta,
 } from '@/server/inngest/client';
 import { appendRuleCheckToJd } from '@/lib/rule-check/match-jd-augment';
 
@@ -47,7 +48,7 @@ export const matchResumeAgent = inngest.createFunction(
     triggers: [{ event: 'MATCH_RULE_CHECK_PASSED' }],
   },
   async ({ event, step, logger, runId }) => {
-    return await handleMatchRuleCheckPassed({ event, step, logger, runId });
+    return await matchResumeAgentHandler({ event, step, logger, runId });
   },
 );
 
@@ -55,7 +56,7 @@ export const matchResumeAgent = inngest.createFunction(
 // MATCH_RULE_CHECK_PASSED → RoboHire match → saveMatchResults → emit MATCH_*
 // ──────────────────────────────────────────────────────────────────────
 
-async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
+export async function matchResumeAgentHandler({ event, step, logger, runId }: any) {
   const data = event.data as MatchRuleCheckPassedData;
   const traceId = data.runtime_context?.trace_id ?? undefined;
   const stepKey = sanitizeStepKey(data.job_requisition_id);
@@ -74,22 +75,43 @@ async function handleMatchRuleCheckPassed({ event, step, logger, runId }: any) {
     },
   });
   return runWithLogger(fileLogger, async () => {
-  fileLogger.event('handler.start', {
-    event_name: event.name,
-    candidate_id: candidateId,
-    job_requisition_id: data.job_requisition_id,
-  });
-
-  if (!data.job_requisition || !data.parsed_resume) {
-    logger.warn(
-      `[${AGENT_NAME}] MATCH_RULE_CHECK_PASSED missing job_requisition or parsed_resume for JR=${data.job_requisition_id} — cannot match`,
-    );
-    return {
-      ok: false,
+    fileLogger.event('handler.start', {
+      event_name: event.name,
+      candidate_id: candidateId,
       job_requisition_id: data.job_requisition_id,
-      error: 'missing-job-requisition-or-parsed-resume',
-    };
-  }
+    });
+
+    const ruleCheckGate = verifyRuleCheckPassedForMatch(data);
+    if (!ruleCheckGate.ok) {
+      logger.warn(
+        `[${AGENT_NAME}] MATCH_RULE_CHECK_PASSED blocked before RoboHire · ` +
+          `jr=${data.job_requisition_id} reason=${ruleCheckGate.reason}` +
+          (ruleCheckGate.detail ? ` detail=${ruleCheckGate.detail}` : ''),
+      );
+      fileLogger.event('handler.rule-check-gate-blocked', {
+        candidate_id: candidateId,
+        job_requisition_id: data.job_requisition_id,
+        reason: ruleCheckGate.reason,
+        detail: ruleCheckGate.detail,
+      });
+      return {
+        ok: false,
+        job_requisition_id: data.job_requisition_id,
+        error: ruleCheckGate.reason,
+        detail: ruleCheckGate.detail,
+      };
+    }
+
+    if (!data.job_requisition || !data.parsed_resume) {
+      logger.warn(
+        `[${AGENT_NAME}] MATCH_RULE_CHECK_PASSED missing job_requisition or parsed_resume for JR=${data.job_requisition_id} — cannot match`,
+      );
+      return {
+        ok: false,
+        job_requisition_id: data.job_requisition_id,
+        error: 'missing-job-requisition-or-parsed-resume',
+      };
+    }
 
   // 2026-05-21 partner contract: pass PDF plain text (parsed_content /
   // RoboHire rawText) as the `resume` parameter. Falls back to the legacy
@@ -321,6 +343,105 @@ function pickClientId(req: RequirementsAgentViewItem): string | undefined {
 function buildResumeTextFromParsed(parsed: Record<string, unknown> | null | undefined): string {
   if (!parsed) return '';
   return typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
+}
+
+type RuleCheckGateResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'rule-check-result-not-pass'
+        | 'rule-check-audit-missing'
+        | 'rule-check-bypassed'
+        | 'rule-check-fail-reason-present'
+        | 'rule-check-rules-not-evaluated'
+        | 'rule-check-rules-missing'
+        | 'rule-check-rules-malformed'
+        | 'rule-check-rules-contain-fail';
+      detail?: string;
+    };
+
+/**
+ * Final pre-RoboHire gate: the matcher may only run after a real rule-check pass.
+ *
+ * The event name alone is not enough proof: dev bypass and manual event injection
+ * can both produce MATCH_RULE_CHECK_PASSED-shaped payloads. Requiring a non-bypass
+ * audit plus per-rule results keeps the expensive/external match step downstream
+ * of an actual rule-check decision.
+ */
+export function verifyRuleCheckPassedForMatch(
+  data: Partial<MatchRuleCheckPassedData>,
+): RuleCheckGateResult {
+  if ((data as { rule_check_result?: unknown }).rule_check_result !== '通过') {
+    return {
+      ok: false,
+      reason: 'rule-check-result-not-pass',
+      detail: `rule_check_result=${String((data as { rule_check_result?: unknown }).rule_check_result)}`,
+    };
+  }
+
+  if (!data.audit || typeof data.audit !== 'object') {
+    return { ok: false, reason: 'rule-check-audit-missing' };
+  }
+
+  const audit = data.audit as Partial<RuleCheckAuditMeta>;
+  if (audit.llm_model === 'bypass' || audit.fail_reason === 'bypassed') {
+    return { ok: false, reason: 'rule-check-bypassed' };
+  }
+  if (typeof audit.fail_reason === 'string' && audit.fail_reason.trim().length > 0) {
+    return {
+      ok: false,
+      reason: 'rule-check-fail-reason-present',
+      detail: audit.fail_reason.trim(),
+    };
+  }
+  if (typeof audit.rules_evaluated !== 'number' || audit.rules_evaluated <= 0) {
+    return {
+      ok: false,
+      reason: 'rule-check-rules-not-evaluated',
+      detail: `rules_evaluated=${String(audit.rules_evaluated)}`,
+    };
+  }
+
+  const rules = data.rule_check_rules;
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return { ok: false, reason: 'rule-check-rules-missing' };
+  }
+
+  const malformed = rules.find(
+    (r) =>
+      !r ||
+      typeof r.rule_id !== 'string' ||
+      !r.rule_id.trim() ||
+      typeof r.rule_name !== 'string' ||
+      !r.rule_name.trim() ||
+      typeof r.status !== 'string' ||
+      !r.status.trim(),
+  );
+  if (malformed) {
+    return {
+      ok: false,
+      reason: 'rule-check-rules-malformed',
+      detail: JSON.stringify(malformed).slice(0, 200),
+    };
+  }
+
+  const failed = rules.find((r) => normalizeRuleStatus(r.status) === 'fail');
+  if (failed) {
+    return {
+      ok: false,
+      reason: 'rule-check-rules-contain-fail',
+      detail: `${failed.rule_id} ${failed.rule_name}`,
+    };
+  }
+
+  return { ok: true };
+}
+
+function normalizeRuleStatus(status: string): string {
+  const s = status.trim().toLowerCase();
+  if (s === 'fail' || s === 'failed' || s === '未通过' || s === '不通过') return 'fail';
+  return s;
 }
 
 function flattenRequirementForMatch(req: RequirementsAgentViewItem): string {

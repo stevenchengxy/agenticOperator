@@ -135,12 +135,12 @@ export function RuleCheckAuditDetailBody({
   const headerAndBody = (
     <>
       <div
-        className="border-b border-line flex items-center gap-3"
-        style={{ padding: "12px 18px" }}
+        className="border-b border-line flex items-center gap-3 bg-bg"
+        style={{ padding: "11px 18px" }}
       >
         <Ic.shield />
         <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-semibold tracking-tight truncate">
+          <div className="text-[13px] font-semibold tracking-tight truncate">
             {t("rc_drawer_title")}
           </div>
           <IdReveal id={auditId} label={t("rc_audit_id_label")} />
@@ -151,7 +151,8 @@ export function RuleCheckAuditDetailBody({
           disabled={isReplaying}
           title={t("rc_replay_title")}
         >
-          {isReplaying ? t("rc_replay_running") : `🔁 ${t("rc_replay")}`}
+          <Ic.play />
+          {isReplaying ? t("rc_replay_running") : t("rc_replay")}
         </Btn>
         {chrome === "drawer" && onClose && (
           <Btn size="sm" onClick={onClose}>
@@ -202,11 +203,11 @@ export function RuleCheckAuditDetailBody({
             </div>
           ) : null}
           <div
-            className="border-b border-line flex"
-            style={{ padding: "0 18px", gap: 16 }}
+            className="border-b border-line flex bg-bg"
+            style={{ padding: "8px 18px", gap: 6 }}
           >
             <TabBtn active={tab === "select"} onClick={() => setTab("select")}>
-              ✦ {t("rc_tab_select")}
+              {t("rc_tab_select")}
             </TabBtn>
             <TabBtn active={tab === "prompt"} onClick={() => setTab("prompt")}>
               {t("rc_tab_prompt")}
@@ -343,10 +344,10 @@ function DetailHeader({
       <DecisionBanner detail={detail} summary={summary} />
       {/* 2026-05-26: 精简头部 — 只留 4 个有用字段;decision 已在 banner,
           长 UUID 标识符收进默认折叠的 <details>。 */}
-      <div className="border-b border-line bg-panel" style={{ padding: "16px 22px" }}>
+      <div className="border-b border-line bg-bg" style={{ padding: "13px 22px" }}>
         <div
           className="grid"
-          style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "14px 28px" }}
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px 22px" }}
         >
           <Kv label={t("rc_kv_client_bg_studio")}>
             <span className="mono text-[11.5px]">
@@ -391,7 +392,7 @@ function DetailHeader({
             </Badge>
           </Kv>
         </div>
-        <details className="mt-3">
+        <details className="mt-2">
           <summary className="hint cursor-pointer select-none" style={{ fontSize: 11.5 }}>
             {t("rc_identifiers")}
           </summary>
@@ -412,32 +413,26 @@ function DetailHeader({
         </details>
       </div>
       {detail.failure_reasons.length > 0 && (
-        <div
+        <details
           className="border-b border-line"
           style={{
-            padding: "12px 22px",
-            borderLeft: "3px solid var(--c-err)",
+            padding: "9px 22px",
             background: "var(--c-err-bg)",
-            display: "flex",
-            gap: 10,
-            alignItems: "flex-start",
           }}
         >
-          <Ic.alert />
-          <div className="min-w-0 flex-1">
-            <div className="hint" style={{ color: "var(--c-err)" }}>{t("rc_failure_reasons_label")}</div>
-            <div className="mono text-[12px] text-err" style={{ marginTop: 4, lineHeight: 1.5 }}>
+          <summary className="cursor-pointer select-none text-err" style={{ fontSize: 12.5, fontWeight: 560 }}>
+            {t("rc_failure_reasons_label")} · {detail.failure_reasons.length}
+          </summary>
+          <div className="mono text-[11.5px] text-err" style={{ marginTop: 7, lineHeight: 1.55 }}>
               {detail.failure_reasons.join("、")}
-            </div>
           </div>
-        </div>
+        </details>
       )}
       {detail.parse_error && (
         <div
           className="border-b border-line"
           style={{
-            padding: "12px 22px",
-            borderLeft: "3px solid var(--c-warn)",
+            padding: "10px 22px",
             background: "var(--c-warn-bg)",
             display: "flex",
             gap: 10,
@@ -471,34 +466,34 @@ function DecisionBanner({
   // candidate was not rejected, evaluation just couldn't finish.
   const infra = isInfraFailure(detail.fail_reason);
   const accent = infra ? "var(--c-warn)" : pass ? "var(--c-ok)" : "var(--c-err)";
+  const conciseSummary = summary.length > 220 ? `${summary.slice(0, 220)}...` : summary;
   return (
     <div
-      className="rc-banner-in border-b border-line flex items-center gap-5"
+      className="rc-banner-in border-b border-line flex items-center gap-4"
       style={{
-        padding: "20px 22px",
-        background: `linear-gradient(100deg, color-mix(in oklab, ${accent} 18%, var(--c-bg)) 0%, color-mix(in oklab, ${accent} 7%, var(--c-bg)) 55%, var(--c-bg) 100%)`,
-        borderLeft: `4px solid ${accent}`,
-        boxShadow: `inset 14px 0 24px -18px ${accent}`,
+        padding: "14px 22px",
+        background: "var(--c-surface)",
+        borderLeft: `3px solid ${accent}`,
       }}
     >
       <div
         className="rc-verdict-pop tabular-nums"
         style={{
-          fontFamily: SERIF,
-          fontSize: 36,
-          fontWeight: 500,
+          fontSize: 13,
+          fontWeight: 650,
           color: accent,
-          minWidth: 120,
-          lineHeight: 1,
-          letterSpacing: "-0.02em",
-          textShadow: `0 0 22px color-mix(in oklab, ${accent} 35%, transparent)`,
+          background: `color-mix(in oklab, ${accent} 12%, transparent)`,
+          borderRadius: 999,
+          padding: "5px 12px",
+          lineHeight: 1.1,
+          whiteSpace: "nowrap",
         }}
       >
         {infra ? t("rc_verdict_parked") : verdictLabel(detail.decision, t)}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-ink-1" style={{ fontSize: 14, lineHeight: 1.55 }}>
-          {summary}
+        <div className="text-ink-1 truncate" style={{ fontSize: 13, lineHeight: 1.55, fontWeight: 520 }}>
+          {conciseSummary}
         </div>
         <div className="text-ink-2 text-[11.5px] mt-2 flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
           {(() => {
@@ -542,7 +537,7 @@ function buildDecisionSummary(
   }
   // FAIL
   const reasons = detail.failure_reasons.length
-    ? detail.failure_reasons.join("、")
+    ? detail.failure_reasons.slice(0, 2).join("、") + (detail.failure_reasons.length > 2 ? ` +${detail.failure_reasons.length - 2}` : "")
     : t("rc_decision_summary_llm_parse_err");
   return t("rc_decision_summary_fail").replace("{reasons}", reasons);
 }
@@ -575,15 +570,14 @@ function TabBtn({
   return (
     <button
       onClick={onClick}
-      className="border-0 bg-transparent cursor-pointer"
+      className="border-0 cursor-pointer transition-all"
       style={{
-        padding: "12px 0 10px",
+        padding: "6px 11px",
+        borderRadius: 7,
         color: active ? "var(--c-ink-1)" : "var(--c-ink-3)",
-        borderBottom: active
-          ? "1.5px solid var(--c-ink-1)"
-          : "1.5px solid transparent",
-        fontWeight: active ? 500 : 400,
-        fontSize: 13,
+        background: active ? "var(--c-panel)" : "transparent",
+        fontWeight: active ? 560 : 450,
+        fontSize: 12.5,
       }}
     >
       {children}
@@ -1148,4 +1142,3 @@ function CopyBtn({ text }: { text: string }) {
     </button>
   );
 }
-

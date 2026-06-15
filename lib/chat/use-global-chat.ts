@@ -11,6 +11,7 @@ export type ChatSession = {
 };
 
 const STORAGE_KEY = "ao:global-chat:v1";
+const COMPACT_TAIL_MESSAGES = 8;
 
 type Persisted = {
   current: ChatSession;
@@ -66,7 +67,8 @@ export function useGlobalChat() {
 
   const appendMessage = useCallback((m: ChatMessage) => {
     setState((s) => {
-      const messages = [...s.current.messages, m];
+      const message = { ...m, createdAt: m.createdAt ?? new Date().toISOString(), kind: m.kind ?? "normal" as const };
+      const messages = [...s.current.messages, message];
       const title =
         s.current.messages.length === 0 && m.role === "user"
           ? autoTitle(messages)
@@ -85,7 +87,7 @@ export function useGlobalChat() {
       if (last && last.role === "assistant") {
         msgs[msgs.length - 1] = { ...last, content: last.content + chunk };
       } else {
-        msgs.push({ role: "assistant", content: chunk });
+        msgs.push({ role: "assistant", content: chunk, createdAt: new Date().toISOString(), kind: "normal" });
       }
       return { ...s, current: { ...s.current, messages: msgs, updatedAt: new Date().toISOString() } };
     });
@@ -101,6 +103,28 @@ export function useGlobalChat() {
         msgs.push(m);
       }
       return { ...s, current: { ...s.current, messages: msgs, updatedAt: new Date().toISOString() } };
+    });
+  }, []);
+
+  const compactCurrent = useCallback((summary: string) => {
+    setState((s) => {
+      const messages = s.current.messages;
+      if (messages.length <= COMPACT_TAIL_MESSAGES) return s;
+      const tail = messages.slice(-COMPACT_TAIL_MESSAGES);
+      const compactMessage: ChatMessage = {
+        role: "system",
+        kind: "compact",
+        createdAt: new Date().toISOString(),
+        content: summary,
+      };
+      return {
+        ...s,
+        current: {
+          ...s.current,
+          messages: [compactMessage, ...tail],
+          updatedAt: new Date().toISOString(),
+        },
+      };
     });
   }, []);
 
@@ -147,6 +171,7 @@ export function useGlobalChat() {
     appendMessage,
     appendToLastAssistant,
     replaceLastAssistant,
+    compactCurrent,
     clearCurrent,
     newSession,
     switchSession,
@@ -154,3 +179,5 @@ export function useGlobalChat() {
     renameSession,
   };
 }
+
+export type GlobalChatController = ReturnType<typeof useGlobalChat>;

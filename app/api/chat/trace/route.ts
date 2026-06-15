@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import { isGatewayConfigured, pickGateway } from "@/server/llm/gateway";
 import { TOOL_SCHEMAS, findTool } from "@/lib/chat/global-chat-tools";
 import { buildSystemPrompt } from "@/lib/chat/global-chat-system-prompt";
+import { recordChatbotLog } from "@/server/chat/chatbot-log";
 import type {
   ChatMessage,
   ChatSource,
@@ -34,18 +35,57 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "BAD_REQUEST", message: "messages[] required" }, { status: 400 });
   }
 
+  const sessionId = body.sessionId;
+  const lastUser = [...body.messages].reverse().find((m) => m.role === "user");
+  if (lastUser) {
+    await recordChatbotLog({
+      sessionId,
+      role: "user",
+      content: lastUser.content,
+      pageContext: body.pageContext,
+      metadata: { messageCount: body.messages.length },
+    });
+  }
+
   if (!isGatewayConfigured()) {
     return makeSseResponse(async (emit) => {
-      emit({ type: "text_chunk", content: "LLM gateway 未配置 · 请联系管理员设置 OPENAI_API_KEY 或等价 env。" });
+      const content = "LLM gateway 未配置 · 请联系管理员设置 OPENAI_API_KEY 或等价 env。";
+      emit({ type: "text_chunk", content });
       emit({ type: "done", toolCallsExecuted: 0 });
+      await recordChatbotLog({
+        sessionId,
+        role: "assistant",
+        content,
+        pageContext: body.pageContext,
+        metadata: { gatewayConfigured: false, toolCallsExecuted: 0 },
+      });
     });
   }
 
   return makeSseResponse(async (emit) => {
     try {
-      await runStreamingToolLoop(body.messages, body.pageContext, emit);
+      const result = await runStreamingToolLoop(body.messages, body.pageContext, sessionId, emit);
+      await recordChatbotLog({
+        sessionId,
+        role: "assistant",
+        content: result.assistantContent || "(empty assistant response)",
+        pageContext: body.pageContext,
+        metadata: {
+          modelUsed: result.modelUsed ?? null,
+          toolCallsExecuted: result.toolCallsExecuted,
+          sources: result.sources,
+        },
+      });
     } catch (e) {
-      emit({ type: "error", message: (e as Error).message });
+      const message = (e as Error).message;
+      emit({ type: "error", message });
+      await recordChatbotLog({
+        sessionId,
+        role: "assistant",
+        content: `ERROR: ${message}`,
+        pageContext: body.pageContext,
+        metadata: { error: true },
+      });
     }
   });
 }
@@ -82,8 +122,9 @@ type AccumulatedToolCall = {
 async function runStreamingToolLoop(
   messages: ChatMessage[],
   pageContext: PageContext | undefined,
+  sessionId: string | undefined,
   emit: (e: StreamEvent) => void,
-): Promise<void> {
+): Promise<{ assistantContent: string; modelUsed?: string; toolCallsExecuted: number; sources: ChatSource[] }> {
   const cfg = pickGateway();
   const client = new OpenAI({ baseURL: cfg.baseURL, apiKey: cfg.apiKey, timeout: 300_000 });
   const sources: ChatSource[] = [];
@@ -94,6 +135,7 @@ async function runStreamingToolLoop(
     { role: "system", content: buildSystemPrompt(pageContext) },
     ...messages.map((m) => ({ role: m.role, content: m.content })),
   ];
+  let allAssistantContent = "";
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
     const stream = await client.chat.completions.create({
@@ -116,6 +158,7 @@ async function runStreamingToolLoop(
 
       if (typeof delta.content === "string" && delta.content.length > 0) {
         assistantContent += delta.content;
+        allAssistantContent += delta.content;
         emit({ type: "text_chunk", content: delta.content });
       }
 
@@ -138,7 +181,9 @@ async function runStreamingToolLoop(
       // Done — final assistant message already streamed via text_chunk events.
       // If we ran out of turns without getting a text response, emit synthesis message.
       if (!assistantContent && turn === MAX_TOOL_TURNS - 1) {
-        emit({ type: "text_chunk", content: "(已达到最大工具调用轮数,以下是部分结果)" });
+        const fallback = "(已达到最大工具调用轮数,以下是部分结果)";
+        allAssistantContent += fallback;
+        emit({ type: "text_chunk", content: fallback });
       }
       break;
     }
@@ -160,7 +205,16 @@ async function runStreamingToolLoop(
 
     // Execute each tool, push result back
     for (const call of toolCallsArr) {
-      emit({ type: "tool_call_start", name: call.function.name, args: safeJsonParse(call.function.arguments) });
+      const parsedArgs = safeJsonParse(call.function.arguments);
+      emit({ type: "tool_call_start", name: call.function.name, args: parsedArgs });
+      await recordChatbotLog({
+        sessionId,
+        role: "tool",
+        kind: "tool",
+        content: `tool.start ${call.function.name}`,
+        pageContext,
+        metadata: { phase: "start", tool: call.function.name, args: parsedArgs },
+      });
       const tool = findTool(call.function.name);
       if (!tool) {
         conversation.push({
@@ -169,11 +223,19 @@ async function runStreamingToolLoop(
           content: JSON.stringify({ error: `unknown tool: ${call.function.name}` }),
         });
         emit({ type: "tool_call_done", name: call.function.name, ms: 0, resultPreview: "(unknown tool)" });
+        await recordChatbotLog({
+          sessionId,
+          role: "tool",
+          kind: "tool",
+          content: `tool.done ${call.function.name}: unknown tool`,
+          pageContext,
+          metadata: { phase: "done", tool: call.function.name, ms: 0, error: "unknown_tool" },
+        });
         continue;
       }
       const start = Date.now();
       try {
-        const parsed = safeJsonParse(call.function.arguments) ?? {};
+        const parsed = parsedArgs ?? {};
         const { result, sources: toolSources } = await tool.execute(parsed);
         toolCallsExecuted += 1;
         if (toolSources) sources.push(...toolSources);
@@ -186,6 +248,19 @@ async function runStreamingToolLoop(
           ms: Date.now() - start,
           resultPreview: summarizeResult(result),
         });
+        await recordChatbotLog({
+          sessionId,
+          role: "tool",
+          kind: "tool",
+          content: `tool.done ${call.function.name}: ${summarizeResult(result)}`,
+          pageContext,
+          metadata: {
+            phase: "done",
+            tool: call.function.name,
+            ms: Date.now() - start,
+            sources: toolSources ?? [],
+          },
+        });
       } catch (e) {
         console.error(`[chat/trace] tool ${call.function.name} failed:`, (e as Error).message);
         conversation.push({
@@ -194,6 +269,14 @@ async function runStreamingToolLoop(
           content: JSON.stringify({ error: `tool execution failed: ${call.function.name}` }),
         });
         emit({ type: "tool_call_done", name: call.function.name, ms: Date.now() - start, resultPreview: "(failed)" });
+        await recordChatbotLog({
+          sessionId,
+          role: "tool",
+          kind: "tool",
+          content: `tool.done ${call.function.name}: failed`,
+          pageContext,
+          metadata: { phase: "done", tool: call.function.name, ms: Date.now() - start, error: (e as Error).message.slice(0, 300) },
+        });
       }
     }
     // Loop continues — next iteration gets the tool results in conversation.
@@ -203,6 +286,7 @@ async function runStreamingToolLoop(
     emit({ type: "sources", items: sources });
   }
   emit({ type: "done", modelUsed, toolCallsExecuted });
+  return { assistantContent: allAssistantContent, modelUsed, toolCallsExecuted, sources };
 }
 
 function safeJsonParse(s: string): unknown {

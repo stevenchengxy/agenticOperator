@@ -60,7 +60,11 @@ const LOG_KIND_LABEL: Record<string, string> = {
  *   pg.* / partner  → 💾 数据库
  *   其它 api.*      → 🌐 外部调用
  */
-export function describeLogKind(kind: string): string {
+export function describeLogKind(kind: string | null | undefined): string {
+  // `kind` arrives from JSONL log lines parsed with an unchecked cast, so a
+  // line missing the field is `undefined` at runtime despite the type. Guard
+  // before any string op (was crashing the monitor RunTrace on such rows).
+  if (typeof kind !== 'string' || kind === '') return '📄 日志事件';
   if (LOG_KIND_LABEL[kind]) return LOG_KIND_LABEL[kind];
   const k = kind.toLowerCase();
   if (k.startsWith('api.robohire')) return '🌐 调用外部面试/解析服务';
@@ -72,7 +76,9 @@ export function describeLogKind(kind: string): string {
   return kind;
 }
 
-export function describeStep(name: string): StepDescriptor {
+export function describeStep(name: string | null | undefined): StepDescriptor {
+  // Same untyped-source caveat as describeLogKind: never assume a string.
+  if (typeof name !== 'string' || name === '') return { label: '步骤' };
   const n = name.toLowerCase();
 
   // ── interview-inviter-agent ──────────────────────────────────────

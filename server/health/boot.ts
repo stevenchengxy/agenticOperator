@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { prisma } from '@/server/db';
+import { prisma, isDbUnreachableError, markDbUnreachable } from '@/server/db';
 import { recordNotification } from '@/server/notifications/ingest';
 import { resolveAlerts } from '@/server/notifications/resolve';
 import type { CaptureInput } from '@/server/notifications/derive';
@@ -150,7 +150,15 @@ export async function recordBoot(now = new Date()): Promise<BootVerdict | null> 
     });
     return verdict;
   } catch (e) {
-    console.warn(`[health] recordBoot failed: ${(e as Error).message}`);
+    // A connection error carries the P1001 code (reliable across log formats).
+    // Prime the breaker so the heartbeat / health-poll floods collapse to the
+    // single throttled "[db] unreachable" notice instead of re-printing the
+    // full multi-line invocation error on every tick.
+    if (isDbUnreachableError(e)) {
+      markDbUnreachable();
+    } else {
+      console.warn(`[health] recordBoot failed: ${(e as Error).message}`);
+    }
     return null;
   }
 }
@@ -164,7 +172,11 @@ export function startHeartbeat(intervalMs = HEARTBEAT_INTERVAL_MS): void {
   heartbeatTimer = setInterval(() => {
     void prisma.serviceHeartbeat
       .update({ where: { id: HEARTBEAT_ID }, data: { lastHeartbeatAt: new Date() } })
-      .catch(() => {});
+      // Keep the unreachable-DB breaker hot so the 30s tick stays quiet during
+      // an outage (a real failure is surfaced once via the throttled notice).
+      .catch((e) => {
+        if (isDbUnreachableError(e)) markDbUnreachable();
+      });
   }, intervalMs);
   heartbeatTimer.unref?.();
 }

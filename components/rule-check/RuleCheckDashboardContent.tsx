@@ -83,168 +83,137 @@ export function RuleCheckDashboardContent() {
         (r.logic || "").toLowerCase().includes(q)),
   );
   const parked = data?.infra_parked ?? [];
+  const deadRules = data?.dead_rules ?? [];
 
   return (
-    <div className="flex flex-col gap-6" style={{ padding: "20px 32px 40px" }}>
-      {/* header */}
-      <div className="flex items-baseline justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: "-0.01em" }}>
-            {t("rc_rh_title")}
-          </h2>
-          <div className="text-ink-3 mt-1" style={{ fontSize: 12.5 }}>
-            {t("rc_rh_sub").replace("{fired}", String(totals?.rules_fired ?? 0)).replace("{total}", String(totals?.rules_total ?? 0))}
+    <div className="flex flex-col gap-5" style={{ padding: "18px 32px 40px" }}>
+      <section className="rc-surface-panel rc-card-in" style={{ padding: 16 }}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="hint">{t("rc_view_dashboard")}</div>
+            <div className="text-ink-1" style={{ fontSize: 18, fontWeight: 560, marginTop: 4 }}>
+              {totals?.rules_fired ?? 0} / {totals?.rules_total ?? 0}
+              <span className="text-ink-3" style={{ fontSize: 12.5, fontWeight: 450, marginLeft: 8 }}>
+                {t("rc_rh_kpi_fired")}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={refreshNow}
+              disabled={refreshing}
+              title={t("rc_rh_refresh_hint")}
+              className="rc-icon-btn"
+              style={{ opacity: refreshing ? 0.55 : 1 }}
+            >
+              <span aria-hidden className={refreshing ? "animate-spin" : ""}>↻</span>
+            </button>
+            <WindowToggle value={win} onChange={setWin} t={t} />
           </div>
         </div>
-        <div className="flex items-center" style={{ gap: 10, marginLeft: "auto" }}>
-          <button
-            type="button"
-            onClick={refreshNow}
-            disabled={refreshing}
-            title={t("rc_rh_refresh_hint")}
-            className="flex items-center text-ink-2 hover:text-ink-1"
-            style={{
-              gap: 6,
-              fontSize: 12,
-              padding: "4px 11px",
-              background: "var(--c-surface)",
-              border: "1px solid var(--c-line)",
-              borderRadius: 7,
-              cursor: refreshing ? "default" : "pointer",
-              opacity: refreshing ? 0.6 : 1,
-            }}
-          >
-            <span aria-hidden className={refreshing ? "animate-spin" : ""} style={{ display: "inline-block" }}>
-              ⟳
-            </span>
-            {refreshing ? t("rc_rh_refreshing") : t("rc_rh_refresh")}
-          </button>
-          <WindowToggle value={win} onChange={setWin} t={t} />
-        </div>
-      </div>
+        <HealthStrip totals={totals} parkedCount={parked.length} t={t} />
+      </section>
 
-      {/* infra banner — only when LLM 没钱/故障 parked something this window */}
       {parked.length > 0 && (
-        <Link
-          href="/fleet"
-          className="flex items-center gap-2 rounded-md no-underline"
-          style={{ padding: "9px 14px", background: "var(--c-warn-bg)", border: "1px solid color-mix(in oklab, var(--c-warn) 40%, transparent)", fontSize: 12.5 }}
-        >
-          <span style={{ color: "var(--c-warn)" }}>⚠</span>
-          <span className="text-ink-1">
-            {t("rc_rh_infra_banner").replace("{n}", String(parked.length))}
-          </span>
-          <span className="ml-auto" style={{ color: "var(--c-accent)" }}>{t("rc_rh_infra_link")} →</span>
+        <Link href="/fleet" className="rc-alert-line no-underline rc-card-in">
+          <span className="rc-status-dot" style={{ background: "var(--c-warn)" }} />
+          <span className="text-ink-1">{t("rc_rh_infra_banner").replace("{n}", String(parked.length))}</span>
+          <span className="ml-auto text-accent">{t("rc_rh_infra_link")} →</span>
         </Link>
       )}
 
-      {/* body: rule table (left) + infra-parked / dead (right) */}
-      <div className="grid gap-6 items-start" style={{ gridTemplateColumns: "minmax(0, 1.9fr) minmax(260px, 1fr)" }}>
-        {/* left — rule table */}
-        <div className="flex flex-col gap-3 min-w-0">
-          {/* 搜索:按 id / 规则名 / 阶段 / 规则内容 过滤 */}
-          <div className="flex items-center gap-2">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("rc_rh_search_ph")}
-              className="rounded text-ink-1"
-              style={{ flex: 1, padding: "6px 12px", fontSize: 12.5, background: "var(--c-surface)", border: "1px solid var(--c-line)" }}
-            />
-            {q !== "" && (
-              <span className="text-ink-3 flex-none" style={{ fontSize: 11.5 }}>
-                {t("rc_rh_search_count").replace("{n}", String(shownRules.length))}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label={`${t("rc_rh_filter_all")} ${rules.length}`} />
-            <FilterChip active={filter === "blocking"} onClick={() => setFilter("blocking")} label={`${t("rc_rh_filter_blocking")} ${rules.filter((r) => r.health === "blocking").length}`} tone="err" />
-            <FilterChip active={filter === "idle"} onClick={() => setFilter("idle")} label={`${t("rc_rh_filter_idle")} ${rules.filter((r) => r.health === "idle").length}`} />
-            <FilterChip active={filter === "unassessed"} onClick={() => setFilter("unassessed")} label={`${t("rc_rh_filter_unassessed")} ${rules.filter((r) => r.health === "unassessed").length}`} />
-            {/* 阶段筛选 —— 31 个阶段太多用下拉 */}
-            <select
-              value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
-              className="rounded-full"
-              style={{ marginLeft: "auto", padding: "3px 10px", fontSize: 11.5, background: stageFilter ? "var(--c-panel)" : "transparent", border: "1px solid var(--c-line)", color: stageFilter ? "var(--c-ink-1)" : "var(--c-ink-3)" }}
-            >
-              <option value="">{t("rc_rh_stage_all")}（{stages.length}）</option>
-              {stages.map((s) => (
-                <option key={s} value={s}>{s}（{rules.filter((r) => r.stage === s).length}）</option>
-              ))}
-            </select>
+      <div className="grid gap-5 items-start" style={{ gridTemplateColumns: "minmax(0, 1fr) 310px" }}>
+        <section className="rc-surface-panel min-w-0 rc-card-in" style={{ padding: 0 }}>
+          <div className="flex flex-col gap-3 border-b border-line" style={{ padding: 14 }}>
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("rc_rh_search_ph")}
+                className="rc-quiet-input text-ink-1"
+                style={{ flex: 1 }}
+              />
+              <select
+                value={stageFilter}
+                onChange={(e) => setStageFilter(e.target.value)}
+                className="rc-quiet-select"
+                style={{ width: 170 }}
+              >
+                <option value="">{t("rc_rh_stage_all")} ({stages.length})</option>
+                {stages.map((s) => (
+                  <option key={s} value={s}>{s} ({rules.filter((r) => r.stage === s).length})</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label={`${t("rc_rh_filter_all")} ${rules.length}`} />
+              <FilterChip active={filter === "blocking"} onClick={() => setFilter("blocking")} label={`${t("rc_rh_filter_blocking")} ${rules.filter((r) => r.health === "blocking").length}`} tone="err" />
+              <FilterChip active={filter === "idle"} onClick={() => setFilter("idle")} label={`${t("rc_rh_filter_idle")} ${rules.filter((r) => r.health === "idle").length}`} />
+              <FilterChip active={filter === "unassessed"} onClick={() => setFilter("unassessed")} label={`${t("rc_rh_filter_unassessed")} ${rules.filter((r) => r.health === "unassessed").length}`} />
+              {q !== "" && <span className="text-ink-3 ml-auto" style={{ fontSize: 11 }}>{t("rc_rh_search_count").replace("{n}", String(shownRules.length))}</span>}
+            </div>
           </div>
 
           {!data ? (
-            <div className="text-ink-3 py-10 text-center border border-line rounded" style={{ fontSize: 12.5 }}>{err ? t("rc_rh_error") : t("rc_loading")}</div>
+            <div className="text-ink-3 py-12 text-center" style={{ fontSize: 12.5 }}>{err ? t("rc_rh_error") : t("rc_loading")}</div>
           ) : shownRules.length === 0 ? (
-            <div className="text-ink-3 py-10 text-center border border-line rounded" style={{ fontSize: 12.5 }}>{t("rc_rh_empty")}</div>
+            <div className="text-ink-3 py-12 text-center" style={{ fontSize: 12.5 }}>{t("rc_rh_empty")}</div>
           ) : (
-            <div className="border border-line rounded" style={{ background: "var(--c-surface)" }}>
-              <div className="grid items-center text-ink-3" style={{ gridTemplateColumns: "minmax(0, 2.3fr) 56px minmax(0, 2fr) 88px", gap: 12, padding: "8px 14px", fontSize: 10.5, borderBottom: "1px solid var(--c-line)" }}>
+            <div>
+              <div className="grid items-center text-ink-3" style={{ gridTemplateColumns: "minmax(0, 2.1fr) 70px minmax(160px, 1.5fr) 86px", gap: 12, padding: "9px 14px", fontSize: 10.5, borderBottom: "1px solid var(--c-line)" }}>
                 <span>{t("rc_rh_col_rule")}</span>
                 <span style={{ textAlign: "right" }}>{t("rc_rh_col_fired")}</span>
                 <span>{t("rc_rh_col_passfail")}</span>
                 <span>{t("rc_rh_col_health")}</span>
               </div>
-              {shownRules.map((r) => <RuleRow key={r.rule_id} r={r} t={t} onSelect={setSelectedRule} />)}
+              {shownRules.map((r, i) => (
+                <div key={r.rule_id} className="rc-row-in" style={{ ["--rc-i"]: Math.min(i, 14) } as React.CSSProperties}>
+                  <RuleRow r={r} t={t} onSelect={setSelectedRule} />
+                </div>
+              ))}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* right — infra-parked + dead rules */}
-        <div className="flex flex-col gap-6 min-w-0">
-          <section>
-            <h3 className="m-0 text-ink-1 flex items-baseline gap-2" style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500 }}>
-              <span style={{ color: parked.length ? "var(--c-warn)" : "var(--c-ink-3)" }}>⚠</span>{t("rc_rh_parked_title")}
-            </h3>
-            <div className="text-ink-3 mb-2 mt-0.5" style={{ fontSize: 11 }}>{t("rc_rh_parked_sub")}</div>
-            {parked.length === 0 ? (
-              <div className="text-ink-4 py-3" style={{ fontSize: 11.5 }}>{data ? t("rc_rh_parked_none") : t("rc_loading")}</div>
-            ) : (
-              <div className="border-t border-line">
-                {parked.slice(0, 10).map((p) => <ParkedRow key={p.audit_id} p={p} t={t} />)}
-                {parked.length > 10 && (
-                  <div className="text-ink-4 pt-2" style={{ fontSize: 10.5 }}>
-                    {t("rc_rh_parked_more").replace("{shown}", "10").replace("{total}", String(parked.length))}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
+        <aside className="flex flex-col gap-4 min-w-0">
+          <SidePanel
+            title={t("rc_rh_parked_title")}
+            count={parked.length}
+            tone={parked.length ? "warn" : "muted"}
+            empty={data ? t("rc_rh_parked_none") : t("rc_loading")}
+          >
+            {parked.slice(0, 8).map((p) => <ParkedRow key={p.audit_id} p={p} t={t} />)}
+            {parked.length > 8 && <div className="text-ink-4 pt-2" style={{ fontSize: 10.5 }}>{t("rc_rh_parked_more").replace("{shown}", "8").replace("{total}", String(parked.length))}</div>}
+          </SidePanel>
 
-          <section>
-            <h3 className="m-0 text-ink-3 flex items-baseline gap-2" style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500 }}>
-              💤 {t("rc_rh_dead_title")} ({data?.dead_rules.length ?? 0})
-            </h3>
-            <div className="text-ink-3 mb-2 mt-0.5" style={{ fontSize: 11 }}>{t("rc_rh_dead_hint")}</div>
-            {(data?.dead_rules.length ?? 0) === 0 ? (
-              <div className="text-ink-4 py-3" style={{ fontSize: 11.5 }}>{data ? t("rc_rh_dead_none") : t("rc_loading")}</div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {(showDead ? data!.dead_rules : data!.dead_rules.slice(0, 12)).map((d) => (
-                  <button
-                    key={d.rule_id}
-                    type="button"
-                    onClick={() => setSelectedRule(d.rule_id)}
-                    title={d.name}
-                    className="rounded text-ink-3 hover:text-ink-1 transition-colors"
-                    style={{ fontFamily: "var(--f-mono)", fontSize: 11, padding: "2px 7px", background: "var(--c-panel)", border: "1px solid var(--c-line)", cursor: "pointer" }}
-                  >
-                    {d.rule_id}
-                  </button>
-                ))}
-                {(data?.dead_rules.length ?? 0) > 12 && (
-                  <button type="button" onClick={() => setShowDead((s) => !s)} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 11, padding: "2px 4px" }}>
-                    {showDead ? t("rc_rh_dead_collapse") : `+${data!.dead_rules.length - 12}…`}
-                  </button>
-                )}
-              </div>
-            )}
-          </section>
-        </div>
+          <SidePanel
+            title={t("rc_rh_dead_title")}
+            count={deadRules.length}
+            tone="muted"
+            empty={data ? t("rc_rh_dead_none") : t("rc_loading")}
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {(showDead ? deadRules : deadRules.slice(0, 18)).map((d) => (
+                <button
+                  key={d.rule_id}
+                  type="button"
+                  onClick={() => setSelectedRule(d.rule_id)}
+                  title={d.name}
+                  className="rc-mini-chip"
+                >
+                  {d.rule_id}
+                </button>
+              ))}
+              {deadRules.length > 18 && (
+                <button type="button" onClick={() => setShowDead((s) => !s)} className="rc-mini-chip">
+                  {showDead ? t("rc_rh_dead_collapse") : `+${deadRules.length - 18}`}
+                </button>
+              )}
+            </div>
+          </SidePanel>
+        </aside>
       </div>
 
       {selectedRule && (
@@ -256,6 +225,76 @@ export function RuleCheckDashboardContent() {
       )}
     </div>
   );
+}
+
+function HealthStrip({
+  totals,
+  parkedCount,
+  t,
+}: {
+  totals: RuleHealthResponse["totals"] | undefined;
+  parkedCount: number;
+  t: (k: string) => string;
+}) {
+  const coverage =
+    totals && totals.rules_total > 0 ? Math.round((totals.rules_fired / totals.rules_total) * 100) : 0;
+  const items = [
+    { label: t("rc_rh_kpi_coverage_sub").replace("{n}", String(coverage)), value: `${coverage}%`, tone: "ok" as const },
+    { label: t("rc_rh_kpi_blocking"), value: String(totals?.blocking_rules ?? 0), tone: "err" as const },
+    { label: t("rc_rh_kpi_dead"), value: String(totals?.rules_dead ?? 0), tone: "muted" as const },
+    { label: t("rc_rh_kpi_infra"), value: String(parkedCount), tone: parkedCount > 0 ? "warn" as const : "muted" as const },
+  ];
+  return (
+    <div className="grid gap-2 mt-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+      {items.map((item) => (
+        <div key={item.label} className="rc-metric-cell">
+          <div className="flex items-center gap-2">
+            <span className="rc-status-dot" style={{ background: toneColor(item.tone) }} />
+            <span className="text-ink-3 truncate" style={{ fontSize: 11.5 }}>{item.label}</span>
+          </div>
+          <div className="tabular-nums text-ink-1" style={{ fontSize: 21, fontWeight: 560, marginTop: 6 }}>
+            {item.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SidePanel({
+  title,
+  count,
+  tone,
+  empty,
+  children,
+}: {
+  title: string;
+  count: number;
+  tone: "warn" | "muted";
+  empty: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rc-surface-panel rc-card-in" style={{ padding: 14 }}>
+      <div className="flex items-center gap-2">
+        <span className="rc-status-dot" style={{ background: tone === "warn" ? "var(--c-warn)" : "var(--c-ink-4)" }} />
+        <h3 className="m-0 text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 560 }}>
+          {title}
+        </h3>
+        <span className="ml-auto tabular-nums text-ink-3" style={{ fontSize: 12 }}>{count}</span>
+      </div>
+      <div className="mt-3">
+        {count === 0 ? <div className="text-ink-4" style={{ fontSize: 11.5 }}>{empty}</div> : children}
+      </div>
+    </section>
+  );
+}
+
+function toneColor(tone: "ok" | "err" | "warn" | "muted"): string {
+  if (tone === "ok") return "var(--c-ok)";
+  if (tone === "err") return "var(--c-err)";
+  if (tone === "warn") return "var(--c-warn)";
+  return "var(--c-ink-4)";
 }
 
 // 点开某条规则 → 抽屉里展示 Neo4j 上的**原规则定义**(live render),不是审计记录。
@@ -325,12 +364,14 @@ function RuleRow({ r, t, onSelect }: { r: RuleHealthRow; t: (k: string) => strin
   const passW = Math.max(r.passed, 0);
   const failW = Math.max(r.failed, 0);
   const redline = r.severity === "terminal";
+  const healthTone: "ok" | "err" | "muted" =
+    r.health === "blocking" ? "err" : r.health === "unassessed" || r.health === "dead" ? "muted" : "ok";
   return (
     <button
       type="button"
       onClick={() => onSelect(r.rule_id)}
-      className="grid items-center w-full text-left hover:bg-panel transition-colors"
-      style={{ gridTemplateColumns: "minmax(0, 2.3fr) 56px minmax(0, 2fr) 88px", gap: 12, padding: "10px 14px", borderBottom: "1px solid var(--c-line)", borderLeft: `2px solid ${r.health === "blocking" ? "var(--c-err)" : "transparent"}`, background: "transparent", cursor: "pointer" }}
+      className="grid items-center w-full text-left rc-row-hover"
+      style={{ gridTemplateColumns: "minmax(0, 2.1fr) 70px minmax(160px, 1.5fr) 86px", gap: 12, padding: "11px 14px", borderBottom: "1px solid var(--c-line)", background: "transparent", cursor: "pointer" }}
       title={r.name}
     >
       <span className="flex items-baseline gap-2 min-w-0">
@@ -342,31 +383,32 @@ function RuleRow({ r, t, onSelect }: { r: RuleHealthRow; t: (k: string) => strin
           </span>
         )}
         {redline && (
-          <span className="flex-none" style={{ fontSize: 9, color: "var(--c-err)", border: "1px solid color-mix(in oklab, var(--c-err) 40%, transparent)", padding: "0 4px", borderRadius: 3 }}>
+          <span className="flex-none" style={{ fontSize: 9, color: "var(--c-err)", background: "var(--c-err-bg)", padding: "1px 5px", borderRadius: 999 }}>
             {t("rc_rh_redline")}
           </span>
         )}
       </span>
-      <span className="tabular-nums text-ink-2" style={{ textAlign: "right", fontSize: 12 }}>{r.evaluated}</span>
+      <span className="tabular-nums text-ink-2" style={{ textAlign: "right", fontSize: 12.5 }}>{r.evaluated}</span>
       <span className="min-w-0">
-        <span className="flex rounded-full overflow-hidden" style={{ height: 7, background: "var(--c-panel)" }} title={t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}>
-          {passW > 0 && <span style={{ flex: passW, background: "var(--c-ok)" }} />}
-          {failW > 0 && <span style={{ flex: failW, background: "var(--c-err)" }} />}
+        <span className="flex rounded-full overflow-hidden" style={{ height: 6, background: "var(--c-panel)" }} title={t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}>
+          {passW > 0 && <span className="rc-meter-fill" style={{ flex: passW, background: "var(--c-ok)" }} />}
+          {failW > 0 && <span className="rc-meter-fill" style={{ flex: failW, background: "var(--c-err)" }} />}
         </span>
         <span className="text-ink-3" style={{ fontSize: 9.5 }}>
           {t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}
         </span>
       </span>
-      <span>
-        {r.health === "blocking" ? (
-          <span style={{ background: "var(--c-err-bg)", color: "var(--c-err)", padding: "1px 8px", borderRadius: 10, fontSize: 10 }}>{t("rc_rh_health_blocking")}</span>
-        ) : r.health === "unassessed" ? (
-          <span className="text-ink-4" style={{ fontSize: 10.5 }}>{t("rc_rh_health_unassessed")}</span>
-        ) : r.health === "dead" ? (
-          <span className="text-ink-4" style={{ fontSize: 10.5 }}>{t("rc_rh_health_dead")}</span>
-        ) : (
-          <span className="text-ink-3" style={{ fontSize: 10.5 }}>{t("rc_rh_health_idle")}</span>
-        )}
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span className="rc-status-dot" style={{ background: toneColor(healthTone) }} />
+        <span className={healthTone === "err" ? "text-err" : "text-ink-3"} style={{ fontSize: 10.5 }}>
+          {r.health === "blocking"
+            ? t("rc_rh_health_blocking")
+            : r.health === "unassessed"
+              ? t("rc_rh_health_unassessed")
+              : r.health === "dead"
+                ? t("rc_rh_health_dead")
+                : t("rc_rh_health_idle")}
+        </span>
       </span>
     </button>
   );
@@ -376,8 +418,8 @@ function ParkedRow({ p, t }: { p: InfraParkedEntry; t: (k: string) => string }) 
   return (
     <Link
       href={`/rule-check/audits/${encodeURIComponent(p.audit_id)}`}
-      className="grid no-underline border-b border-line hover:bg-panel transition-colors"
-      style={{ gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, padding: "8px 4px" }}
+      className="grid no-underline rc-row-hover"
+      style={{ gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--c-line)" }}
     >
       <span className="min-w-0">
         <span className="text-ink-1 truncate block" style={{ fontSize: 12 }} title={[p.candidate_name, p.jr_title, p.client_name].filter(Boolean).join(" · ")}>
@@ -400,14 +442,15 @@ function FilterChip({ active, onClick, label, tone }: { active: boolean; onClick
     <button
       type="button"
       onClick={onClick}
-      className="rounded-full transition-colors"
+      className="rounded-full transition-all"
       style={{
-        padding: "3px 12px",
+        padding: "4px 11px",
         fontSize: 11.5,
-        background: active ? "var(--c-panel)" : "transparent",
+        background: active ? "var(--c-panel)" : "var(--c-surface)",
         border: "1px solid var(--c-line)",
         color: active ? (tone === "err" ? "var(--c-err)" : "var(--c-ink-1)") : "var(--c-ink-3)",
-        fontWeight: active ? 500 : 400,
+        fontWeight: active ? 560 : 450,
+        boxShadow: active ? "0 1px 2px rgba(15,23,42,0.06)" : "none",
       }}
     >
       {label}
@@ -423,18 +466,20 @@ function WindowToggle({ value, onChange, t }: { value: Win; onChange: (v: Win) =
     { id: "all", label: t("rc_range_all") },
   ];
   return (
-    <div className="flex items-center gap-1">
+    <div className="inline-flex items-center border border-line" style={{ padding: 3, borderRadius: 8, background: "var(--c-surface)" }}>
       {opts.map((o) => (
         <button
           key={o.id}
           onClick={() => onChange(o.id)}
-          className="transition-colors rounded"
+          className="transition-all"
           style={{
-            padding: "3px 9px",
+            padding: "4px 9px",
+            border: 0,
+            borderRadius: 6,
             color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
             background: value === o.id ? "var(--c-panel)" : "transparent",
-            fontWeight: value === o.id ? 500 : 400,
-            fontSize: 12.5,
+            fontWeight: value === o.id ? 560 : 450,
+            fontSize: 12,
           }}
         >
           {o.label}

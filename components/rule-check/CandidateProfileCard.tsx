@@ -59,9 +59,8 @@ export function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail 
   const scopeLine = (
     <div
       className="text-ink-3 flex flex-wrap items-center"
-      style={{ fontSize: 11, marginTop: 6, gap: "2px 10px", lineHeight: 1.5 }}
+      style={{ fontSize: 11, marginTop: 7, gap: "2px 10px", lineHeight: 1.5 }}
     >
-      <span style={{ marginRight: 2 }}>🏢</span>
       <span className="min-w-0 break-all">
         <span className="hint">{t("rc_attr_client")}</span> {detail.client_display_name || detail.client_name || "?"}
       </span>
@@ -85,18 +84,17 @@ export function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail 
 
   return (
     <div
-      className="border border-line rounded-sm grid"
+      className="rc-surface-panel grid rc-card-in"
       style={{
-        padding: "12px 14px",
-        background: "color-mix(in oklab, var(--c-accent) 5%, var(--c-bg))",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "10px 18px",
+        padding: "14px 16px",
+        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: "12px 22px",
       }}
     >
       {/* Candidate profile */}
       <div>
-        <div className="hint" style={{ marginBottom: 6 }}>
-          👤 {t("rc_candidate_profile_title")}
+        <div className="hint" style={{ marginBottom: 7 }}>
+          {t("rc_candidate_profile_title")}
         </div>
         <div className="text-[13px] text-ink-1 font-semibold" style={{ marginBottom: 4 }}>
           {name || t("rc_candidate_no_name")}
@@ -135,8 +133,8 @@ export function CandidateProfileCard({ detail }: { detail: RuleCheckAuditDetail 
 
       {/* Position profile */}
       <div>
-        <div className="hint" style={{ marginBottom: 6 }}>
-          💼 {t("rc_jr_profile_title")}
+        <div className="hint" style={{ marginBottom: 7 }}>
+          {t("rc_jr_profile_title")}
         </div>
         <div className="text-[13px] text-ink-1 font-semibold" style={{ marginBottom: 4 }}>
           {jrTitle || t("rc_jr_no_title")}

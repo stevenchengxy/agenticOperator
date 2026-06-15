@@ -2,11 +2,13 @@
 import React from "react";
 import { useApp } from "@/lib/i18n";
 import { useGlobalChat } from "@/lib/chat/use-global-chat";
+import type { GlobalChatController } from "@/lib/chat/use-global-chat";
 import { Ic } from "@/components/shared/Ic";
 
-export function HistoryList() {
+export function HistoryList({ chat: chatProp }: { chat?: GlobalChatController }) {
   const { t } = useApp();
-  const chat = useGlobalChat();
+  const internalChat = useGlobalChat();
+  const chat = chatProp ?? internalChat;
 
   return (
     <div className="flex flex-col h-full">

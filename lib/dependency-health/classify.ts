@@ -48,9 +48,20 @@ function isEmptyRobohirePayload(op: string, data: Record<string, unknown> | null
         (Array.isArray(data.education) && data.education.length > 0) ||
         (Array.isArray(data.skills) && data.skills.length > 0)
       );
-    case 'matchResume':
-      // score 0 is a valid match result — guard on the type, not truthiness.
-      return typeof data.matchScore !== 'number';
+    case 'matchResume': {
+      // RoboHire's real /match-resume shape sets top-level `matchScore` to null
+      // and exposes the actual score at `overallMatchScore.score` (mirrored at
+      // top-level `score`) — see match-resume-agent's extractMatchingScore. The
+      // old check guarded on `matchScore` alone, so EVERY valid 200 (e.g. a
+      // score-82 match) was flagged "empty" → spurious MATCH_FAILED. Accept any
+      // of the real score locations; score 0 is valid → type-check, not truthiness.
+      const overall = data.overallMatchScore as { score?: unknown } | null | undefined;
+      return !(
+        typeof data.matchScore === 'number' ||
+        typeof data.score === 'number' ||
+        (overall != null && typeof overall.score === 'number')
+      );
+    }
     case 'generateJd':
       return !(data.title || data.description || data.qualifications || data.hardRequirements);
     case 'inviteCandidate':

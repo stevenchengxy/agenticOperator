@@ -15,8 +15,6 @@ import type { RuleCheckStatsResponse } from "@/app/api/rule-check-audits/stats/r
 // Audit detail moved to /rule-check/audits/[auditId] fullscreen route
 // (2026-05-25) — no longer renders here as a drawer.
 
-const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
-
 export function RuleCheckAuditsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,15 +92,11 @@ export function RuleCheckAuditsContent() {
       {/* Serif KPI banner */}
       {stats && stats.total > 0 ? <ValueAnchorBanner stats={stats} t={t} /> : null}
 
-      {/* Filter strip — horizontal row */}
-      <div className="border-b border-line bg-surface flex items-center gap-3" style={{ padding: "12px 26px" }}>
-        <div className="flex-1">
-          <div className="text-[14px] font-semibold text-ink-1" style={{ fontFamily: SERIF }}>
+      <div className="border-b border-line bg-bg flex items-center gap-2 flex-wrap" style={{ padding: "12px 26px" }}>
+        <div className="flex-1 min-w-[220px]">
+          <div className="text-[13px] font-semibold text-ink-1">
             {t("rc_audits_title")}
-          </div>
-          <div className="text-[11.5px] text-ink-3 mt-0.5">
-            {t("rc_audits_sub")}
-            {data ? ` · ${data.total.toLocaleString()} ${t("rc_count_unit")}` : ""}
+            {data ? <span className="text-ink-3 font-normal"> · {data.total.toLocaleString()}</span> : null}
           </div>
         </div>
         <FilterSelect
@@ -187,7 +181,7 @@ export function RuleCheckAuditsContent() {
           />
         ) : (
           <>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-2">
               {data.rows.map((r, i) => (
                 <div
                   key={r.audit_id}
@@ -218,11 +212,8 @@ export function RuleCheckAuditsContent() {
 function ValueAnchorBanner({ stats, t }: { stats: RuleCheckStatsResponse; t: (k: string) => string }) {
   const pct = stats.total > 0 ? Math.round((stats.fail / stats.total) * 100) : 0;
   return (
-    <div className="border-b border-line" style={{ padding: "20px 26px", background: "var(--c-bg)" }}>
-      <div
-        className="grid gap-x-10 gap-y-4"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
-      >
+    <div className="border-b border-line bg-bg" style={{ padding: "14px 26px" }}>
+      <div className="rc-surface-panel grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", padding: 12 }}>
         <Kpi
           label={t("rc_stat_audits_7d")}
           value={stats.total.toLocaleString()}
@@ -258,18 +249,18 @@ function ValueAnchorBanner({ stats, t }: { stats: RuleCheckStatsResponse; t: (k:
 function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "ok" | "err" }) {
   const color = tone === "ok" ? "var(--c-ok)" : tone === "err" ? "var(--c-err)" : "var(--c-ink-1)";
   return (
-    <div className="min-w-0">
-      <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500, color: "var(--c-ink-3)" }}>
+    <div className="min-w-0 rc-metric-cell">
+      <div className="truncate" style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 560, color: "var(--c-ink-3)" }}>
         {label}
       </div>
       <div
         className="tabular-nums truncate"
-        style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1.1, color, marginTop: 6 }}
+        style={{ fontSize: 23, fontWeight: 560, lineHeight: 1.05, color, marginTop: 6 }}
       >
         {value}
       </div>
       {sub && (
-        <div className="text-ink-3 mono" style={{ fontSize: 11, marginTop: 4 }}>
+        <div className="text-ink-3 mono truncate" style={{ fontSize: 10.5, marginTop: 4 }}>
           {sub}
         </div>
       )}
@@ -297,8 +288,8 @@ function FilterInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-7 border border-line bg-panel rounded-sm mono text-[11.5px] text-ink-1 outline-none w-[180px]"
-        style={{ padding: "0 8px" }}
+        className="rc-quiet-input mono text-ink-1 w-[180px]"
+        style={{ height: 30 }}
       />
     </label>
   );
@@ -323,8 +314,8 @@ function FilterSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-7 border border-line bg-panel rounded-sm text-[12px] text-ink-1 outline-none"
-        style={{ padding: "0 8px", width }}
+        className="rc-quiet-select text-ink-1"
+        style={{ height: 30, width }}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -365,100 +356,38 @@ function AuditCard({
   const reg = lookupAgent(domain, row.agent_id);
   const agentText = reg?.label[lang] ?? row.agent_label;
   const stageText = reg?.stage[lang] ?? row.stage;
+  const candidate = row.candidate_name || (row.candidate_id ? row.candidate_id.slice(0, 8) : "—");
+  const job = row.jr_title || (row.job_requisition_id ? row.job_requisition_id.slice(-10) : "—");
+  const flagsText = `${row.n_flags > 0 ? row.n_flags : 0}/${row.rules_evaluated}`;
+  const reason = row.failure_reasons[0];
   return (
     <button
       type="button"
       onClick={() => onOpen(row.audit_id)}
-      className="text-left cursor-pointer rounded-lg transition-all w-full"
-      style={{
-        padding: "12px 14px",
-        background: "var(--c-surface)",
-        border: "1px solid var(--c-line)",
-        borderLeft: `3px solid ${accent}`,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--c-panel)";
-        e.currentTarget.style.transform = "translateY(-1px)";
-        e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "var(--c-surface)";
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = "none";
-      }}
+      className="rc-audit-card text-left cursor-pointer w-full"
+      style={{ "--rc-accent": accent, "--rc-bg": verdictBg } as React.CSSProperties}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <span
-            className="rounded-full font-mono text-[11px] flex-shrink-0"
-            style={{
-              padding: "2px 9px",
-              background: verdictBg,
-              color: accent,
-              fontWeight: 600,
-            }}
-          >
-            {verdictText}
-          </span>
-          <div className="min-w-0 flex-1">
-            {/* 执行 agent + 阶段:同一领域里不同 rule-check agent / 不同位置的执行记录。 */}
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <span
-                className="rounded-sm"
-                style={{
-                  fontFamily: "var(--f-mono)",
-                  fontSize: 10,
-                  padding: "1px 6px",
-                  background: "var(--c-accent-bg)",
-                  color: "var(--c-accent)",
-                }}
-              >
-                {agentText}
-              </span>
-              {stageText ? (
-                <span
-                  className="rounded-sm"
-                  style={{
-                    fontFamily: "var(--f-mono)",
-                    fontSize: 10,
-                    padding: "1px 6px",
-                    background: "var(--c-panel)",
-                    color: "var(--c-ink-3)",
-                  }}
-                >
-                  {stageText}
-                </span>
-              ) : null}
-            </div>
-            <div className="text-[13px] text-ink-1 truncate" style={{ fontFamily: SERIF, fontWeight: 500 }}>
-              {row.candidate_name || (row.candidate_id ? row.candidate_id.slice(0, 8) : "—")}
-              <span className="text-ink-3" style={{ fontWeight: 400 }}> · </span>
-              {row.jr_title || (row.job_requisition_id ? row.job_requisition_id.slice(-10) : "—")}
-              {row.dept_label ? (
-                <span
-                  className="ml-2 rounded-sm align-middle"
-                  style={{
-                    fontFamily: "var(--f-mono)",
-                    fontSize: 10,
-                    padding: "1px 6px",
-                    background: "var(--c-panel)",
-                    color: "var(--c-ink-3)",
-                  }}
-                >
-                  {row.dept_label}
-                </span>
-              ) : null}
-            </div>
-            <div className="text-[10.5px] text-ink-4 mono truncate mt-0.5">
-              {row.job_requisition_id || "—"}
-            </div>
+      <div className="grid items-center gap-3" style={{ gridTemplateColumns: "96px minmax(0,1fr) 128px" }}>
+        <span className="rc-verdict-pill" style={{ color: accent, background: verdictBg }}>
+          {verdictText}
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[13px] text-ink-1 truncate" style={{ fontWeight: 560 }}>{candidate}</span>
+            <span className="text-ink-4">/</span>
+            <span className="text-[13px] text-ink-1 truncate" style={{ fontWeight: 520 }}>{job}</span>
+            {row.dept_label ? <span className="rc-mini-chip flex-none">{row.dept_label}</span> : null}
+          </div>
+          <div className="flex items-center gap-2 mt-1 min-w-0">
+            <span className="mono text-ink-4 truncate" style={{ fontSize: 10.5 }}>{agentText}{stageText ? ` · ${stageText}` : ""}</span>
+            {reason ? <span className="text-ink-3 truncate" style={{ fontSize: 11 }}>{reason}</span> : null}
           </div>
         </div>
-        <div className="text-[11px] text-ink-3 text-right flex-shrink-0">
-          <div className="mono">{formatRelative(row.created_at, lang)}</div>
-          <div className="mono mt-0.5 text-ink-4">
-            {row.n_flags > 0 ? `${row.n_flags}/${row.rules_evaluated}` : `0/${row.rules_evaluated}`} flags
-            {row.llm_duration_ms ? ` · ${row.llm_duration_ms}ms` : ""}
+        <div className="text-right flex-shrink-0">
+          <div className="mono text-ink-3" style={{ fontSize: 11 }}>{formatRelative(row.created_at, lang)}</div>
+          <div className="mono text-ink-4 mt-1" style={{ fontSize: 10.5 }}>
+            {flagsText}
+            {row.llm_duration_ms ? ` · ${(row.llm_duration_ms / 1000).toFixed(1)}s` : ""}
           </div>
         </div>
       </div>

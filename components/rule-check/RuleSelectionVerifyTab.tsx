@@ -448,21 +448,17 @@ function AdaptedRules({
 
   return (
     <div
-      className="border border-line rounded-md"
+      className="rc-surface-panel rc-card-in"
       style={{
         padding: "14px 16px",
-        background: "color-mix(in oklab, var(--c-accent) 4%, var(--c-bg))",
       }}
     >
       <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 4 }}>
-        <span style={{ color: "var(--c-accent)" }}>
+        <span className="text-ink-3">
           <Ic.branch />
         </span>
         <span className="text-ink-1" style={{ fontSize: 13.5, fontWeight: 600 }}>
           {t("rc_sel_title")}
-        </span>
-        <span className="hint" style={{ fontSize: 10.5 }}>
-          {mode === "selection" ? t("rc_sel_hint_sel") : t("rc_sel_hint")}
         </span>
       </div>
       <div className="mono text-[12px] text-ink-1" style={{ marginBottom: 2 }}>
@@ -524,12 +520,6 @@ function AdaptedRules({
           ))}
         </div>
       )}
-      <div className="text-[11px]" style={{ marginTop: 8, color: "var(--c-accent)" }}>
-        ↳{" "}
-        {parked
-          ? t("rc_sel_parked_note").replace("{count}", String(selectedCount))
-          : t("rc_sel_injected_note").replace("{count}", String(selected.length))}
-      </div>
 
       {/* 未选中 · 排除组:全量 provenance 驱动,每条 = 确定性排除理由 + AI 该不该纳入 */}
       {excludedRows.length > 0 ? (

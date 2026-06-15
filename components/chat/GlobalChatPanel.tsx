@@ -6,19 +6,29 @@ import { useGlobalChat } from "@/lib/chat/use-global-chat";
 import { usePageContext } from "@/lib/chat/page-context";
 import { Markdown } from "@/components/shared/Markdown";
 import { Ic } from "@/components/shared/Ic";
+import type { CopilotRuntimeEvent } from "./copilot-types";
 import type {
   ChatMessage,
   ChatSource,
   GlobalChatRequest,
   StreamEvent,
 } from "@/lib/chat/types";
+import type { GlobalChatController } from "@/lib/chat/use-global-chat";
 
 export function GlobalChatPanel({
   scope = "bubble",
   onClose,
+  chat: chatProp,
+  draftPrompt,
+  onDraftConsumed,
+  onRuntimeEvent,
 }: {
   scope?: "bubble" | "full";
   onClose?: () => void;
+  chat?: GlobalChatController;
+  draftPrompt?: string | null;
+  onDraftConsumed?: () => void;
+  onRuntimeEvent?: (event: CopilotRuntimeEvent) => void;
 }) {
   const { t } = useApp();
   const suggestions = [
@@ -27,7 +37,8 @@ export function GlobalChatPanel({
     t("chat_suggestion_3"),
     t("chat_suggestion_4"),
   ];
-  const chat = useGlobalChat();
+  const internalChat = useGlobalChat();
+  const chat = chatProp ?? internalChat;
   const pageContext = usePageContext();
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -43,13 +54,21 @@ export function GlobalChatPanel({
     }
   }, [chat.currentSession.messages.length, busy]);
 
+  React.useEffect(() => {
+    if (!draftPrompt) return;
+    setInput(draftPrompt);
+    onDraftConsumed?.();
+  }, [draftPrompt, onDraftConsumed]);
+
   const send = React.useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || busy) return;
       const userMsg: ChatMessage = { role: "user", content: trimmed };
       const historyBeforeAppend = chat.currentSession.messages;
+      const sessionId = chat.currentSession.id;
       chat.appendMessage(userMsg);
+      onRuntimeEvent?.({ type: "prompt", sessionId, content: trimmed, at: new Date().toISOString() });
       setInput("");
       setBusy(true);
       setErr(null);
@@ -58,6 +77,7 @@ export function GlobalChatPanel({
 
       try {
         const reqBody: GlobalChatRequest = {
+          sessionId,
           messages: [...historyBeforeAppend, userMsg],
           pageContext,
         };
@@ -73,6 +93,9 @@ export function GlobalChatPanel({
         let buffer = "";
         let assistantStarted = false;
         let assistantIdx = -1;
+        let assistantText = "";
+        let modelUsed: string | undefined;
+        let toolCallsExecuted = 0;
         let collectedSources: ChatSource[] | null = null;
 
         while (true) {
@@ -95,39 +118,80 @@ export function GlobalChatPanel({
                 if (!assistantStarted) {
                   assistantStarted = true;
                   assistantIdx = historyBeforeAppend.length + 1;
+                  onRuntimeEvent?.({ type: "assistant_start", sessionId, at: new Date().toISOString() });
                 }
+                assistantText += evt.content;
                 chat.appendToLastAssistant(evt.content);
                 break;
               case "tool_call_start":
+                onRuntimeEvent?.({
+                  type: "tool_start",
+                  sessionId,
+                  at: new Date().toISOString(),
+                  name: evt.name,
+                  args: evt.args,
+                });
                 setActiveTool({ name: evt.name, startedAt: Date.now() });
                 break;
               case "tool_call_done":
+                onRuntimeEvent?.({
+                  type: "tool_done",
+                  sessionId,
+                  at: new Date().toISOString(),
+                  name: evt.name,
+                  ms: evt.ms,
+                  preview: evt.resultPreview,
+                });
                 setActiveTool(null);
                 break;
               case "sources":
                 collectedSources = evt.items;
                 break;
               case "done":
+                modelUsed = evt.modelUsed;
+                toolCallsExecuted = evt.toolCallsExecuted;
                 if (collectedSources && assistantIdx >= 0) {
                   setSourcesPerMessage((s) => ({ ...s, [assistantIdx]: collectedSources! }));
                 }
+                onRuntimeEvent?.({
+                  type: "assistant_done",
+                  sessionId,
+                  at: new Date().toISOString(),
+                  content: assistantText,
+                  modelUsed,
+                  toolCallsExecuted,
+                  sources: collectedSources ?? undefined,
+                });
                 break;
               case "error":
+                onRuntimeEvent?.({
+                  type: "error",
+                  sessionId,
+                  at: new Date().toISOString(),
+                  message: evt.message,
+                });
                 throw new Error(evt.message);
             }
           }
         }
       } catch (e) {
+        onRuntimeEvent?.({
+          type: "error",
+          sessionId: chat.currentSession.id,
+          at: new Date().toISOString(),
+          message: (e as Error).message ?? t("chat_send_fail"),
+        });
         setErr((e as Error).message ?? t("chat_send_fail"));
       } finally {
         setBusy(false);
         setActiveTool(null);
       }
     },
-    [busy, chat, pageContext, t],
+    [busy, chat, onRuntimeEvent, pageContext, t],
   );
 
   const messages = chat.currentSession.messages;
+  const isFull = scope === "full";
   const hasContext = pageContext.route !== "/" && (pageContext.runId || pageContext.auditId || pageContext.entityId || pageContext.agentShort);
   const contextSummary = hasContext
     ? [
@@ -139,83 +203,94 @@ export function GlobalChatPanel({
     : null;
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "linear-gradient(180deg, var(--c-surface) 0%, color-mix(in oklab, var(--c-surface) 92%, var(--c-accent) 8%) 100%)" }}>
+    <div
+      className={isFull ? "copilot-chat-panel" : "flex flex-col h-full"}
+      style={{
+        background: isFull
+          ? "var(--c-bg)"
+          : "linear-gradient(180deg, var(--c-surface) 0%, color-mix(in oklab, var(--c-surface) 92%, var(--c-accent) 8%) 100%)",
+      }}
+    >
       {/* Header */}
-      <div
-        className="flex items-center gap-3 border-b border-line"
-        style={{ padding: "12px 14px" }}
-      >
-        <div
-          className="rounded-full grid place-items-center text-white"
-          style={{
-            width: 32,
-            height: 32,
-            background: "linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-2) 100%)",
-            boxShadow: "0 2px 8px color-mix(in oklab, var(--c-accent) 28%, transparent)",
-            flexShrink: 0,
-          }}
-        >
-          <Ic.chat />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-semibold text-ink-1 leading-tight">{t("chat_header_title")}</div>
-          <div className="text-[10.5px] text-ink-3 leading-tight mt-0.5">{t("chat_header_subtitle")}</div>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {messages.length > 0 && (
+      {isFull ? (
+        <div className="copilot-chat-topbar">
+          <div className="min-w-0">
+            <div className="copilot-chat-title">{chat.currentSession.title}</div>
+            <div className="copilot-chat-subtitle">AO Copilot · tools, memory, review and evaluation</div>
+          </div>
+          {messages.length > 0 ? (
             <button
               type="button"
               onClick={chat.newSession}
-              className="rounded-md cursor-pointer transition-colors flex items-center justify-center"
-              style={{
-                width: 28,
-                height: 28,
-                background: "transparent",
-                color: "var(--c-ink-3)",
-                border: "none",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--c-panel)";
-                e.currentTarget.style.color = "var(--c-ink-1)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--c-ink-3)";
-              }}
+              className="copilot-icon-button"
               title={t("chat_new_session")}
               aria-label={t("chat_new_session")}
             >
               <Ic.plus />
             </button>
-          )}
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md cursor-pointer transition-colors flex items-center justify-center"
-              style={{
-                width: 28,
-                height: 28,
-                background: "transparent",
-                color: "var(--c-ink-3)",
-                border: "none",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--c-panel)";
-                e.currentTarget.style.color = "var(--c-ink-1)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "var(--c-ink-3)";
-              }}
-              title={t("chat_close")}
-              aria-label={t("chat_close")}
-            >
-              <Ic.cross />
-            </button>
-          )}
+          ) : null}
         </div>
-      </div>
+      ) : (
+        <div
+          className="flex items-center gap-3 border-b border-line"
+          style={{ padding: "12px 14px" }}
+        >
+          <div
+            className="rounded-full grid place-items-center text-white"
+            style={{
+              width: 32,
+              height: 32,
+              background: "linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-2) 100%)",
+              boxShadow: "0 2px 8px color-mix(in oklab, var(--c-accent) 28%, transparent)",
+              flexShrink: 0,
+            }}
+          >
+            <Ic.chat />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold text-ink-1 leading-tight">{t("chat_header_title")}</div>
+            <div className="text-[10.5px] text-ink-3 leading-tight mt-0.5">{t("chat_header_subtitle")}</div>
+          </div>
+          <div className="flex items-center gap-0.5">
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={chat.newSession}
+                className="rounded-md cursor-pointer transition-colors flex items-center justify-center"
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "transparent",
+                  color: "var(--c-ink-3)",
+                  border: "none",
+                }}
+                title={t("chat_new_session")}
+                aria-label={t("chat_new_session")}
+              >
+                <Ic.plus />
+              </button>
+            )}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md cursor-pointer transition-colors flex items-center justify-center"
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "transparent",
+                  color: "var(--c-ink-3)",
+                  border: "none",
+                }}
+                title={t("chat_close")}
+                aria-label={t("chat_close")}
+              >
+                <Ic.cross />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Context pill */}
       {scope === "bubble" && contextSummary && (
@@ -239,13 +314,18 @@ export function GlobalChatPanel({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-auto" style={{ padding: "16px 14px" }}>
-        {messages.length === 0 && <EmptyState suggestions={suggestions} onSelect={send} t={t} />}
+      <div
+        ref={scrollRef}
+        className={isFull ? "copilot-thread flex-1 overflow-auto" : "flex-1 overflow-auto"}
+        style={{ padding: isFull ? "28px 0 18px" : "16px 14px" }}
+      >
+        {messages.length === 0 && <EmptyState suggestions={suggestions} onSelect={send} t={t} variant={scope} />}
         {messages.map((m, i) => (
           <MessageRow
             key={i}
             message={m}
             sources={sourcesPerMessage[i]}
+            variant={scope}
             flyIn={i === messages.length - 1 && m.role === "user" && justSent}
             streaming={busy && i === messages.length - 1 && m.role === "assistant"}
           />
@@ -264,7 +344,7 @@ export function GlobalChatPanel({
               padding: "8px 10px",
               background: "var(--c-warn-bg)",
               border: "1px solid color-mix(in oklab, var(--c-warn) 35%, transparent)",
-              color: "oklch(0.45 0.14 75)",
+              color: "var(--c-warn)",
               fontSize: 11.5,
             }}
           >
@@ -275,13 +355,16 @@ export function GlobalChatPanel({
       </div>
 
       {/* Input */}
-      <div className="border-t border-line bg-surface" style={{ padding: "10px 12px" }}>
+      <div
+        className={isFull ? "copilot-composer-wrap" : "border-t border-line bg-surface"}
+        style={{ padding: isFull ? "14px 28px 22px" : "10px 12px" }}
+      >
         <div
-          className={`flex items-center gap-1 rounded-full ${justSent ? "chat-input-sending" : ""}`}
+          className={`${isFull ? "copilot-composer" : "flex items-center gap-1 rounded-full"} ${justSent ? "chat-input-sending" : ""}`}
           style={{
             border: "1px solid var(--c-line)",
-            background: "var(--c-panel)",
-            padding: "4px 4px 4px 14px",
+            background: isFull ? "var(--c-surface)" : "var(--c-panel)",
+            padding: isFull ? "12px 12px 10px 16px" : "4px 4px 4px 14px",
             transition: "border-color 160ms ease-out, box-shadow 160ms ease-out",
           }}
           onFocus={(e) => {
@@ -293,8 +376,9 @@ export function GlobalChatPanel({
             e.currentTarget.style.boxShadow = "none";
           }}
         >
-          <input
-            className="flex-1 bg-transparent outline-none text-[13px] text-ink-1 placeholder:text-ink-4"
+          <textarea
+            rows={1}
+            className={isFull ? "copilot-composer-input" : "flex-1 bg-transparent outline-none text-[13px] text-ink-1 placeholder:text-ink-4"}
             placeholder={t("chat_input_placeholder")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -338,11 +422,36 @@ function EmptyState({
   suggestions,
   onSelect,
   t,
+  variant = "bubble",
 }: {
   suggestions: string[];
   onSelect: (s: string) => void;
   t: (k: string) => string;
+  variant?: "bubble" | "full";
 }) {
+  if (variant === "full") {
+    return (
+      <div className="copilot-empty-state chat-message-in">
+        <div className="copilot-empty-kicker">AO Copilot</div>
+        <h1>今天处理什么？</h1>
+        <div className="copilot-empty-prompts">
+          {suggestions.map((s, i) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onSelect(s)}
+              className="copilot-empty-prompt"
+              style={{ animationDelay: `${45 * i}ms` }}
+            >
+              <span>{s}</span>
+              <Ic.arrowR />
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center text-center" style={{ paddingTop: 28, paddingBottom: 8 }}>
       <div
@@ -405,15 +514,69 @@ function EmptyState({
 function MessageRow({
   message,
   sources,
+  variant = "bubble",
   flyIn,
   streaming,
 }: {
   message: ChatMessage;
   sources?: ChatSource[];
+  variant?: "bubble" | "full";
   flyIn?: boolean;
   streaming?: boolean;
 }) {
   const isUser = message.role === "user";
+  const isCompact = message.kind === "compact";
+  const isFull = variant === "full";
+  if (isCompact) {
+    return (
+      <div className="chat-message-in" style={{ margin: "6px auto 18px", maxWidth: isFull ? 860 : 620, padding: isFull ? "0 24px" : undefined }}>
+        <div
+          className={isFull ? "copilot-compact-note" : "rounded-lg"}
+          style={{
+            padding: "10px 12px",
+            background: isFull ? undefined : "var(--c-panel)",
+            border: isFull ? undefined : "1px dashed var(--c-line)",
+            color: "var(--c-ink-2)",
+            fontSize: 12,
+            lineHeight: 1.55,
+          }}
+        >
+          <div className="flex items-center gap-2 text-ink-1" style={{ fontWeight: 560, marginBottom: 5 }}>
+            <Ic.book />
+            <span>历史已压缩</span>
+          </div>
+          <Markdown compact>{message.content}</Markdown>
+        </div>
+      </div>
+    );
+  }
+  if (isFull) {
+    return (
+      <div className={`copilot-message-row chat-message-in ${isUser ? "is-user" : "is-assistant"} ${flyIn ? "chat-send-fly" : ""}`}>
+        {!isUser ? (
+          <div className="copilot-message-meta">
+            <span className="copilot-assistant-mark"><Ic.sparkle /></span>
+            <span>AO Copilot</span>
+          </div>
+        ) : null}
+        <div className={isUser ? "copilot-user-message" : "copilot-assistant-message"}>
+          {isUser ? (
+            <div className="whitespace-pre-wrap">{message.content}</div>
+          ) : (
+            <>
+              <Markdown compact>{message.content}</Markdown>
+              {streaming && <span className="chat-streaming-cursor" />}
+            </>
+          )}
+        </div>
+        {sources && sources.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <SourcesList sources={sources} />
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className={`flex gap-2 mb-4 ${flyIn ? "chat-send-fly" : "chat-message-in"} ${isUser ? "flex-row-reverse" : "flex-row"}`}>
       {!isUser && (

@@ -42,6 +42,23 @@ describe('classifyRobohire — empty-200 predicates', () => {
     expect(classifyRobohire('matchResume', { data: { matchScore: 0 } })).toEqual({ ok: true });
     expect(classifyRobohire('matchResume', { data: { matchScore: 0.7 } })).toEqual({ ok: true });
   });
+  it("matchResume: RoboHire's REAL shape (matchScore=null, real score at overallMatchScore.score / top-level score) → ok", () => {
+    // Regression: run 01KV4RMAKD7R3QJSKCJ9MV0R4M scored 82 (grade B+) yet was
+    // flagged "empty" → spurious MATCH_FAILED, because matchScore is always null.
+    expect(
+      classifyRobohire('matchResume', {
+        data: { matchScore: null, score: 82, overallMatchScore: { score: 82, grade: 'B+' } },
+      }),
+    ).toEqual({ ok: true });
+    // Score only nested under overallMatchScore (no top-level mirror) → still ok.
+    expect(
+      classifyRobohire('matchResume', { data: { matchScore: null, overallMatchScore: { score: 0 } } }),
+    ).toEqual({ ok: true });
+    // Genuinely empty (no score anywhere) → still classified empty.
+    expect(
+      classifyRobohire('matchResume', { data: { matchScore: null, resumeAnalysis: {} } }),
+    ).toMatchObject({ ok: false, reason: 'empty' });
+  });
   it('generateJd: no title/description → empty; description present → ok', () => {
     expect(classifyRobohire('generateJd', { data: {} })).toMatchObject({ ok: false, reason: 'empty' });
     expect(classifyRobohire('generateJd', { data: { description: 'We are hiring…' } })).toEqual({ ok: true });

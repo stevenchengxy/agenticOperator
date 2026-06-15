@@ -109,16 +109,33 @@ const MATCH_PASSED_NEED_INTERVIEW_v1 = envelope(MATCH_PAYLOAD_v1);
 const MATCH_PASSED_NO_INTERVIEW_v1 = envelope(MATCH_PAYLOAD_v1);
 const MATCH_FAILED_v1 = envelope(MATCH_PAYLOAD_v1);
 
+const RULE_CHECK_RULE_LINE_v1 = z.object({
+  rule_id: z.string(),
+  rule_name: z.string(),
+  status: z.string(),
+  reason: z.string().optional(),
+}).passthrough();
+
 // MATCH_RULE_CHECK_PASSED — ruleCheckAgent → matchResumeAgent 过桥事件。
-// 沿用 MATCH_PAYLOAD_v1 平铺契约;另带 job_requisition + parsed_resume 透传。
+// 不是最终 MATCH_* 评分事件,所以不要求 matching_score;同时携带逐条
+// rule_check_rules,matchResumeAgent 会把它追加进发给 RoboHire 的 jd 文本。
 const MATCH_RULE_CHECK_PASSED_v1 = envelope(
-  MATCH_PAYLOAD_v1.extend({
+  z.object({
+    job_requisition_id: z.string(),
+    candidate_id: z.string().nullable(),
+    resume_id: z.string().nullable().optional(),
+    client_id: z.string().optional(),
+    rule_check_result: z.literal('通过'),
+    rule_check_reason: z.string().optional(),
+    upload_id: z.string().nullable().optional(),
     employee_id: z.string().optional(),
     audit: z.record(z.string(), z.unknown()).optional(),
+    rule_check_rules: z.array(RULE_CHECK_RULE_LINE_v1).optional(),
     job_requisition: z.record(z.string(), z.unknown()).optional(),
     parsed_resume: z.record(z.string(), z.unknown()).nullable().optional(),
+    parsed_content: z.string().nullable().optional(),
     runtime_context: z.record(z.string(), z.unknown()).optional(),
-  }),
+  }).passthrough(),
 );
 
 // MATCH_RULE_CHECK_FAILED — ruleCheckAgent rule-check 失败时 emit;

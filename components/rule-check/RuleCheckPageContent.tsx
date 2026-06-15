@@ -11,8 +11,6 @@ import { RuleCheckAuditsContent } from "./RuleCheckAuditsContent";
 //
 // URL: ?view=dashboard | audits. Default = dashboard.
 
-const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
-
 type View = "dashboard" | "audits";
 
 export function RuleCheckPageContent() {
@@ -35,39 +33,41 @@ export function RuleCheckPageContent() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
-      {/* page header — only on dashboard layer; the inner views render their own headers */}
-      <div className="border-b border-line" style={{ padding: "24px 32px 12px" }}>
-        <div className="flex items-start gap-6">
+    <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg rc-page-in">
+      <div className="border-b border-line bg-bg/95" style={{ padding: "22px 32px 14px" }}>
+        <div className="flex items-end justify-between gap-6">
           <div className="flex-1 min-w-0">
-            <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
+            <h1 className="m-0 text-ink-1" style={{ fontWeight: 560, fontSize: 25, lineHeight: 1.1 }}>
               {t("rc_page_title")}
             </h1>
-            <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+            <div className="text-ink-3 mt-1" style={{ fontSize: 12.5 }}>
               {VIEW_META[view].sub}
             </div>
           </div>
-        </div>
-
-        {/* layer tabs */}
-        <div className="flex items-center gap-1 mt-4">
+          <div
+            className="inline-flex items-center border border-line"
+            style={{ padding: 3, borderRadius: 8, background: "var(--c-surface)" }}
+          >
           {(Object.keys(VIEW_META) as View[]).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
-              className="transition-colors"
+              className="transition-all"
               style={{
-                padding: "8px 14px",
-                borderBottom: view === v ? "1.5px solid var(--c-ink-1)" : "1.5px solid transparent",
+                padding: "6px 14px",
+                borderRadius: 6,
+                border: 0,
+                background: view === v ? "var(--c-panel)" : "transparent",
                 color: view === v ? "var(--c-ink-1)" : "var(--c-ink-3)",
-                fontWeight: view === v ? 500 : 400,
-                fontSize: 13,
-                marginBottom: -1,
+                fontWeight: view === v ? 560 : 450,
+                fontSize: 12.5,
+                boxShadow: view === v ? "0 1px 2px rgba(15,23,42,0.06)" : "none",
               }}
             >
               {VIEW_META[v].label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 

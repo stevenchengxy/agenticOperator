@@ -9,7 +9,7 @@
 // rows, error rate, whether it's currently inside an unfinished step.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/server/db";
+import { prisma, isDbUnreachableError, markDbUnreachable } from "@/server/db";
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { normalizeKind } from "@/lib/api/activity-types";
 
@@ -45,6 +45,9 @@ export type AgentsHealthResponse = {
   agents: AgentHealth[];
   windowMs: number;
   generatedAt: string;
+  /** True when the DB read failed (Postgres down) and every agent fell back to
+   *  idle. Lets the UI distinguish "really idle" from "can't tell". */
+  degraded?: boolean;
 };
 
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
@@ -65,11 +68,28 @@ export async function GET(req: Request): Promise<Response> {
   // Cap at 5000 — at 22 agents emitting maybe 5 rows per step, this covers
   // a few hundred concurrent runs comfortably; pathological churn caps
   // gracefully.
-  const rows = await prisma.agentActivity.findMany({
-    where: { createdAt: { gte: since } },
-    orderBy: { createdAt: "desc" },
-    take: 5000,
-  });
+  //
+  // When Postgres is unreachable (dev without Docker, or an outage) this read
+  // throws. The /workflow canvas polls us every 4s, so a 500 here would spam
+  // the console and blank the canvas. Degrade instead: no rows → every known
+  // agent reads as idle, flagged `degraded` so the UI knows it's "can't tell"
+  // rather than "really idle". The Prisma client (server/db) already collapses
+  // the unreachable-DB log noise, so we stay silent here to avoid re-flooding
+  // on every poll.
+  let rows: Awaited<ReturnType<typeof prisma.agentActivity.findMany>> = [];
+  let degraded = false;
+  try {
+    rows = await prisma.agentActivity.findMany({
+      where: { createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 5000,
+    });
+  } catch (e) {
+    degraded = true;
+    // This route polls every 4s; priming the breaker keeps the Prisma client
+    // from re-flooding the console on each failed poll during an outage.
+    if (isDbUnreachableError(e)) markDbUnreachable();
+  }
 
   // Group by agentName.
   const byAgent = new Map<string, typeof rows>();
@@ -112,6 +132,7 @@ export async function GET(req: Request): Promise<Response> {
     agents,
     windowMs,
     generatedAt: new Date().toISOString(),
+    ...(degraded ? { degraded: true } : {}),
   };
   return NextResponse.json(body);
 }
