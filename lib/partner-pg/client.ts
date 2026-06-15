@@ -251,6 +251,17 @@ function getPool(): Pool {
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
     statement_timeout: 5_000,
+    // Pin the session timezone to UTC at connection startup (partner-pg 980a9dd).
+    //
+    // raas Postgres (prod) runs PGTZ=Asia/Shanghai and its time columns are
+    // `timestamp without time zone`. Our writes use raw `NOW()` (see
+    // candidates.ts), a timestamptz cast into the tz-less column using the
+    // *session* timezone. Inheriting Asia/Shanghai stores Beijing wall-clock
+    // (e.g. 17:38) into a column everyone else — raas Prisma + the frontend —
+    // treats as UTC, producing a +8h display offset (17:38 → next-day 01:38).
+    // Applied via the startup `options` param so it takes effect before the
+    // first query (race-free, unlike a 'connect' SET TIME ZONE handler).
+    options: '-c timezone=UTC',
   });
   pool.on('error', (err) => {
     reportPgFailure(err, { phase: 'idle', label: 'idle-client-error' });

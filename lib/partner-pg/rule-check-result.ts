@@ -87,15 +87,18 @@ export async function saveRuleCheckFailToPartnerPg(
       return { candidate_match_result_id: cmrId, created: false, job_posting_id: jobPostingId };
     }
 
+    // ADR-0061 §② (2026-06-14): CMR.stage 已下线。raas 端区分 rule_check 拒签靠
+    // match_status(=FAIL_STATUS) + RuntimeState 缺失（ADR-0034），不读 stage 列；
+    // 旧的 stage='rule_check' 是冗余信号，停写。列 nullable，省略即 NULL。
     await c.query(
       `INSERT INTO candidate_match_result (
           candidate_match_result_id, candidate_id, job_requisition_id,
           job_posting_id, match_score, match_reason, match_status,
-          stage, created_by, created_at, updated_at
+          created_by, created_at, updated_at
         ) VALUES (
           $1, $2, $3,
           $4, NULL, $5, $6,
-          $7, $8, NOW(), NOW()
+          $7, NOW(), NOW()
         )`,
       [
         cmrId,
@@ -104,7 +107,6 @@ export async function saveRuleCheckFailToPartnerPg(
         jobPostingId,
         item.match_reason,
         FAIL_STATUS,
-        'rule_check',
         createdBy,
       ],
     );

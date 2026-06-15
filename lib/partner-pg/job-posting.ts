@@ -68,18 +68,60 @@ function mapEnum(
   return table[trimmed.toLowerCase()] ?? trimmed;
 }
 
-function parseSalaryRange(
+// 月薪 sane 上限 — 1 亿元/月。远超任何真实薪资,又安全落在 partner 的
+// int4 列 (上限 2,147,483,647) 内。超过此值一律视为上游解析脏数据
+// (如 RoboHire 把 "8.2k/8.5k" 拼成 "8.20008.5000" → 8200085000),丢弃为
+// null,而不是写进 integer 列触发 22003 溢出 / 静默写脏值。
+// 见 2026-06-03 JD 生成失败事故。
+export const SALARY_SANE_MAX = 100_000_000;
+
+/** 解析单个薪资 token → 绝对金额。支持 8.2k / 8.5K / 1.5万 / 2w / 8000 / 12,000。 */
+export function parseSalaryToken(token: string | null | undefined): number | null {
+  if (token == null) return null;
+  const cleaned = String(token).replace(/[,，\s]/g, '');
+  const m = cleaned.match(/(\d+(?:\.\d+)?)([kK千万wW])?/);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return null;
+  const unit = m[2];
+  const mult =
+    unit === 'k' || unit === 'K' || unit === '千'
+      ? 1_000
+      : unit === '万' || unit === 'w' || unit === 'W'
+        ? 10_000
+        : 1;
+  return Math.round(n * mult);
+}
+
+/**
+ * 解析薪资区间文本 → { min, max }。
+ * 支持分隔符 - – — ~ ～ / ／ 到 至,以及 k/千/万/w 后缀与小数 (8.2k → 8200)。
+ * 单值时 max 为 null;无法解析返回 { null, null }。
+ *
+ * ⚠️ 旧实现用 `replace(/[kK]/g,'000')` 字面替换 + 删小数点,会把 "8.2k/8.5k"
+ * 算成 8200085000 (应为 8200/8500),溢出 partner int4 列。务必走单 token 解析。
+ */
+export function parseSalaryRange(
   s: string | null | undefined,
 ): { min: number | null; max: number | null } {
-  if (!s) return { min: null, max: null };
-  const cleaned = String(s).replace(/[kK]/g, '000').replace(/[^\d\-]/g, '');
-  const parts = cleaned
-    .split('-')
-    .map((p) => parseInt(p, 10))
-    .filter((n) => !isNaN(n));
-  if (parts.length === 2) return { min: parts[0], max: parts[1] };
-  if (parts.length === 1) return { min: parts[0], max: null };
+  if (s == null) return { min: null, max: null };
+  const tokens = String(s)
+    .split(/[-–—~～\/／]|到|至/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const nums = tokens
+    .map(parseSalaryToken)
+    .filter((n): n is number => n != null);
+  if (nums.length >= 2) return { min: nums[0], max: nums[1] };
+  if (nums.length === 1) return { min: nums[0], max: null };
   return { min: null, max: null };
+}
+
+/** 范围校验:非有限 / 负数 / 超 sane 上限 → null,否则原值。 */
+export function saneSalary(n: number | null): number | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  if (n < 0 || n > SALARY_SANE_MAX) return null;
+  return n;
 }
 
 function toInt(value: unknown): number | null {
@@ -231,14 +273,17 @@ export async function syncJdToPartnerPg(input: SyncJdInput): Promise<SyncJdResul
   const salaryMaxRaw = pickField<string | number>(body, 'salary_max', 'salaryMax');
 
   const resolvedTitle = postingTitleField ?? '待定';
-  const explicitSalaryMin = toInt(salaryMinRaw);
-  const explicitSalaryMax = toInt(salaryMaxRaw);
-  const fallbackSalaryRange = salary_range ?? jd_content?.salaryBenefits ?? null;
-  const { min: parsedSalaryMin, max: parsedSalaryMax } = parseSalaryRange(fallbackSalaryRange);
-  const salaryMin = explicitSalaryMin ?? parsedSalaryMin;
-  const salaryMax = explicitSalaryMax ?? parsedSalaryMax;
+  // 薪资文本权威来源 — salaryText 是 RoboHire 原文 ("8.2k/8.5k"),最干净;
+  // 写入 salary_range 文本列与解析数值都用它,两边口径一致。
   const resolvedSalaryRangeText =
     salaryText ?? salary_range ?? jd_content?.salaryBenefits ?? null;
+  // 数值优先从原文解析。RoboHire 的结构化 salaryMin/Max 已证实会产出脏值
+  // (把 "8.2k/8.5k" 拼成 "8.20008.5000" → 82 亿,溢出 partner int4 列),
+  // 仅当原文解析不出时才退回结构化字段;两路都过 sane 范围校验兜底。
+  const { min: textSalaryMin, max: textSalaryMax } =
+    parseSalaryRange(resolvedSalaryRangeText);
+  const salaryMin = saneSalary(textSalaryMin ?? toInt(salaryMinRaw));
+  const salaryMax = saneSalary(textSalaryMax ?? toInt(salaryMaxRaw));
   const cityFirst = Array.isArray(city) && city.length > 0 ? city[0] : null;
 
   // Run all 3 writes in one transaction

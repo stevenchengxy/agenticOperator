@@ -82,6 +82,7 @@ export const resumeParserAgent = inngest.createFunction(
       object_key: raw.object_key ?? raw.objectKey,
       filename: raw.filename,
       employee_id: raw.employee_id ?? raw.employeeId ?? raw.operator_employee_id ?? null,
+      locked_by_employee_id: raw.locked_by_employee_id ?? raw.lockedByEmployeeId ?? null,
       client_id: raw.client_id ?? null,
       job_requisition_id: raw.job_requisition_id ?? null,
       sourcing_channel_id: raw.sourcing_channel_id ?? raw.sourcingChannelId ?? null,
@@ -108,6 +109,12 @@ export const resumeParserAgent = inngest.createFunction(
     const operator_id = raw.operator_id ?? null;
     const client_id = raw.client_id ?? null;
     const job_requisition_id = raw.job_requisition_id ?? null;
+    // RAAS Nextcloud 路径(ADR-0040)在 RESUME_DOWNLOADED 预填窄化后的客户需求 id
+    // 数组:已按「文件名岗位名 × 招聘员名下在招岗位」模糊匹配收敛。透传给下游
+    // ruleCheckAgent,使其直接对这些 JR 撮合,而非按 employee_id 扫名下全部在招岗位。
+    const job_requisition_ids = normalizeJobRequisitionIds(
+      raw.job_requisition_ids ?? raw.jobRequisitionIds,
+    );
     const mime_type = raw.mime_type ?? raw.contentType ?? 'application/pdf';
     const file_size = raw.size ?? raw.file_size ?? null;
     // RAAS publishes sourcing_channel_id on RESUME_DOWNLOADED — pass it through
@@ -120,6 +127,20 @@ export const resumeParserAgent = inngest.createFunction(
         : typeof raw.sourcingChannelId === 'string' && raw.sourcingChannelId.trim()
           ? raw.sourcingChannelId.trim()
           : null;
+    // RMHR 锁定归属透传 (raas 2026-05-27 起在 RESUME_DOWNLOADED 上发
+    // locked_by_employee_id / locked_by_name / locked_at, c200efd)。锁持有人是
+    // 候选人归属权威 — 被他人锁定时 AO 把候选人归属校正为锁持有人而非上传者
+    // (per raas ADR-0041 "锁在他人则同步真实归属")。snake/camel 双形态兼容。
+    const locked_by_employee_id =
+      typeof raw.locked_by_employee_id === 'string' && raw.locked_by_employee_id.trim()
+        ? raw.locked_by_employee_id.trim()
+        : typeof raw.lockedByEmployeeId === 'string' && raw.lockedByEmployeeId.trim()
+          ? raw.lockedByEmployeeId.trim()
+          : null;
+    // 归属生效值: 锁持有人优先, 无锁信息回落上传者。仅用于"归属"语义的写入
+    // (candidate.employee_id / Neo4j Candidate.employee_id); resume.uploaded_by
+    // 与 RESUME_PROCESSED.employee_id (matcher 按上传者扫名下岗位) 保持上传者。
+    const ownerEmployeeId = locked_by_employee_id ?? employeeId;
     const traceId = getTraceId(event.data);
 
     // External-dependency-health context — passed to reportDependencyDegraded
@@ -357,6 +378,7 @@ export const resumeParserAgent = inngest.createFunction(
         size: typeof file_size === 'number' ? file_size : null,
         filename: filename ?? undefined,
         employee_id: employeeId ?? undefined,
+        locked_by_employee_id: locked_by_employee_id ?? undefined,
         client_id: client_id ?? undefined,
         job_requisition_id: job_requisition_id ?? undefined,
         sourcing_channel_id: sourcing_channel_id ?? undefined,
@@ -407,7 +429,9 @@ export const resumeParserAgent = inngest.createFunction(
     await step.run(`write-candidate-neo4j-${stepKeyForNeo4j}`, async () => {
       const r = await writeCandidateInstance({
         candidate_id: saveResult.candidate_id,
-        employee_id: employeeId,
+        // 归属语义 — 锁持有人优先 (c200efd)。resume.uploaded_by / writeResumeInstance
+        // 仍记上传者; 仅 Candidate 归属随 RMHR 锁权威。
+        employee_id: ownerEmployeeId,
         parsed: parsed as unknown as Record<string, unknown>,
       });
       if (r.ok) {
@@ -509,6 +533,9 @@ export const resumeParserAgent = inngest.createFunction(
       // 透传上传时关联的岗位 — matchResumeAgent 据此决定"单岗位精准匹配"
       // 还是"上传者名下全部 recruiting 岗位扫描"。
       job_requisition_id: job_requisition_id ?? null,
+      // ADR-0040 — RAAS 预填的窄化 JR 数组(单数 job_requisition_id 为空时,
+      // ruleCheckAgent 直接循环这些 id 取详情撮合,跳过 path-B 名下全量扫描)。
+      job_requisition_ids: job_requisition_ids.length > 0 ? job_requisition_ids : undefined,
       // 透传 RAAS 上游传来的 sourcing_channel_id / client_id,partner / 重新订阅方都需要
       sourcing_channel_id: sourcing_channel_id ?? null,
       client_id: client_id ?? null,
@@ -608,6 +635,22 @@ export const resumeParserAgent = inngest.createFunction(
 // ──────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────
+
+// ADR-0040 — 把 RAAS 预填的 job_requisition_ids 规整成去重、去空白的 string[]。
+// 容忍 undefined / 非数组 / 含空串 / 重复值,产出干净的 id 列表。
+function normalizeJobRequisitionIds(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of v) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim();
+    if (id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
 
 /**
  * Unwrap RAAS-canonical envelope shape to flat fields.

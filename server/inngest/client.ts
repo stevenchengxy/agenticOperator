@@ -112,6 +112,9 @@ export type ResumeProcessedData = {
   resume_id?: string;
   // 上传时关联的岗位（raas 前端"上传简历"弹框里的"关联岗位"下拉）
   job_requisition_id?: string | null;
+  // ADR-0040 — RAAS Nextcloud 路径预填的窄化客户需求 id 数组（单数 job_requisition_id
+  // 为空时，ruleCheckAgent 直接循环这些 id 取详情撮合，跳过 path-B 名下全量扫描）。
+  job_requisition_ids?: string[];
   // 来源渠道(RAAS 在 RESUME_DOWNLOADED 里给 → AO 透传 → 下游 / partner 重新订阅时仍可见)
   sourcing_channel_id?: string | null;
   // 客户(用于下游 matcher 的 client 维度过滤)

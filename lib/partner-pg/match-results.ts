@@ -417,18 +417,21 @@ export async function saveMatchResultsToPartnerPg(
           ],
         );
       } else {
+        // ADR-0061 §② (2026-06-14): CMR.stage 已从招聘漏斗信号下线。raas 端不再
+        // 读/写该列（漏斗一律走 Application SSOT），AO 停止写入初值 'draft'。列在
+        // raas schema 为 nullable，省略即落 NULL；AO 本就从不读 stage，行为零变化。
         await c.query(
           `INSERT INTO candidate_match_result (
               candidate_match_result_id, candidate_id, job_requisition_id,
               match_score, match_reason, match_status,
               job_posting_id, dimension_scores, core_tags,
-              experience_years, stage, created_by,
+              experience_years, created_by,
               created_at, updated_at
             ) VALUES (
               $1, $2, $3,
               $4, $5, $6,
               $7, $8::jsonb, $9::jsonb,
-              $10, $11, $12,
+              $10, $11,
               NOW(), NOW()
             )`,
           [
@@ -442,7 +445,6 @@ export async function saveMatchResultsToPartnerPg(
             JSON.stringify(dimensionScores ?? null),
             JSON.stringify(coreTags),
             typeof item.experience_years === 'number' ? item.experience_years : null,
-            'draft',
             item.created_by ?? 'ai_engine',
           ],
         );

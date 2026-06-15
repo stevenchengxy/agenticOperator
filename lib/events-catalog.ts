@@ -126,7 +126,7 @@ export const EVENT_CATALOG: EventDef[] = [
   { name: "RESUME_DOWNLOADED", stage: "resume", kind: "domain", rate: 3102, err: 4, desc: "简历已从招聘渠道采集并下载至系统暂存区，等待自动化处理。",
     publishers: ["ResumeCollector"], subscribers: ["ResumeParser", "DupeChecker"], wf: ["collect-loop/v3"],
     emits: ["RESUME_PROCESSED", "RESUME_PARSE_ERROR", "RESUME_LOCKED_CONFLICT"],
-    data: [["resume_file_paths", "List<String>"], ["job_requisition_id", "String"]],
+    data: [["resume_file_paths", "List<String>"], ["job_requisition_id", "String"], ["job_requisition_ids", "List<String>"]],
     mutations: ["Job_Requisition"] },
   { name: "RESUME_PROCESSED", stage: "resume", kind: "domain", rate: 2802, err: 0, desc: "简历解析已完成（或人工修复），结构化数据准备进入匹配环节。",
     publishers: ["ResumeParser"], subscribers: ["Matcher", "KG.index"], wf: ["client→submit/v4.2"],

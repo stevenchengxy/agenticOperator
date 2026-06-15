@@ -142,13 +142,22 @@ describe('matchResumeDirect', () => {
     expect(r.data.recommendation).toBe('STRONG_MATCH');
   });
 
-  it('serializes resume + jd as JSON body', async () => {
+  it('serializes resume + jd as JSON body and defaults locale to zh', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify({ success: true, data: { matchScore: 50, recommendation: 'PARTIAL_MATCH' }, requestId: 'r' })));
     await matchResumeDirect({ resume: 'R', jd: 'J' });
     const body = JSON.parse(((fetchSpy.mock.calls[0][1]?.body as string) ?? '{}'));
-    expect(body).toEqual({ resume: 'R', jd: 'J' });
+    expect(body).toEqual({ resume: 'R', jd: 'J', locale: 'zh' });
+  });
+
+  it('honors an explicit locale override', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ success: true, data: { matchScore: 50, recommendation: 'PARTIAL_MATCH' }, requestId: 'r' })));
+    await matchResumeDirect({ resume: 'R', jd: 'J', locale: 'en' });
+    const body = JSON.parse(((fetchSpy.mock.calls[0][1]?.body as string) ?? '{}'));
+    expect(body.locale).toBe('en');
   });
 });
 

@@ -37,6 +37,14 @@ export type SaveCandidateInput = {
   etag?: string | null;
   size?: number | null;
   employee_id?: string | null;
+  /**
+   * RMHR 锁持有人工号 — RESUME_DOWNLOADED 的 locked_by_employee_id 透传
+   * (raas 2026-05-27 起发送)。非空时是归属权威 (per raas ADR-0041
+   * "锁在他人则同步真实归属"): INSERT 直接用它做 candidate.employee_id,
+   * dedup 命中走 UPDATE 时无条件覆盖既有归属。为空时回落 employee_id
+   * (上传者) 走原 COALESCE 仅填空语义。
+   */
+  locked_by_employee_id?: string | null;
   hr_folder?: string | null;
   job_requisition_id?: string | null;
   client_id?: string | null;
@@ -71,6 +79,18 @@ export type SaveCandidateResult = {
   candidate_created: boolean;
   resume_created: boolean;
 };
+
+// ──────────────────────────────────────────────────────────────────────
+// 业务默认值 (2026-06-12, partner-pg c5f48e3)
+// ──────────────────────────────────────────────────────────────────────
+
+// raas candidate.status 的「求职中」枚举值。新建候选人默认求职中; dedup 命中
+// 走 COALESCE 仅填空, 不覆盖招聘手动维护的状态。
+const DEFAULT_CANDIDATE_STATUS = 'active';
+
+// raas sourcing_channel 字典「BOSS直聘-AI」。上游 RESUME_DOWNLOADED 未带
+// sourcing_channel_id 时的默认来源。
+const DEFAULT_SOURCING_CHANNEL_ID = '02001034';
 
 // ──────────────────────────────────────────────────────────────────────
 // Helpers
@@ -204,12 +224,23 @@ export async function saveCandidateToPartnerPg(
   if (!input.bucket) throw new Error('[partner-pg/candidates] missing bucket');
   if (!input.object_key) throw new Error('[partner-pg/candidates] missing object_key');
 
-  // RAAS publishes sourcing_channel_id on RESUME_DOWNLOADED — we just pass it
-  // through. Do NOT default-fill: if NULL ends up in Postgres it means the
-  // upstream chain dropped the field and we want that to surface (rather
-  // than silently mislabel every candidate as "人才库-AI").
-  const sourcingChannelId = nonEmpty(input.sourcing_channel_id);
+  // RAAS publishes sourcing_channel_id on RESUME_DOWNLOADED — upstream value
+  // wins when present. 2026-06-12 业务决策 (c5f48e3): 上游缺失时默认回填
+  // BOSS直聘-AI (02001034), 不再让 NULL 落库 (取代旧的"不回填以暴露断链"策略
+  // —— AO 管道的简历实际来源即 BOSS直聘 AI 投递)。
+  const sourcingChannelId =
+    nonEmpty(input.sourcing_channel_id) ?? DEFAULT_SOURCING_CHANNEL_ID;
   const uploadedBy = nonEmpty(input.employee_id);
+  // 2026-06-11 (c200efd) — RMHR 锁持有人是候选人归属权威 (锁权威覆盖)。被他人
+  // 锁定时 raas 仍发 RESUME_DOWNLOADED 并透传 locked_by_*, 候选人应归锁持有人而
+  // 非上传者。lockedBy 非空 → employee_id 写锁持有人且 UPDATE 无条件覆盖; 为空
+  // → 沿用上传者 + COALESCE 仅填空 (公共池) 的历史语义。resume.uploaded_by 不受
+  // 影响 — 那是"谁上传了文件", 始终记上传者。
+  // ⚠️ 运维红线: 勿从 Inngest dashboard 直接 replay 旧 RESUME_DOWNLOADED — 陈旧
+  // locked_by 会无条件覆盖较新归属 (这里不做 locked_at 新旧比较, 跨系统时区口径
+  // 不可靠)。
+  const lockedBy = nonEmpty(input.locked_by_employee_id);
+  const ownerEmployeeId = lockedBy ?? uploadedBy;
 
   const parsed = input.parsed?.data ?? {};
   const name = nonEmpty(parsed.name) ?? '未命名候选人';
@@ -293,13 +324,13 @@ export async function saveCandidateToPartnerPg(
             candidate_id, name, mobile, mobile_normalized, email, gender,
             current_location, current_company, current_title,
             skills, languages,
-            sourcing_channel_id, employee_id, data_source,
+            sourcing_channel_id, employee_id, data_source, status,
             created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4, $5, $6,
             $7, $8, $9,
             $10::text[], $11::text[],
-            $12, $13, $14,
+            $12, $13, $14, $15,
             NOW(), NOW()
           )`,
         [
@@ -315,8 +346,9 @@ export async function saveCandidateToPartnerPg(
           skillsExtracted,
           languagesList,
           sourcingChannelId,
-          uploadedBy,
+          ownerEmployeeId,
           'agentic_operator',
+          DEFAULT_CANDIDATE_STATUS,
         ],
       );
     } else {
@@ -325,6 +357,10 @@ export async function saveCandidateToPartnerPg(
       // 让新 RoboHire 输出能覆盖. RoboHire 返空(置 '未命名候选人' 占位)则不
       // 覆盖, 用 COALESCE 保留原值. 不在 AO 这层做姓名校验/过滤 — 上游 RoboHire
       // 是 source of truth, RoboHire 输出不对要上游修.
+      //
+      // employee_id (归属): $13 标记"事件带 RMHR 锁持有人"。带锁 → 无条件覆盖为
+      // $11 (= 锁持有人, 锁权威校正归属); 不带锁 → 原 COALESCE 仅填空语义
+      // ($11 = 上传者)。status: COALESCE 仅填空, 不覆盖招聘手动维护的状态。
       const incomingNameForUpdate = name === '未命名候选人' ? null : name;
       await c.query(
         `UPDATE candidate SET
@@ -339,9 +375,11 @@ export async function saveCandidateToPartnerPg(
             languages = CASE WHEN COALESCE(array_length(languages, 1), 0) = 0
                              THEN $9::text[] ELSE languages END,
             sourcing_channel_id = COALESCE(sourcing_channel_id, $10),
-            employee_id = COALESCE(employee_id, $11),
+            employee_id = CASE WHEN $13::boolean THEN $11
+                               ELSE COALESCE(employee_id, $11) END,
             data_source = COALESCE(data_source, 'agentic_operator'),
             name = COALESCE($12, name),
+            status = COALESCE(status, $14),
             updated_at = NOW()
          WHERE candidate_id = $1`,
         [
@@ -355,8 +393,10 @@ export async function saveCandidateToPartnerPg(
           skillsExtracted,
           languagesList,
           sourcingChannelId,
-          uploadedBy,
+          ownerEmployeeId,
           incomingNameForUpdate,
+          lockedBy !== null,
+          DEFAULT_CANDIDATE_STATUS,
         ],
       );
     }

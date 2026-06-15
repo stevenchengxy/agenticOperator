@@ -54,7 +54,9 @@ const RESUME_DOWNLOADED_v1 = envelope(
     etag: z.string().nullable().optional(),
     size: z.number().nullable().optional(),
     employee_id: z.string().nullable().optional(),
-    job_requisition_id: z.string().optional(),
+    job_requisition_id: z.string().nullable().optional(),
+    // ADR-0040 — RAAS Nextcloud 路径预填的窄化客户需求 id 数组(可空/缺省)。
+    job_requisition_ids: z.array(z.string()).optional(),
     received_at: z.string().optional(),
   }).passthrough(),
 );

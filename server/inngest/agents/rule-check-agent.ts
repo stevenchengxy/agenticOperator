@@ -128,6 +128,11 @@ export async function ruleCheckAgentHandler({
       ? data.job_requisition_id.trim()
       : null;
 
+  // ADR-0040 — RAAS Nextcloud 路径预填的窄化 JR 数组(单数 job_requisition_id 为空时
+  // 才有意义)。已在 RAAS 侧按「文件名岗位名 × 招聘员名下在招岗位」模糊匹配收敛,
+  // 这里直接对这些 JR 取详情撮合,跳过 path-B「按 employee_id 扫名下全部在招岗位」。
+  const linkedJrIds = pickJobRequisitionIds(data);
+
   // ── 1. JR 列表收敛 ──
   // 2026-05-20: 直读 partner Postgres,不再走 RAAS HTTP API.
   const requirements = await step.run('list-requirements', async () => {
@@ -150,6 +155,39 @@ export async function ruleCheckAgentHandler({
         return [];
       }
       return [merged];
+    }
+    // path B' (ADR-0040) — RAAS 预填了窄化 JR 数组:直接对这些 id 逐个取详情,
+    // 不再按 employee_id 扫该招聘员名下全部在招岗位。每个 JR 取详情 + flatten
+    // spec(同 path A),hasMatchableContent 过滤空内容。某个 id 取不到详情则跳过
+    // 该 id(不抛错,其余正常),全部取不到则落到下方 requirements.length===0 早退。
+    if (linkedJrIds.length > 0) {
+      logger.info(
+        `[${AGENT_NAME}] path-B' prefilled JR ids · count=${linkedJrIds.length} · ` +
+          `ids=${linkedJrIds.join(',')}`,
+      );
+      const details = await Promise.all(
+        linkedJrIds.map(async (jrId) => {
+          const detail = await getRequirementDetail(jrId);
+          if (!detail) {
+            logger.warn(`[${AGENT_NAME}] prefilled JR ${jrId} 在 partner Postgres 不存在,跳过`);
+            return null;
+          }
+          const merged: RequirementsAgentViewItem = {
+            ...(detail.specification ?? {}),
+            ...detail,
+          };
+          if (!hasMatchableContent(merged)) {
+            logger.warn(`[${AGENT_NAME}] prefilled JR ${jrId} 内容空,跳过`);
+            return null;
+          }
+          return merged;
+        }),
+      );
+      const matchable = details.filter((x): x is RequirementsAgentViewItem => x !== null);
+      logger.info(
+        `[${AGENT_NAME}] path-B' ${linkedJrIds.length} prefilled JR → ${matchable.length} matchable`,
+      );
+      return matchable;
     }
     // 2026-05-21 path B 收敛 — 按 RAAS partner 契约:
     //   - 真相源 = requirement_claim 表(recruiter 认领关系,不是 spec.hsm_*)
@@ -200,7 +238,7 @@ export async function ruleCheckAgentHandler({
       employee_id: employeeId,
       requested_count: 0,
       reason:
-        linkedJrId === null
+        linkedJrId === null && linkedJrIds.length === 0
           ? 'no-published-jr-claimed-by-recruiter'
           : 'no-matchable-requirements',
     };
@@ -828,6 +866,23 @@ function pickUploadId(data: any): string | null {
 function pickCandidateId(data: any): string | null {
   if (typeof data.candidate_id === 'string' && data.candidate_id.trim()) return data.candidate_id.trim();
   return null;
+}
+
+// ADR-0040 — RAAS 预填的窄化 JR 数组。容忍 snake/camel、非数组、空串、重复值,
+// 产出去重、去空白的 string[]。
+function pickJobRequisitionIds(data: any): string[] {
+  const raw = data?.job_requisition_ids ?? data?.jobRequisitionIds;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim();
+    if (id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 function pickEmployeeId(data: any): string | null {
