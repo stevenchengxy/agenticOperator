@@ -131,9 +131,43 @@ export async function listRunsWithEvents(
   );
 }
 
+// Event recency for the merge sort. received_at is the natural timeline; fall
+// back to ts (epoch ms). Unlike runs, an archived event with no timestamp is
+// OLD captured data (not a fresh in-progress row), so unknown → 0 (sort last).
+const eventMs = (e: { received_at?: string; ts?: number }): number => {
+  if (e.received_at) {
+    const t = new Date(e.received_at).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  return typeof e.ts === "number" ? e.ts : 0;
+};
+
+/**
+ * Events list, durable like the runs list. The live Inngest /v1/events buffer is
+ * lossy/ephemeral — empty after quiet periods or an Inngest restart — so in auto
+ * mode we merge it with the Postgres archive (live wins on id; archive is the
+ * durable superset of history that aged out of the live buffer). This is why the
+ * /events page + overview "live event stream" no longer go blank when the live
+ * buffer is empty.
+ */
+export async function listEvents(
+  limit = 50,
+  name?: string,
+): ReturnType<typeof live.listEvents> {
+  const s = source();
+  if (s === "live") return live.listEvents(limit, name);
+  if (s === "postgres") return archive.listEvents(limit, name);
+  return mergeLists(
+    live.listEvents(limit, name),
+    archive.listEvents(limit, name),
+    (e) => e.id,
+    (e) => eventMs(e),
+    limit,
+  );
+}
+
 // ── Always live: registry metadata + mutations ───────────────────────
 export const listFunctions = live.listFunctions;
-export const listEvents = live.listEvents;
 export const getEventRuns = live.getEventRuns;
 export const replayEvent = live.replayEvent;
 export const sendEvent = live.sendEvent;

@@ -92,8 +92,10 @@ async function restGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function listEvents(limit = 50): Promise<InngestEvent[]> {
-  const body = await restGet<{ data: InngestEvent[] }>(`/v1/events?limit=${limit}`);
+export async function listEvents(limit = 50, name?: string): Promise<InngestEvent[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (name) qs.set("name", name); // Inngest dev /v1/events filters on ?name=
+  const body = await restGet<{ data: InngestEvent[] }>(`/v1/events?${qs.toString()}`);
   return body.data ?? [];
 }
 

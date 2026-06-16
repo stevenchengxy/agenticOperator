@@ -20,6 +20,7 @@
 
 import { prisma } from "@/server/db";
 import { getInngestUrl } from "@/lib/inngest-url";
+import { listEvents } from "@/lib/inngest-source";
 
 const LOCAL_INNGEST = getInngestUrl();
 
@@ -122,9 +123,12 @@ export async function GET(): Promise<Response> {
         }
       };
 
-      // Initial dump
+      // Initial dump: live Inngest ∪ durable Postgres archive (via
+      // inngest-source). The live /v1/events buffer is lossy/ephemeral and is
+      // often empty after a quiet period or an Inngest restart, so reading it
+      // alone makes the stream open blank even though the archive has history.
       try {
-        const initial = await fetchInngestEvents(INITIAL_LIMIT);
+        const initial = await listEvents(INITIAL_LIMIT);
         for (const e of initial) seen.add(e.internal_id ?? e.id);
         const sourceMap = await enrichWithSource(initial);
         emit({

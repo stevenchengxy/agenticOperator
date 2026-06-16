@@ -8,9 +8,8 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
-import { getInngestUrl } from "@/lib/inngest-url";
+import { listEvents } from "@/lib/inngest-source";
 
-const LOCAL_INNGEST = getInngestUrl();
 const RAAS_INNGEST = process.env.RAAS_INNGEST_URL ?? "";
 
 type InngestEvent = {
@@ -29,39 +28,40 @@ export async function GET(req: Request): Promise<Response> {
   const limit = Math.min(100, Math.max(1, Number.isFinite(limitParam) ? limitParam : 30));
   const includeShared = url.searchParams.get("includeShared") === "1";
 
-  const sources: Array<{ label: string; url: string }> = [
-    { label: "local", url: LOCAL_INNGEST },
-  ];
-  if (includeShared && RAAS_INNGEST) {
-    sources.push({ label: "shared", url: RAAS_INNGEST });
-  }
+  const sourceLabels = ["local", ...(includeShared && RAAS_INNGEST ? ["shared"] : [])];
 
   const all: Array<InngestEvent & { _source: string }> = [];
   const errors: Array<{ source: string; message: string }> = [];
 
-  for (const s of sources) {
+  // Local events go through inngest-source: live Inngest ∪ durable Postgres
+  // archive. The live /v1/events buffer is lossy/ephemeral (empties after quiet
+  // periods or an Inngest restart), so reading it alone makes /events look
+  // frozen even though the archive has the history. nameFilter is passed
+  // through so Inngest dev returns the right slice server-side.
+  try {
+    const localEvents = await listEvents(limit, nameFilter ?? undefined);
+    for (const e of localEvents) all.push({ ...e, _source: "local" });
+  } catch (e) {
+    errors.push({ source: "local", message: (e as Error).message });
+  }
+
+  // Shared (RAAS) Inngest is a separate instance with no local archive mirror —
+  // read it live. Inngest dev /v1/events accepts ?name= (NOT event_name) for
+  // server-side filtering.
+  if (includeShared && RAAS_INNGEST) {
     try {
-      // Pass nameFilter UPSTREAM so Inngest dev returns the right slice.
-      // Filtering client-side after a small `limit` fetch is broken — if
-      // the most-recent `limit` events don't include the filtered name,
-      // we'd return empty/sparse results even when matching events exist.
-      // Inngest dev /v1/events accepts ?name= (NOT event_name) for
-      // server-side filtering. Verified empirically against the dev
-      // server build shipped with inngest-cli.
-      const upstreamUrl = new URL(`${s.url}/v1/events`);
+      const upstreamUrl = new URL(`${RAAS_INNGEST}/v1/events`);
       upstreamUrl.searchParams.set("limit", String(limit));
       if (nameFilter) upstreamUrl.searchParams.set("name", nameFilter);
       const r = await fetch(upstreamUrl, { signal: AbortSignal.timeout(8_000) });
       if (!r.ok) {
-        errors.push({ source: s.label, message: `${r.status} ${r.statusText}` });
-        continue;
-      }
-      const body = (await r.json()) as { data?: InngestEvent[] };
-      for (const e of body.data ?? []) {
-        all.push({ ...e, _source: s.label });
+        errors.push({ source: "shared", message: `${r.status} ${r.statusText}` });
+      } else {
+        const body = (await r.json()) as { data?: InngestEvent[] };
+        for (const e of body.data ?? []) all.push({ ...e, _source: "shared" });
       }
     } catch (e) {
-      errors.push({ source: s.label, message: (e as Error).message });
+      errors.push({ source: "shared", message: (e as Error).message });
     }
   }
 
@@ -95,7 +95,7 @@ export async function GET(req: Request): Promise<Response> {
 
   return NextResponse.json({
     events: enriched,
-    sources: sources.map((s) => s.label),
+    sources: sourceLabels,
     errors,
     fetchedAt: new Date().toISOString(),
   });

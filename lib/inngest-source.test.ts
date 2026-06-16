@@ -23,11 +23,17 @@ vi.mock("./inngest-archive/reader", () => ({
   listRunsWithEvents: vi.fn(),
   getRunHistory: vi.fn(),
   getRunStepOutputs: vi.fn(),
+  listEvents: vi.fn(),
 }));
 
 import * as live from "./inngest-admin-client";
 import * as archive from "./inngest-archive/reader";
-import { listRecentRuns, listRunsWithEvents, getRunHistory } from "./inngest-source";
+import {
+  listRecentRuns,
+  listRunsWithEvents,
+  getRunHistory,
+  listEvents,
+} from "./inngest-source";
 
 type Recent = Awaited<ReturnType<typeof live.listRecentRuns>>[number];
 function run(id: string, status: string, startedAt: string): Recent {
@@ -212,5 +218,93 @@ describe("inngest-source listRunsWithEvents (auto = merge live + archive)", () =
     vi.mocked(live.listRunsWithEvents).mockRejectedValue(new Error("ECONNREFUSED"));
     const rows = await listRunsWithEvents("slug", { limit: 50 });
     expect(rows.map((r) => r.runId)).toEqual(["a"]);
+  });
+});
+
+type Evt = Awaited<ReturnType<typeof live.listEvents>>[number];
+function evt(
+  id: string,
+  receivedAt: string,
+  data: unknown = {},
+): Evt {
+  return { id, name: "EVENT", data, received_at: receivedAt };
+}
+
+describe("inngest-source listEvents (auto = merge live + archive)", () => {
+  it("surfaces archived events when the live event store is empty (durability)", async () => {
+    // The Inngest dev server's /v1/events buffer is lossy/ephemeral — after a
+    // quiet period it returns []. The durable archive still has the history, so
+    // the events page + overview stream must not go blank.
+    vi.mocked(live.listEvents).mockResolvedValue([]);
+    vi.mocked(archive.listEvents).mockResolvedValue([
+      evt("a", "2026-06-15T08:00:00Z"),
+    ]);
+    const rows = await listEvents(200);
+    expect(rows.map((e) => e.id)).toEqual(["a"]);
+  });
+
+  it("lets the live event win over an archived duplicate with the same id", async () => {
+    vi.mocked(archive.listEvents).mockResolvedValue([
+      evt("a", "2026-06-15T08:00:00Z", { from: "archive" }),
+    ]);
+    vi.mocked(live.listEvents).mockResolvedValue([
+      evt("a", "2026-06-15T08:00:00Z", { from: "live" }),
+    ]);
+    const rows = await listEvents(200);
+    expect(rows).toHaveLength(1);
+    expect((rows[0].data as { from: string }).from).toBe("live");
+  });
+
+  it("keeps an archived event that aged out of the live window", async () => {
+    vi.mocked(archive.listEvents).mockResolvedValue([
+      evt("old", "2026-06-15T07:00:00Z"),
+    ]);
+    vi.mocked(live.listEvents).mockResolvedValue([
+      evt("new", "2026-06-15T08:00:00Z"),
+    ]);
+    const rows = await listEvents(200);
+    expect(rows.map((e) => e.id).sort()).toEqual(["new", "old"]);
+  });
+
+  it("sorts the merged union by received_at desc and respects the limit", async () => {
+    vi.mocked(archive.listEvents).mockResolvedValue([
+      evt("old", "2026-06-15T07:00:00Z"),
+    ]);
+    vi.mocked(live.listEvents).mockResolvedValue([
+      evt("new", "2026-06-15T08:00:00Z"),
+    ]);
+    const rows = await listEvents(1);
+    expect(rows.map((e) => e.id)).toEqual(["new"]);
+  });
+
+  it("falls back to live when the archive throws", async () => {
+    vi.mocked(archive.listEvents).mockRejectedValue(new Error("pg down"));
+    vi.mocked(live.listEvents).mockResolvedValue([evt("b", "2026-06-15T08:00:00Z")]);
+    const rows = await listEvents(200);
+    expect(rows.map((e) => e.id)).toEqual(["b"]);
+  });
+
+  it("postgres mode returns archive only, never calls live", async () => {
+    process.env.MONITOR_READ_SOURCE = "postgres";
+    vi.mocked(archive.listEvents).mockResolvedValue([evt("a", "2026-06-15T08:00:00Z")]);
+    const rows = await listEvents(200);
+    expect(rows.map((e) => e.id)).toEqual(["a"]);
+    expect(live.listEvents).not.toHaveBeenCalled();
+  });
+
+  it("live mode returns live only, never calls archive", async () => {
+    process.env.MONITOR_READ_SOURCE = "live";
+    vi.mocked(live.listEvents).mockResolvedValue([evt("a", "2026-06-15T08:00:00Z")]);
+    const rows = await listEvents(200);
+    expect(rows.map((e) => e.id)).toEqual(["a"]);
+    expect(archive.listEvents).not.toHaveBeenCalled();
+  });
+
+  it("passes an optional name filter through to both sources", async () => {
+    vi.mocked(live.listEvents).mockResolvedValue([]);
+    vi.mocked(archive.listEvents).mockResolvedValue([]);
+    await listEvents(200, "RESUME_PROCESSED");
+    expect(live.listEvents).toHaveBeenCalledWith(200, "RESUME_PROCESSED");
+    expect(archive.listEvents).toHaveBeenCalledWith(200, "RESUME_PROCESSED");
   });
 });

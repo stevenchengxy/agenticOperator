@@ -1,0 +1,89 @@
+{
+  "metadata": {
+    "domain": "招聘-v1",
+    "source": "由 AO 现役 6 个招聘 agent 的真实事件链与业务逻辑提炼,供智能体生成器读取。objects/rules 沿用 neo4j_data/招聘- v1 既有交付物未改。",
+    "workflow_count": 6,
+    "message": "招聘域 6-agent 工作流蓝图:候选人查重→简历解析→规则检查→简历匹配→面试邀约,外加 JD 生成分支。entry 事件 RESUME_DOWNLOADED / JD_GENERATION_REQUESTED / JD_REJECTED 由人工/外部产出;终态事件(*_CONFLICT/*_FAILED/*_MISSING/MATCH_PASSED_NO_INTERVIEW/JD_GENERATED/INTERVIEW_INVITATION_SENT)由本子图外的人工或系统承接。",
+    "entry_events": ["RESUME_DOWNLOADED", "JD_GENERATION_REQUESTED", "JD_REJECTED"],
+    "terminal_events": ["RESUME_LOCKED_CONFLICT", "RESUME_INFO_MISSING", "RESUME_PARSE_ERROR", "MATCH_RULE_CHECK_FAILED", "MATCH_PASSED_NO_INTERVIEW", "MATCH_FAILED", "INTERVIEW_INVITATION_SENT", "INTERVIEW_INVITATION_FAILED", "JD_GENERATED"]
+  },
+  "workflows": [
+    {
+      "id": "DD-1",
+      "name": "deduplicateCandidate",
+      "description": "候选人查重 Agent。简历下载后第一道闸:三级去重(手机号/证件号/弱标识)+ 归属锁定。employee_id 无条件覆盖;locked_by 与当前 employee_id 不一致则仅 lock-only 并发归属冲突。",
+      "actor": ["Agent"],
+      "trigger": ["RESUME_DOWNLOADED"],
+      "actions": [
+        { "order": "1", "name": "extractIdentityKeys", "description": "从简历原件抽取手机号/证件号/姓名+生日等去重标识,缺失从 rawText 兜底。", "type": "logic", "condition": "已收到 RESUME_DOWNLOADED" },
+        { "order": "2", "name": "tierMatch", "description": "Tier1 手机号→Tier2 证件号→Tier3 弱标识 逐级匹配既有候选人,命中复用否则新建。", "type": "logic", "condition": "已抽取标识" },
+        { "order": "3", "name": "resolveOwnershipLock", "description": "归属判定与锁定:通过→CANDIDATE_DEDUP_PASSED;归属冲突→RESUME_LOCKED_CONFLICT。", "type": "logic", "condition": "已确定 candidate_id" }
+      ],
+      "triggered_event": ["CANDIDATE_DEDUP_PASSED", "RESUME_LOCKED_CONFLICT"]
+    },
+    {
+      "id": "9-1",
+      "name": "processResume",
+      "description": "Resume Parser Agent。经 RoboHire 结构化解析简历,性别从 rawText 补抽、毕业时间取 endDate,完整性校验后发 RESUME_PROCESSED。retries=0 防重复扣配额。",
+      "actor": ["Agent"],
+      "trigger": ["CANDIDATE_DEDUP_PASSED"],
+      "actions": [
+        { "order": "1", "name": "parseResume", "description": "RoboHire parseResumeDirect 解析为结构化字段;402/429 等映射为 RESUME_PARSE_ERROR。", "type": "logic", "condition": "候选人去重已通过" },
+        { "order": "2", "name": "extractResumeInfo", "description": "补全性别(rawText)、毕业时间(endDate)、归一化技能标签。", "type": "logic", "condition": "简历已解析" },
+        { "order": "3", "name": "validateCompleteness", "description": "关键字段完整性校验;缺失→RESUME_INFO_MISSING,齐备→RESUME_PROCESSED。", "type": "logic", "condition": "信息已抽取" }
+      ],
+      "triggered_event": ["RESUME_PROCESSED", "RESUME_INFO_MISSING", "RESUME_PARSE_ERROR"]
+    },
+    {
+      "id": "10-1",
+      "name": "ruleCheckForMatchResume",
+      "description": "Rule Check Agent。经 Allmeta 工具拉本体上下文,做'筛选适用规则→二次验证→逐条判定'的 tool-use 循环(关联公司/国籍/回流)。业务 FAIL 不 throw,只 write-only;红线需人工确认先挂 HITL。通过发 MATCH_RULE_CHECK_PASSED。retries=1。",
+      "actor": ["Agent"],
+      "trigger": ["RESUME_PROCESSED"],
+      "actions": [
+        { "order": "1", "name": "checkRelatedCompaniesRecords", "description": "华为/荣耀、OPPO/小米关联公司冷冻期检查(规则 10-25/10-26)。", "type": "logic", "condition": "候选人记录已创建" },
+        { "order": "2", "name": "checkNationality", "description": "国籍与岗位要求检查(规则 10-35)。", "type": "logic", "condition": "关联公司检查已通过" },
+        { "order": "3", "name": "checkReflux", "description": "腾讯/字节回流冷冻期与正编受控锁定检查(规则 10-32/10-34/10-42/10-43/10-45/10-49/10-51/10-56)。", "type": "logic", "condition": "关联公司检查已通过" }
+      ],
+      "triggered_event": ["MATCH_RULE_CHECK_PASSED", "MATCH_RULE_CHECK_FAILED"]
+    },
+    {
+      "id": "10-2",
+      "name": "matchResume",
+      "description": "Match Resume Agent。综合岗位规格/薪资/期望与简历画像计算匹配度,达标需面试→MATCH_PASSED_NEED_INTERVIEW,达标无需面试→MATCH_PASSED_NO_INTERVIEW,不达标→MATCH_FAILED(合法 write-only)。retries=2。",
+      "actor": ["Agent"],
+      "trigger": ["MATCH_RULE_CHECK_PASSED"],
+      "actions": [
+        { "order": "1", "name": "executeMatchResume", "description": "RAAS/RoboHire matchResume 评分,写入 Candidate_Match_Result。", "type": "logic", "condition": "规则检查已通过" },
+        { "order": "2", "name": "determineInterviewNeed", "description": "依结论与岗位流程路由到需面试/无需面试/不通过。", "type": "logic", "condition": "匹配评分完成" }
+      ],
+      "triggered_event": ["MATCH_PASSED_NEED_INTERVIEW", "MATCH_PASSED_NO_INTERVIEW", "MATCH_FAILED"]
+    },
+    {
+      "id": "11-1",
+      "name": "inviteInternalInterview",
+      "description": "Interview Inviter Agent。生成并发送内部面试邀约,创建 Interview_Record。优先 RAAS inviteInterview,501 回退 RoboHire inviteCandidateDirect,均失败→INTERVIEW_INVITATION_FAILED。retries=2。",
+      "actor": ["Agent"],
+      "trigger": ["MATCH_PASSED_NEED_INTERVIEW"],
+      "actions": [
+        { "order": "1", "name": "generateInterviewInvitation", "description": "生成邀约内容并创建面试记录。", "type": "logic", "condition": "匹配通过且需面试" },
+        { "order": "2", "name": "sendInvitation", "description": "RAAS 优先、RoboHire 回退发送邀约。", "type": "logic", "condition": "邀约内容已生成" },
+        { "order": "3", "name": "notifyRecruiter", "description": "通知招聘专员邀约结果,失败附原因。", "type": "logic", "condition": "邀约已尝试发送" }
+      ],
+      "triggered_event": ["INTERVIEW_INVITATION_SENT", "INTERVIEW_INVITATION_FAILED"]
+    },
+    {
+      "id": "4",
+      "name": "createJD",
+      "description": "Create JD Agent。RoboHire generateJdDirect 生成 JD 散文,proseToSkillArray 拆出 must/nice 技能数组(jsonb),映射岗位需求后发 JD_GENERATED;被驳回(JD_REJECTED)回本节点重生成。retries=1。",
+      "actor": ["Agent"],
+      "trigger": ["JD_GENERATION_REQUESTED", "JD_REJECTED"],
+      "actions": [
+        { "order": "1", "name": "generateJDContent", "description": "RoboHire generateJdDirect 生成 hardRequirements/niceToHave 散文。", "type": "logic", "condition": "收到生成/重生成请求" },
+        { "order": "2", "name": "proseToSkillArray", "description": "散文拆为 must_have_skills/nice_to_have_skills 数组。", "type": "logic", "condition": "JD 正文已生成" },
+        { "order": "3", "name": "handleRequisitionMapping", "description": "建立 Job_Posting 与需求/规格映射,写薪资与渠道。", "type": "logic", "condition": "技能数组已拆分" }
+      ],
+      "triggered_event": ["JD_GENERATED"]
+    }
+  ]
+}

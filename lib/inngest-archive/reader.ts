@@ -14,6 +14,7 @@ type RecentRunResult = Awaited<ReturnType<typeof live.listRecentRuns>>;
 type RunHistoryResult = Awaited<ReturnType<typeof live.getRunHistory>>;
 type StepOutputsResult = Awaited<ReturnType<typeof live.getRunStepOutputs>>;
 type RunsWithEventsResult = Awaited<ReturnType<typeof live.listRunsWithEvents>>;
+type EventsResult = Awaited<ReturnType<typeof live.listEvents>>;
 
 function parseMaybeJson(raw: string | null): unknown {
   if (raw == null) return null;
@@ -129,6 +130,30 @@ export async function getRunStepOutputs(runId: string): Promise<StepOutputsResul
       output: s.output,
       outputError: null,
     }));
+}
+
+/**
+ * Recent events from the durable archive, newest-first, shaped exactly like the
+ * live client's listEvents. The live Inngest dev server's /v1/events buffer is
+ * lossy and ephemeral (empties after quiet periods / restarts), so reading the
+ * archive keeps the /events page + overview stream populated. Ordered by
+ * archivedAt (always non-null, ≈ capture/chronological order) since received_at
+ * can be null for some rows; the source resolver re-sorts the merged union.
+ */
+export async function listEvents(limit = 50, name?: string): Promise<EventsResult> {
+  const rows = await prisma.inngestEventArchive.findMany({
+    where: name ? { name } : {},
+    orderBy: { archivedAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    internal_id: r.internalId ?? undefined,
+    name: r.name,
+    data: parseMaybeJson(r.data),
+    ts: r.ts ? r.ts.getTime() : undefined,
+    received_at: r.receivedAt?.toISOString() ?? undefined,
+  }));
 }
 
 export async function listRunsWithEvents(

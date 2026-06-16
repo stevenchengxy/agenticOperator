@@ -1,0 +1,287 @@
+[
+  {
+    "name": "JD_GENERATION_REQUESTED",
+    "description": "招聘需求澄清完成后,触发 Create JD Agent 自动生成职位描述。本事件是 JD 分支的起点,由需求侧(人工/外部系统)产出,不在本 6-agent 子图内由 Agent 生成。",
+    "payload": {
+      "source_action": "",
+      "event_data": [
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "client_id", "type": "String", "target_object": "Client" }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "JD_REJECTED",
+    "description": "JD 初稿经人工评审被驳回,携带驳回原因,触发 Create JD Agent 重新生成。",
+    "payload": {
+      "source_action": "",
+      "event_data": [
+        { "name": "job_posting_id", "type": "String", "target_object": "Job_Posting" },
+        { "name": "reject_reason", "type": "String", "target_object": null }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "JD_GENERATED",
+    "description": "Create JD Agent 已生成职位描述(含硬性要求 hardRequirements 与加分项 niceToHave,并已将散文要求拆分为 must / nice_to_have 技能数组),JD 进入人工评审或发布环节。本事件为本子图的终态输出,后续发布由人工/外部系统完成。",
+    "payload": {
+      "source_action": "createJD",
+      "event_data": [
+        { "name": "job_posting_id", "type": "String", "target_object": "Job_Posting" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Job_Posting",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": ["job_posting_id", "job_requisition_id", "jd_content", "must_have_skills", "nice_to_have_skills", "salary_scheme"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RESUME_DOWNLOADED",
+    "description": "渠道侧已收集并下载到候选人简历原件(PDF 等),触发 Candidate Dedup Agent 做候选人查重与归属锁定。本事件由人工收简/外部渠道产出,是简历分支的起点。",
+    "payload": {
+      "source_action": "",
+      "event_data": [
+        { "name": "resume_file_path", "type": "String", "target_object": "Resume" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "employee_id", "type": "String", "target_object": "Employee" }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "CANDIDATE_DEDUP_PASSED",
+    "description": "Candidate Dedup Agent 完成三级去重(手机号 / 证件号 / employee_id)并成功锁定候选人归属(locked_by == 当前 employee_id 或无锁状态),允许进入简历解析。携带去重命中的 candidate_id 以便复用既有候选人记录。",
+    "payload": {
+      "source_action": "deduplicateCandidate",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "resume_file_path", "type": "String", "target_object": "Resume" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "employee_id", "type": "String", "target_object": "Employee" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": ["candidate_id", "is_locked", "locked_by", "lock_start_time"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RESUME_LOCKED_CONFLICT",
+    "description": "Candidate Dedup Agent 发现候选人已被他人(locked_by != 当前 employee_id)锁定,仅执行 lock-only 不再推进解析与匹配,并通知招聘专员归属冲突。本事件为终态分支。",
+    "payload": {
+      "source_action": "deduplicateCandidate",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "locked_by", "type": "String", "target_object": "Employee" },
+        { "name": "conflict_reason", "type": "String", "target_object": null }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate",
+          "mutation_type": "MODIFY",
+          "impacted_properties": ["candidate_id", "is_locked", "locked_by"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RESUME_PROCESSED",
+    "description": "Resume Parser Agent 已完成简历结构化解析(经 RoboHire 解析,性别从 rawText 补抽、毕业时间取 endDate),候选人与简历记录已就绪,触发 Rule Check Agent 做匹配前规则检查。",
+    "payload": {
+      "source_action": "processResume",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "resume_id", "type": "String", "target_object": "Resume" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Resume",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": ["resume_id", "work_experience", "project_experience", "education_experience", "language_skills", "file_path", "is_original", "skill_tags"]
+        },
+        {
+          "target_object": "Candidate",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": ["candidate_id", "id_number", "name", "nationality", "gender", "birth_date"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RESUME_INFO_MISSING",
+    "description": "Resume Parser Agent 解析后发现关键字段缺失(完整性校验未通过),挂起等待人工补录。本事件为终态分支。",
+    "payload": {
+      "source_action": "processResume",
+      "event_data": [
+        { "name": "resume_id", "type": "String", "target_object": "Resume" },
+        { "name": "missing_fields", "type": "String", "target_object": null }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "RESUME_PARSE_ERROR",
+    "description": "Resume Parser Agent 解析异常(RoboHire 不可达 / 文件不可解析等基础设施或输入错误),写入异常并等待人工干预修正。本事件为终态分支。",
+    "payload": {
+      "source_action": "processResume",
+      "event_data": [
+        { "name": "resume_id", "type": "String", "target_object": "Resume" },
+        { "name": "error_reason", "type": "String", "target_object": null }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "MATCH_RULE_CHECK_PASSED",
+    "description": "候选人简历通过 Rule Check Agent 的匹配前规则检查(关联公司冷冻期、国籍限制、回流冷冻期等),进入智能匹配评分环节。",
+    "payload": {
+      "source_action": "ruleCheckForMatchResume",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "resume_id", "type": "String", "target_object": "Resume" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "client_id", "type": "String", "target_object": "Client" },
+        { "name": "rule_check_result", "type": "String", "target_object": null },
+        { "name": "rule_check_reason", "type": "String", "target_object": null }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate_Match_Result",
+          "mutation_type": "CREATE",
+          "impacted_properties": ["candidate_match_result_id", "client_id", "candidate_id", "job_position_id", "rule_check_result", "rule_check_reason"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MATCH_RULE_CHECK_FAILED",
+    "description": "Rule Check Agent 判定候选人未通过匹配前规则检查(命中竞对/回流/国籍等红线)。注意:业务 FAIL 是合法结论,只 write-only 落 Candidate_Match_Result,不进入后续匹配;红线类需人工确认的会先挂起 HITL 而非直接 FAILED。本事件为终态分支。",
+    "payload": {
+      "source_action": "ruleCheckForMatchResume",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "rule_check_result", "type": "String", "target_object": null },
+        { "name": "rule_check_reason", "type": "String", "target_object": null }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate_Match_Result",
+          "mutation_type": "CREATE",
+          "impacted_properties": ["candidate_match_result_id", "candidate_id", "job_position_id", "rule_check_result", "rule_check_reason"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MATCH_PASSED_NEED_INTERVIEW",
+    "description": "Match Resume Agent 完成智能匹配评分,候选人达标且该岗位要求内部面试,触发 Interview Inviter Agent 发起面试邀约。",
+    "payload": {
+      "source_action": "matchResume",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "resume_id", "type": "String", "target_object": "Resume" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "match_score", "type": "Float", "target_object": "Candidate_Match_Result" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate_Match_Result",
+          "mutation_type": "MODIFY",
+          "impacted_properties": ["match_status", "match_reason", "match_score"]
+        },
+        {
+          "target_object": "Application",
+          "mutation_type": "MODIFY",
+          "impacted_properties": ["application_id", "stage"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MATCH_PASSED_NO_INTERVIEW",
+    "description": "Match Resume Agent 完成匹配评分,候选人达标但该岗位无需内部面试,直接进入后续推荐环节(本子图外)。本事件为终态分支。",
+    "payload": {
+      "source_action": "matchResume",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "match_score", "type": "Float", "target_object": "Candidate_Match_Result" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate_Match_Result",
+          "mutation_type": "MODIFY",
+          "impacted_properties": ["match_status", "match_reason", "match_score"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MATCH_FAILED",
+    "description": "Match Resume Agent 评分后判定候选人与岗位不匹配。业务 FAIL 为合法结论,write-only 落库,不发起面试。本事件为终态分支。",
+    "payload": {
+      "source_action": "matchResume",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "match_reason", "type": "String", "target_object": "Candidate_Match_Result" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Candidate_Match_Result",
+          "mutation_type": "MODIFY",
+          "impacted_properties": ["match_status", "match_reason", "match_score"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "INTERVIEW_INVITATION_SENT",
+    "description": "Interview Inviter Agent 已生成并发送面试邀约(RAAS inviteInterview 未实装 501 时回退 RoboHire inviteCandidateDirect),面试记录创建,等待候选人响应(本子图外)。本事件为终态分支。",
+    "payload": {
+      "source_action": "inviteInternalInterview",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "interview_record_id", "type": "String", "target_object": "Interview_Record" }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Interview_Record",
+          "mutation_type": "CREATE",
+          "impacted_properties": ["interview_record_id", "candidate_id", "job_requisition_id", "invitation_status", "invited_at"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "INTERVIEW_INVITATION_FAILED",
+    "description": "Interview Inviter Agent 发送邀约失败(RAAS 与 RoboHire 均不可达/拒绝),写入失败状态并通知招聘专员人工跟进。本事件为终态分支。",
+    "payload": {
+      "source_action": "inviteInternalInterview",
+      "event_data": [
+        { "name": "candidate_id", "type": "String", "target_object": "Candidate" },
+        { "name": "job_requisition_id", "type": "String", "target_object": "Job_Requisition" },
+        { "name": "error_reason", "type": "String", "target_object": null }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Interview_Record",
+          "mutation_type": "CREATE",
+          "impacted_properties": ["interview_record_id", "invitation_status"]
+        }
+      ]
+    }
+  }
+]

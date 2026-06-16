@@ -1,0 +1,399 @@
+[
+  {
+    "id": "DD-1",
+    "name": "deduplicateCandidate",
+    "description": "候选人查重 Agent。简历下载后第一道闸:对候选人做三级去重(Tier1 仅手机号 / Tier2 证件号 / Tier3 姓名+生日等弱标识),命中则复用既有 Candidate 记录,并按归属规则锁定候选人。归属规则:employee_id 无条件覆盖既有锁;若 locked_by 与当前 employee_id 不一致则仅 lock-only,不向下游发 CANDIDATE_DEDUP_PASSED,改发 RESUME_LOCKED_CONFLICT 并通知招聘专员。",
+    "submission_criteria": "1. RESUME_DOWNLOADED 事件已送达\n2. 简历原件可读取(file_path 有效)\n3. 携带发起人 employee_id 用于归属判定",
+    "object_type": "action",
+    "category": "候选人查重",
+    "actor": ["Agent"],
+    "trigger": ["RESUME_DOWNLOADED"],
+    "target_objects": ["Candidate", "Resume", "Application", "Employee"],
+    "inputs": [
+      { "name": "resume_file_path", "type": "String", "description": "候选人简历原件路径,用于抽取去重标识。", "source_object": "Resume.file_path", "required": true },
+      { "name": "job_requisition_id", "type": "String", "description": "目标岗位编号,用于建立 Application 归属。", "source_object": "Job_Requisition.job_requisition_id", "required": true },
+      { "name": "employee_id", "type": "String", "description": "发起本次收简的招聘专员编号,用于候选人锁定归属判定。", "source_object": "Employee.employee_id", "required": true }
+    ],
+    "outputs": [
+      { "name": "candidate_id", "type": "String", "description": "去重后唯一的候选人编号(命中则复用,未命中则新建)。" },
+      { "name": "dedup_result", "type": "String", "description": "去重与锁定结论,可选值为'通过'或'归属冲突'。" }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "extractIdentityKeys",
+        "description": "从简历原件抽取去重标识:手机号(归一化)、证件号、姓名+出生日期。RoboHire 解析不一定返回所有字段,缺失项从 rawText 兜底抽取。",
+        "object_type": "logic",
+        "condition": "已收到 RESUME_DOWNLOADED 事件",
+        "rules": [],
+        "inputs": [ { "name": "resume_file_path", "type": "String", "description": "简历原件路径。", "source_object": "Resume.file_path" } ],
+        "outputs": [ { "name": "identity_keys", "type": "Object", "description": "归一化后的去重标识集合。" } ]
+      },
+      {
+        "order": "2",
+        "name": "tierMatch",
+        "description": "三级去重匹配:Tier1 仅以手机号匹配既有 Candidate;未命中则 Tier2 以证件号匹配;再未命中则 Tier3 以姓名+生日等弱标识匹配。命中则复用 candidate_id,未命中则新建。",
+        "object_type": "logic",
+        "condition": "已抽取去重标识",
+        "rules": [],
+        "inputs": [ { "name": "identity_keys", "type": "Object", "description": "去重标识集合。", "source_object": null } ],
+        "outputs": [ { "name": "candidate_id", "type": "String", "description": "命中或新建的候选人编号。" } ]
+      },
+      {
+        "order": "3",
+        "name": "resolveOwnershipLock",
+        "description": "归属与锁定:若候选人无锁或 locked_by 为空,则以当前 employee_id 锁定并发 CANDIDATE_DEDUP_PASSED;若 locked_by == 当前 employee_id,正常续行;若 locked_by != 当前 employee_id,仅 lock-only(写锁信息但不覆盖归属),发 RESUME_LOCKED_CONFLICT 并通知招聘专员。employee_id 显式提供时无条件覆盖既有锁。",
+        "object_type": "logic",
+        "condition": "已确定 candidate_id",
+        "rules": [],
+        "inputs": [
+          { "name": "candidate_id", "type": "String", "description": "候选人编号。", "source_object": "Candidate.candidate_id" },
+          { "name": "employee_id", "type": "String", "description": "发起人编号。", "source_object": "Employee.employee_id" }
+        ],
+        "outputs": [ { "name": "dedup_result", "type": "String", "description": "通过或归属冲突。" } ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        { "object_type": "Candidate", "action": "CREATE_OR_MODIFY", "property_impacted": ["candidate_id", "is_locked", "locked_by", "lock_start_time"], "description": "新建或更新候选人并写入锁定归属信息。" }
+      ],
+      "notifications": [
+        { "recipient": "招聘专员", "channel": "InApp", "condition": "归属冲突", "message": "{{candidate.name}} 已被 {{locked_by}} 锁定,本次仅登记不进入解析。", "triggered_event": "RESUME_LOCKED_CONFLICT" }
+      ]
+    },
+    "triggered_event": ["CANDIDATE_DEDUP_PASSED", "RESUME_LOCKED_CONFLICT"]
+  },
+  {
+    "id": "9-1",
+    "name": "processResume",
+    "description": "Resume Parser Agent。对去重锁定后的候选人简历做结构化解析:经 RoboHire parseResumeDirect 抽取工作/项目/教育经历与技能标签;性别字段 RoboHire 不返回,从 rawText 补抽;毕业时间取 endDate 而非 graduationYear。解析完成校验完整性,通过则发 RESUME_PROCESSED,字段缺失发 RESUME_INFO_MISSING,基础设施/输入异常发 RESUME_PARSE_ERROR。retries=0 以避免重复扣 RAAS 解析配额。",
+    "submission_criteria": "1. CANDIDATE_DEDUP_PASSED 事件已送达\n2. candidate_id 已确定且未处于归属冲突\n3. 简历原件可下载解析",
+    "object_type": "action",
+    "category": "简历处理",
+    "actor": ["Agent"],
+    "trigger": ["CANDIDATE_DEDUP_PASSED"],
+    "target_objects": ["Resume", "Candidate", "Job_Requisition", "Application"],
+    "inputs": [
+      { "name": "candidate_id", "type": "String", "description": "去重后的候选人编号。", "source_object": "Candidate.candidate_id", "required": true },
+      { "name": "resume_file_path", "type": "String", "description": "简历原件路径。", "source_object": "Resume.file_path", "required": true },
+      { "name": "job_requisition_id", "type": "String", "description": "目标岗位编号。", "source_object": "Job_Requisition.job_requisition_id", "required": true }
+    ],
+    "outputs": [
+      { "name": "resume_id", "type": "String", "description": "结构化后的简历编号。" },
+      { "name": "parse_result", "type": "String", "description": "解析结论:成功 / 缺失 / 异常。" }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "parseResume",
+        "description": "调用 RoboHire parseResumeDirect 解析简历原件为结构化字段(work_experience / project_experience / education_experience / skill_tags 等)。402→QUOTA_EXHAUSTED、429→RATE_LIMITED 等映射为 RESUME_PARSE_ERROR。",
+        "object_type": "logic",
+        "condition": "候选人去重已通过",
+        "rules": [],
+        "inputs": [ { "name": "resume_file_path", "type": "String", "description": "简历原件路径。", "source_object": "Resume.file_path" } ],
+        "outputs": [ { "name": "parsed_resume", "type": "Object", "description": "结构化简历对象。" } ]
+      },
+      {
+        "order": "2",
+        "name": "extractResumeInfo",
+        "description": "补全候选人基本信息:性别从 rawText 抽取(RoboHire 不返回 gender);毕业时间取教育经历的 endDate;归一化 skill_tags。",
+        "object_type": "logic",
+        "condition": "简历已解析",
+        "rules": [],
+        "inputs": [ { "name": "parsed_resume", "type": "Object", "description": "结构化简历。", "source_object": null } ],
+        "outputs": [ { "name": "candidate_profile", "type": "Object", "description": "补全后的候选人画像。" } ]
+      },
+      {
+        "order": "3",
+        "name": "validateCompleteness",
+        "description": "完整性校验:核对匹配所需关键字段(工作经历、技能标签、教育经历等)是否齐备。缺失则发 RESUME_INFO_MISSING 等待人工补录,齐备则发 RESUME_PROCESSED。",
+        "object_type": "logic",
+        "condition": "信息已抽取",
+        "rules": [],
+        "inputs": [ { "name": "candidate_profile", "type": "Object", "description": "候选人画像。", "source_object": null } ],
+        "outputs": [ { "name": "completeness", "type": "String", "description": "完整 / 缺失。" } ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        { "object_type": "Resume", "action": "CREATE", "property_impacted": ["resume_id", "work_experience", "project_experience", "education_experience", "language_skills", "skill_tags", "file_path", "is_original"], "description": "创建结构化简历记录。" },
+        { "object_type": "Candidate", "action": "CREATE_OR_MODIFY", "property_impacted": ["candidate_id", "name", "gender", "nationality", "birth_date", "id_number"], "description": "补全候选人基本信息。" },
+        { "object_type": "Application", "action": "CREATE", "property_impacted": ["application_id", "candidate_id", "job_requisition_id", "stage"], "description": "建立候选人-岗位申请关联。" }
+      ],
+      "notifications": []
+    },
+    "triggered_event": ["RESUME_PROCESSED", "RESUME_INFO_MISSING", "RESUME_PARSE_ERROR"]
+  },
+  {
+    "id": "10-1",
+    "name": "ruleCheckForMatchResume",
+    "description": "Rule Check Agent。候选人匹配前的规则检查,执行公司通用规则与客户定制规则(关联公司冷冻期、国籍限制、回流冷冻期等)。运行机制:经 Allmeta 工具(get_instance / list_instances / list_links)拉取本体图上下文做'筛选适用规则→二次验证选规则→逐条判定'的 tool-use 循环。关键不变量:业务 FAIL 是合法结论,只返回 decision 并 completed,绝不 throw(只有 LLM/图谱不可达等基础设施故障才 throw 走重试);命中需人工确认的红线先挂起 HITL 待办而非直接判 FAILED。只有检查通过才发 MATCH_RULE_CHECK_PASSED。",
+    "submission_criteria": "1. RESUME_PROCESSED事件已送达\n2. 候选人(Candidate)记录已创建且candidate_id非空\n3. 候选人简历(Resume)已完成结构化解析\n4. 至少一个有效的招聘岗位(Job_Requisition)记录存在且hc_status不为\"已关闭\"",
+    "object_type": "action",
+    "category": "简历匹配",
+    "actor": ["Agent"],
+    "trigger": ["RESUME_PROCESSED"],
+    "target_objects": ["Candidate", "Resume", "Job_Requisition", "Application", "Client", "Client_Department", "Candidate_Match_Result"],
+    "inputs": [
+      { "name": "candidate_id", "type": "String", "description": "待匹配的候选人唯一编号。通过RESUME_PROCESSED事件携带。", "source_object": "Candidate.candidate_id", "required": true },
+      { "name": "resume_id", "type": "String", "description": "待匹配的候选人简历唯一编号,已完成结构化解析。", "source_object": "Resume.resume_id", "required": true },
+      { "name": "job_requisition_id", "type": "String", "description": "待匹配的招聘岗位编号,hc_status不为\"已关闭\";用于按客户/部门过滤适用规则。", "source_object": "Job_Requisition.job_requisition_id", "required": true }
+    ],
+    "outputs": [
+      { "name": "result", "type": "String", "description": "规则检查综合结果,可选值为'通过'或'未通过'。" },
+      { "name": "reason", "type": "String", "description": "规则检查结果的原因解释。" }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "checkRelatedCompaniesRecords",
+        "description": "检查候选人历史工作经历是否包含华为/荣耀及其关联公司、OPPO/小米及其关联公司记录,按冷冻期判定是否挂起。",
+        "object_type": "logic",
+        "condition": "已收到简历处理完成事件,候选人记录已创建",
+        "rules": [
+          { "id": "10-25", "submission_criteria": "候选人简历已完成解析,工作经历数据已结构化。", "description": "检索是否包含华为、荣耀及其关联公司任职记录;若离职不足3个月则挂起匹配并生成'竞对互不挖角待确认'待办,达3个月正常继续。" },
+          { "id": "10-26", "submission_criteria": "候选人简历已完成解析,工作经历数据已结构化。", "description": "检索是否包含OPPO、小米及其关联公司任职记录;若离职不足6个月则挂起匹配并生成待办,达6个月正常继续。" }
+        ],
+        "inputs": [
+          { "name": "candidate_id", "type": "String", "description": "待校验候选人编号。", "source_object": "Candidate.candidate_id" },
+          { "name": "resume_id", "type": "String", "description": "读取 work_experience。", "source_object": "Resume.resume_id" }
+        ],
+        "outputs": [
+          { "name": "result", "type": "String", "description": "通过/未通过。" },
+          { "name": "reason", "type": "String", "description": "原因解释。" }
+        ]
+      },
+      {
+        "order": "2",
+        "name": "checkNationality",
+        "description": "根据候选人国籍检查是否符合岗位要求。",
+        "object_type": "logic",
+        "condition": "关联公司检查规则已通过",
+        "rules": [
+          { "id": "10-35", "submission_criteria": "推荐包生成时必填字段任一缺失。", "description": "若候选人国籍为非中国,系统自动锁定其可推荐通道范围为仅外籍人在国内工作品类通道。" }
+        ],
+        "inputs": [
+          { "name": "candidate_id", "type": "String", "description": "读取国籍信息。", "source_object": "Candidate.candidate_id" },
+          { "name": "job_requisition_id", "type": "String", "description": "岗位国籍要求。", "source_object": "Job_Requisition.job_requisition_id" }
+        ],
+        "outputs": [
+          { "name": "result", "type": "String", "description": "通过/未通过。" },
+          { "name": "reason", "type": "String", "description": "原因解释。" }
+        ]
+      },
+      {
+        "order": "3",
+        "name": "checkReflux",
+        "description": "从工作履历与职责描述中检查回流人员(腾讯正编/外包、友商字节派驻等),区分BPO与非BPO,按客户与事业群维度执行回流冷冻期与受控锁定。",
+        "object_type": "logic",
+        "condition": "已通过关联公司规则检查",
+        "rules": [
+          { "id": "10-32", "submission_criteria": "系统中存在候选人在目标岗位下的历史推荐记录。", "description": "检索近3个月历史记录,若某岗位下存在'筛选淘汰/面试淘汰/筛选通过未到面',自动跳过该岗位继续匹配其他岗位。" },
+          { "id": "10-34", "submission_criteria": "候选人简历含通过友商在字节跳动任职经历。", "description": "匹配字节岗位时识别派驻业务类型:BPO 不受限直接继续;非BPO 提取真实离职日期,不足6个月拦截跳过所有字节岗位,达6个月正常继续。" },
+          { "id": "10-42", "submission_criteria": "目标岗位归属腾讯CDG事业群,且简历含腾讯或腾讯外包经历。", "description": "提取最近一次腾讯离职日期,不足6个月立即阻断推荐且无人工放行;无腾讯经历或满6个月则正常继续。" },
+          { "id": "10-43", "submission_criteria": "候选人推荐至腾讯IEG天美/光子/魔方/北极光之一岗位。", "description": "检索是否有四大工作室从业记录;离职不满6个月且目标工作室与原工作室不同则跳过该岗位禁止跨室推荐,满6个月允许。" },
+          { "id": "10-45", "submission_criteria": "候选人具备腾讯历史从业经历。", "description": "若存在腾讯正式岗位经历,自动标记候选人为'正编转外包受控'状态。" },
+          { "id": "10-49", "submission_criteria": "候选人简历已完成解析,工作经历数据已结构化。", "description": "若识别到字节跳动正式雇员经历,自动锁定推荐流程并通知招聘专员获取并上传合规凭证。" },
+          { "id": "10-51", "submission_criteria": "候选人通过合规凭证校验。", "description": "仅在合规凭证含客户BP'无异常且可回流'确认后方可推送客户;'不可回流'或超时未响应则终止推荐。" },
+          { "id": "10-56", "submission_criteria": "候选人历史履历含'深圳市腾娱互动科技有限公司'任职记录。", "description": "匹配腾讯岗位时,提取该公司离职日期,不足6个月拦截跳过所有腾讯岗位,满6个月正常匹配。" }
+        ],
+        "inputs": [
+          { "name": "candidate_id", "type": "String", "description": "检索历史任职/回流状态。", "source_object": "Candidate.candidate_id" },
+          { "name": "resume_id", "type": "String", "description": "读取工作经历做回流检查。", "source_object": "Resume.resume_id" },
+          { "name": "job_requisition_id", "type": "String", "description": "客户/部门过滤适用规则。", "source_object": "Job_Requisition.job_requisition_id" }
+        ],
+        "outputs": [
+          { "name": "result", "type": "String", "description": "通过/未通过。" },
+          { "name": "reason", "type": "String", "description": "原因解释。" }
+        ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        { "object_type": "Candidate_Match_Result", "action": "CREATE", "property_impacted": ["candidate_match_result_id", "client_id", "candidate_id", "job_position_id", "rule_check_result", "rule_check_reason"], "description": "为候选人与每个匹配岗位创建匹配结果记录,写入规则检查结论('通过'或'未通过')和原因。" }
+      ],
+      "notifications": [
+        { "recipient": "招聘专员", "channel": "InApp", "condition": "规则检查通过", "message": "{{candidate.name}} - {{job.name}} 规则检查通过,将自动进入简历匹配环节。", "triggered_event": "" },
+        { "recipient": "招聘专员", "channel": "Email, InApp", "condition": "规则检查未通过", "message": "{{candidate.name}} - {{job.name}} 规则检查失败,原因为:{{candidate_match_result.rule_check_reason}},将不会自动进入简历匹配环节。", "triggered_event": "" },
+        { "recipient": "招聘专员/HSM", "channel": "InApp", "condition": "命中需人工确认的红线(如正编转外包受控/合规凭证)", "message": "{{candidate.name}} 命中需人工确认红线,已挂起等待裁决。", "triggered_event": "" }
+      ]
+    },
+    "triggered_event": ["MATCH_RULE_CHECK_PASSED", "MATCH_RULE_CHECK_FAILED"]
+  },
+  {
+    "id": "10-2",
+    "name": "matchResume",
+    "description": "Match Resume Agent。对通过规则检查的候选人做智能匹配评分,综合岗位规格(Job_Requisition_Specification)、薪资方案、候选人期望与简历画像计算匹配度与匹配理由,写入 Candidate_Match_Result。达标且岗位需面试发 MATCH_PASSED_NEED_INTERVIEW;达标但无需面试发 MATCH_PASSED_NO_INTERVIEW;不达标发 MATCH_FAILED(合法业务结论,write-only)。retries=2。",
+    "submission_criteria": "1. MATCH_RULE_CHECK_PASSED 事件已送达\n2. Candidate_Match_Result 已写入规则检查通过结论\n3. 目标岗位规格(Job_Requisition_Specification)存在",
+    "object_type": "action",
+    "category": "简历匹配",
+    "actor": ["Agent"],
+    "trigger": ["MATCH_RULE_CHECK_PASSED"],
+    "target_objects": ["Candidate", "Resume", "Job_Requisition", "Job_Requisition_Specification", "Application", "Candidate_Match_Result", "Client", "Salary_Scheme", "Candidate_Expectation"],
+    "inputs": [
+      { "name": "candidate_id", "type": "String", "description": "候选人编号。", "source_object": "Candidate.candidate_id", "required": true },
+      { "name": "resume_id", "type": "String", "description": "结构化简历编号。", "source_object": "Resume.resume_id", "required": true },
+      { "name": "job_requisition_id", "type": "String", "description": "目标岗位编号。", "source_object": "Job_Requisition.job_requisition_id", "required": true }
+    ],
+    "outputs": [
+      { "name": "match_status", "type": "String", "description": "匹配结论:通过需面试 / 通过无需面试 / 不通过。" },
+      { "name": "match_score", "type": "Float", "description": "匹配度评分。" },
+      { "name": "match_reason", "type": "String", "description": "匹配理由说明。" }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "executeMatchResume",
+        "description": "调用匹配评分(RAAS/RoboHire matchResume)综合岗位硬性要求、加分项、薪资方案与候选人期望计算匹配度与理由,写入 Candidate_Match_Result。",
+        "object_type": "logic",
+        "condition": "规则检查已通过",
+        "rules": [],
+        "inputs": [
+          { "name": "candidate_id", "type": "String", "description": "候选人编号。", "source_object": "Candidate.candidate_id" },
+          { "name": "job_requisition_id", "type": "String", "description": "岗位编号。", "source_object": "Job_Requisition.job_requisition_id" }
+        ],
+        "outputs": [ { "name": "match_score", "type": "Float", "description": "匹配度评分。" } ]
+      },
+      {
+        "order": "2",
+        "name": "determineInterviewNeed",
+        "description": "依据匹配结论与岗位流程配置判定下一步:达标且需面试→MATCH_PASSED_NEED_INTERVIEW;达标但无需面试→MATCH_PASSED_NO_INTERVIEW;不达标→MATCH_FAILED。",
+        "object_type": "logic",
+        "condition": "匹配评分完成",
+        "rules": [],
+        "inputs": [ { "name": "match_score", "type": "Float", "description": "匹配度评分。", "source_object": "Candidate_Match_Result.match_score" } ],
+        "outputs": [ { "name": "match_status", "type": "String", "description": "下一步路由结论。" } ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        { "object_type": "Candidate_Match_Result", "action": "MODIFY", "property_impacted": ["match_status", "match_reason", "match_score"], "description": "写入智能匹配评分与结论。" },
+        { "object_type": "Application", "action": "MODIFY", "property_impacted": ["application_id", "stage"], "description": "推进申请阶段。" }
+      ],
+      "notifications": [
+        { "recipient": "招聘专员", "channel": "InApp", "condition": "匹配通过", "message": "{{candidate.name}} - {{job.name}} 匹配通过,匹配度 {{match_score}}。", "triggered_event": "" }
+      ]
+    },
+    "triggered_event": ["MATCH_PASSED_NEED_INTERVIEW", "MATCH_PASSED_NO_INTERVIEW", "MATCH_FAILED"]
+  },
+  {
+    "id": "11-1",
+    "name": "inviteInternalInterview",
+    "description": "Interview Inviter Agent。为匹配通过且需面试的候选人生成并发送内部面试邀约,创建 Interview_Record。发送优先走 RAAS inviteInterview;若 RAAS 未实装(501)则回退 RoboHire inviteCandidateDirect。发送成功发 INTERVIEW_INVITATION_SENT,两条通道均失败发 INTERVIEW_INVITATION_FAILED 并通知招聘专员。retries=2。",
+    "submission_criteria": "1. MATCH_PASSED_NEED_INTERVIEW 事件已送达\n2. 候选人与岗位的 Candidate_Match_Result 为通过\n3. 候选人联系方式可用",
+    "object_type": "action",
+    "category": "内部面试邀约",
+    "actor": ["Agent"],
+    "trigger": ["MATCH_PASSED_NEED_INTERVIEW"],
+    "target_objects": ["Interview_Record", "Candidate", "Resume", "Job_Requisition", "Employee", "Application"],
+    "inputs": [
+      { "name": "candidate_id", "type": "String", "description": "候选人编号。", "source_object": "Candidate.candidate_id", "required": true },
+      { "name": "job_requisition_id", "type": "String", "description": "目标岗位编号。", "source_object": "Job_Requisition.job_requisition_id", "required": true }
+    ],
+    "outputs": [
+      { "name": "invitation_status", "type": "String", "description": "邀约状态:已发送 / 发送失败。" },
+      { "name": "interview_record_id", "type": "String", "description": "面试记录编号。" }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "generateInterviewInvitation",
+        "description": "生成面试邀约内容(岗位、时间建议、联系人),创建 Interview_Record。",
+        "object_type": "logic",
+        "condition": "匹配通过且需面试",
+        "rules": [],
+        "inputs": [ { "name": "candidate_id", "type": "String", "description": "候选人编号。", "source_object": "Candidate.candidate_id" } ],
+        "outputs": [ { "name": "interview_record_id", "type": "String", "description": "面试记录编号。" } ]
+      },
+      {
+        "order": "2",
+        "name": "sendInvitation",
+        "description": "发送邀约:优先 RAAS inviteInterview;501 未实装则回退 RoboHire inviteCandidateDirect。两通道均失败则标记失败。",
+        "object_type": "logic",
+        "condition": "邀约内容已生成",
+        "rules": [],
+        "inputs": [ { "name": "interview_record_id", "type": "String", "description": "面试记录编号。", "source_object": "Interview_Record.interview_record_id" } ],
+        "outputs": [ { "name": "invitation_status", "type": "String", "description": "已发送/发送失败。" } ]
+      },
+      {
+        "order": "3",
+        "name": "notifyRecruiter",
+        "description": "通知招聘专员邀约结果;失败时附原因供人工跟进。",
+        "object_type": "logic",
+        "condition": "邀约已尝试发送",
+        "rules": [],
+        "inputs": [ { "name": "invitation_status", "type": "String", "description": "邀约状态。", "source_object": "Interview_Record.invitation_status" } ],
+        "outputs": [ { "name": "notified", "type": "Boolean", "description": "是否已通知。" } ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        { "object_type": "Interview_Record", "action": "CREATE", "property_impacted": ["interview_record_id", "candidate_id", "job_requisition_id", "invitation_status", "invited_at"], "description": "创建面试记录并写入邀约状态。" }
+      ],
+      "notifications": [
+        { "recipient": "招聘专员", "channel": "InApp", "condition": "邀约发送失败", "message": "{{candidate.name}} - {{job.name}} 面试邀约发送失败,请人工跟进。", "triggered_event": "INTERVIEW_INVITATION_FAILED" }
+      ]
+    },
+    "triggered_event": ["INTERVIEW_INVITATION_SENT", "INTERVIEW_INVITATION_FAILED"]
+  },
+  {
+    "id": "4",
+    "name": "createJD",
+    "description": "Create JD Agent。依据招聘需求生成职位描述(JD)。调用 RoboHire generateJdDirect 产出硬性要求 hardRequirements 与加分项 niceToHave 的散文;因 generate-jd 不返回结构化技能数组,再经 proseToSkillArray 将散文拆为 must_have_skills / nice_to_have_skills 数组(jsonb 写入)。建立/映射岗位需求后发 JD_GENERATED。被人工评审驳回(JD_REJECTED)的需求也回到本节点重生成。retries=1。",
+    "submission_criteria": "1. JD_GENERATION_REQUESTED 或 JD_REJECTED 事件已送达\n2. 招聘需求(Job_Requisition)记录存在\n3. 客户信息可用",
+    "object_type": "action",
+    "category": "JD创建与更新",
+    "actor": ["Agent"],
+    "trigger": ["JD_GENERATION_REQUESTED", "JD_REJECTED"],
+    "target_objects": ["Job_Posting", "Job_Requisition", "Job_Requisition_Specification", "Client", "Sourcing_Channel"],
+    "inputs": [
+      { "name": "job_requisition_id", "type": "String", "description": "招聘需求编号。", "source_object": "Job_Requisition.job_requisition_id", "required": true },
+      { "name": "client_id", "type": "String", "description": "客户编号,用于套用客户口径与模板。", "source_object": "Client.client_id", "required": true }
+    ],
+    "outputs": [
+      { "name": "job_posting_id", "type": "String", "description": "生成的职位发布编号。" },
+      { "name": "jd_content", "type": "String", "description": "JD 正文。" }
+    ],
+    "action_steps": [
+      {
+        "order": "1",
+        "name": "generateJDContent",
+        "description": "调用 RoboHire generateJdDirect 生成 JD 正文,含 hardRequirements 与 niceToHave 散文描述。",
+        "object_type": "logic",
+        "condition": "收到 JD 生成/重生成请求",
+        "rules": [],
+        "inputs": [ { "name": "job_requisition_id", "type": "String", "description": "需求编号。", "source_object": "Job_Requisition.job_requisition_id" } ],
+        "outputs": [ { "name": "jd_content", "type": "String", "description": "JD 正文散文。" } ]
+      },
+      {
+        "order": "2",
+        "name": "proseToSkillArray",
+        "description": "将 hardRequirements / niceToHave 散文拆分为结构化 must_have_skills 与 nice_to_have_skills 数组(generate-jd 不返回技能数组,需本步补齐),以 jsonb 写入。",
+        "object_type": "logic",
+        "condition": "JD 正文已生成",
+        "rules": [],
+        "inputs": [ { "name": "jd_content", "type": "String", "description": "JD 正文。", "source_object": null } ],
+        "outputs": [ { "name": "skill_arrays", "type": "Object", "description": "must/nice 技能数组。" } ]
+      },
+      {
+        "order": "3",
+        "name": "handleRequisitionMapping",
+        "description": "建立/更新 Job_Posting 与 Job_Requisition / Job_Requisition_Specification 的映射,写入薪资方案与渠道信息。",
+        "object_type": "logic",
+        "condition": "技能数组已拆分",
+        "rules": [],
+        "inputs": [ { "name": "skill_arrays", "type": "Object", "description": "技能数组。", "source_object": null } ],
+        "outputs": [ { "name": "job_posting_id", "type": "String", "description": "职位发布编号。" } ]
+      }
+    ],
+    "side_effects": {
+      "data_changes": [
+        { "object_type": "Job_Posting", "action": "CREATE_OR_MODIFY", "property_impacted": ["job_posting_id", "job_requisition_id", "jd_content", "must_have_skills", "nice_to_have_skills", "salary_scheme"], "description": "创建或更新职位发布及其结构化技能数组。" }
+      ],
+      "notifications": [
+        { "recipient": "招聘专员", "channel": "InApp", "condition": "JD 生成完成", "message": "{{job.name}} JD 已生成,待评审发布。", "triggered_event": "JD_GENERATED" }
+      ]
+    },
+    "triggered_event": ["JD_GENERATED"]
+  }
+]
