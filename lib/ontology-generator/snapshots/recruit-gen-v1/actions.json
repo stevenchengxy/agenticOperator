@@ -1,0 +1,125 @@
+[
+  {
+    "id": "RG-1",
+    "name": "parseResume",
+    "description": "简历下载后做去重锁定并经 RoboHire 结构化解析,落库候选人与简历,完成发 RESUME_PROCESSED。",
+    "category": "简历处理",
+    "object_type": "action",
+    "actor": ["Agent"],
+    "trigger": ["RESUME_DOWNLOADED"],
+    "triggered_event": ["RESUME_PROCESSED", "RESUME_LOCKED_CONFLICT"],
+    "target_objects": ["Candidate", "Resume", "Application"],
+    "tool_use": ["minio.getResume", "robohire.parseResume", "candidateLock.runLockCheck", "partnerpg.saveCandidate", "allmeta.writeInstance"],
+    "system_prompt": "",
+    "user_prompt": "",
+    "outputs": [{ "name": "resume_id", "type": "String" }],
+    "side_effects": { "data_changes": [{ "object_type": "Candidate", "action": "CREATE_OR_MODIFY" }, { "object_type": "Resume", "action": "CREATE" }] },
+    "action_steps": [
+      { "name": "lockAndDedup", "description": "三级去重 + 归属锁定;冲突发 RESUME_LOCKED_CONFLICT", "rules": [] },
+      { "name": "downloadAndParse", "description": "MinIO 取件 → RoboHire 解析为结构化字段", "rules": [] },
+      { "name": "persist", "description": "落 partner-pg + 镜像 Neo4j,发 RESUME_PROCESSED", "rules": [] }
+    ]
+  },
+  {
+    "id": "RG-2",
+    "name": "ruleCheck",
+    "description": "匹配前规则校验(关联公司/国籍/回流冷冻期等)。业务 FAIL 合法只写库不抛错,通过发 MATCH_RULE_CHECK_PASSED。",
+    "category": "规则校验",
+    "object_type": "action",
+    "actor": ["Agent"],
+    "trigger": ["RESUME_PROCESSED"],
+    "triggered_event": ["MATCH_RULE_CHECK_PASSED", "MATCH_RULE_CHECK_FAILED"],
+    "target_objects": ["Candidate", "Job_Requisition", "Candidate_Match_Result"],
+    "tool_use": ["partnerpg.getRequirement", "partnerpg.getParsedResume", "llm.complete", "allmeta.writeInstance", "partnerpg.saveRuleCheckFail"],
+    "system_prompt": "",
+    "user_prompt": "",
+    "outputs": [{ "name": "result", "type": "String" }, { "name": "reason", "type": "String" }],
+    "side_effects": { "data_changes": [{ "object_type": "Candidate_Match_Result", "action": "CREATE" }] },
+    "action_steps": [
+      { "name": "loadContext", "description": "读取需求与已解析简历", "rules": [] },
+      { "name": "evaluateRules", "description": "经本体+Neo4j+LLM 评估适用规则", "rules": [{ "id": "10-25" }, { "id": "10-26" }, { "id": "10-32" }] },
+      { "name": "route", "description": "PASS→MATCH_RULE_CHECK_PASSED;FAIL→写未通过+MATCH_RULE_CHECK_FAILED", "rules": [] }
+    ]
+  },
+  {
+    "id": "RG-3",
+    "name": "matchResume",
+    "description": "对通过规则的候选人经 RoboHire 做匹配评分,达标且需面试发 MATCH_PASSED_NEED_INTERVIEW。",
+    "category": "深度匹配",
+    "object_type": "action",
+    "actor": ["Agent"],
+    "trigger": ["MATCH_RULE_CHECK_PASSED"],
+    "triggered_event": ["MATCH_PASSED_NEED_INTERVIEW", "MATCH_FAILED"],
+    "target_objects": ["Candidate", "Job_Requisition", "Candidate_Match_Result"],
+    "tool_use": ["robohire.matchResume", "partnerpg.saveMatchResults", "allmeta.writeInstance"],
+    "system_prompt": "",
+    "user_prompt": "",
+    "outputs": [{ "name": "match_status", "type": "String" }, { "name": "match_score", "type": "Float" }],
+    "side_effects": { "data_changes": [{ "object_type": "Candidate_Match_Result", "action": "MODIFY" }] },
+    "action_steps": [
+      { "name": "score", "description": "RoboHire 匹配评分", "rules": [] },
+      { "name": "route", "description": "score<40→MATCH_FAILED;否则 MATCH_PASSED_NEED_INTERVIEW", "rules": [] }
+    ]
+  },
+  {
+    "id": "RG-4",
+    "name": "inviteInterview",
+    "description": "为匹配通过的候选人发送面试邀约,创建面试记录,成功发 INTERVIEW_INVITATION_SENT。",
+    "category": "内部面试邀约",
+    "object_type": "action",
+    "actor": ["Agent"],
+    "trigger": ["INTERVIEW_INVITATION_REQUESTED"],
+    "triggered_event": ["INTERVIEW_INVITATION_SENT", "INTERVIEW_INVITATION_FAILED"],
+    "target_objects": ["Candidate", "Job_Requisition", "Interview_Record"],
+    "tool_use": ["partnerpg.getParsedResume", "partnerpg.getRequirement", "robohire.inviteCandidate", "partnerpg.markInterview", "allmeta.writeInstance"],
+    "system_prompt": "",
+    "user_prompt": "",
+    "outputs": [{ "name": "invitation_status", "type": "String" }],
+    "side_effects": { "data_changes": [{ "object_type": "Interview_Record", "action": "CREATE" }] },
+    "action_steps": [
+      { "name": "backfill", "description": "缺字段时回填简历/JD 文本", "rules": [] },
+      { "name": "send", "description": "RoboHire 发送邀约", "rules": [] },
+      { "name": "record", "description": "建面试记录 + 标记已邀约", "rules": [] }
+    ]
+  },
+  {
+    "id": "RG-5",
+    "name": "createJd",
+    "description": "由招聘需求经 RoboHire 生成 JD 并拆技能数组,落库职位发布,发 JD_GENERATED。",
+    "category": "JD创建与更新",
+    "object_type": "action",
+    "actor": ["Agent"],
+    "trigger": ["REQUIREMENT_LOGGED", "CLARIFICATION_READY", "JD_REJECTED"],
+    "triggered_event": ["JD_GENERATED"],
+    "target_objects": ["Job_Requisition", "Job_Posting"],
+    "tool_use": ["partnerpg.getRequirement", "robohire.generateJd", "partnerpg.syncJd", "allmeta.writeInstance"],
+    "system_prompt": "",
+    "user_prompt": "",
+    "outputs": [{ "name": "job_posting_id", "type": "String" }],
+    "side_effects": { "data_changes": [{ "object_type": "Job_Posting", "action": "CREATE_OR_MODIFY" }] },
+    "action_steps": [
+      { "name": "generate", "description": "RoboHire 生成 JD 文案", "rules": [] },
+      { "name": "persist", "description": "拆技能数组 + 落库 + 镜像,发 JD_GENERATED", "rules": [] }
+    ]
+  },
+  {
+    "id": "RG-6",
+    "name": "candidateIdentity",
+    "description": "候选人查重:三级去重(精确手机/邮箱 + LLM 模糊姓名/学校/专业),写审计并返回判定,发 CANDIDATE_IDENTITY_CHECKED。",
+    "category": "候选人查重",
+    "object_type": "action",
+    "actor": ["Agent"],
+    "trigger": ["CANDIDATE_IDENTITY_REQUESTED"],
+    "triggered_event": ["CANDIDATE_IDENTITY_CHECKED"],
+    "target_objects": ["Candidate"],
+    "tool_use": ["partnerpg.getParsedResume", "llm.fieldJudge"],
+    "system_prompt": "",
+    "user_prompt": "",
+    "outputs": [{ "name": "samePerson", "type": "Boolean" }, { "name": "sameAsCandidateId", "type": "String" }],
+    "side_effects": { "data_changes": [{ "object_type": "OntologyRuleCheck", "action": "CREATE" }] },
+    "action_steps": [
+      { "name": "exactCompare", "description": "手机/邮箱/性别精确比对", "rules": [{ "id": "9-15" }] },
+      { "name": "fuzzyJudge", "description": "LLM 判定姓名/学校/专业/学历等价", "rules": [] }
+    ]
+  }
+]
