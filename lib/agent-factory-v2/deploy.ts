@@ -18,7 +18,6 @@
 import { prisma } from "@/server/db";
 import { persistSpecs } from "@/lib/agent-factory-gen/persist";
 import { registerDomainApp, resyncDomainApp } from "@/server/inngest/domain-app";
-import { isForceDryRunDomain } from "@/lib/tools/resolve-registry";
 import type { GeneratedAgentSpec } from "@/lib/agent-factory-gen/types";
 import type { Deployer, ShipReport, RunReport } from "./types";
 
@@ -68,12 +67,12 @@ export async function shipAgents(domain: string, specs: GeneratedAgentSpec[]): P
     data: { status: "offline" },
   });
 
-  // 3. flip this version's rows to active. liveExecution = false (dry-run mocks);
-  //    force-dry-run domains can never go live regardless.
-  const effLive = false && !isForceDryRunDomain(domain);
+  // 3. flip this version's rows to active. (liveExecution was dropped from the
+  //    schema — generated agents always run as dry-run shells in their isolated
+  //    domain, so there's nothing extra to set.)
   const flip = await prisma.agentVersion.updateMany({
     where: { domain, capturedFrom: "ontology-gen", versionLabel },
-    data: { status: "active", deployedAt: new Date(), liveExecution: effLive },
+    data: { status: "active", deployedAt: new Date() },
   });
 
   // 4. register + resync the per-domain Inngest app so it introspects the new fns
