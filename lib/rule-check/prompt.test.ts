@@ -170,7 +170,7 @@ describe('composeMatchResumePrompt', () => {
     expect(out).not.toContain('§4.4');
   });
 
-  it('renders the GraphContext section with named slots', () => {
+  it('renders the GraphContext section with named slots (JR slot dropped, renumbered to 5)', () => {
     const out = composeMatchResumePrompt({
       input: baseInput,
       graph: baseCtx,
@@ -179,10 +179,61 @@ describe('composeMatchResumePrompt', () => {
     expect(out).toContain('## 3. Graph context');
     expect(out).toContain('### 3.1 candidate');
     expect(out).toContain('### 3.2 resume');
-    expect(out).toContain('### 3.3 job_requisition');
-    expect(out).toContain('### 3.4 applications');
-    expect(out).toContain('### 3.5 blacklist_hits');
-    expect(out).toContain('### 3.6 employment_links');
+    expect(out).toContain('### 3.3 applications');
+    expect(out).toContain('### 3.4 blacklist_hits');
+    expect(out).toContain('### 3.5 employment_links');
+    // §3.3 job_requisition graph slot is gone — JR now lives only in §2.1
+    // (the partner-pg blob), so the LLM never sees two conflicting JR copies.
+    expect(out).not.toContain('### 3.6');
+    expect(out).not.toContain('### 3.3 job_requisition');
+  });
+
+  it('§2 carries ONLY a slimmed job_requisition — no runtime_context / spec / hsm blocks', () => {
+    const out = composeMatchResumePrompt({
+      input: baseInput,
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    expect(out).toContain('## 2. Inputs');
+    expect(out).toContain('### 2.1 job_requisition');
+    // dropped sections (runtime_context = pure plumbing; spec/hsm = always null)
+    expect(out).not.toContain('runtime_context');
+    expect(out).not.toContain('2.3 job_requisition_specification');
+    expect(out).not.toContain('2.4 hsm_feedback');
+  });
+
+  it('§2.1 JR keeps whitelisted requirement fields and drops operational noise', () => {
+    const out = composeMatchResumePrompt({
+      input: {
+        ...baseInput,
+        job_requisition: {
+          job_requisition_id: 'JR-1',
+          // whitelisted (rule-relevant) — must survive
+          degree_requirement: '本科',
+          salary_range: '20k-30k',
+          must_have_skills: ['java', 'spring'],
+          age_range: '25-35',
+          // denylisted (operational noise) — must be stripped
+          first_interviewer_name: 'SECRET_INTERVIEWER',
+          evaluation_rules: 'SECRET_RULES',
+          competitor_application_count: 42,
+          created_at: '2026-01-01T00:00:00Z',
+          interview_process: 'SECRET_PROCESS',
+        },
+      },
+      graph: baseCtx,
+      steps: baseSteps,
+    });
+    // kept
+    expect(out).toContain('本科');
+    expect(out).toContain('20k-30k');
+    expect(out).toContain('java');
+    expect(out).toContain('25-35');
+    // stripped
+    expect(out).not.toContain('SECRET_INTERVIEWER');
+    expect(out).not.toContain('SECRET_RULES');
+    expect(out).not.toContain('SECRET_PROCESS');
+    expect(out).not.toContain('competitor_application_count');
   });
 
   it('emits null/[] for missing graph slots', () => {

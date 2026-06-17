@@ -10,6 +10,69 @@
 import type { GraphContext } from './graph-context';
 import type { MatchResumeStepGroup, Rule, RuleCheckInput } from './types';
 
+// ─── §2 JR 字段白名单 ───
+// rule-check 只做「候选人 ↔ 客户规则匹配」,提示词里的 JR 只需要两类字段:
+//   1. 适用性维度(client / 部门 / 事业群 / 组织 / 层级)— 供 §5 决策树判断某条
+//      规则是否落在本岗位场景(not_triggered 判定 + 部门复核)。
+//   2. 岗位明文要求(职责/要求/学历/技能/语言/年龄/薪资/性别/工时/外籍/负向要求)
+//      — 14 条「硬性要求」类通用规则(10-5/10-6/10-7/10-14/10-21/10-22/10-24/
+//      10-28/10-32/10-34/10-39/10-43/10-54/10-56)的阈值就藏在这些 JR 字段里。
+// 其余面试流程、内部 ID、时间戳、招聘运营/漏斗字段一律不进 prompt。
+// 白名单(pick)而非黑名单:JR 将来新增列默认排除,不会再悄悄泄漏进提示词。
+// 字段集由审计得出(3 个独立视角对 rules.json 全量分类后裁决,correctness-first)。
+export const JR_PROMPT_FIELDS: readonly string[] = [
+  // 适用性维度
+  'job_requisition_id',
+  'client_id',
+  'client_department_id',
+  'client_business_group',
+  'sd_org_name',
+  'oa_department',
+  'first_level_department',
+  'service_bg',
+  'expected_level',
+  // 岗位画像 / 类型
+  'client_job_title',
+  'client_job_type',
+  'job_type',
+  'recruitment_type',
+  // 岗位明文要求(规则阈值来源)
+  'job_responsibility',
+  'job_requirement',
+  'hard_requirements',
+  'qualifications',
+  'nice_to_have',
+  'must_have_skills',
+  'nice_to_have_skills',
+  'degree_requirement',
+  'education_requirement',
+  'language_requirements',
+  'gender',
+  'age_range',
+  'work_years',
+  'salary_range',
+  'work_schedule_type',
+  'negative_requirement',
+  'require_foreigner',
+];
+
+/**
+ * 渲染前投影 JR:只保留 JR_PROMPT_FIELDS 中、且原 JR 上存在的键(保留 null/空值,
+ * 让 LLM 能区分「字段提供了但为空」vs「字段根本不存在」)。
+ *
+ * ⚠ 返回新对象,**绝不修改入参**。runner.ts / extractDims / 规则 fetcher 仍读
+ * 原始完整 input.job_requisition 取 client_id / client_department_id /
+ * client_business_group / sd_org_name 做规则收敛 —— 这里只裁「渲染副本」,
+ * 所以永远不会因为白名单遗漏而「饿死」规则拉取。
+ */
+export function pickJrFields(jr: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of JR_PROMPT_FIELDS) {
+    if (k in jr) out[k] = jr[k];
+  }
+  return out;
+}
+
 // ─── Phase 3: matchResume prompt composer (Set-ordered + graph context) ───
 
 function buildStrictOrderBlock(stepCount: number): string {
@@ -107,12 +170,12 @@ function renderGraphSection(graph: GraphContext): string {
     '',
     renderGraphSlot('3.1 candidate', graph.candidate),
     renderGraphSlot('3.2 resume (候选人当前简历, 来自 neo4j Resume 节点)', graph.resume),
-    renderGraphSlot('3.3 job_requisition', graph.job_requisition),
-    renderGraphSlot('3.4 applications (历史投递, 全量)', graph.applications),
-    renderGraphSlot('3.5 blacklist_hits (全量)', graph.blacklist_hits),
-    renderGraphSlot('3.6 employment_links (含 Employer 节点解析)', graph.employment_links),
+    renderGraphSlot('3.3 applications (历史投递, 全量)', graph.applications),
+    renderGraphSlot('3.4 blacklist_hits (全量)', graph.blacklist_hits),
+    renderGraphSlot('3.5 employment_links (含 Employer 节点解析)', graph.employment_links),
     '',
-    '如需上面未列出的实体（亲属关系、合规文档等），通过 tool 调用 `get_instance` / `list_instances` / `list_links`。',
+    '岗位 Job_Requisition 已在 §2.1 给出（白名单字段）；如需其完整字段或上面未列出的实体' +
+      '（亲属关系、合规文档等），通过 tool 调用 `get_instance` / `list_instances` / `list_links`。',
   ].join('\n');
 }
 
@@ -151,27 +214,13 @@ function renderInputsSectionV2(input: RuleCheckInput): string {
   return [
     '## 2. Inputs',
     '',
-    '### 2.1 runtime_context',
+    '### 2.1 job_requisition（仅保留与规则匹配相关的字段：适用性维度 + 岗位明文要求）',
     '```json',
-    JSON.stringify(input.runtime_context, null, 2),
+    JSON.stringify(pickJrFields(input.job_requisition), null, 2),
     '```',
     '',
-    '### 2.2 job_requisition',
-    '```json',
-    JSON.stringify(input.job_requisition, null, 2),
-    '```',
-    '',
-    '### 2.3 job_requisition_specification',
-    '```json',
-    JSON.stringify(input.job_requisition_specification ?? null, null, 2),
-    '```',
-    '',
-    '### 2.4 hsm_feedback',
-    '```json',
-    JSON.stringify(input.hsm_feedback ?? null, null, 2),
-    '```',
-    '',
-    '（候选人简历 resume 已移入 §3.2 Graph context，由 neo4j Resume 节点提供。）',
+    '（候选人简历 resume 见 §3.2 Graph context；岗位 specification / hsm_feedback ' +
+      '及面试流程、内部 ID、招聘运营等字段不参与本批规则匹配，已省略。）',
   ].join('\n');
 }
 
@@ -184,7 +233,7 @@ export function composeMatchResumePrompt(args: {
 
 ## 1. 你的角色
 
-你是一名 matchResume action 的规则评估员。基于给定的 INPUT、GRAPH_CONTEXT 和 RULES，按 Set 顺序逐条评估每条 rule 的 status，并按规则结算出最终 decision。
+你是一名 matchResume action 的规则评估员。基于给定的 INPUT、GRAPH_CONTEXT 和 RULES，按 Set 顺序逐条评估每条 rule 的 status。**你只输出每条规则的 status，不要输出或结算最终 decision —— 最终 decision 完全由 server 端依据各 rule 的 status 统一汇总（见 §6）。**
 
 - **必须**严格按 Set 顺序、Set 内列出顺序评估。
 - **不要**给候选人打匹配分数（评分由下游算法负责）。
