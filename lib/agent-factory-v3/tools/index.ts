@@ -23,14 +23,31 @@ function cardOf(s: GeneratedAgentSpec): AgentCardLite {
   return { slug: s.slug, short: s.short, nameZh: s.nameZh, trigger: s.trigger, emit: s.emit, tools: s.tools };
 }
 
+type SpecExtras = {
+  skills?: Array<{ name: string; purpose: string; promptFragment: string; tools: string[]; decisionRule: string }>;
+  research?: Array<{ query: string; findings: string }>;
+  extraTools?: string[];
+};
+
 /** Build a runnable GeneratedAgentSpec from an ontology action — deterministic,
- *  no LLM. Uses the action's own system/user prompt + tool_use bindings. */
-export function buildSpecFromAction(action: OntologyAction, domain: string, registry: ToolRegistry): GeneratedAgentSpec {
-  const { tools, unresolved } = selectToolsForAction(action, registry);
-  const sys =
+ *  no LLM. Uses the action's own system/user prompt + tool_use bindings, and
+ *  weaves in any brain-authored skills + web research + extra tools. */
+export function buildSpecFromAction(action: OntologyAction, domain: string, registry: ToolRegistry, extras?: SpecExtras): GeneratedAgentSpec {
+  const sel = selectToolsForAction(action, registry);
+  const skillTools = (extras?.skills ?? []).flatMap((s) => s.tools);
+  const extraTools = extras?.extraTools ?? [];
+  const tools = [...new Set([...sel.tools, ...[...extraTools, ...skillTools].filter((t) => registry.has(t))])];
+  const unresolved = [...sel.unresolved, ...extraTools.filter((t) => !registry.has(t))];
+  let sys =
     action.system_prompt ||
     `你是「${action.name}」agent。当收到事件 ${action.trigger.join(" / ") || "(入口)"} 时执行 ${action.name}，` +
       `完成后发出 ${action.triggered_event.join(" 或 ") || "(终态)"}。`;
+  if (extras?.skills?.length) {
+    sys += "\n\n【可复用技能】\n" + extras.skills.map((s) => `- ${s.name}（${s.purpose}）：${s.promptFragment}${s.decisionRule ? ` 决策：${s.decisionRule}` : ""}`).join("\n");
+  }
+  if (extras?.research?.length) {
+    sys += "\n\n【领域研究参考(联网得到)】\n" + extras.research.map((r) => r.findings).join("\n").slice(0, 900);
+  }
   const usr = action.user_prompt || `处理当前案例的数据并产出结果，按业务规则决定发出哪个事件。`;
   const steps = (tools.length ? tools : ["process"]).map((tool, i) => ({
     name: tool.split(".").pop() || `step${i + 1}`,
@@ -91,18 +108,26 @@ const generate_agents: BrainTool = {
   name: "generate_agents",
   description:
     "为指定的 action 们生成可运行的 agent（从本体确定性构建：绑定 tool_use 工具 + 系统/用户 prompt + 触发/发出事件）。传入 action 名字数组（通常每个 Agent 动作一个 agent）。可多次调用增量补充。",
-  parameters: params({ actions: { type: "array", items: { type: "string" }, description: "要生成 agent 的 action 名字（来自 read_ontology 的 agentActions[].name）" } }, ["actions"]),
+  parameters: params({
+    actions: { type: "array", items: { type: "string" }, description: "要生成 agent 的 action 名字（来自 read_ontology 的 agentActions[].name）" },
+    extra_tools: { type: "object", description: "可选：给某些 agent 额外绑定 create_tool 创造的工具，形如 {\"actionName\":[\"toolName\"]}" },
+  }, ["actions"]),
   async execute(args, ctx) {
     if (!ctx.ontology) return { ok: false, summary: "请先调用 read_ontology 理解本体。" };
     const reg = ctx.registry ?? resolveRegistry(ctx.domain, ctx.ontology);
     ctx.registry = reg;
     const names = (Array.isArray(args.actions) ? args.actions : []) as string[];
+    const extraMap = (args.extra_tools && typeof args.extra_tools === "object" && !Array.isArray(args.extra_tools)) ? (args.extra_tools as Record<string, string[]>) : {};
     const created: string[] = [];
     const missing: string[] = [];
     for (const name of names) {
       const action = ctx.ontology.actions.find((a) => a.name === name);
       if (!action) { missing.push(name); continue; }
-      const spec = buildSpecFromAction(action, ctx.domain, reg);
+      const spec = buildSpecFromAction(action, ctx.domain, reg, {
+        skills: ctx.createdSkills,
+        research: ctx.research,
+        extraTools: Array.isArray(extraMap[name]) ? extraMap[name] : [],
+      });
       ctx.specs = ctx.specs.filter((s) => s.actionName !== name);
       ctx.specs.push(spec);
       ctx.emit({ t: "agent.created", spec: cardOf(spec) });
@@ -168,3 +193,6 @@ const finish: BrainTool = {
 };
 
 export const P1_TOOLS: BrainTool[] = [read_ontology, generate_agents, validate_graph, sandbox_run, finish];
+
+/** Side-effect-free subset given to isolated sub-agents (read + report only). */
+export const READONLY_TOOLS: BrainTool[] = [read_ontology, finish];

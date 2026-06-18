@@ -25,7 +25,10 @@ export type BrainEvent =
   | { t: "tool.result"; id: string; name: string; ok: boolean; summary: string }
   | { t: "agent.created"; spec: AgentCardLite }
   | { t: "skill.created"; name: string; purpose: string }
+  | { t: "tool.created"; name: string; description: string }
   | { t: "web.result"; query: string; results: Array<{ title: string; url: string; snippet: string }> }
+  | { t: "subagent.start"; task: string }
+  | { t: "subagent.done"; task: string; summary: string }
   | { t: "validation"; ok: boolean; issues: string[] }
   | { t: "sandbox"; ran: number; reachedTerminal: boolean; agents: string[]; events: string[] }
   | { t: "gate"; reason: string }
@@ -52,6 +55,10 @@ export interface BrainCtx {
   /** cached after read_ontology */
   ontology: DomainOntology | null;
   registry: ToolRegistry | null;
+  /** skills the brain authored this run (woven into generated agents) */
+  createdSkills: Array<{ name: string; purpose: string; promptFragment: string; tools: string[]; decisionRule: string }>;
+  /** facts the brain gathered via web_search (fed into agent prompts as grounding) */
+  research: Array<{ query: string; findings: string }>;
   budget: { maxTokens: number; maxTurns: number };
   spent: { tokens: number; turns: number };
 }

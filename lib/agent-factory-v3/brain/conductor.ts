@@ -24,6 +24,12 @@ function systemPrompt(domain: string): string {
     "5. sandbox_run 把它们真实部署到 Inngest 并触发运行，确认事件链真的跑起来、到达终态。如果没跑通，推理为什么、修正、重试。",
     "6. 都跑通后 finish 给出中文总结。",
     "",
+    "你还有这些自主能力，在有帮助时【主动】使用（不是必须，由你判断）：",
+    "- web_search：联网搜索领域知识 / 最佳实践 / 业务规则，帮助你设计更好的 agent。",
+    "- create_skill：当你发现一类可复用的能力(如「三级去重」「红线校验」)，把它造成技能——生成 agent 时会自动织入。",
+    "- create_tool：当本体现有工具覆盖不了某能力，造一个新工具，再在 generate_agents 的 extra_tools 里把它绑给对应 agent。",
+    "- spawn_subagent：当某个子问题需要独立深入探索时，派一个隔离的子大脑去做，它只回传摘要。",
+    "",
     "重要：每次调用工具，都要在 `reasoning` 字段用一句中文说清楚你为什么这么做——这是你展示给用户的思考。要真正地推理，不要机械执行。",
   ].join("\n");
 }
@@ -41,6 +47,8 @@ export async function* runBrain(opts: {
     specs: [],
     ontology: null,
     registry: null,
+    createdSkills: [],
+    research: [],
     budget: { maxTokens: MAX_TOKENS, maxTurns: MAX_TURNS },
     spent: { tokens: 0, turns: 0 },
   };

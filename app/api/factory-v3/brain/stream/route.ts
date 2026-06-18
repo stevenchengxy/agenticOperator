@@ -1,6 +1,9 @@
 import { requireFactoryAuth } from "@/lib/factory-auth";
 import { runBrain } from "@/lib/agent-factory-v3/brain/conductor";
 import { P1_TOOLS } from "@/lib/agent-factory-v3/tools";
+import { P2_TOOLS, P3_TOOLS } from "@/lib/agent-factory-v3/tools/p2-p3";
+
+const ALL_TOOLS = [...P1_TOOLS, ...P2_TOOLS, ...P3_TOOLS];
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -36,7 +39,7 @@ export async function GET(req: Request): Promise<Response> {
       // keepalive so proxies don't drop the long-lived stream
       const hb = setInterval(() => { try { controller.enqueue(enc.encode(": hb\n\n")); } catch {} }, 15_000);
       try {
-        for await (const ev of runBrain({ domain, goal, tools: P1_TOOLS })) send(ev);
+        for await (const ev of runBrain({ domain, goal, tools: ALL_TOOLS })) send(ev);
       } catch (e) {
         send({ t: "error", message: (e as Error).message });
       } finally {

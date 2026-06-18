@@ -30,6 +30,10 @@ type Block =
   | { kind: "agent"; spec: AgentCardLite }
   | { kind: "validation"; ok: boolean; issues: string[] }
   | { kind: "sandbox"; ran: number; reachedTerminal: boolean; agents: string[]; events: string[] }
+  | { kind: "web"; query: string; results: Array<{ title: string; url: string; snippet: string }> }
+  | { kind: "skill"; name: string; purpose: string }
+  | { kind: "toolnew"; name: string; description: string }
+  | { kind: "subagent"; task: string; summary?: string }
   | { kind: "message"; text: string }
   | { kind: "error"; message: string };
 
@@ -46,7 +50,13 @@ function toBlocks(events: BrainEvent[]): Block[] {
     } else if (e.t === "agent.created") blocks.push({ kind: "agent", spec: e.spec });
     else if (e.t === "validation") blocks.push({ kind: "validation", ok: e.ok, issues: e.issues });
     else if (e.t === "sandbox") blocks.push({ kind: "sandbox", ran: e.ran, reachedTerminal: e.reachedTerminal, agents: e.agents, events: e.events });
-    else if (e.t === "message") blocks.push({ kind: "message", text: e.text });
+    else if (e.t === "web.result") blocks.push({ kind: "web", query: e.query, results: e.results });
+    else if (e.t === "skill.created") blocks.push({ kind: "skill", name: e.name, purpose: e.purpose });
+    else if (e.t === "tool.created") blocks.push({ kind: "toolnew", name: e.name, description: e.description });
+    else if (e.t === "subagent.start") blocks.push({ kind: "subagent", task: e.task });
+    else if (e.t === "subagent.done") {
+      for (let i = blocks.length - 1; i >= 0; i--) { const b = blocks[i]; if (b.kind === "subagent" && b.task === e.task) { b.summary = e.summary; break; } }
+    } else if (e.t === "message") blocks.push({ kind: "message", text: e.text });
     else if (e.t === "error") blocks.push({ kind: "error", message: e.message });
   }
   flush();
@@ -220,6 +230,17 @@ function BlockView({ b, streaming }: { b: Block; streaming: boolean }) {
     );
     case "validation": return <div className={`fv3-valid ${b.ok ? "ok" : "warn"}`}>{b.ok ? "✓ 事件图闭合" : `⚠ 校验：${b.issues.slice(0, 2).join("；")}`}</div>;
     case "sandbox": return <div className={`fv3-sandboxcard ${b.reachedTerminal ? "ok" : "warn"}`}>⚙ <b>真实运行</b>：{b.ran} 个 agent 部署到 Inngest 并跑起来 · 事件链 {b.events.length} 个 · {b.reachedTerminal ? "到达终态 ✓" : "未到终态"}</div>;
+    case "web": return (
+      <div className="fv3-webcard">
+        <div className="fv3-webhead">🔎 联网搜索「{b.query}」· {b.results.length} 条</div>
+        {b.results.slice(0, 3).map((r, i) => (
+          <div key={i} className="fv3-webrow"><a href={r.url} target="_blank" rel="noreferrer">{r.title}</a><span>{r.snippet.slice(0, 110)}</span></div>
+        ))}
+      </div>
+    );
+    case "skill": return <div className="fv3-makecard">✨ <b>创造技能</b>「{b.name}」<span className="fv3-badge draft">DRAFT</span> — {b.purpose}</div>;
+    case "toolnew": return <div className="fv3-makecard">🔧 <b>创造工具</b>「{b.name}」<span className="fv3-badge draft">DRAFT</span> — {b.description}</div>;
+    case "subagent": return <div className="fv3-subcard">🧬 <b>子大脑</b>：{b.task}{b.summary ? <div className="fv3-submeta">↳ {b.summary}</div> : <span className="fv3-toolstatus run"> ●</span>}</div>;
     case "message": return <div className="fv3-assistant">{b.text}</div>;
     case "error": return <div className="fv3-errcard">⚠ {b.message}</div>;
   }
@@ -272,6 +293,13 @@ const FV3_CSS = `
 .fv3-sandboxcard{font-size:13px;border-radius:10px;padding:10px 14px;border:1px solid var(--c-line)}
 .fv3-sandboxcard.ok{color:var(--c-ok);background:color-mix(in oklch,var(--c-ok) 12%,transparent)}
 .fv3-sandboxcard.warn{color:var(--c-warn);background:color-mix(in oklch,var(--c-warn) 10%,transparent)}
+.fv3-webcard{border:1px solid var(--c-line);border-radius:10px;background:var(--c-surface);padding:9px 13px}
+.fv3-webhead{font-size:12.5px;color:var(--c-ink-2);margin-bottom:5px}
+.fv3-webrow{font-size:11.5px;margin:3px 0;display:flex;flex-direction:column}
+.fv3-webrow a{color:var(--c-accent);font-weight:500}.fv3-webrow span{color:var(--c-ink-3)}
+.fv3-makecard{font-size:13px;border-radius:10px;padding:9px 13px;border:1px solid var(--c-line);background:color-mix(in oklch,var(--c-accent) 7%,var(--c-surface))}
+.fv3-subcard{font-size:13px;border-radius:10px;padding:9px 13px;border:1px solid var(--c-line);border-left:3px solid oklch(.7 .14 300);background:var(--c-surface)}
+.fv3-submeta{font-size:11.5px;color:var(--c-ink-3);margin-top:4px}
 .fv3-assistant{font-size:14px;line-height:1.7;color:var(--c-ink-1);white-space:pre-wrap;background:var(--c-surface);border:1px solid var(--c-line);border-radius:12px;padding:13px 16px}
 .fv3-errcard{color:var(--c-err);background:color-mix(in oklch,var(--c-err) 10%,transparent);border:1px solid var(--c-line);border-radius:9px;padding:8px 13px;font-size:12.5px}
 .fv3-composer{border-top:1px solid var(--c-line);padding:11px 16px;display:flex;gap:8px;max-width:860px;width:100%;margin:0 auto}
