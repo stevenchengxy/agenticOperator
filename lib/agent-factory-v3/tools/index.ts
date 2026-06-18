@@ -147,7 +147,7 @@ const sandbox_run: BrainTool = {
     if (!ship.appRegistered) {
       return { ok: false, summary: `上架到 Inngest 失败：${ship.error ?? "未注册"}`, output: ship };
     }
-    const run = await fireAndObserve(ctx.domain, ctx.specs, { timeoutMs: 30_000 });
+    const run = await fireAndObserve(ctx.domain, ctx.specs, { timeoutMs: 50_000 });
     const agents = [...new Set(run.runs.map((r) => r.fn.replace(`agentic-operator-${ctx.domain}-`, "")))];
     ctx.emit({ t: "sandbox", ran: agents.length, reachedTerminal: run.reachedTerminal, agents, events: run.events });
     return {
