@@ -71,6 +71,7 @@ export function LeftNav() {
     { type: "group", title: t("nav_group_build") },
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), count: "1", href: "/workflow" },
     { type: "item", id: "ontology-gen", icon: "branch", label: t("nav_ontology_gen"), href: "/behavior/ontology-generator" },
+    { type: "item", id: "factory",    icon: "bolt",     label: t("nav_factory_v2"), href: "/behavior/factory-v3" },
     { type: "group", title: t("nav_group_govern") },
     { type: "item", id: "system-config", icon: "gear", label: t("settings_env_title"), href: "/settings/system" },
     { type: "item", id: "integrations", icon: "plug",   label: t("nav_integrations"), href: "/datasources" },

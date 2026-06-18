@@ -20,7 +20,17 @@ import { ONTOLOGY_GEN_SOURCE } from "@/lib/ontology-generator/draft-store";
 import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID, COST_CONTROL_DOMAIN_ID, isRecruitmentDomain } from "@/lib/domain-ids";
 import { buildEnergyFunctions } from "@/server/inngest/domains/energy";
 import { buildCostControlFunctions } from "@/server/inngest/domains/feikong";
+import { executeGeneratedAgent } from "@/server/inngest/factory/agent-executor";
 import type { ShellCardData } from "@/lib/ontology-generator/types";
+
+/** Parse the deployed spec's LLM-execution fields from specJson. */
+function parseAgentSpec(specJson: string | null): { actionName: string; systemPrompt: string; userPrompt: string; tools: string[] } | null {
+  if (!specJson) return null;
+  try {
+    const s = JSON.parse(specJson) as { actionName?: string; short?: string; systemPrompt?: string; userPrompt?: string; tools?: unknown };
+    return { actionName: s.actionName ?? s.short ?? "", systemPrompt: s.systemPrompt ?? "", userPrompt: s.userPrompt ?? "", tools: Array.isArray(s.tools) ? (s.tools as string[]) : [] };
+  } catch { return null; }
+}
 
 // The `raas` (业务领域) domain is ALREADY served by the main app
 // (agentic-operator-main, /api/inngest) which hosts the 5 real production
@@ -47,14 +57,45 @@ function parseCard(configJson: string | null): ShellCardData | null {
 
 // ── functions ──────────────────────────────────────────────────────────────
 
-type ShellRow = { short: string; slug: string; configJson: string | null };
+type ShellRow = { short: string; slug: string; configJson: string | null; specJson: string | null };
 
-function makeShellFunction(client: Inngest, domain: string, shell: ShellRow, card: ShellCardData) {
+/** The full trigger/emit event sets for a shell — drawn from specJson (arrays),
+ *  falling back to the card's single primary event. Multi-event so the WHOLE
+ *  generated chain traverses (the card only keeps `trigger[0]`/`emit[0]`, which
+ *  stops the chain at the first branch). */
+function shellEvents(specJson: string | null, card: ShellCardData): { triggers: string[]; emits: string[] } {
+  const clean = (arr: unknown, fallback: string): string[] => {
+    const list = Array.isArray(arr) && arr.length ? (arr as string[]) : [fallback];
+    return [...new Set(list.filter((e) => typeof e === "string" && e && e !== "—"))];
+  };
+  try {
+    const s = JSON.parse(specJson || "{}") as { trigger?: unknown; emit?: unknown };
+    return { triggers: clean(s.trigger, card.triggerEvent), emits: clean(s.emit, card.emitEvent) };
+  } catch {
+    return { triggers: clean(null, card.triggerEvent), emits: clean(null, card.emitEvent) };
+  }
+}
+
+function makeShellFunction(
+  client: Inngest,
+  domain: string,
+  shell: ShellRow,
+  card: ShellCardData,
+  events: { triggers: string[]; emits: string[] },
+  spec: { actionName: string; systemPrompt: string; userPrompt: string; tools: string[] } | null,
+) {
   return client.createFunction(
     {
       id: shell.slug, // og-… → full slug agentic-operator-<domain>-og-…
       name: card.nameZh || card.agentId || shell.short,
-      triggers: [{ event: card.triggerEvent }],
+      // Namespace each trigger as `${domain}/${event}` so a generated domain's
+      // chain is isolated from production (which uses bare event names) AND
+      // matches the namespaced entry events deploy.ts fireAndObserve sends.
+      // Without namespacing the shell listens on a bare name nobody in this
+      // domain fires → runs:[] (the observe gap). Multi-trigger so an agent that
+      // consumes several events (e.g. jdGenerator on REQUIREMENT_LOGGED |
+      // CLARIFICATION_READY) is reachable from any of them.
+      triggers: events.triggers.map((e) => ({ event: `${domain}/${e}` })),
     },
     async ({ event, step }: { event: { id?: string; name: string; data?: unknown }; step: any }) => {
       const data = (event.data ?? {}) as Record<string, unknown>;
@@ -77,20 +118,44 @@ function makeShellFunction(client: Inngest, domain: string, shell: ShellRow, car
         await log.log("agent_start", `${shell.short} started`, {});
       });
 
-      await step.sleep("work", "600ms");
+      // REAL execution: the agent runs its OWN LLM + tools on the actual case
+      // and DECIDES which single outcome event to emit — genuinely dynamic per
+      // case, not a sleep+emit stub. Degrades to the first event only if the
+      // gateway is down or there's no spec.
+      const decision = await step.run("reason", () =>
+        executeGeneratedAgent(
+          {
+            actionName: spec?.actionName ?? shell.short,
+            domainId: domain,
+            systemPrompt: spec?.systemPrompt ?? "",
+            userPrompt: spec?.userPrompt ?? "",
+            tools: spec?.tools ?? [],
+            emit: events.emits,
+          },
+          { eventName: event.name.replace(`${domain}/`, ""), eventData: data },
+        ),
+      );
 
-      if (card.emitEvent && card.emitEvent !== "—") {
+      await step.run("decided", () =>
+        log.log("agent_decision", `${shell.short} 判断 → 发出 ${decision.event || "(无)"}：${decision.reasoning}`, {
+          chosen: decision.event,
+          tools: decision.toolCalls.map((t: { name: string }) => t.name),
+          degraded: decision.degraded,
+        }),
+      );
+
+      if (decision.event) {
         await step.sendEvent("emit", {
-          name: card.emitEvent,
-          data: { _runId: runId, source: shell.short, _shell: true },
+          name: `${domain}/${decision.event}`,
+          data: { _runId: runId, source: shell.short, reasoning: decision.reasoning, ...decision.payload },
         });
       }
 
       await step.run("done", async () => {
-        await log.done(`${shell.short} done`, { emitted: card.emitEvent });
+        await log.done(`${shell.short} done`, { emitted: decision.event });
         await markRunComplete(runId, "completed");
       });
-      return { runId, emitted: card.emitEvent };
+      return { runId, emitted: decision.event, reasoning: decision.reasoning };
     },
   );
 }
@@ -114,7 +179,7 @@ async function buildDomainFunctions(client: Inngest, domain: string) {
   const shells = await prisma.agentVersion.findMany({
     where: { capturedFrom: ONTOLOGY_GEN_SOURCE, domain, status: "active" },
     orderBy: { createdAt: "desc" },
-    select: { short: true, slug: true, configJson: true },
+    select: { short: true, slug: true, configJson: true, specJson: true },
   });
 
   // Dedupe by slug (a domain may have re-deployed the same agent) — keep latest.
@@ -125,7 +190,10 @@ async function buildDomainFunctions(client: Inngest, domain: string) {
   for (const shell of bySlug.values()) {
     const card = parseCard(shell.configJson);
     if (!card?.triggerEvent || card.triggerEvent === "—") continue;
-    fns.push(makeShellFunction(client, domain, shell, card));
+    const events = shellEvents(shell.specJson, card);
+    if (!events.triggers.length) continue;
+    const spec = parseAgentSpec(shell.specJson);
+    fns.push(makeShellFunction(client, domain, shell, card, events, spec));
   }
   return fns;
 }
@@ -162,6 +230,13 @@ export async function getDomainServeHandler(domain: string): Promise<ReturnType<
  *  already-working main app registration (host.docker.internal in Docker), so
  *  per-domain apps reuse the exact reachable host. Falls back to env / default. */
 async function resolveCallbackOrigin(): Promise<string> {
+  // Prefer the explicit serve origin the SDK itself registers under — the host
+  // the running Inngest can actually reach. With the native inngest-cli (this
+  // setup) host.docker.internal is a dead IP, so when the main app isn't yet
+  // registered the fallback below makes /fn/register fail with "App ID required".
+  if (process.env.INNGEST_SERVE_ORIGIN) {
+    try { return new URL(process.env.INNGEST_SERVE_ORIGIN).origin; } catch { /* fall through */ }
+  }
   try {
     const res = await fetch(`${getInngestUrl()}/v0/gql`, {
       method: "POST",
@@ -184,11 +259,12 @@ async function callbackUrlFor(domain: string): Promise<string> {
 }
 
 async function postRegister(callbackUrl: string): Promise<{ ok: boolean; status: number; body: string }> {
-  const res = await fetch(`${getInngestUrl()}/fn/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: callbackUrl }),
-  });
+  // Trigger the SDK's self-sync by PUTting the per-domain serve endpoint — the
+  // SDK then registers its app (id + functions + reachable callback URL) with
+  // the Inngest dev server, exactly how the main app syncs. The older
+  // `POST ${inngest}/fn/register {url}` is rejected by current Inngest with
+  // "App ID required".
+  const res = await fetch(callbackUrl, { method: "PUT" });
   return { ok: res.ok, status: res.status, body: await res.text() };
 }
 
