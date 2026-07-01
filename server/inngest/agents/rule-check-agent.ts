@@ -54,6 +54,7 @@ import {
   writeJobRequisitionInstance,
 } from '@/lib/allmeta-writers';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
+import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 
 const AGENT_ID = 'rule-check-agent';
 const AGENT_NAME = 'ruleCheck';
@@ -840,7 +841,12 @@ export const ruleCheckAgent = inngest.createFunction(
     retries: 1,
     triggers: [{ event: 'RESUME_PROCESSED' }],
   },
-  async (ctx) => ruleCheckAgentHandler(ctx as unknown as Parameters<typeof ruleCheckAgentHandler>[0]),
+  async (ctx) => {
+    const c = ctx as unknown as Parameters<typeof ruleCheckAgentHandler>[0];
+    const paused = await skipIfRaasV1Paused(AGENT_ID, c.logger);
+    if (paused) return paused;
+    return ruleCheckAgentHandler(c);
+  },
 );
 
 // ──────────────────────────────────────────────────────────────────────
@@ -953,4 +959,3 @@ function getTraceId(eventData: unknown): string | undefined {
 function sanitize(s: string): string {
   return s.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 80) || 'unknown';
 }
-

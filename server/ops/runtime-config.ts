@@ -121,7 +121,7 @@ export const KNOWN_CONFIG_DEFINITIONS: RuntimeConfigDefinition[] = [
     label: "Allmeta domain",
     section: "neo4j",
     description: "Default ontology domain used by recruitment operations.",
-    placeholder: "招聘-v1",
+    placeholder: "RAAS-v1",
   },
   {
     key: "NEO4J_INSTANCE_URI",

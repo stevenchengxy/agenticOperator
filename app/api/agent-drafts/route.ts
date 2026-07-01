@@ -80,7 +80,15 @@ export async function GET(req: Request) {
     const ov = overrideByKey.get(`${a.domain}::${a.short}`);
     const status: DraftLifecycle = (ov?.status as DraftLifecycle) ?? "active"; // no override → live
     if (!wantArchived(status)) continue;
-    const name = agentDisplayName(a.short);
+    // Prefer an operator-set display name (override configJson.nameZh) over the
+    // built-in AGENT_MAP name, so a renamed real agent reads consistently here.
+    let name = agentDisplayName(a.short);
+    if (ov?.configJson) {
+      try {
+        const c = JSON.parse(ov.configJson) as { nameZh?: unknown };
+        if (typeof c.nameZh === "string" && c.nameZh.trim()) name = c.nameZh.trim();
+      } catch { /* keep default */ }
+    }
     rows.push({
       id: ov?.id ?? realAgentId(a.domain, a.short),
       short: a.short,

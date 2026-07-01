@@ -36,6 +36,11 @@ export interface ToolDescriptor {
   returns: Record<string, unknown>;
   requiredEnv?: string[];
   idempotent?: boolean;
+  /** The real client this tool wraps — its module path + export name. Used by
+   *  the agent code generator (specToAgentCode) to emit a native import +
+   *  call (`import { parseResumeDirect } from '@/lib/robohire-client'`) instead
+   *  of an opaque registry lookup, so generated code reads like a real agent. */
+  impl?: { module: string; export: string };
   /** Lazy, dry-run-aware executor. */
   execute?: (args: Record<string, unknown>, ctx?: ToolRunCtx) => Promise<unknown>;
 }
@@ -122,9 +127,45 @@ export class ToolRegistry {
 // preserved — but a purely-CJK tool name no longer collapses to "".
 const normalize = (s: string): string => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "");
 
-/** Resolve a raw ontology `tool_use[]` entry to a registry tool name. Exact
- *  match first, then a normalized contains-match (so "RoboHire 解析简历" or
- *  "robohire_parse" still hit "robohire.parseResume"). */
+// Generic stop-tokens that carry no disambiguating signal in a tool name. Kept
+// small + verb/scaffolding-only so real nouns (resume/candidate/jd/match) stay.
+const TOOL_STOP_TOKENS = new Set([
+  "get", "fetch", "query", "read", "load", "run", "do", "check", "status",
+  "record", "file", "content", "data", "info", "the", "by", "of", "to", "for",
+  "value", "entity", "entities", "instance", "result", "results", "list",
+]);
+
+/** camelCase / snake / dot / space → lowercase NFKC tokens. Handles both
+ *  camel boundaries ("generateJd"→"generate jd") and acronym→word boundaries
+ *  ("JDContent"→"JD Content") so "generateJDContent" → [generate, jd, content]. */
+function toTokens(s: string): string[] {
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/[._\-/\s]+/g, " ")
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean);
+}
+
+/** The meaningful tokens of a CATALOG tool name = tokens AFTER the family
+ *  prefix (the part after the first dot), minus generic stop-tokens. The LLM
+ *  almost never reproduces the namespace ("robohire."), so we match on the
+ *  meaningful tail only. e.g. "robohire.parseResume" → ["parse","resume"]. */
+function catalogContentTokens(name: string): string[] {
+  const tail = name.includes(".") ? name.slice(name.indexOf(".") + 1) : name;
+  return toTokens(tail).filter((t) => !TOOL_STOP_TOKENS.has(t));
+}
+
+/** Resolve a raw ontology `tool_use[]` / LLM-authored tool name to a registry
+ *  tool name. Exact → normalized-contains → conservative token-superset fuzzy.
+ *
+ *  The fuzzy fallback (Fix #2) only fires when a catalog tool's WHOLE meaningful
+ *  name is contained in the query's tokens — so an LLM-invented variant like
+ *  "parseResumeFile" resolves to "robohire.parseResume", but "checkBlacklist"
+ *  (no blacklist tool exists) stays unresolved instead of binding a wrong tool.
+ *  This is what stops generated agents from binding ZERO real tools. */
 export function resolveToolName(raw: string, registry: ToolRegistry): string | undefined {
   if (registry.has(raw)) return raw;
   const nr = normalize(raw);
@@ -135,7 +176,87 @@ export function resolveToolName(raw: string, registry: ToolRegistry): string | u
     if (nn === nr) return name;
     if (!best && (nn.includes(nr) || nr.includes(nn))) best = name;
   }
-  return best;
+  if (best) return best;
+
+  // Conservative token-superset fuzzy. Query tokens (all of them) must be a
+  // SUPERSET of some catalog tool's meaningful tokens. Pick the most specific
+  // (most content tokens) match; never bind on a single 1-3 char token.
+  const queryTokens = new Set(toTokens(raw));
+  if (!queryTokens.size) return undefined;
+  let bestName: string | undefined;
+  let bestLen = 0;
+  for (const name of registry.names()) {
+    const content = catalogContentTokens(name);
+    if (!content.length) continue;
+    const covered = content.every((t) => queryTokens.has(t));
+    if (!covered) continue;
+    // Guard against a single short token producing spurious matches.
+    if (content.length === 1 && content[0].length < 4) continue;
+    if (content.length > bestLen) { bestLen = content.length; bestName = name; }
+  }
+  return bestName;
+}
+
+/** Rank the real catalog against an ontology action, returning the top-N tool
+ *  names most relevant to it (Fix #2 grounding). Used by read_ontology to hand
+ *  the brain CONCRETE candidates (so it picks real namespaced names instead of
+ *  inventing them) and by design_agent to floor an agent with real tools when
+ *  the LLM's picks don't resolve. Domain-general: scores the action's name +
+ *  target_objects token-overlap against each tool's full name + title +
+ *  description. */
+export function suggestToolsForAction(
+  action: { name?: string; target_objects?: string[] },
+  registry: ToolRegistry,
+  limit = 5,
+): string[] {
+  const nameTokens = new Set(toTokens(action.name ?? "").filter((t) => !TOOL_STOP_TOKENS.has(t)));
+  const objTokens = new Set((action.target_objects ?? []).flatMap((o) => toTokens(o)));
+  const scored: Array<{ name: string; score: number }> = [];
+  for (const t of registry.list()) {
+    const toolNameTokens = new Set(toTokens(t.name)); // full name incl. family
+    const haystack = `${t.name} ${t.title ?? ""} ${t.description ?? ""}`.toLowerCase();
+    let score = 0;
+    for (const tok of nameTokens) {
+      if (toolNameTokens.has(tok)) score += 3;        // action verb/noun in tool name — strong
+      else if (haystack.includes(tok)) score += 1;
+    }
+    for (const tok of objTokens) {
+      if (toolNameTokens.has(tok)) score += 2;        // target object in tool name
+      else if (tok.length >= 3 && haystack.includes(tok)) score += 1;
+    }
+    if (score > 0) scored.push({ name: t.name, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return scored.slice(0, limit).map((s) => s.name);
+}
+
+export interface ToolGrounding {
+  /** picks that are exact real catalog names (the LLM used the real name) */
+  exact: string[];
+  /** picks that were a non-real name BRIDGED to a real tool (the LLM wrote a
+   *  variant like "parseResumeFile" → "robohire.parseResume") */
+  bridged: Array<{ raw: string; resolved: string }>;
+  /** picks with no real tool at all — a capability gap, not a wrong bind */
+  unresolved: string[];
+}
+
+/** P1 — De-Hallucinator grounding signal. Classify each LLM-authored tool pick as
+ *  exact / bridged / unresolved against the live registry, so a bridged or missing
+ *  bind becomes VISIBLE to the brain (it can confirm or re-pick) instead of the
+ *  fuzzy resolver silently shipping a guessed binding. Reuses resolveToolName so it
+ *  can never drift from the actual resolution. */
+export function groundToolPicks(rawPicks: string[], registry: ToolRegistry): ToolGrounding {
+  const exact: string[] = [];
+  const bridged: Array<{ raw: string; resolved: string }> = [];
+  const unresolved: string[] = [];
+  for (const raw of rawPicks) {
+    if (!raw) continue;
+    const resolved = resolveToolName(raw, registry);
+    if (!resolved) unresolved.push(raw);
+    else if (resolved === raw) exact.push(resolved);
+    else bridged.push({ raw, resolved });
+  }
+  return { exact, bridged, unresolved };
 }
 
 export interface ToolSelection {

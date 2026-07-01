@@ -11,8 +11,10 @@
 // Everything else (the switcher list, names, colors) derives from the live id,
 // so renaming any OTHER domain in Allmeta needs no code change at all.
 
-/** Allmeta domain id for the recruitment (招聘) production agents. */
-export const RECRUITMENT_DOMAIN_ID = "招聘-v1";
+/** Allmeta domain id for the recruitment production agents. Primary = RAAS-v1
+ *  (it holds the live ontology — 23 actions / 262 rules). 招聘-v1 is the demoted
+ *  legacy name and is no longer the recruitment subject. */
+export const RECRUITMENT_DOMAIN_ID = "RAAS-v1";
 
 /** Allmeta domain id for the energy-dispatch ontology agent pack. Must match
  *  the snapshot dir name under lib/ontology-generator/snapshots/. */
@@ -40,11 +42,13 @@ export function eventNsForDomain(id: string | null | undefined): string | null {
   return null;
 }
 
-/** True when a domain id refers to the recruitment (招聘) pack. Empty/absent
- *  domain defaults to recruitment (the app's original single-domain behavior).
- *  Accepts the legacy `RAAS-v1` / `raas` ids so reads survive the rename. */
+/** True when a domain id refers to the recruitment pack (primary = RAAS-v1).
+ *  Empty/absent domain defaults to recruitment (the app's original single-domain
+ *  behavior). Accepts the lowercase `raas` alias. NOTE: `招聘-v1` is intentionally
+ *  NOT matched — it was demoted from being the recruitment subject (RAAS-v1 took
+ *  over), so it no longer binds to the main app. */
 export function isRecruitmentDomain(id: string | null | undefined): boolean {
-  return !id || id === RECRUITMENT_DOMAIN_ID || id === "RAAS-v1" || id === "raas";
+  return !id || id === RECRUITMENT_DOMAIN_ID || id === "raas";
 }
 
 /** A clean, short display name derived from a domain id: strips a trailing

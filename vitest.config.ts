@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     globals: true,
+    // Polyfill in-memory localStorage/sessionStorage when the env's is missing/broken (Node 26's
+    // native experimental localStorage shadows happy-dom's). No-op on Node 22.
+    setupFiles: ['./vitest.setup.ts'],
     include: ['**/*.test.ts', '**/*.test.tsx'],
     exclude: [
       '**/node_modules/**',

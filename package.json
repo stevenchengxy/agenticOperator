@@ -7,8 +7,10 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "dev": "node scripts/dev-bootstrap.mjs && STUB_AGENTS=1 next dev -p 3002",
-    "dev:next-only": "STUB_AGENTS=1 next dev -p 3002",
+    "dev": "node scripts/dev-bootstrap.mjs && next dev -p 3002",
+    "dev:next-only": "next dev -p 3002",
+    "dev:demo": "node scripts/dev-bootstrap.mjs && STUB_AGENTS=1 next dev -p 3002",
+    "dev:next-only:demo": "STUB_AGENTS=1 next dev -p 3002",
     "inngest:up": "docker compose -f docker-compose.inngest.yml up -d",
     "inngest:down": "docker compose -f docker-compose.inngest.yml down",
     "inngest:logs": "docker compose -f docker-compose.inngest.yml logs -f",
@@ -55,6 +57,9 @@
     "pinyin-pro": "^3.28.1",
     "react": "19.2.5",
     "react-dom": "19.2.5",
+    "react-markdown": "^9.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "unpdf": "^1.6.0",
     "zod": "^4.4.3"
   },

@@ -37,6 +37,7 @@ import { classifyRobohire } from '@/lib/dependency-health/classify';
 import { reportDependencyDegraded } from '@/lib/dependency-health/report';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import { inngest, type ResumeProcessedData } from '@/server/inngest/client';
+import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { prisma } from '@/server/db';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
@@ -50,6 +51,8 @@ import { candidateIdentityAgent } from '@/server/inngest/agents/candidate-identi
 // just a structural alias.
 type RaasParseResumeData = Record<string, unknown> & { name?: string | null };
 
+const AGENT_ID = 'resume-parser-agent';
+
 export const resumeParserAgent = inngest.createFunction(
   {
     id: 'resume-parser-agent',
@@ -58,6 +61,9 @@ export const resumeParserAgent = inngest.createFunction(
     triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
   async ({ event, step, logger, runId }) => {
+    const paused = await skipIfRaasV1Paused(AGENT_ID, logger);
+    if (paused) return paused;
+
     // RESUME_DOWNLOADED 兼容两种 shape:
     //   A) RAAS canonical envelope —
     //      { entity_id, entity_type, event_id, payload: { ... }, trace }

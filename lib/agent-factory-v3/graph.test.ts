@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadSnapshotOntology } from "@/lib/ontology-generator/ontology-source";
 import type { OntologyAction } from "@/lib/ontology-generator/ontology-source";
-import { compileGraph, verifyGraph } from "./graph";
+import { compileGraph, verifyGraph, coverageGap } from "./graph";
 
 const ont = loadSnapshotOntology("recruit-gen-v1");
 
@@ -101,6 +101,37 @@ describe("verifyGraph", () => {
       action: "phantomDedup",
       event: "CANDIDATE_DEDUP_PASSED",
     });
+  });
+});
+
+describe("coverageGap (P0 — deterministic completeness, adaptive)", () => {
+  it("returns the actor=Agent actions that have no covering spec", () => {
+    // recruit-gen-v1 has 6 Agent actions; cover only 2.
+    const gap = coverageGap(ont.actions, ["parseResume", "createJd"]);
+    expect(gap).toContain("ruleCheck");
+    expect(gap).toContain("matchResume");
+    expect(gap).not.toContain("parseResume");
+    expect(gap).not.toContain("createJd");
+  });
+
+  it("is empty when every Agent action is covered", () => {
+    const all = ont.actions.filter((a) => a.actor.includes("Agent")).map((a) => a.name);
+    expect(coverageGap(ont.actions, all)).toEqual([]);
+  });
+
+  it("ignores non-Agent (human/system) actions — never forces spurious agents", () => {
+    const acts: OntologyAction[] = [
+      { id: "h", name: "humanReview", actor: ["Human"], trigger: ["X"], triggered_event: ["Y"], target_objects: [], tool_use: [], system_prompt: "", user_prompt: "" },
+      { id: "s", name: "autoSync", actor: ["System"], trigger: ["Y"], triggered_event: ["Z"], target_objects: [], tool_use: [], system_prompt: "", user_prompt: "" },
+    ];
+    expect(coverageGap(acts, [])).toEqual([]);
+  });
+
+  it("still requires coverage for an Agent+Human action (it is in read_ontology's set)", () => {
+    const acts: OntologyAction[] = [
+      { id: "m", name: "mixed", actor: ["Agent", "Human"], trigger: ["X"], triggered_event: ["Y"], target_objects: [], tool_use: [], system_prompt: "", user_prompt: "" },
+    ];
+    expect(coverageGap(acts, [])).toEqual(["mixed"]);
   });
 });
 

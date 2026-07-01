@@ -195,6 +195,73 @@ describe('generateJdDirect', () => {
     await expect(generateJdDirect({ prompt: 'x' })).rejects.toMatchObject({ httpStatus: 400, code: 'CLIENT' });
   });
 
+  it('throws SERVER when meta.stages.generate="failed" (200 + success:true but generate stage failed)', async () => {
+    // Real RoboHire failure: HTTP 200, envelope success:true, parse ok, but the
+    // generate stage failed → every content field came back "" while title is the
+    // placeholder "Untitled". The envelope `success` flag and the placeholder title
+    // both lie; meta.stages.generate is the truth. Surface it as a recoverable SERVER
+    // degradation so the caller fails the run instead of persisting an empty JD.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { title: 'Untitled', qualifications: '', hardRequirements: '', description: '', evaluationRules: '' },
+          meta: { stages: { parse: 'success', generate: 'failed' } },
+          requestId: 'req_jd_degraded',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await expect(generateJdDirect({ prompt: 'a valid prompt long enough to pass' })).rejects.toMatchObject({
+      code: 'SERVER',
+      requestId: 'req_jd_degraded',
+    });
+  });
+
+  it('throws SERVER when meta.stages.parse="failed"', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {},
+          meta: { stages: { parse: 'failed', generate: 'skipped' } },
+          requestId: 'req_jd_parsefail',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    await expect(generateJdDirect({ prompt: 'a valid prompt long enough to pass' })).rejects.toMatchObject({
+      code: 'SERVER',
+    });
+  });
+
+  it('does NOT throw on a fully-successful generate-jd (both stages success)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { title: 'Untitled', description: 'real body', qualifications: 'real quals' },
+          meta: { stages: { parse: 'success', generate: 'success' } },
+          requestId: 'req_ok',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await generateJdDirect({ prompt: 'a valid prompt long enough to pass' });
+    expect(r.requestId).toBe('req_ok');
+  });
+
+  it('does NOT throw when meta is absent (older response shape)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: true, data: { description: 'body' }, requestId: 'req_nometa' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const r = await generateJdDirect({ prompt: 'a valid prompt long enough to pass' });
+    expect(r.requestId).toBe('req_nometa');
+  });
+
   it('passes X-Trace-Id header', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')

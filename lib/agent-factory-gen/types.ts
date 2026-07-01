@@ -9,7 +9,9 @@ export interface GeneratedStep {
   tool?: string;
 }
 
-export type PromptSource = "llm" | "ontology" | "fallback";
+// "ontology" = action carried a system_prompt; "ontology-desc" = seeded from the
+// action's rich `description` (live actions have description, not system_prompt).
+export type PromptSource = "llm" | "ontology" | "ontology-desc" | "fallback";
 
 // ── Agent-Loop (reflexion) refinement records ─────────────────────────────────
 // The factory drafts a prompt, then a critic LLM scores it against the ontology
@@ -83,6 +85,12 @@ export interface GeneratedAgentSpec {
   objects: string[];
   systemPrompt: string;
   userPrompt: string;
+  /** the brain's design reasoning + tool rationale + per-branch decision logic it
+   *  authored in design_agent. Stored on the spec so later re-emits (codegen /
+   *  refine / revert) can show the REAL content instead of a placeholder. */
+  designReasoning?: string;
+  toolRationale?: string;
+  decisionLogic?: string;
   steps: GeneratedStep[];
   ruleRefs: string[];
   retries: number;
@@ -95,6 +103,32 @@ export interface GeneratedAgentSpec {
   hitlGate?: HitlGate;
   /** tool sequencing strategy for the executor (default "parallel") */
   toolFlow?: ToolFlow;
+  /** P4 — true when this spec is a last-resort DEGRADED shell auto-synthesized to
+   *  satisfy the coverage invariant after the brain exhausted its retries on the
+   *  action. It is a placeholder (template prompt + floored tools), surfaced as a
+   *  blocking warning — never a clean pass. The operator must complete it. */
+  degraded?: boolean;
+  /** A readable Inngest agent .ts rendering of this spec (specToAgentCode) —
+   *  native imports + embedded prompt + step/emit scaffold — so the user can
+   *  see + own + edit each generated agent as code, not just a spec. */
+  generatedCode?: string;
+  /** AI-authored input schema — the trigger event payload fields this agent
+   *  consumes, grounded in the ontology DataObjects' properties. */
+  inputSchema?: IoField[];
+  /** AI-authored output schema — the outcome event payload fields it emits. */
+  outputSchema?: IoField[];
+  /** how `generatedCode` was produced: "ai" = the LLM wrote the .ts (codegen_agent);
+   *  "render" = deterministic specToAgentCode rendering of the spec. */
+  codeSource?: "ai" | "render";
+}
+
+/** One AI-authored I/O field, grounded in a DataObject property where possible. */
+export interface IoField {
+  field: string;
+  type: string;
+  description?: string;
+  /** the DataObject.property this field maps to (e.g. "Candidate.candidate_id"). */
+  source?: string;
 }
 
 export interface ValidationReport {

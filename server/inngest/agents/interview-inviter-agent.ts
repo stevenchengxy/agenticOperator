@@ -40,6 +40,7 @@ import {
   type InterviewInvitationSentPayload,
   type InterviewInvitationFailedPayload,
 } from '@/server/inngest/client';
+import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 
 const AGENT_ID = 'interview-inviter-agent';
 const AGENT_NAME = 'interviewInviter';
@@ -52,6 +53,9 @@ export const interviewInviterAgent = inngest.createFunction(
     triggers: [{ event: 'INTERVIEW_INVITATION_REQUESTED' }],
   },
   async ({ event, step, logger, runId }) => {
+    const paused = await skipIfRaasV1Paused(AGENT_ID, logger);
+    if (paused) return paused;
+
     return await interviewInviterAgentHandler({ event, step, logger, runId });
   },
 );

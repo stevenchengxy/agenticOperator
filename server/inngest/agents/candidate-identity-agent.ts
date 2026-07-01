@@ -32,6 +32,7 @@ import {
 } from '@/lib/rule-check/candidate-match/candidate-repo';
 import { makeAiFieldJudge } from '@/lib/rule-check/candidate-match/ai-equivalence';
 import type { AiFieldJudge } from '@/lib/rule-check/candidate-match/field-equivalence';
+import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 
 const AGENT_ID = 'rule-check-candidate-identity-agent';
 const AGENT_NAME = '候选人查重';
@@ -146,5 +147,10 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
 
 export const candidateIdentityAgent = inngest.createFunction(
   { id: AGENT_ID, name: AGENT_NAME, retries: 1, triggers: [{ event: 'CANDIDATE_IDENTITY_REQUESTED' }] },
-  async (ctx) => candidateIdentityHandler(ctx as unknown as HandlerCtx),
+  async (ctx) => {
+    const c = ctx as unknown as HandlerCtx & { logger?: { warn?: (message: string) => void } };
+    const paused = await skipIfRaasV1Paused(AGENT_ID, c.logger);
+    if (paused) return paused;
+    return candidateIdentityHandler(c);
+  },
 );

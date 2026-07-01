@@ -39,13 +39,29 @@ describe('POST /api/inngest-admin/sync-app', () => {
     expect(j.error).toMatch(/Invalid URL/);
   });
 
-  it('proxies to Inngest /fn/register on success', async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, modified: true }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+  it('400 when url points at a per-domain endpoint', async () => {
+    const r = await POST(makeReq({ url: 'http://app:3002/api/inngest/能源调度-v1' }));
+    expect(r.status).toBe(400);
+    const j = await r.json();
+    expect(j.error).toMatch(/RAAS-v1 main endpoint/);
+  });
+
+  it('PUTs the main SDK endpoint and verifies function count on success', async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, modified: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: { apps: [{ name: 'agentic-operator-main', functionCount: 6 }] },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
     global.fetch = fetchSpy as unknown as typeof fetch;
 
     const r = await POST(makeReq({ url: 'http://app:3002/api/inngest' }));
@@ -54,12 +70,13 @@ describe('POST /api/inngest-admin/sync-app', () => {
     expect(j.ok).toBe(true);
     expect(j.appUrl).toBe('http://app:3002/api/inngest');
     expect(j.inngestUrl).toBe('http://test-inngest:8288');
+    expect(j.functionsRegistered).toBe(6);
+    expect(j.expectedFunctions).toBe(6);
 
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
     const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
-    expect(calledUrl).toBe('http://test-inngest:8288/fn/register');
-    expect((calledInit as RequestInit).method).toBe('POST');
-    expect((calledInit as RequestInit).body).toContain('http://app:3002/api/inngest');
+    expect(calledUrl).toBe('http://app:3002/api/inngest');
+    expect((calledInit as RequestInit).method).toBe('PUT');
   });
 
   it('502 when Inngest fetch throws', async () => {

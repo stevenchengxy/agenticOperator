@@ -66,29 +66,43 @@ if (dockerUp) {
   warn("start Docker, then run `npm run pg:up && npx prisma db push`.");
 }
 
-// 3. Inngest event bus (soft-fail) — prefer Docker, fall back to local CLI hint
+// 3. Inngest event bus (soft-fail) — NATIVE inngest-cli only, NEVER Docker.
+//    A Docker-hosted Inngest can't reach the host app at localhost:3002 to
+//    complete SDK registration (agents fail to register with ECONNREFUSED),
+//    and it also breaks RAAS partner LAN access. The local CLI runs on the
+//    host and calls back to :3002 cleanly. Dedup-guarded + detached so a
+//    repeated `npm run dev` reuses the already-running server.
 const localInngestCli = resolve(ROOT, "node_modules/.bin/inngest-cli");
 const hasLocalCli = existsSync(localInngestCli);
 
-if (!dockerUp) {
-  if (hasLocalCli) {
-    warn("fallback: run `npm run inngest:dev` in another terminal (local CLI, no Docker)");
-  } else {
-    warn("no local inngest-cli — run `npm install`, then `npm run inngest:dev`");
-  }
+let inngestRunning = false;
+try {
+  execSync("pgrep -f 'inngest-cli dev'", { cwd: ROOT, stdio: "ignore" });
+  inngestRunning = true;
+} catch {
+  inngestRunning = false; // pgrep exits non-zero when no match
+}
+
+if (inngestRunning) {
+  log("Inngest dev server already running (native) — leaving it.");
+} else if (!hasLocalCli) {
+  warn("no local inngest-cli — run `npm install`, then `npm run inngest:dev`");
   warn("UI will load; event stream / agent runs are inert until Inngest is up");
 } else {
   try {
-    execSync("docker compose -f docker-compose.inngest.yml up -d", {
+    mkdirSync(resolve(ROOT, "logs"), { recursive: true });
+    const out = openSync(resolve(ROOT, "logs/inngest.log"), "a");
+    const serveUrl = `${process.env.INNGEST_SERVE_ORIGIN || "http://localhost:3002"}/api/inngest`;
+    const child = spawn(localInngestCli, ["dev", "--host", "0.0.0.0", "-u", serveUrl], {
       cwd: ROOT,
-      stdio: "inherit",
+      detached: true,
+      stdio: ["ignore", out, out],
     });
+    child.unref();
+    log(`started native Inngest dev server in background → logs/inngest.log (serve ${serveUrl})`);
   } catch (e) {
-    warn(`Inngest container start failed: ${e.message}`);
-    if (hasLocalCli) {
-      warn("fallback: run `npm run inngest:dev` in another terminal (local CLI, no Docker)");
-    }
-    warn("continuing without Inngest container");
+    warn(`could not start native Inngest: ${e.message}`);
+    warn("manual: run `npm run inngest:dev` in another terminal");
   }
 }
 

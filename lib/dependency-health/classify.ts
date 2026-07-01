@@ -63,7 +63,16 @@ function isEmptyRobohirePayload(op: string, data: Record<string, unknown> | null
       );
     }
     case 'generateJd':
-      return !(data.title || data.description || data.qualifications || data.hardRequirements);
+      // `title` is NOT a content signal: RoboHire fills the placeholder "Untitled"
+      // even when generation fails (and on success too), so a truthy title masks a
+      // completely empty JD. A usable JD must carry at least one real body field.
+      return !(
+        data.description ||
+        data.qualifications ||
+        data.hardRequirements ||
+        data.niceToHave ||
+        data.evaluationRules
+      );
     case 'inviteCandidate':
       return !(data.login_url || data.qrcode_url || data.user_id != null || data.reused);
     default:
@@ -84,7 +93,27 @@ export function classifyRobohire(op: string, errOrResponse: unknown): DepOutcome
     // errors — but stay defensive). Treat as a transient network fault.
     return fail('robohire', op, 'network', errOrResponse.message);
   }
-  const data = (errOrResponse as { data?: Record<string, unknown> } | null | undefined)?.data;
+  const resp = errOrResponse as
+    | { data?: Record<string, unknown>; meta?: { stages?: { parse?: string; generate?: string } } }
+    | null
+    | undefined;
+  // Authoritative per-stage signal (generate-jd): RoboHire returns `success: true`
+  // at the envelope level even when an internal stage failed — the real outcome is
+  // in meta.stages.{parse,generate}. A failed stage is a vendor-side fault; parse
+  // success means the input was readable, so a generate failure is transient →
+  // `server` (recoverable: park + retry). This is the same conclusion the client's
+  // generateJdDirect reaches by throwing; honoring it here keeps the classifier
+  // self-consistent for any caller that hands us a raw degraded response.
+  const stages = resp?.meta?.stages;
+  if (stages && (stages.parse === 'failed' || stages.generate === 'failed')) {
+    return fail(
+      'robohire',
+      op,
+      'server',
+      `${op} stage failed: parse=${stages.parse ?? '—'} generate=${stages.generate ?? '—'}`,
+    );
+  }
+  const data = resp?.data;
   if (isEmptyRobohirePayload(op, data)) {
     return fail('robohire', op, 'empty', `${op} 返回 200 但内容为空`);
   }

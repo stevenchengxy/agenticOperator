@@ -63,6 +63,12 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
     });
   const deleteRaw = (id: string) => fetch(`/api/agent-drafts/${encodeURIComponent(id)}`, { method: "DELETE" });
   const restoreRaw = (id: string) => fetch(`/api/agent-drafts/${encodeURIComponent(id)}/restore`, { method: "POST" });
+  const renameRaw = (id: string, nameZh: string) =>
+    fetch(`/api/agent-drafts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nameZh }),
+    });
 
   async function transition(row: AgentDraftRow, to: DraftLifecycle) {
     setBusyId(row.id);
@@ -91,6 +97,19 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
     setBusyId(row.id);
     try {
       await restoreRaw(row.id);
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Rename a factory-generated shell's display name (slug/Inngest id unchanged).
+  async function rename(row: AgentDraftRow) {
+    const next = window.prompt(t("dst_rename_prompt"), row.nameZh)?.trim();
+    if (!next || next === row.nameZh) return;
+    setBusyId(row.id);
+    try {
+      await renameRaw(row.id, next);
       await load();
     } finally {
       setBusyId(null);
@@ -205,6 +224,7 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
                           selected={selected.has(r.id)}
                           onToggleSelect={() => toggleOne(r.id)}
                         >
+                          {r.kind === "shell" && <ActionBtn busy={busyId === r.id || bulkBusy} onClick={() => rename(r)} label={t("dst_rename")} />}
                           <ActionBtn kind="primary" busy={busyId === r.id || bulkBusy} onClick={() => transition(r, "active")} label={t("dst_deploy")} />
                           <ActionBtn kind="danger" busy={busyId === r.id || bulkBusy} onClick={() => remove(r)} label={t("dst_delete")} />
                         </ShellCard>
@@ -241,6 +261,7 @@ export function DraftStorePanel({ open, onClose }: { open: boolean; onClose: () 
                           onToggleSelect={() => toggleOne(r.id)}
                           badge={<StatusBadge online={r.status === "active"} t={t} />}
                         >
+                          {r.kind === "shell" && <ActionBtn busy={busyId === r.id || bulkBusy} onClick={() => rename(r)} label={t("dst_rename")} />}
                           {r.status === "active" ? (
                             <ActionBtn busy={busyId === r.id || bulkBusy} onClick={() => transition(r, "offline")} label={t("dst_offline")} />
                           ) : (

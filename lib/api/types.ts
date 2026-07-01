@@ -50,6 +50,14 @@ export type AgentRow = {
   /** True iff agent is registered (real/shell) but currently paused
    *  (AgentConfig.enabled=false). UI uses this to show the resume affordance. */
   paused: boolean;
+  /** Operator-set display name override (from a managed AgentVersion row). When
+   *  present the Fleet shows this instead of t(displayName). Null = use the
+   *  built-in i18n / shell name. */
+  customName?: string | null;
+  /** Id for the lifecycle/rename/delete APIs (`/api/agent-drafts/[id]`): a real
+   *  agent's synthetic `real:<domain>:<short>` id, or a shell's AgentVersion id.
+   *  Null when the row isn't operator-manageable (e.g. an unmapped live fn). */
+  manageId?: string | null;
 };
 export type AgentsResponse = { agents: AgentRow[]; meta: ApiMeta };
 

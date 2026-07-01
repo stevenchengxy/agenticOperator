@@ -9,6 +9,10 @@ import { NextResponse } from 'next/server';
 import { listFunctions } from '@/lib/inngest-admin-client';
 import { prisma } from '@/server/db';
 import { AGENT_MAP } from '@/lib/agent-mapping';
+import {
+  isRaasV1FunctionSlug,
+  RAAS_V1_EXPECTED_FUNCTION_COUNT,
+} from '@/lib/raas-v1-inngest';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +44,7 @@ function buildMonitoredFallback(): Record<string, { name: string; triggers: Arra
 
 export async function GET() {
   try {
-    const functions = await listFunctions();
+    const functions = (await listFunctions()).filter((f) => isRaasV1FunctionSlug(f.slug));
 
     // Read every disabled agent slug so we can (a) mark live ones as paused
     // and (b) inject ghost entries for ones Inngest no longer sees.
@@ -55,7 +59,7 @@ export async function GET() {
         where: { enabled: false },
         select: { id: true },
       });
-      pausedSlugs = disabled.map((c) => c.id);
+      pausedSlugs = disabled.map((c) => c.id).filter(isRaasV1FunctionSlug);
     } catch (e) {
       console.warn(
         '[functions-admin] AgentConfig query failed; pause state may be temporarily wrong:',
@@ -94,6 +98,7 @@ export async function GET() {
       functions: combined,
       meta: {
         total: combined.length,
+        expectedCount: RAAS_V1_EXPECTED_FUNCTION_COUNT,
         liveCount: liveMapped.length,
         pausedCount: combined.filter((f) => f.paused).length,
         generatedAt: new Date().toISOString(),

@@ -136,6 +136,28 @@ export function compileGraph(
 }
 
 /**
+ * Deterministic completeness. The set of actor=Agent action names that have NO
+ * covering spec yet. The "checklist" is re-derived from the live ontology, so it
+ * is ADAPTIVE (varies per domain) — never a hardcoded agent list. It matches the
+ * exact universe read_ontology exposes to the brain: actions whose actor includes
+ * "Agent" (a pure Human / System action is not an agent the factory must build).
+ *
+ * This is an ACCEPTANCE CRITERION, not a fallback: a non-empty gap means the run
+ * has not produced a working agent for every action — the finish tool fails on it
+ * (no force-allow, no degraded shells). Fully-AI: the brain must cover the spec.
+ */
+export function coverageGap(
+  actions: ReadonlyArray<{ name: string; actor: string[] }>,
+  coveredActionNames: Iterable<string>,
+): string[] {
+  const covered = new Set(coveredActionNames);
+  return actions
+    .filter((a) => a.actor.includes("Agent"))
+    .map((a) => a.name)
+    .filter((name) => !covered.has(name));
+}
+
+/**
  * Statically verify graph closure. A healthy graph has: every consumed event is
  * produced or is an entry event; every emitted event is consumed or is a
  * terminal event; at least one entry and one terminal; every node reachable.

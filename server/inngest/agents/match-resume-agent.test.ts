@@ -58,6 +58,7 @@ vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
 }));
 
 import {
+  buildResumeTextFromParsed,
   matchResumeAgentHandler,
   verifyRuleCheckPassedForMatch,
 } from './match-resume-agent';
@@ -207,5 +208,71 @@ describe('matchResumeAgentHandler — pre-RoboHire rule-check gate', () => {
     expect(payload.jd).toContain('入岗前规则检查结论');
     expect(payload.jd).toContain('系统注入,非岗位 JD 原文');
     expect(payload.jd).toContain('10-25 学历底线:通过');
+  });
+});
+
+describe('buildResumeTextFromParsed — RoboHire 结构化 → 干净简历文本', () => {
+  // 真实 RoboHire 解析形状(取自 __fixtures__/real-run-chensiying.ts)。
+  const structured = {
+    name: '陈思',
+    phone: '138****0000',
+    email: 'redacted@example.com',
+    experience: [
+      { company: '字节跳动（深圳）科技有限公司', title: '行政文秘专员', startDate: '2024.03', endDate: '至今' },
+      { company: '深圳本技有限公司', title: '行政助理', startDate: '2021.07', endDate: '2024.02' },
+    ],
+    education: [{ school: '北京师范大学', degree: '本科', major: '汉语言文学（师范）', endDate: '2021.06' }],
+    skills: { technical: ['Excel 数据透视', '公文写作'], tools: ['飞书', '企业微信', '腾讯文档'] },
+  };
+
+  it('把结构化字段渲染成带标签的可读文本,而非裸 JSON', () => {
+    const text = buildResumeTextFromParsed(structured);
+    // 人读得懂的值都在
+    expect(text).toContain('陈思');
+    expect(text).toContain('字节跳动（深圳）科技有限公司');
+    expect(text).toContain('行政文秘专员');
+    expect(text).toContain('北京师范大学');
+    expect(text).toContain('汉语言文学（师范）');
+    expect(text).toContain('Excel 数据透视');
+    expect(text).toContain('飞书');
+    // 不是裸 JSON 语法(键名/花括号/引号噪声)
+    expect(text).not.toContain('"technical"');
+    expect(text).not.toContain('{"');
+  });
+
+  it('无法抽取任何已知字段时返回空串(交给上层回退 rawText)', () => {
+    expect(buildResumeTextFromParsed(null)).toBe('');
+    expect(buildResumeTextFromParsed(undefined)).toBe('');
+    expect(buildResumeTextFromParsed({})).toBe('');
+    expect(buildResumeTextFromParsed({ unknown_field: 1 })).toBe('');
+  });
+
+  it('已是纯文本的简历原样返回', () => {
+    expect(buildResumeTextFromParsed('张三 后端工程师' as never)).toContain('张三 后端工程师');
+  });
+});
+
+describe('matchResumeAgentHandler — resume 入参改用结构化渲染', () => {
+  it('优先把结构化渲染文本作为 resume 发给 RoboHire,而非 rawText 原文', async () => {
+    await runHandler(
+      passedData({
+        parsed_resume: { name: '李四', skills: { technical: ['Kubernetes'] } },
+        parsed_content: 'RAWTEXT_NOT_PRIMARY 李四 简历原始文字',
+      }),
+    );
+    const [payload] = mockMatchResumeDirect.mock.calls[0] as [{ resume: string }];
+    expect(payload.resume).toContain('Kubernetes'); // 结构化字段被渲染进去
+    expect(payload.resume).not.toContain('RAWTEXT_NOT_PRIMARY'); // 不再以 rawText 为主
+  });
+
+  it('结构化为空时回退到 rawText(parsed_content),不发空简历', async () => {
+    await runHandler(
+      passedData({
+        parsed_resume: {},
+        parsed_content: '李四 简历纯文本兜底',
+      }),
+    );
+    const [payload] = mockMatchResumeDirect.mock.calls[0] as [{ resume: string }];
+    expect(payload.resume).toContain('李四 简历纯文本兜底');
   });
 });

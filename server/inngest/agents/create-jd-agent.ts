@@ -44,6 +44,7 @@ import {
   writeJobRequisitionInstance,
 } from '@/lib/allmeta-writers';
 import { inngest, type JdGeneratedEnvelope } from '@/server/inngest/client';
+import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
 
@@ -114,6 +115,9 @@ export const createJdAgent = inngest.createFunction(
     ],
   },
   async ({ event, step, logger, runId }) => {
+    const paused = await skipIfRaasV1Paused(AGENT_ID, logger);
+    if (paused) return paused;
+
     if (!isPartnerPgConfigured()) {
       throw new NonRetriableError(
         `[${AGENT_NAME}] RAAS_POSTGRES_URL env 未配置`,

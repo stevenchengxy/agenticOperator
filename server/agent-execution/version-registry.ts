@@ -91,6 +91,6 @@ export function ruleTextSha256(version: string, ruleId: string): string | null {
 /** Normalize partner domain aliases to AO's recruitment ontology id. */
 export function normalizeDomain(domain: string): string {
   const d = (domain ?? '').trim();
-  if (d === 'RAAS-v1' || d === 'raas' || d === '' || d === '招聘-v1') return '招聘-v1';
+  if (d === 'RAAS-v1' || d === 'raas' || d === '' || d === '招聘-v1') return 'RAAS-v1';
   return d;
 }

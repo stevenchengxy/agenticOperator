@@ -31,6 +31,7 @@ import {
   type MatchRuleCheckPassedData,
   type RuleCheckAuditMeta,
 } from '@/server/inngest/client';
+import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 import { appendRuleCheckToJd } from '@/lib/rule-check/match-jd-augment';
 
 // Loose shape — the merged JR object from rule-check carries arbitrary
@@ -48,6 +49,9 @@ export const matchResumeAgent = inngest.createFunction(
     triggers: [{ event: 'MATCH_RULE_CHECK_PASSED' }],
   },
   async ({ event, step, logger, runId }) => {
+    const paused = await skipIfRaasV1Paused(AGENT_ID, logger);
+    if (paused) return paused;
+
     return await matchResumeAgentHandler({ event, step, logger, runId });
   },
 );
@@ -113,19 +117,24 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
       };
     }
 
-  // 2026-05-21 partner contract: pass PDF plain text (parsed_content /
-  // RoboHire rawText) as the `resume` parameter. Falls back to the legacy
-  // stringified-JSON shape only when parsed_content is missing (e.g. older
-  // resume rows from before partner started writing the column, or RoboHire
-  // didn't return rawText for that PDF).
+  // 2026-06-25: pass RoboHire's STRUCTURED parse — rendered to clean labeled text
+  // by buildResumeTextFromParsed — as the `resume` parameter, mirroring how the jd
+  // side is built from structured job_requisition fields via
+  // flattenRequirementForMatch. The raw PDF text (parsed_content / rawText) is now
+  // a fallback used only when the structured parse yields nothing renderable, so we
+  // never send an empty resume to /match-resume.
+  // (Supersedes the 2026-05-21 rawText-first contract; rawText stays in the event
+  //  payload for rule-check / identity, this only changes the matcher's input.)
   const parsedContent =
     typeof data.parsed_content === 'string' && data.parsed_content.trim().length > 0
       ? data.parsed_content
       : null;
-  const resumeText = parsedContent ?? buildResumeTextFromParsed(data.parsed_resume);
-  const resumeSource: 'parsed_content' | 'parsed_resume_json' = parsedContent
-    ? 'parsed_content'
-    : 'parsed_resume_json';
+  const structuredResumeText = buildResumeTextFromParsed(data.parsed_resume);
+  const usingStructured = structuredResumeText.trim().length > 0;
+  const resumeText = usingStructured ? structuredResumeText : parsedContent ?? '';
+  const resumeSource: 'parsed_resume_structured' | 'parsed_content' = usingStructured
+    ? 'parsed_resume_structured'
+    : 'parsed_content';
   // 2026-06-12(领导要求):把规则检查结论追加进 jd 文本发给 RoboHire 做深度匹配
   // (接口仍是 {resume, jd})。MATCH_ATTACH_RULECHECK=0 可关回纯 JD。
   const jdText =
@@ -340,9 +349,69 @@ function pickClientId(req: RequirementsAgentViewItem): string | undefined {
   return undefined;
 }
 
-function buildResumeTextFromParsed(parsed: Record<string, unknown> | null | undefined): string {
+// Render RoboHire's structured parse (name / experience[] / education[] / skills)
+// into clean labeled resume text — the candidate-side mirror of
+// flattenRequirementForMatch (which does the same for the JD side). We send this
+// instead of raw PDF text so /match-resume sees denoised, structured signal.
+// Returns '' when nothing usable can be extracted, so the caller falls back to
+// the raw parsed_content (rawText) rather than sending an empty resume.
+export function buildResumeTextFromParsed(parsed: Record<string, unknown> | null | undefined): string {
   if (!parsed) return '';
-  return typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
+  if (typeof parsed === 'string') return parsed;
+  if (typeof parsed !== 'object') return '';
+
+  const r = parsed as Record<string, any>;
+  const lines: string[] = [];
+  const str = (v: unknown): string =>
+    typeof v === 'string' ? v.trim() : v == null ? '' : String(v);
+
+  if (str(r.name)) lines.push(`姓名: ${str(r.name)}`);
+
+  const contact = [str(r.phone ?? r.mobile), str(r.email)].filter(Boolean).join(' · ');
+  if (contact) lines.push(`联系方式: ${contact}`);
+
+  const exp = Array.isArray(r.experience)
+    ? r.experience
+    : Array.isArray(r.workExperience)
+      ? r.workExperience
+      : [];
+  const expLines = exp
+    .map((e: any) => {
+      if (!e || typeof e !== 'object') return str(e);
+      const head = [str(e.company), str(e.title)].filter(Boolean).join(' · ');
+      const span = [str(e.startDate), str(e.endDate)].filter(Boolean).join(' - ');
+      return [head, span ? `(${span})` : ''].filter(Boolean).join(' ');
+    })
+    .filter(Boolean);
+  if (expLines.length) lines.push(`\n工作经历:\n  - ${expLines.join('\n  - ')}`);
+
+  const edu = Array.isArray(r.education) ? r.education : [];
+  const eduLines = edu
+    .map((e: any) => {
+      if (!e || typeof e !== 'object') return str(e);
+      const head = [str(e.school), str(e.degree), str(e.major)].filter(Boolean).join(' · ');
+      const span = str(e.endDate ?? e.graduationYear);
+      return [head, span ? `(${span})` : ''].filter(Boolean).join(' ');
+    })
+    .filter(Boolean);
+  if (eduLines.length) lines.push(`\n教育背景:\n  - ${eduLines.join('\n  - ')}`);
+
+  const skillItems: string[] = [];
+  const s = r.skills;
+  if (Array.isArray(s)) skillItems.push(...s.map(str));
+  else if (s && typeof s === 'object')
+    for (const v of Object.values(s)) {
+      if (Array.isArray(v)) skillItems.push(...v.map(str));
+      else if (str(v)) skillItems.push(str(v));
+    }
+  else if (str(s)) skillItems.push(str(s));
+  const skills = skillItems.filter(Boolean);
+  if (skills.length) lines.push(`\n技能:\n  - ${skills.join('\n  - ')}`);
+
+  if (str(r.summary)) lines.push(`\n个人摘要:\n${str(r.summary)}`);
+  if (str(r.selfEvaluation)) lines.push(`\n自我评价:\n${str(r.selfEvaluation)}`);
+
+  return lines.join('\n').trim();
 }
 
 type RuleCheckGateResult =

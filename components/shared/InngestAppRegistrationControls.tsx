@@ -6,9 +6,10 @@ import { Badge, Btn } from "@/components/shared/atoms";
 import { Ic } from "@/components/shared/Ic";
 import { useDomain, type Domain } from "@/lib/domains";
 import { useApp } from "@/lib/i18n";
+import { RAAS_V1_EXPECTED_FUNCTION_COUNT } from "@/lib/raas-v1-inngest";
 
 type SyncResult =
-  | { ok: true; functionsRegistered: number | null }
+  | { ok: true; functionsRegistered: number | null; expectedFunctions: number }
   | { ok: false; error: string };
 
 type MainAppProps = {
@@ -50,7 +51,11 @@ export function MainInngestAppRegistration({
       });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error ?? "sync failed");
-      setResult({ ok: true, functionsRegistered: j.functionsRegistered ?? null });
+      setResult({
+        ok: true,
+        functionsRegistered: j.functionsRegistered ?? null,
+        expectedFunctions: j.expectedFunctions ?? RAAS_V1_EXPECTED_FUNCTION_COUNT,
+      });
       await onSynced?.();
     } catch (e) {
       setResult({ ok: false, error: (e as Error).message });
@@ -68,7 +73,7 @@ export function MainInngestAppRegistration({
             {t("settings_env_main_app_hint")}
           </div>
         </div>
-        {!compact && <Badge variant="info">agentic-operator-main</Badge>}
+        {!compact && <Badge variant="info">RAAS-v1 · {RAAS_V1_EXPECTED_FUNCTION_COUNT} functions</Badge>}
       </div>
 
       <div className="mt-3 flex min-w-0 flex-wrap items-stretch gap-1.5">
@@ -91,20 +96,33 @@ export function MainInngestAppRegistration({
         </Btn>
       </div>
 
-      {result && (
-        <div className={clsx("mt-2 text-[11.5px] leading-5", result.ok ? "text-[color:var(--c-ok)]" : "text-[color:var(--c-err)]")}>
-          {result.ok ? (
-            <>
-              {t("sync_app_success")} ·{" "}
-              {result.functionsRegistered != null
-                ? t("sync_app_fn_count").replace("{n}", String(result.functionsRegistered))
-                : t("sync_app_fn_count_unknown")}
-            </>
-          ) : (
-            <span className="break-all">{t("sync_app_error")}: {result.error}</span>
-          )}
-        </div>
-      )}
+      {result && <SyncResultLine result={result} />}
+    </div>
+  );
+}
+
+function SyncResultLine({ result }: { result: SyncResult }) {
+  const { t } = useApp();
+  if (!result.ok) {
+    return (
+      <div className="mt-2 text-[11.5px] leading-5 text-[color:var(--c-err)]">
+        <span className="break-all">{t("sync_app_error")}: {result.error}</span>
+      </div>
+    );
+  }
+
+  const mismatch =
+    result.functionsRegistered != null &&
+    result.functionsRegistered !== result.expectedFunctions;
+  return (
+    <div className={clsx("mt-2 text-[11.5px] leading-5", mismatch ? "text-warn" : "text-[color:var(--c-ok)]")}>
+      {t("sync_app_success")} ·{" "}
+      {result.functionsRegistered != null
+        ? t("sync_app_fn_count").replace("{n}", String(result.functionsRegistered))
+        : t("sync_app_fn_count_unknown")}
+      {" · "}
+      {t("sync_app_expected_fn_count").replace("{n}", String(result.expectedFunctions))}
+      {mismatch && <> · {t("sync_app_fn_count_mismatch")}</>}
     </div>
   );
 }

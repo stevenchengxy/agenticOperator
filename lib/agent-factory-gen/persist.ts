@@ -66,6 +66,12 @@ export interface PersistResult {
 export interface PersistOptions {
   /** version label; defaults to a factory timestamp. */
   versionLabel?: string;
+  /** Override the AgentVersion.domain column (the DEPLOY target / which Inngest
+   *  app serves it) independently of spec.domainId (which still drives the tool
+   *  registry + dry-run at runtime). Used to deploy a sandbox copy to a dedicated
+   *  `sandbox-<domain>` app without touching the real domain's app. Defaults to
+   *  spec.domainId. */
+  deployDomain?: string;
 }
 
 /** Write each generated spec as a draft AgentVersion row. Idempotent: versionLabel
@@ -101,7 +107,7 @@ export async function persistSpecs(
           slug: s.slug,
           versionLabel,
           status: "draft",
-          domain: s.domainId,
+          domain: opts.deployDomain ?? s.domainId,
           capturedFrom: "ontology-gen",
           generatedBy: "agent-factory-gen",
           configJson: JSON.stringify(card),
@@ -124,4 +130,28 @@ export async function persistSpecs(
   }
 
   return { persisted, skipped, errors, versionLabel };
+}
+
+/** Persist the current generation as the domain's DRAFT set and refresh it:
+ *  write the specs as draft rows (idempotent on content hash) and drop stale
+ *  ontology-gen drafts from earlier generations of the SAME domain, so the Fleet
+ *  drafts list reflects exactly the current generated set instead of piling up.
+ *  Called from the brain's generate step so generated agents land in the Fleet
+ *  drafts immediately — before any deploy decision. */
+export async function syncDomainDrafts(
+  domain: string,
+  specs: GeneratedAgentSpec[],
+): Promise<PersistResult> {
+  const res = await persistSpecs(specs);
+  if (res.versionLabel) {
+    await prisma.agentVersion.deleteMany({
+      where: {
+        domain,
+        capturedFrom: "ontology-gen",
+        status: "draft",
+        versionLabel: { not: res.versionLabel },
+      },
+    });
+  }
+  return res;
 }

@@ -44,7 +44,39 @@ export function canonicalDomain(d: string): string {
 
 /** True when the domain must run dry-run no matter what (case/space-insensitive). */
 export function isForceDryRunDomain(d: string): boolean {
-  return FORCE_DRYRUN_DOMAINS.has(canonicalDomain(d));
+  return FORCE_DRYRUN_DOMAINS.has(canonicalDomain(d)) || isSandboxDomain(d);
+}
+
+/** P1-3 (audit MAJOR): fail-closed live-write allowlist. A write/dual-write tool only
+ *  performs REAL side effects when its domain is EXPLICITLY listed in LIVE_WRITE_DOMAINS
+ *  (comma-separated env). Default = empty → every write degrades to dry-run (mock), so
+ *  a new domain wired to a real registry, or a forgotten FORCE_DRYRUN, can NOT silently
+ *  fire real inviteCandidate / partner-pg writes. Inventory the domains that genuinely
+ *  need live writes into LIVE_WRITE_DOMAINS before flipping any to real. Dry-run/sandbox
+ *  domains are mock regardless. */
+export const LIVE_WRITE_ALLOWLIST = new Set(
+  (process.env.LIVE_WRITE_DOMAINS ?? "").split(",").map((d) => canonicalDomain(d)).filter(Boolean),
+);
+export function isLiveWriteAllowed(d: string): boolean {
+  if (isForceDryRunDomain(d)) return false; // dry-run/sandbox domains never do real writes
+  return LIVE_WRITE_ALLOWLIST.has(canonicalDomain(d));
+}
+
+/** Prefix marking a DEDICATED sandbox-test Inngest app, isolated from any real
+ *  domain's app. The factory's sandbox deploys the generated agents here (NOT to
+ *  the domain's own `agentic-operator-<domain>` app), runs the chain, then tears
+ *  it down — so a domain's production app is never polluted by a test run. */
+export const SANDBOX_DOMAIN_PREFIX = "sandbox-";
+
+/** The dedicated sandbox-test domain id for a real domain (→ Inngest app
+ *  `agentic-operator-sandbox-<domain>`, serve route `/api/inngest/sandbox-<domain>`). */
+export function sandboxDomainFor(realDomain: string): string {
+  return `${SANDBOX_DOMAIN_PREFIX}${realDomain}`;
+}
+
+/** True when a domain id refers to a sandbox-test app (always dry-run). */
+export function isSandboxDomain(d: string): boolean {
+  return canonicalDomain(d).startsWith(SANDBOX_DOMAIN_PREFIX);
 }
 
 function isRecruitGenDomain(d: string): boolean {

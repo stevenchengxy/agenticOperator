@@ -36,7 +36,13 @@ export type OntologyAction = {
   tool_use: string[];
   system_prompt: string;
   user_prompt: string;
+  /** BUSINESS input schema (DataObject-grounded: name/type/description/source_object/
+   *  required). The agent's inputs at the event level — NOT a tool's I/O (that lives
+   *  in the tool library). Previously dropped on the floor; now parsed. */
+  inputs?: Array<Record<string, unknown>>;
   outputs?: Array<Record<string, unknown>>;
+  /** preconditions that must hold before the action runs (numbered prose). */
+  submission_criteria?: string;
   side_effects?: Record<string, unknown>;
 };
 
@@ -208,52 +214,136 @@ async function allmetaList(resource: string, domainId: string): Promise<Node[]> 
   }
 }
 
+// ── domain-id resolution ─────────────────────────────────────────────────────
+//
+// AO-internal domain ids (e.g. "agents-generation") can differ in case/format
+// from the canonical Allmeta/Neo4j id (e.g. "Agents-generation"). The ontology
+// resource endpoints match `?domain=` CASE-SENSITIVELY, so a mismatched id
+// silently returns zero items. Resolve the AO id to the canonical Allmeta id via
+// the domains list (matched on id OR display name, ignoring case/space/_/-),
+// cached briefly. Fail-safe: returns the input unchanged when the list is
+// unavailable or nothing matches (so snapshot domains never regress).
+export type AllmetaDomain = { id: string; name?: string };
+let DOMAIN_LIST_CACHE: { at: number; list: AllmetaDomain[] } | null = null;
+const DOMAIN_LIST_TTL_MS = 60_000;
+
+/** All business domains known to Allmeta (id + display name). Public so the
+ *  factory's front-desk can answer "有几个域 / 都有哪些域" without a generation run. */
+export async function listDomains(): Promise<AllmetaDomain[]> {
+  return allmetaDomains();
+}
+
+async function allmetaDomains(): Promise<AllmetaDomain[]> {
+  if (!ALLMETA_BASE) return [];
+  if (DOMAIN_LIST_CACHE && Date.now() - DOMAIN_LIST_CACHE.at < DOMAIN_LIST_TTL_MS) return DOMAIN_LIST_CACHE.list;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ALLMETA_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${ALLMETA_BASE.replace(/\/+$/, "")}/api/domains`, {
+      headers: ALLMETA_KEY ? { Authorization: `Bearer ${ALLMETA_KEY}` } : {},
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) return DOMAIN_LIST_CACHE?.list ?? [];
+    const body = (await res.json()) as { domains?: AllmetaDomain[] };
+    const list = Array.isArray(body.domains) ? body.domains : [];
+    DOMAIN_LIST_CACHE = { at: Date.now(), list };
+    return list;
+  } catch {
+    return DOMAIN_LIST_CACHE?.list ?? [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const normDomainId = (s: string): string => s.toLowerCase().normalize("NFKC").replace(/[\s_-]+/g, "");
+
+/** Resolve an AO domain id to the canonical Allmeta domain id (matched on id or
+ *  display name, case/format-insensitive). Returns the input unchanged when no
+ *  domains list is available or no match is found. */
+export async function resolveAllmetaDomainId(domainId: string): Promise<string> {
+  const domains = await allmetaDomains();
+  if (!domains.length) return domainId;
+  const want = normDomainId(domainId);
+  const hit = domains.find((d) => normDomainId(d.id) === want || (d.name ? normDomainId(d.name) === want : false));
+  return hit?.id ?? domainId;
+}
+
 function normalizeAllmetaObject(n: Node): OntologyObject {
   return {
-    id: String(n.uid ?? n.id ?? ""),
-    name: String(n.name ?? n.uid ?? ""),
+    id: String(n.id ?? n.uid ?? ""),
+    name: String(n.name ?? n.id ?? n.uid ?? ""),
     description: typeof n.description === "string" ? n.description : undefined,
     type: typeof n.type === "string" ? n.type : undefined,
     primary_key: typeof n.primary_key === "string" ? n.primary_key : undefined,
-    properties: parseJsonField(n.properties_json, [] as OntologyObject["properties"]),
+    // Live Allmeta serializes properties as a stringified `properties` field;
+    // older exports used `properties_json`. Accept either.
+    properties: parseJsonField(n.properties ?? n.properties_json, [] as OntologyObject["properties"]),
   };
 }
 
 function normalizeAllmetaEvent(n: Node): OntologyEvent {
+  // Live Allmeta nests the payload as a stringified `payload` field
+  // ({source_action, event_data, state_mutations}); older exports carried bare
+  // `event_data_json` / `mutations_json`. Parse the envelope, fall back to bare.
+  const payload = parseJsonField(n.payload, {} as Record<string, unknown>);
+  const topSrc = typeof n.source_action === "string" && n.source_action ? n.source_action : null;
+  const paySrc = typeof payload.source_action === "string" && payload.source_action ? payload.source_action : null;
   return {
     name: String(n.name ?? ""),
     description: typeof n.description === "string" ? n.description : undefined,
     payload: {
-      source_action: typeof n.source_action === "string" ? n.source_action : null,
-      event_data: parseJsonField(n.event_data_json, [] as OntologyEvent["payload"]["event_data"]),
-      state_mutations: parseJsonField(n.mutations_json, [] as OntologyEvent["payload"]["state_mutations"]),
+      source_action: topSrc ?? paySrc,
+      event_data: Array.isArray(payload.event_data)
+        ? (payload.event_data as OntologyEvent["payload"]["event_data"])
+        : parseJsonField(n.event_data_json, [] as OntologyEvent["payload"]["event_data"]),
+      state_mutations: Array.isArray(payload.state_mutations)
+        ? (payload.state_mutations as OntologyEvent["payload"]["state_mutations"])
+        : parseJsonField(n.mutations_json, [] as OntologyEvent["payload"]["state_mutations"]),
     },
   };
 }
 
 function normalizeAllmetaAction(n: Node, emitByAction: Map<string, string[]>): OntologyAction {
   const name = String(n.name ?? "");
+  // Live Allmeta serializes list/object fields as stringified `*_json` and uses
+  // `trigger_json` (consumed) + `triggered_event_json` (emitted) + `actor_json`.
+  // Older exports carried bare `actor` / `trigger_events`. Parse `*_json` first,
+  // fall back to the bare field so both shapes work. The `actor` parse is
+  // load-bearing: the brain filters Agent actions via actor.includes("Agent"),
+  // so a missed parse makes a live domain look like it has zero agents.
+  const actor = asArray(parseJsonField(n.actor_json ?? n.actor, [] as string[]));
+  const trigger = asArray(parseJsonField(n.trigger_json ?? n.trigger_events, [] as string[]));
+  const emitted = asArray(parseJsonField(n.triggered_event_json ?? n.triggered_event, [] as string[]));
   return {
-    id: String(n.action_id ?? n.id ?? ""),
+    id: String(n.id ?? n.action_id ?? ""),
     name,
     description: typeof n.description === "string" ? n.description : undefined,
     category: typeof n.category === "string" ? n.category : undefined,
-    actor: asArray(n.actor),
-    trigger: asArray(n.trigger_events), // Allmeta: trigger_events = consumed
-    triggered_event: emitByAction.get(name) ?? [], // derived from events' source_action
-    target_objects: asArray(n.target_objects),
-    // Allmeta deployment doesn't carry prompts/tools/side-effects on the node;
-    // they're only needed to RUN an agent (snapshot path), not to display/infer.
-    tool_use: asArray(n.tool_use),
+    actor,
+    trigger,
+    // Prefer the action's own emitted list; fall back to deriving from each
+    // event's source_action when the node doesn't carry it.
+    triggered_event: emitted.length ? emitted : (emitByAction.get(name) ?? []),
+    target_objects: asArray(parseJsonField(n.target_objects_json ?? n.target_objects, [] as string[])),
+    // Allmeta deployment doesn't carry prompts/tools on the node; they're only
+    // needed to RUN an agent (snapshot path), not to display/infer. tool_use is
+    // therefore usually empty live — the factory binds tools from the registry.
+    tool_use: asArray(parseJsonField(n.tool_use_json ?? n.tool_use, [] as string[])),
     system_prompt: typeof n.system_prompt === "string" ? n.system_prompt : "",
     user_prompt: typeof n.user_prompt === "string" ? n.user_prompt : "",
+    inputs: parseJsonField(n.inputs_json, [] as OntologyAction["inputs"]),
     outputs: parseJsonField(n.outputs_json, [] as OntologyAction["outputs"]),
+    submission_criteria: typeof n.submission_criteria === "string" ? n.submission_criteria : undefined,
     side_effects: parseJsonField(n.side_effects_json, {} as OntologyAction["side_effects"]),
   };
 }
 
 /** Fetch + normalize a domain's ontology from Allmeta (the live Neo4j read). */
-async function fetchAllmetaOntology(domainId: string): Promise<DomainOntology | null> {
+async function fetchAllmetaOntology(aoDomainId: string): Promise<DomainOntology | null> {
+  // Translate the AO id to the canonical Allmeta id once (the resource queries
+  // are case-sensitive). Everything downstream keeps the AO-facing id.
+  const domainId = await resolveAllmetaDomainId(aoDomainId);
   const [actionsRaw, eventsRaw] = await Promise.all([
     allmetaList("actions", domainId),
     allmetaList("events", domainId),
@@ -278,7 +368,7 @@ async function fetchAllmetaOntology(domainId: string): Promise<DomainOntology | 
   }
 
   return {
-    domainId,
+    domainId: aoDomainId, // keep the AO-facing id so downstream keying stays stable
     objects: objectsRaw.map(normalizeAllmetaObject),
     rules: rulesRaw as OntologyRule[],
     actions: dedupeActionsByName(actionsRaw.map((n) => normalizeAllmetaAction(n, emitByAction))),
@@ -336,4 +426,29 @@ export async function fetchDomainOntology(domainId: string): Promise<DomainOntol
 export async function fetchRunnableOntology(domainId: string): Promise<DomainOntology> {
   if (hasSnapshot(domainId)) return loadSnapshotOntology(domainId);
   return fetchDomainOntology(domainId);
+}
+
+/**
+ * STRICT factory read: LIVE Allmeta → Neo4j ONLY. No snapshot, no empty shell.
+ * The Agent Factory must generate from the REAL Neo4j ontology or not at all — a
+ * stale/local snapshot would mint agents wired to the wrong contract. So when
+ * Allmeta returns nothing usable (unreachable / wrong domain id / empty graph),
+ * this THROWS, which the factory turns into a blocked run rather than silently
+ * building on fallback data. Used by the v3 brain's read_ontology.
+ */
+export async function fetchLiveOntologyStrict(domainId: string): Promise<DomainOntology> {
+  let live: DomainOntology | null;
+  try {
+    live = await fetchAllmetaOntology(domainId);
+  } catch (e) {
+    throw new Error(
+      `本体读取失败:无法从 Allmeta 读取域「${domainId}」(${(e as Error).message})。已阻断生成——不回退 snapshot。请检查 ALLMETA_BASE_URL 是否可达、域 id 是否正确、Neo4j 是否有该域本体。`,
+    );
+  }
+  if (!live || live.actions.length === 0) {
+    throw new Error(
+      `本体读取失败:Allmeta 未返回域「${domainId}」的可用本体(actions=${live?.actions.length ?? 0})。已阻断生成——不回退 snapshot。请确认 ALLMETA_BASE_URL 可达、域 id 正确、Neo4j 里灌了该域本体。`,
+    );
+  }
+  return live;
 }

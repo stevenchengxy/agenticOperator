@@ -63,6 +63,46 @@ describe('classifyRobohire — empty-200 predicates', () => {
     expect(classifyRobohire('generateJd', { data: {} })).toMatchObject({ ok: false, reason: 'empty' });
     expect(classifyRobohire('generateJd', { data: { description: 'We are hiring…' } })).toEqual({ ok: true });
   });
+  it('generateJd: placeholder title "Untitled" with empty content → empty (title is "Untitled" on success too, so it is never a content signal)', () => {
+    // Real RoboHire failure payload (meta.stages.generate="failed"): every content
+    // field is "" yet title is the placeholder "Untitled". The old check keyed on
+    // `data.title` truthiness → spurious "ok". A title alone is never a usable JD.
+    expect(
+      classifyRobohire('generateJd', {
+        data: {
+          title: 'Untitled',
+          description: '',
+          qualifications: '',
+          hardRequirements: '',
+          niceToHave: '',
+          evaluationRules: '',
+        },
+      }),
+    ).toMatchObject({ ok: false, reason: 'empty' });
+  });
+  it('generateJd: meta.stages.generate="failed" → server (recoverable) even when title="Untitled" looks present', () => {
+    // RoboHire's authoritative failure signal. parse succeeded (input was readable)
+    // so a generate failure is a transient vendor-side fault → recoverable.
+    expect(
+      classifyRobohire('generateJd', {
+        data: { title: 'Untitled', qualifications: '', hardRequirements: '', description: '' },
+        meta: { stages: { parse: 'success', generate: 'failed' } },
+      }),
+    ).toMatchObject({ ok: false, reason: 'server' });
+  });
+  it('generateJd: both stages success + real content → ok', () => {
+    expect(
+      classifyRobohire('generateJd', {
+        data: {
+          title: 'Untitled',
+          description: '加入腾讯 PCG…',
+          qualifications: '## 教育背景…',
+          hardRequirements: '1. 全日制本科…',
+        },
+        meta: { stages: { parse: 'success', generate: 'success' } },
+      }),
+    ).toEqual({ ok: true });
+  });
   it('inviteCandidate: no entry fields → empty; login_url/reused present → ok', () => {
     expect(classifyRobohire('inviteCandidate', { data: {} })).toMatchObject({ ok: false, reason: 'empty' });
     expect(classifyRobohire('inviteCandidate', { data: { login_url: 'https://x' } })).toEqual({ ok: true });

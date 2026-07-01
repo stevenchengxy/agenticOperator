@@ -14,12 +14,23 @@ import {
 import { invalidateHandlerCache } from '@/app/api/inngest/route';
 import { invalidateRegistryCache } from '@/lib/inngest-registry';
 import { writeManageAudit } from '@/lib/manage/audit';
+import { isRaasV1FunctionSlug } from '@/lib/raas-v1-inngest';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   try {
+    if (!isRaasV1FunctionSlug(slug)) {
+      return NextResponse.json(
+        {
+          error: 'unsupported-function-scope',
+          message: `${slug} is not one of the six RAAS-v1 functions served by agentic-operator-main`,
+        },
+        { status: 400 },
+      );
+    }
+
     const body = (await req.json()) as { paused?: boolean };
     const paused = Boolean(body.paused);
     const prev = await prisma.agentConfig.findUnique({ where: { id: slug } });

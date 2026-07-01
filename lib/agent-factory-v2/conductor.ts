@@ -7,7 +7,7 @@ import { validateSpecs, type ValidationResult } from "./builders/validator";
 import { simulateChain, type SmokeResult } from "./smoke";
 import { fix } from "./builders/fixer";
 import { fetchRunnableOntology } from "@/lib/ontology-generator/ontology-source";
-import { resolveRegistry } from "@/lib/tools/resolve-registry";
+import { resolveRegistry, isForceDryRunDomain } from "@/lib/tools/resolve-registry";
 import type { BuildEvent, BuildBudget, BuilderCtx, BuildPlan, DomainUnderstanding, SkillSpec, Deployer } from "./types";
 import type { LlmCallRow } from "./ledger";
 import type { GeneratedAgentSpec } from "@/lib/agent-factory-gen/types";
@@ -29,6 +29,11 @@ export interface RunBuildOptions {
    *  Inngest app and fires/observes a real run after smoke passes. Omitted in
    *  hermetic tests (in-process only). Injected by the build route. */
   deployer?: Deployer;
+  /** P0-2 (audit BLOCKER): explicit opt-in required to auto-ship to a NON-dry-run
+   *  domain. Without it, a real domain only emits needs-human and is NOT shipped —
+   *  the operator deploys via Fleet (same posture as the v3 brain, which physically
+   *  can't reach live). Fail-closed: live ship is opt-in, never the smoke-pass default. */
+  allowLiveShip?: boolean;
 }
 
 export interface RunBuildResult {
@@ -227,7 +232,15 @@ export async function runBuild(opts: RunBuildOptions): Promise<RunBuildResult> {
     // specs as deployable AgentVersion rows, bring the per-domain Inngest app
     // online, then fire the entry events and observe the REAL run in the archive.
     // (Hermetic builds have no deployer → this is skipped, staying in-process.)
-    if (opts.deployer && smoke.passed) {
+    // P0-2 (audit BLOCKER): close the auto-ship-to-live backdoor. Only auto-ship to
+    // dry-run/sandbox domains (no real side effects), OR when the caller EXPLICITLY
+    // opted into a live ship. A real domain on smoke-pass alone now emits needs-human
+    // and is NOT shipped — the operator promotes it via Fleet, matching v3's posture.
+    const shipAllowed = isForceDryRunDomain(domain) || opts.allowLiveShip === true;
+    if (opts.deployer && smoke.passed && !shipAllowed) {
+      bus.emit({ t: "needs-human", reason: `域「${domain}」不是 dry-run/sandbox 域,且未显式 allowLiveShip——不自动上架到 live(冒烟通过≠可上线)。请在 Fleet 人工确认部署,或显式传 allowLiveShip。` });
+    }
+    if (opts.deployer && smoke.passed && shipAllowed) {
       try {
         bus.emit({ t: "ship.start", count: specs.length });
         const shipReport = await opts.deployer.ship(domain, specs);

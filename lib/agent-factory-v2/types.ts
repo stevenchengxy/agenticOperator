@@ -102,6 +102,24 @@ export interface ShipReport {
   deployed: string[];
   appRegistered: boolean;
   error?: string;
+  /** the per-domain Inngest app id the functions were served under */
+  appId?: string;
+  /** how many functions the Inngest dev server actually introspected after the
+   *  sync (the verifiable count — 0 means nothing registered despite app online). */
+  functionsRegistered?: number;
+}
+
+/** Per-test-case behavioral verdict: did the case reach the terminal its KIND
+ *  expects? pass→a non-failure terminal, reject→a failure terminal, edge→tolerant.
+ *  Turns the sandbox from "the chain runs" into "the chain decides correctly". */
+export interface CaseResult {
+  name: string;
+  kind: string;                       // pass | reject | edge
+  expectedOutcome: string;
+  reachedTerminal: string | null;     // bare terminal event name it actually reached
+  isFailureTerminal: boolean;
+  ok: boolean;                        // verdict matched the kind's expectation
+  detail: string;
 }
 
 export interface RunReport {
@@ -113,6 +131,23 @@ export interface RunReport {
   events: string[];
   /** true when a terminal (no-consumer) event of the chain was observed */
   reachedTerminal: boolean;
+  /** the per-domain Inngest app the functions ran under (deploy proof) */
+  appId?: string;
+  /** functions the Inngest server actually had registered when we fired. 0 =
+   *  the deploy didn't take — fired into the void; reported as a deploy failure
+   *  distinct from "ran but didn't reach terminal". */
+  functionsRegistered?: number;
+  /** distinct agent functions that ACTUALLY executed (≤ functionsRegistered). A
+   *  partial chain shows fewer than deployed — the honest "did the whole chain
+   *  run" signal, so a 2-of-6 run can't read as a full success. */
+  agentsRan?: number;
+  /** agent slugs whose decision was a DEGRADED fallback (gateway down → emits[0]),
+   *  not a real decision. A chain that only "progressed" on degraded fallbacks is
+   *  NOT verified — the finish gate must reject it. */
+  degradedAgents?: string[];
+  /** ② per-case behavioral verdicts — each fired test case traced to its terminal
+   *  and checked against its kind's expectation. */
+  caseResults?: CaseResult[];
 }
 
 export interface Deployer {

@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
@@ -55,6 +56,10 @@ export type FleetRow = {
   paused: boolean;
   // Inngest slug for pause/resume mutation
   slug: string | null;
+  // Operator-set display name override (null = use t(roleK)).
+  customName: string | null;
+  // Id for rename/delete via /api/agent-drafts/[id] (null = not manageable).
+  manageId: string | null;
 };
 
 // Status answers "is this agent currently online?", not "have past runs
@@ -115,6 +120,8 @@ function buildRows(api: AgentsResponse, liveByWsId: Map<string, LiveAgentState>)
       lastActiveAt: live?.latestStartedAt ?? null,
       paused,
       slug,
+      customName: a.customName ?? null,
+      manageId: a.manageId ?? null,
     };
   });
 }
@@ -235,6 +242,35 @@ export function FleetContent() {
       setOptimisticPause((m) => { const c = { ...m }; delete c[slug]; return c; });
     }
   }, [refetchAgents]);
+
+  // Rename / delete via the shared agent-drafts lifecycle API (real agents use a
+  // `real:<domain>:<short>` override id, shells their AgentVersion id — both
+  // carried on row.manageId). Rename only changes the display name; delete is a
+  // soft-archive into the recycle bin (the registered fn is never unregistered).
+  const renameAgent = React.useCallback(async (row: FleetRow) => {
+    if (!row.manageId) return;
+    const current = row.customName ?? t(row.roleK);
+    const next = window.prompt(t("dst_rename_prompt"), current)?.trim();
+    if (!next || next === current) return;
+    try {
+      await fetch(`/api/agent-drafts/${encodeURIComponent(row.manageId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nameZh: next }),
+      });
+      refetchAgents();
+    } catch { /* surfaced on next refetch */ }
+  }, [t, refetchAgents]);
+
+  const deleteAgent = React.useCallback(async (row: FleetRow) => {
+    if (!row.manageId) return;
+    const name = row.customName ?? t(row.roleK);
+    if (!window.confirm(t("dst_delete_confirm").replace("{name}", name))) return;
+    try {
+      await fetch(`/api/agent-drafts/${encodeURIComponent(row.manageId)}`, { method: "DELETE" });
+      refetchAgents();
+    } catch { /* surfaced on next refetch */ }
+  }, [t, refetchAgents]);
 
   // Clear optimistic overrides once the freshly-fetched row matches them.
   // Decoupling from a timer means we never expose a stale snapshot during
@@ -407,7 +443,7 @@ export function FleetContent() {
               <section key={g.key}>
                 {group !== "flat" && <GroupHeader title={groupTitle(g.title, group, t)} rows={g.rows} t={t} />}
                 {g.rows.map((r, i) => (
-                  <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} onOpen={openAgent} />
+                  <AgentListRow key={r.short} row={r} idx={i} t={t} onTogglePause={togglePause} onOpen={openAgent} onRename={renameAgent} onDelete={deleteAgent} />
                 ))}
               </section>
             ))}
@@ -674,10 +710,11 @@ function GroupHeader({ title, rows, t }: { title: string; rows: FleetRow[]; t: (
   );
 }
 
-function AgentListRow({ row, idx, t, onTogglePause, onOpen }: { row: FleetRow; idx: number; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void; onOpen: (short: string) => void }) {
+function AgentListRow({ row, idx, t, onTogglePause, onOpen, onRename, onDelete }: { row: FleetRow; idx: number; t: (k: string) => string; onTogglePause: (slug: string, paused: boolean) => void; onOpen: (short: string) => void; onRename: (row: FleetRow) => void; onDelete: (row: FleetRow) => void }) {
   const stub = row.realness === "unbuilt";
   const dim = row.lifecycle === "deprecated";
-  const roleLabel = t(row.roleK);
+  // Operator-set name wins over the built-in i18n label.
+  const roleLabel = row.customName || t(row.roleK);
   return (
     <div
       role="button"
@@ -750,8 +787,8 @@ function AgentListRow({ row, idx, t, onTogglePause, onOpen }: { row: FleetRow; i
         {stub ? <span className="text-ink-4">—</span> : fmtP95(row.p95Ms)}
       </div>
 
-      {/* action — always-visible 上线/下线 */}
-      <div className="relative flex items-center justify-end min-w-0 flex-nowrap overflow-hidden">
+      {/* action — 上线/下线 primary toggle + ⋯ manage menu */}
+      <div className="relative flex items-center justify-end gap-1.5 min-w-0 flex-nowrap">
         {!stub && row.slug ? (
           <PauseToggleButton
             paused={row.paused}
@@ -763,10 +800,106 @@ function AgentListRow({ row, idx, t, onTogglePause, onOpen }: { row: FleetRow; i
             }}
           />
         ) : (
-          <span className="text-ink-4 tabular-nums" style={{ fontSize: 12 }}>{row.version}</span>
+          !row.manageId && <span className="text-ink-4 tabular-nums" style={{ fontSize: 12 }}>{row.version}</span>
         )}
+        <RowActionsMenu row={row} t={t} onRename={onRename} onDelete={onDelete} onOpen={onOpen} />
       </div>
     </div>
+  );
+}
+
+// Per-row「⋯」manage menu — 重命名 / 查看详情 / 删除. Rendered fixed-position
+// (computed from the trigger rect) so it escapes the row's clipping. Real agents
+// and shells expose rename+delete (via row.manageId); an unmapped live fn shows
+// only 查看详情. All mutations route through the parent's agent-drafts handlers.
+function RowActionsMenu({ row, t, onRename, onDelete, onOpen }: { row: FleetRow; t: (k: string) => string; onRename: (row: FleetRow) => void; onDelete: (row: FleetRow) => void; onOpen: (short: string) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState<{ top: number; right: number } | null>(null);
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    setOpen((o) => !o);
+  };
+  const pick = (fn: () => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label={t("flx_more_actions")}
+        onClick={toggle}
+        className="flex-none w-7 h-7 grid place-items-center rounded-md text-ink-3 hover:bg-panel hover:text-ink-1 transition-colors"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>
+      </button>
+      {/* Portal to <body>. The row carries `.ao-hover-lift` / `.ao-fade-rise`,
+          which leave a CSS `transform` on it (translateY(0) is held by
+          animation-fill-mode:both, and :hover adds translateY(-1px)). Any
+          transform turns the row into the containing block for `position:fixed`
+          descendants, so a menu rendered inline would resolve its viewport
+          coordinates against the ROW instead of the viewport — pushing it
+          off-screen for every row below the top of the list (the long-standing
+          "⋯ does nothing for non-top agents" bug). Rendering through a portal
+          escapes the transformed ancestor entirely. */}
+      {open && pos && typeof document !== "undefined" && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          <div
+            className="fixed z-50 min-w-[140px] rounded-lg border border-line bg-surface shadow-sh-3 py-1 og-card-in"
+            style={{ top: pos.top, right: pos.right }}
+            onClick={(e) => e.stopPropagation()}
+            role="menu"
+          >
+            {row.manageId && (
+              <MenuItem label={t("dst_rename")} onClick={pick(() => onRename(row))} />
+            )}
+            <MenuItem label={t("flx_view_detail")} onClick={pick(() => onOpen(row.short))} />
+            {row.manageId && (
+              <MenuItem label={t("dst_delete")} danger onClick={pick(() => onDelete(row))} />
+            )}
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+function MenuItem({ label, onClick, danger }: { label: string; onClick: (e: React.MouseEvent) => void; danger?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-panel transition-colors"
+      style={danger ? { color: "var(--c-bad, oklch(0.6 0.2 25))" } : undefined}
+    >
+      {label}
+    </button>
   );
 }
 

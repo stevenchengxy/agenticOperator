@@ -142,3 +142,74 @@ describe("validateSpecs", () => {
     expect(result.slugCollisions).toHaveLength(0);
   });
 });
+
+// P2 — ontology-grounded checks. Active only when the caller passes the
+// ontology context, so validateSpecs(specs) with no opts is unchanged.
+describe("validateSpecs — coverage check (P2)", () => {
+  it("flags an actor=Agent ontology action that has no spec", () => {
+    const specs = [
+      makeSpec({ key: "parseResume", slug: "test-parse", emit: ["E_DONE"] }),
+    ];
+    const agentActions = [
+      { name: "parseResume", actor: ["Agent"] },
+      { name: "ruleCheck", actor: ["Agent"] }, // uncovered
+    ];
+    const result = validateSpecs(specs, { agentActions });
+    expect(result.ok).toBe(false);
+    expect(
+      result.structuredIssues.some((i) => i.kind === "uncovered-agent-action" && i.agentAction === "ruleCheck"),
+    ).toBe(true);
+  });
+
+  it("does NOT flag coverage when agentActions is omitted (back-compat)", () => {
+    const result = validateSpecs([makeSpec({ key: "x", slug: "test-x", emit: ["E_DONE"] })]);
+    expect(result.structuredIssues.some((i) => i.kind === "uncovered-agent-action")).toBe(false);
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes coverage when every Agent action has a spec (human actions not required)", () => {
+    const specs = [
+      makeSpec({ key: "parseResume", slug: "test-parse", emit: ["E_DONE"] }),
+      makeSpec({ key: "ruleCheck", slug: "test-rc", emit: ["E_DONE2"] }),
+    ];
+    const agentActions = [
+      { name: "parseResume", actor: ["Agent"] },
+      { name: "ruleCheck", actor: ["Agent"] },
+      { name: "humanGate", actor: ["Human"] },
+    ];
+    const result = validateSpecs(specs, { agentActions });
+    expect(result.structuredIssues.some((i) => i.kind === "uncovered-agent-action")).toBe(false);
+  });
+});
+
+describe("validateSpecs — fallback prompt is a hard failure (fully-AI)", () => {
+  it("fails a spec whose prompt is a hardcoded fallback template (the LLM authored nothing)", () => {
+    const s = makeSpec({ key: "x", slug: "test-x", emit: ["E_DONE"], promptSource: "fallback" });
+    const result = validateSpecs([s]);
+    expect(result.ok).toBe(false);
+    expect(result.structuredIssues.some((i) => i.kind === "fallback-prompt" && i.agentAction === "x")).toBe(true);
+  });
+
+  it("an LLM-authored prompt passes", () => {
+    const s = makeSpec({ key: "x", slug: "test-x", emit: ["E_DONE"], promptSource: "llm" });
+    expect(validateSpecs([s]).structuredIssues.some((i) => i.kind === "fallback-prompt")).toBe(false);
+  });
+});
+
+describe("validateSpecs — ungrounded event check (P2)", () => {
+  it("flags a spec event that no ontology action declares", () => {
+    const specs = [
+      makeSpec({ key: "x", slug: "test-x", trigger: ["KNOWN_IN"], emit: ["HALLUCINATED_EVT"] }),
+    ];
+    const result = validateSpecs(specs, { knownEvents: ["KNOWN_IN", "REAL_OUT"] });
+    expect(
+      result.structuredIssues.some((i) => i.kind === "ungrounded-event" && i.event === "HALLUCINATED_EVT"),
+    ).toBe(true);
+    expect(result.ok).toBe(false);
+  });
+
+  it("does NOT flag events when knownEvents is omitted (back-compat)", () => {
+    const result = validateSpecs([makeSpec({ key: "x", slug: "test-x", trigger: ["A"], emit: ["B_DONE"] })]);
+    expect(result.structuredIssues.some((i) => i.kind === "ungrounded-event")).toBe(false);
+  });
+});

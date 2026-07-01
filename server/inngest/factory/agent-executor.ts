@@ -7,7 +7,8 @@
 // real case and picks a branch — genuinely dynamic, not a stub.
 
 import { chatComplete, isGatewayConfigured, type ChatTool } from "@/server/llm/gateway";
-import { resolveRegistry, isForceDryRunDomain } from "@/lib/tools/resolve-registry";
+import { resolveRegistry, isForceDryRunDomain, isLiveWriteAllowed } from "@/lib/tools/resolve-registry";
+import { registerPersistedInto } from "@/lib/tools/persisted-tools";
 
 export type AgentExecSpec = {
   actionName: string;
@@ -33,14 +34,21 @@ const sanitize = (n: string) => n.replace(/[^a-zA-Z0-9_-]/g, "__");
 export async function executeGeneratedAgent(
   spec: AgentExecSpec,
   ev: { eventName: string; eventData: Record<string, unknown> },
+  opts: { forceDryRun?: boolean } = {},
 ): Promise<AgentDecision> {
   const emits = spec.emit.filter((e) => e && e !== "—");
   const degrade = (reasoning: string): AgentDecision => ({ event: emits[0] ?? "", reasoning, payload: {}, toolCalls: [], degraded: true });
   if (emits.length === 0) return { event: "", reasoning: "无候选结果事件", payload: {}, toolCalls: [], degraded: false };
   if (!isGatewayConfigured()) return degrade("LLM 网关未配置 — 走默认分支");
 
+  // Registry + dry-run resolve from the spec's REAL domainId (so a sandbox copy
+  // still binds the right tool library). forceDryRun pins dry-run regardless —
+  // set when running inside a dedicated sandbox app, so a real domain's agents
+  // never fire real external side effects during a test.
   const registry = resolveRegistry(spec.domainId);
-  const dryRun = isForceDryRunDomain(spec.domainId);
+  // fold in approved AI-created (persisted) tools so deployed agents can run them too.
+  try { await registerPersistedInto(registry, spec.domainId); } catch { /* library optional */ }
+  const dryRun = opts.forceDryRun || isForceDryRunDomain(spec.domainId);
   const toolCalls: AgentDecision["toolCalls"] = [];
   const nameMap = new Map<string, string>(); // sanitized → real
 
@@ -102,7 +110,17 @@ export async function executeGeneratedAgent(
           toolCalls.push({ name: real, args });
           const d = registry.get(real);
           if (d?.execute) {
-            try { return await d.execute((args ?? {}) as Record<string, unknown>, { dryRun }); }
+            // P1-3 (audit MAJOR): write/dual-write tools only do REAL side effects on
+            // a domain explicitly in the live-write allowlist; otherwise degrade to
+            // dry-run (fail-closed) so a mis-wired / not-yet-inventoried domain can't
+            // silently fire real inviteCandidate / partner-pg writes. Non-write tools
+            // and already-dry-run domains are unaffected.
+            const isWrite = d.sideEffect === "write" || d.sideEffect === "dual-write";
+            const effectiveDryRun = dryRun || (isWrite && !isLiveWriteAllowed(spec.domainId));
+            if (isWrite && !dryRun && effectiveDryRun) {
+              console.warn(`[agent-executor] 写工具 ${real} 在域「${spec.domainId}」降级为 dry-run(不在 LIVE_WRITE_DOMAINS 允许名单)——如确需真写,把该域加入 LIVE_WRITE_DOMAINS 环境变量。`);
+            }
+            try { return await d.execute((args ?? {}) as Record<string, unknown>, { dryRun: effectiveDryRun }); }
             catch (e) { return { error: (e as Error).message }; }
           }
           return { ok: true, note: `${real} 无执行器，按 dry-run 处理` };

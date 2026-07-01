@@ -347,6 +347,80 @@ model AgentVersion {
   @@index([capturedFrom, domain, status])
 }
 
+// Agent Factory — cross-run learning. Each row is a lesson the brain wrote
+// after analyzing a failure (or a notable success), persisted per-domain so the
+// next brain.start() can load prior reflections into its system prompt. This
+// is what turns "each run starts amnesiac" into Reflexion-style learning.
+model FailureReflection {
+  id          String   @id @default(cuid())
+  domain      String   // business domain id (e.g. "Agents-generation", "招聘-v1")
+  // 'failure' = sandbox/validate failure root-caused; 'success' = patterns that
+  // worked; 'caveat' = subtle gotcha observed (e.g. tool quirks). The brain
+  // self-classifies via analyze_failure.
+  kind        String   @default("failure")  // 'failure' | 'success' | 'caveat'
+  summary     String   // 1-line: what happened
+  rootCause   String?  // why it happened (LLM diagnosis)
+  lesson      String   // what to do differently next time — the actionable bit
+  // Provenance
+  runId       String?  // FactoryBuildRun id, if available
+  ranAgents   String?  // JSON: which agents were in play
+  failedAgent String?  // slug of the agent at fault (if any)
+  createdAt   DateTime @default(now())
+
+  @@index([domain, createdAt(sort: Desc)])
+  @@index([domain, kind])
+}
+
+// One Agent-Factory brain run — the full streamed transcript + outcome, so the
+// chatbot survives a page refresh (server-side history) and the user can reopen
+// or "regenerate" a past run. Complements the per-browser localStorage cache
+// that restores the IN-PROGRESS transcript instantly. (Fix #3.)
+model FactoryBrainRun {
+  id              String   @id @default(cuid())
+  domain          String   // business domain id the brain generated for
+  goal            String   // the goal text given to the brain
+  status          String   @default("running") // 'running' | 'done' | 'error' | 'aborted'
+  tokensUsed      Int      @default(0)
+  turns           Int      @default(0)
+  agentsCount     Int      @default(0)
+  reachedTerminal Boolean  @default(false)     // sandbox event chain reached a terminal state
+  errorMessage    String?
+  transcript      String   @default("[]")       // JSON BrainEvent[] — the full live trace
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([domain, createdAt(sort: Desc)])
+}
+
+// Durable mirror of the factory brain's conversation — the "继续" checkpoint that
+// survives a server restart/HMR (see lib/agent-factory-v3/brain/conversation-store.ts).
+// App-managed: the store creates/reads the table via raw SQL. Modeled here ONLY so
+// `prisma db push` recognizes it and never drops it (otherwise every `npm run dev`
+// wipes in-progress conversations and "继续" starts over from scratch).
+model FactoryConversation {
+  id           String   @id
+  domain       String?
+  messagesJson String   @map("messages_json")
+  ctxJson      String   @map("ctx_json")
+  updatedAt    DateTime @default(now()) @db.Timestamptz(6) @map("updated_at")
+
+  @@map("factory_conversation")
+}
+
+// HITL human-message mailbox for in-flight factory runs (see
+// lib/agent-factory-v3/brain/mailbox.ts). App-managed via raw SQL; modeled here so
+// db push keeps the table instead of dropping it on every restart.
+model FactoryHumanMsg {
+  id        BigInt   @id @default(autoincrement())
+  runId     String   @map("run_id")
+  text      String
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+
+  @@index([runId, consumed], map: "factory_human_msg_run_idx")
+  @@map("factory_human_msg")
+}
+
 // =====================================================================
 // EM — Runtime / Gateway / Outbound (Q1: no Editor)
 // =====================================================================
@@ -1350,4 +1424,49 @@ model AgentExecution {
   @@index([status])
   @@index([createdAt])
   @@map("agent_execution")
+}
+
+
+// ===== Agent Factory v2 ledger (recovered 2026-06-17) =====
+model FactoryBuildRun {
+  id          String   @id @default(cuid())
+  domain      String
+  status      String   @default("running") // running | comprehending | done | failed
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  tokensUsed  Int      @default(0)
+  note        String?
+  events      FactoryBuildEvent[]
+  llmCalls    FactoryLlmCall[]
+  @@index([domain, startedAt])
+}
+
+model FactoryBuildEvent {
+  id      String  @id @default(cuid())
+  runId   String
+  seq     Int
+  type    String  // build.start | facet.analyzed | understanding.ready | llm | build.done | error | ...
+  payload String  // JSON
+  ts      DateTime @default(now())
+  run     FactoryBuildRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@index([runId, seq])
+}
+
+model FactoryLlmCall {
+  id               String  @id @default(cuid())
+  runId            String
+  builder          String  // facet-analyst | integrator | ...
+  target           String? // which target agent/facet this call was for
+  purpose          String
+  systemPrompt     String  // full input
+  userPrompt       String  // full input
+  responseText     String  // full output
+  model            String?
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  latencyMs        Int      @default(0)
+  degraded         Boolean  @default(false) // true = gateway down, deterministic fallback
+  ts               DateTime @default(now())
+  run              FactoryBuildRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@index([runId, ts])
 }

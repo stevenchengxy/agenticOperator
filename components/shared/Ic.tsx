@@ -232,6 +232,29 @@ export const Ic = {
       <path d="M7 9a2.5 2.5 0 0 1 0-3.5l2-2a2.5 2.5 0 1 1 3.5 3.5l-1 1M9 7a2.5 2.5 0 0 1 0 3.5l-2 2a2.5 2.5 0 0 1-3.5-3.5l1-1" />
     </svg>
   ),
+  brain: (p: P) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M12 5.5A2.5 2.5 0 0 0 7 5.4 2.5 2.5 0 0 0 5.1 9.6 2.6 2.6 0 0 0 5 14a2.4 2.4 0 0 0 1.6 2.5A2.3 2.3 0 0 0 9 19.5a2.5 2.5 0 0 0 3-2.4Z" />
+      <path d="M12 5.5A2.5 2.5 0 0 1 17 5.4a2.5 2.5 0 0 1 1.9 4.2A2.6 2.6 0 0 1 19 14a2.4 2.4 0 0 1-1.6 2.5A2.3 2.3 0 0 1 15 19.5a2.5 2.5 0 0 1-3-2.4Z" />
+    </svg>
+  ),
+  flask: (p: P) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M9 3h6M10 3v6l-4.6 8.2A1.8 1.8 0 0 0 7 20h10a1.8 1.8 0 0 0 1.6-2.8L14 9V3" />
+      <path d="M7.4 14h9.2" />
+    </svg>
+  ),
+  refresh: (p: P) => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M4 11a8 8 0 0 1 13.7-5.3L20 8" /><path d="M20 4v4h-4" />
+      <path d="M20 13a8 8 0 0 1-13.7 5.3L4 16" /><path d="M4 20v-4h4" />
+    </svg>
+  ),
+  stop: (p: P) => (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="6" y="6" width="12" height="12" rx="2.5" />
+    </svg>
+  ),
 };
 
 export type IcName = keyof typeof Ic;

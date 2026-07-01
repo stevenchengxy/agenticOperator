@@ -7,8 +7,7 @@
 //   npm run register
 //
 // What it does:
-//   POST http://10.100.0.70:8288/fn/register
-//   { "url": "http://172.16.1.83:3002/api/inngest" }
+//   PUT http://172.16.1.83:3002/api/inngest
 //
 // Reads INNGEST_BASE_URL + AO_LAN_IP + AO_PORT from .env.local.
 // Re-run any time after the AO dev server restarts (registration is in-memory).
@@ -16,6 +15,10 @@
 // dotenv only auto-loads .env, not .env.local. Load explicitly.
 import { config } from "dotenv";
 import path from "node:path";
+import {
+  RAAS_V1_APP_ID,
+  RAAS_V1_EXPECTED_FUNCTION_COUNT,
+} from "../lib/raas-v1-inngest";
 config({ path: path.resolve(process.cwd(), ".env.local") });
 config({ path: path.resolve(process.cwd(), ".env") });
 
@@ -27,11 +30,12 @@ async function main(): Promise<void> {
   const lanIp = process.env.AO_LAN_IP ?? "127.0.0.1";
   const port = process.env.AO_PORT ?? "3002";
   const callback = `http://${lanIp}:${port}/api/inngest`;
-  const registerUrl = `${base}/fn/register`;
 
-  console.log(`Registering AO callback with Inngest:`);
+  console.log(`Registering RAAS-v1 main app with Inngest:`);
   console.log(`  Inngest server: ${base}`);
   console.log(`  AO callback:    ${callback}`);
+  console.log(`  App ID:         ${RAAS_V1_APP_ID}`);
+  console.log(`  Expected funcs: ${RAAS_V1_EXPECTED_FUNCTION_COUNT}`);
   console.log("");
 
   // First sanity-check that the callback is reachable from THIS host.
@@ -39,8 +43,6 @@ async function main(): Promise<void> {
   try {
     const ping = await fetch(`http://localhost:${port}/api/inngest`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
     });
     if (!ping.ok) {
       console.warn(`⚠ Local PUT /api/inngest returned ${ping.status}; AO may not be running yet`);
@@ -52,31 +54,54 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Then ask the shared Inngest server to register us.
+  // Then self-sync the exact callback URL that the shared Inngest server should
+  // store. The SDK endpoint owns the app id + manifest, so PUT is enough.
   try {
-    const res = await fetch(registerUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: callback }),
-    });
+    const res = await fetch(callback, { method: "PUT" });
     const text = await res.text();
     if (!res.ok) {
       console.error(`✗ Register failed (${res.status}): ${text}`);
       process.exit(1);
     }
-    console.log(`✓ Registered:`);
-    try {
-      console.log(JSON.stringify(JSON.parse(text), null, 2));
-    } catch {
-      console.log(text);
+    console.log(`✓ SDK endpoint accepted registration PUT`);
+    const count = await probeFunctionCount(base, RAAS_V1_APP_ID);
+    if (count == null) {
+      console.warn(`⚠ Could not verify function count from ${base}/v0/gql`);
+    } else if (count !== RAAS_V1_EXPECTED_FUNCTION_COUNT) {
+      console.error(
+        `✗ ${RAAS_V1_APP_ID} registered ${count} functions, expected ${RAAS_V1_EXPECTED_FUNCTION_COUNT}. ` +
+          `Check STUB_AGENTS and make sure you registered /api/inngest, not a domain endpoint.`,
+      );
+      process.exit(1);
+    } else {
+      console.log(`✓ Verified ${count}/${RAAS_V1_EXPECTED_FUNCTION_COUNT} RAAS-v1 functions registered`);
     }
     console.log("");
     console.log(`Next: send a RESUME_DOWNLOADED event from RAAS or trigger locally:`);
     console.log(`  curl -X POST http://localhost:${port}/api/test/trigger-resume-uploaded`);
   } catch (e) {
-    console.error(`✗ Couldn't reach ${registerUrl}: ${(e as Error).message}`);
+    console.error(`✗ Couldn't PUT ${callback}: ${(e as Error).message}`);
     process.exit(1);
   }
 }
 
 main();
+
+async function probeFunctionCount(base: string, appId: string): Promise<number | null> {
+  try {
+    const res = await fetch(`${base.replace(/\/+$/, "")}/v0/gql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "{ apps { name functionCount } }" }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      data?: { apps?: Array<{ name: string; functionCount: number }> };
+    };
+    const app = body.data?.apps?.find((a) => a.name === appId);
+    return typeof app?.functionCount === "number" ? app.functionCount : null;
+  } catch {
+    return null;
+  }
+}

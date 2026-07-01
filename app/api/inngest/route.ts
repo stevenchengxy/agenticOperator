@@ -15,10 +15,10 @@ import { serve } from 'inngest/next';
 import type { NextRequest } from 'next/server';
 import { inngest } from '@/server/inngest/client';
 import { allFunctions } from '@/server/inngest/functions';
+import { RAAS_V1_APP_ID } from '@/lib/raas-v1-inngest';
+import { inngestFunctionId } from '@/server/inngest/raas-v1';
 import { getPausedSlugs } from '@/lib/agent-pause-guard';
 import { bootOnce } from '@/server/init';
-
-bootOnce();
 
 // Cache one serve handler per unique paused-set. The set changes rarely (only
 // on toggle), so this Map stays small in practice.
@@ -28,13 +28,13 @@ const handlerCache = new Map<string, ServeHandler>();
 function getFunctionSlug(fn: unknown): string {
   // Inngest InngestFunction has `opts.id` (the createFunction id, e.g. "resume-parser-agent").
   // The full slug used by Inngest dev server is `<appId>-<fnId>`.
-  const appId = inngest.id; // "agentic-operator-main"
-  const f = fn as { opts?: { id?: string }; id?: ((prefix?: string) => string) };
-  const fnId = f.opts?.id ?? (typeof f.id === 'function' ? f.id() : '');
+  const appId = RAAS_V1_APP_ID;
+  const fnId = inngestFunctionId(fn);
   return fnId ? `${appId}-${fnId}` : '';
 }
 
 async function pickHandler(): Promise<ServeHandler> {
+  bootOnce();
   const paused = await getPausedSlugs();
   const key = Array.from(paused).sort().join(',') || '<none>';
   let h = handlerCache.get(key);

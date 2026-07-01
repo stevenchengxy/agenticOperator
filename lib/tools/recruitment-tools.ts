@@ -12,6 +12,40 @@ import { ToolRegistry, type ToolDescriptor } from "./registry";
 const RECRUIT = "recruit";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// RANK-3 (golden fixture): the dry-run mocks used by sandbox_run must be
+// SCHEMA-COMPLETE happy-path data — not empty shells. With `skills: []` an agent
+// genuinely (and correctly) picks the failure branch (RESUME_INFO_MISSING), so
+// the happy-path chain dies on the first hop and the sandbox can never go green.
+// A complete golden candidate lets the verifier actually exercise the full chain.
+const GOLDEN_CANDIDATE = {
+  candidate_id: "cand_demo_001",
+  name: "张三",
+  phone: "13800000000",
+  email: "zhangsan@example.com",
+  gender: "男",
+  age: 30,
+  education: "本科",
+  school: "示例大学",
+  major: "计算机科学与技术",
+  graduationYear: 2017,
+  endDate: "2017-07",
+  workYears: 6,
+  skills: ["Java", "Spring Boot", "分布式系统", "MySQL", "Redis"],
+  currentCompany: "示例科技有限公司",
+  workHistory: [{ company: "示例科技有限公司", title: "高级后端工程师", years: 4 }],
+} as const;
+const GOLDEN_REQUIREMENT = {
+  job_requisition_id: "jr_demo_001",
+  title: "高级后端工程师",
+  client: "示例客户",
+  department: "技术部",
+  must_have_skills: ["Java", "Spring Boot"],
+  nice_to_have_skills: ["分布式系统", "Redis"],
+  min_years: 3,
+  education: "本科",
+  headcount: 2,
+} as const;
+
 /** Fail-safe for LIVE tool execution: resolve a client export by name or throw.
  *  Guarantees that a missing/renamed client export throws (so the executor's
  *  try/catch marks the run failed) instead of silently returning `undefined`
@@ -26,6 +60,8 @@ function callExport<T = (...args: any[]) => any>(mod: any, fn: string, tool: str
 }
 
 const str = (description: string) => ({ type: "string", description });
+const num = (description?: string) => ({ type: "number", ...(description ? { description } : {}) });
+const arr = (items: unknown, description?: string) => ({ type: "array", items, ...(description ? { description } : {}) });
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
   type: "object",
   properties,
@@ -58,11 +94,27 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
     domain: RECRUIT,
     sideEffect: "read",
     parameters: obj({ pdf: str("PDF Buffer"), filename: str("文件名,如 resume.pdf") }, ["pdf"]),
-    returns: obj({ data: { type: "object" }, requestId: str("请求 id"), cached: { type: "boolean" } }),
+    // The REAL parsed shape RoboHire returns under `data` — so a generated agent
+    // knows exactly which structured fields it gets back (and that gender/rawText
+    // need补抽, endDate is the grad time). External-platform I/O lives HERE, not in
+    // the ontology action.
+    returns: obj({
+      data: obj({
+        name: str("姓名"), phone: str("手机号"), email: str("邮箱"),
+        gender: str("性别(RoboHire 常不返回,需从 rawText 补抽)"),
+        age: num("年龄"), education: str("最高学历"), school: str("毕业院校"), major: str("专业"),
+        graduationYear: num("毕业年份(优先用 endDate)"), endDate: str("毕业时间(取此,非 graduationYear)"),
+        workYears: num("工作年限"), currentCompany: str("当前公司"),
+        skills: arr(str("技能标签"), "技能数组"),
+        workHistory: arr(obj({ company: str("公司"), title: str("职位"), years: num("年限") }), "工作经历"),
+        rawText: str("简历原文,gender 等缺失字段从此抽取"),
+      }),
+      requestId: str("请求 id"), cached: { type: "boolean" },
+    }),
     requiredEnv: ["ROBOHIRE_API_BASE_URL", "ROBOHIRE_API_KEY"],
     idempotent: true,
     execute: async (args, ctx) => {
-      if (ctx?.dryRun) return { __mock: true, tool: "robohire.parseResume", data: { name: "示例", skills: [] } };
+      if (ctx?.dryRun) return { __mock: true, tool: "robohire.parseResume", data: { ...GOLDEN_CANDIDATE } };
       const mod: any = await import("@/lib/robohire-client");
       return callExport(mod, "parseResumeDirect", "robohire.parseResume")(args.pdf as Buffer, String(args.filename ?? "resume.pdf"));
     },
@@ -90,7 +142,13 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
     domain: RECRUIT,
     sideEffect: "read",
     parameters: obj({ requirement: str("招聘需求文本"), language: str("语言,默认 zh") }, ["requirement"]),
-    returns: obj({ jd_content: str("JD 正文") }),
+    // RoboHire returns hardRequirements/niceToHave as PROSE (no structured skill
+    // arrays) — a generated agent must know to run proseToSkillArray downstream.
+    returns: obj({
+      hardRequirements: str("硬性要求(散文,需 proseToSkillArray 拆成 must_have_skills)"),
+      niceToHave: str("加分项(散文,需拆成 nice_to_have_skills)"),
+      jd_content: str("JD 正文"),
+    }),
     requiredEnv: ["ROBOHIRE_API_BASE_URL", "ROBOHIRE_API_KEY"],
     execute: async (args, ctx) => {
       if (ctx?.dryRun) return { __mock: true, tool: "robohire.generateJd", jd_content: "示例 JD" };
@@ -138,7 +196,7 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
     returns: obj({ requirement: { type: "object" } }),
     idempotent: true,
     execute: async (args, ctx) => {
-      if (ctx?.dryRun) return { __mock: true, tool: "partnerpg.getRequirement" };
+      if (ctx?.dryRun) return { __mock: true, tool: "partnerpg.getRequirement", ...GOLDEN_REQUIREMENT };
       const mod: any = await import("@/lib/partner-pg/requirements");
       return callExport(mod, "getRequirementDetail", "partnerpg.getRequirement")(args.job_requisition_id);
     },
@@ -153,7 +211,7 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
     returns: obj({ resume: { type: "object" } }),
     idempotent: true,
     execute: async (args, ctx) => {
-      if (ctx?.dryRun) return { __mock: true, tool: "partnerpg.getParsedResume" };
+      if (ctx?.dryRun) return { __mock: true, tool: "partnerpg.getParsedResume", ...GOLDEN_CANDIDATE };
       const mod: any = await import("@/lib/partner-pg/parsed-resume");
       return callExport(mod, "getParsedResume", "partnerpg.getParsedResume")(args.candidate_id, args.resume_id);
     },
@@ -289,7 +347,7 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
   },
   {
     name: "llm.complete",
-    title: "LLM 补全",
+    title: "AI 补全",
     description: "通用 LLM 调用(经统一网关)。用于需要语言理解/生成的步骤。",
     domain: "*",
     sideEffect: "read",
@@ -305,7 +363,7 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
   },
   {
     name: "llm.fieldJudge",
-    title: "字段等价判定(LLM)",
+    title: "字段等价判定(AI)",
     description: "用 LLM 判定两个字段(姓名/学校/专业/学历)是否等价,用于候选人模糊去重。",
     domain: "*",
     sideEffect: "read",
@@ -322,7 +380,63 @@ export const RECRUITMENT_TOOLS: ToolDescriptor[] = [
       return { equivalent: /true/i.test(r.text), confidence: 0.7 };
     },
   },
+  {
+    // The capability the REAL rule-check agent uses: pull the live business
+    // rules for an action from Allmeta/Neo4j (Action→step→Rule edges) instead
+    // of having them baked into the prompt. Cross-domain (`*`) so any domain's
+    // rule-check agent can fetch its own live rules.
+    name: "ontology.fetchActionRules",
+    title: "抓取本动作的规则",
+    description:
+      "从 Allmeta/Neo4j 按 Action→step→Rule 图边【动态抓取】这个动作该执行的业务规则(实时,不是烤进 prompt 的静态文本)。rule-check 类 agent 用它取回红线/冷冻期/竞对等规则后逐条核对候选人。返回 {ruleCount, rules:[{id,name,rule,enforcement,failurePolicy}]}。",
+    domain: "*",
+    sideEffect: "read",
+    parameters: obj(
+      { action: str("要抓规则的 action 名(本 agent 对应的动作名)"), domain: str("业务域 id") },
+      ["action", "domain"],
+    ),
+    returns: obj({ ruleCount: { type: "number" }, rules: { type: "array" } }),
+    idempotent: true,
+    impl: { module: "@/lib/ontology-rules", export: "fetchOntologyActionRules" },
+    execute: async (args, ctx) => {
+      if (ctx?.dryRun) return { __mock: true, tool: "ontology.fetchActionRules", ruleCount: 0, rules: [] };
+      const mod: any = await import("@/lib/ontology-rules");
+      return callExport(mod, "fetchOntologyActionRules", "ontology.fetchActionRules")(
+        String(args.action),
+        String(args.domain ?? ""),
+      );
+    },
+  },
 ];
+
+// Tool → real client (module + export) so the agent code generator can emit a
+// native import + call. Mirrors the `await import(...)` / `callExport(...)` in
+// each execute above. Kept as a side-table (not 18 inline `impl:` fields) so the
+// mapping stays reviewable in one place.
+const TOOL_IMPL: Record<string, { module: string; export: string }> = {
+  "minio.getResume": { module: "@/lib/minio", export: "getResumeBuffer" },
+  "robohire.parseResume": { module: "@/lib/robohire-client", export: "parseResumeDirect" },
+  "robohire.matchResume": { module: "@/lib/robohire-client", export: "matchResumeDirect" },
+  "robohire.generateJd": { module: "@/lib/robohire-client", export: "generateJdDirect" },
+  "robohire.inviteCandidate": { module: "@/lib/robohire-client", export: "inviteCandidateDirect" },
+  "partnerpg.getRequirement": { module: "@/lib/partner-pg/requirements", export: "getRequirementDetail" },
+  "partnerpg.getParsedResume": { module: "@/lib/partner-pg/parsed-resume", export: "getParsedResume" },
+  "partnerpg.saveCandidate": { module: "@/lib/partner-pg/candidates", export: "saveCandidateToPartnerPg" },
+  "partnerpg.saveMatchResults": { module: "@/lib/partner-pg/match-results", export: "saveMatchResultsToPartnerPg" },
+  "partnerpg.saveRuleCheckFail": { module: "@/lib/partner-pg/rule-check-result", export: "saveRuleCheckFailToPartnerPg" },
+  "partnerpg.syncJd": { module: "@/lib/partner-pg/job-posting", export: "syncJdToPartnerPg" },
+  "partnerpg.markInterview": { module: "@/lib/partner-pg/interview-invitations", export: "markInterviewInvitationSent" },
+  "allmeta.getInstance": { module: "@/lib/allmeta-client", export: "getInstance" },
+  "allmeta.writeInstance": { module: "@/lib/allmeta-client", export: "writeInstance" },
+  "allmeta.searchEntities": { module: "@/lib/allmeta-client", export: "searchEntitiesNeo4j" },
+  "candidateLock.runLockCheck": { module: "@/lib/candidate-lock", export: "runLockCheck" },
+  "llm.complete": { module: "@/server/llm/gateway", export: "chatComplete" },
+  "llm.fieldJudge": { module: "@/server/llm/gateway", export: "chatComplete" },
+  "ontology.fetchActionRules": { module: "@/lib/ontology-rules", export: "fetchOntologyActionRules" },
+};
+for (const t of RECRUITMENT_TOOLS) {
+  if (!t.impl && TOOL_IMPL[t.name]) t.impl = TOOL_IMPL[t.name];
+}
 
 /** Build the recruitment registry. */
 export function buildRecruitmentRegistry(): ToolRegistry {

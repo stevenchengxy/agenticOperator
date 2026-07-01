@@ -233,15 +233,39 @@ async function buildInngest(): Promise<{
       title: "Inngest 主 App 未注册",
       detail: `Inngest 找不到 ${MAIN_APP_ID}。请重新同步 ${serveEndpointUrl}。`,
     };
-  } else if (appErrors.length > 0) {
+  } else if (appErrors.some((e) => e.name === MAIN_APP_ID)) {
+    // The production pipeline app (main) failed to sync — a real engine fault.
+    const mainErr = appErrors.find((e) => e.name === MAIN_APP_ID)!;
     state = "down";
-    detail = appErrors.map((e) => `${e.name}: ${e.error}`).join("; ");
+    detail = `${mainErr.name}: ${mainErr.error}`;
     issue = {
       key: "infra.inngest.app_sync",
       level: "critical",
-      title: "Inngest App 同步失败",
+      title: "Inngest 主 App 同步失败",
       detail,
     };
+  } else if (appErrors.length > 0) {
+    // Only AUXILIARY apps (per-domain / generation) have errors. An empty
+    // auxiliary app ("No functions registered within your app") is a benign
+    // lifecycle state — e.g. a business domain whose generated shells are all
+    // still drafts, or a leftover generation app — and must NOT take the whole
+    // event engine offline. The server is reachable and the production (main)
+    // app is healthy. Only a GENUINE sync failure on an auxiliary app is worth
+    // a soft (degraded) warning; an empty app is not.
+    const hardAuxErrors = appErrors.filter(
+      (e) => !/no functions registered/i.test(e.error),
+    );
+    if (hardAuxErrors.length > 0) {
+      state = "degraded";
+      detail = hardAuxErrors.map((e) => `${e.name}: ${e.error}`).join("; ");
+      issue = {
+        key: "infra.inngest.aux_app_sync",
+        level: "warn",
+        title: "Inngest 辅助 App 同步失败",
+        detail,
+      };
+    }
+    // else: empty auxiliary app(s) only → engine stays healthy.
   }
 
   return {

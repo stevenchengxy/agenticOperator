@@ -365,7 +365,7 @@ export async function generateJdDirect(
   if (opts.traceId) headers['X-Trace-Id'] = opts.traceId;
 
   const url = `${baseUrl}/api/v1/jobs/generate-jd`;
-  return instrumentedFetch(
+  const resp = await instrumentedFetch(
     'RoboHire.generateJd',
     url,
     'POST',
@@ -382,6 +382,37 @@ export async function generateJdDirect(
     (res) => handleJsonResponse<RobohireGenerateJdResponse>(res, 'jobs/generate-jd'),
     opts.traceId,
     opts.logger,
+  );
+  assertGenerateStagesOk(resp);
+  return resp;
+}
+
+/**
+ * generate-jd's envelope returns `success: true` at the transport level even when
+ * an internal stage failed — the real per-stage outcome lives in
+ * `meta.stages.{parse,generate}`. A failed `generate` stage comes back with
+ * `success: true`, a placeholder `title: "Untitled"`, and every content field "",
+ * which is indistinguishable from success unless you read meta.stages. `handleJsonResponse`
+ * only rejects `success: false`, so without this guard a degraded generation sails
+ * through and downstream persists an empty JD as if it succeeded.
+ *
+ * Surface a failed stage as a SERVER (recoverable) RobohireApiError: parse success
+ * means the input was readable, so a generate failure is a transient vendor-side
+ * fault worth a retry — not a permanent content problem. Absent `meta` (older
+ * response shape) → nothing to assert.
+ */
+function assertGenerateStagesOk(resp: RobohireGenerateJdResponse): void {
+  const stages = resp.meta?.stages;
+  if (!stages) return;
+  const failed: string[] = [];
+  if (stages.parse === 'failed') failed.push('parse');
+  if (stages.generate === 'failed') failed.push('generate');
+  if (failed.length === 0) return;
+  throw new RobohireApiError(
+    200,
+    'SERVER',
+    `jobs/generate-jd stage failed: ${failed.join(',')} (parse=${stages.parse ?? '—'} generate=${stages.generate ?? '—'})`,
+    resp.requestId,
   );
 }
 

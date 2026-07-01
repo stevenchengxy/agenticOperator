@@ -4,7 +4,7 @@ import { displayKey } from '@/server/normalize/agents';
 import { wsClient } from '@/server/clients/ws';
 import { fetchLiveRegistry } from '@/lib/inngest-registry';
 import { prisma } from '@/server/db';
-import { ONTOLOGY_GEN_SOURCE, REAL_AGENT_SOURCE, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
+import { ONTOLOGY_GEN_SOURCE, REAL_AGENT_SOURCE, realAgentId, rowToDraftRow, type ShellVersionRow } from '@/lib/ontology-generator/draft-store';
 import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID } from '@/lib/domain-ids';
 import { deriveAgents } from '@/lib/ontology-generator/analyze';
 import { loadSnapshotOntology, hasSnapshot } from '@/lib/ontology-generator/ontology-source';
@@ -56,21 +56,33 @@ export async function GET(_req: Request): Promise<Response> {
 
   // Real-agent lifecycle overrides: an 'archived' override soft-deletes a real
   // agent into the recycle bin (hide it from the fleet); 'offline' shows it
-  // paused. Keyed by short (recruitment shorts are unique).
-  const realOverride = new Map<string, string>();
+  // paused. The override row also carries an operator-set display name
+  // (configJson.nameZh) when the agent was renamed. Keyed by short (recruitment
+  // shorts are unique).
+  const realOverride = new Map<string, { status: string; customName: string | null }>();
   try {
     const ovs = await prisma.agentVersion.findMany({
       where: { capturedFrom: REAL_AGENT_SOURCE },
       orderBy: { createdAt: 'desc' },
-      select: { short: true, status: true },
+      select: { short: true, status: true, configJson: true },
     });
-    for (const o of ovs) if (!realOverride.has(o.short)) realOverride.set(o.short, o.status);
+    for (const o of ovs) {
+      if (realOverride.has(o.short)) continue;
+      let customName: string | null = null;
+      if (o.configJson) {
+        try {
+          const c = JSON.parse(o.configJson) as { nameZh?: unknown };
+          if (typeof c.nameZh === 'string' && c.nameZh.trim()) customName = c.nameZh.trim();
+        } catch { /* keep null */ }
+      }
+      realOverride.set(o.short, { status: o.status, customName });
+    }
   } catch {
     /* best-effort — no overrides → all real agents live */
   }
 
   const agents: AgentRow[] = AGENT_MAP
-    .filter((a) => realOverride.get(a.short) !== 'archived') // archived → recycle bin, hidden
+    .filter((a) => realOverride.get(a.short)?.status !== 'archived') // archived → recycle bin, hidden
     .map((a) => {
       const live = regByShort.get(a.short);
       const acts = activityByAgent[a.short] ?? [];
@@ -94,7 +106,9 @@ export async function GET(_req: Request): Promise<Response> {
         spark: Array(16).fill(0),
         realness: live?.realness ?? 'unbuilt',
         slug: live?.slug ?? null,
-        paused: ov === 'offline' || ov === 'draft' ? true : (live?.paused ?? false),
+        paused: ov?.status === 'offline' || ov?.status === 'draft' ? true : (live?.paused ?? false),
+        customName: ov?.customName ?? null,
+        manageId: realAgentId(a.domain, a.short),
       };
     });
 
@@ -163,6 +177,8 @@ export async function GET(_req: Request): Promise<Response> {
       realness: r.realness,
       slug: r.slug,
       paused: r.paused,
+      customName: null,
+      manageId: null, // unmapped live fn — not lifecycle-manageable
     });
   }
 
@@ -201,6 +217,8 @@ export async function GET(_req: Request): Promise<Response> {
         realness: 'shell',
         slug: card.slug,
         paused: card.status === 'offline',
+        customName: card.nameZh,
+        manageId: card.id, // AgentVersion id — lifecycle/rename/delete target
       });
     }
   } catch {

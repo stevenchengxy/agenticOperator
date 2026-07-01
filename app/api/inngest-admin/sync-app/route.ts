@@ -1,8 +1,9 @@
 // POST /api/inngest-admin/sync-app
 //
-// Registers an Inngest "app" (any URL that serves the inngest SDK handler)
-// with the local/shared Inngest dev server. Mirrors what
-// scripts/register-with-inngest.ts does but exposes it through the UI.
+// Re-syncs the RAAS-v1 main Inngest app by PUTting the AO SDK serve endpoint.
+// Current Inngest dev servers reject the old `/fn/register { url }` flow with
+// "App ID required"; the SDK endpoint already knows its app id and function
+// manifest, so PUT /api/inngest is the stable registration primitive.
 //
 // Body: { url: string } — the Inngest serve endpoint
 //   typical values:
@@ -10,12 +11,15 @@
 //     - http://host.docker.internal:3002/api/inngest    (from Docker)
 //     - http://<lan-ip>:<port>/api/inngest              (partner sibling)
 //
-// Mechanism: POSTs `{ url }` to <getInngestUrl()>/fn/register. Inngest
-// then reverse-calls PUT <url> to fetch the function manifest and
-// registers all `inngest.createFunction(...)` definitions.
+// Scope guard: this route only accepts the main `/api/inngest` path. Per-domain
+// apps (`/api/inngest/<domain>`) must be managed through /api/domains/[id]/inngest-app.
 
 import { NextResponse } from 'next/server';
 import { getInngestUrl } from '@/lib/inngest-url';
+import {
+  RAAS_V1_APP_ID,
+  RAAS_V1_EXPECTED_FUNCTION_COUNT,
+} from '@/lib/raas-v1-inngest';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +29,7 @@ export type SyncAppResponse =
       inngestUrl: string;
       appUrl: string;
       functionsRegistered: number | null;
+      expectedFunctions: number;
       raw: unknown;
     }
   | {
@@ -59,7 +64,18 @@ export async function POST(req: Request): Promise<Response> {
   // Basic URL sanity — Inngest will give a clearer error if it can't reach
   // the URL, but catching obvious typos here avoids a confusing 5xx.
   try {
-    new URL(appUrl);
+    const parsed = new URL(appUrl);
+    if (parsed.pathname.replace(/\/+$/, '') !== '/api/inngest') {
+      return NextResponse.json(
+        {
+          ok: false,
+          inngestUrl,
+          appUrl,
+          error: 'Only the RAAS-v1 main endpoint /api/inngest can be synced here. Use domain app controls for /api/inngest/<domain>.',
+        },
+        { status: 400 },
+      );
+    }
   } catch {
     return NextResponse.json(
       { ok: false, inngestUrl, appUrl, error: `Invalid URL: ${appUrl}` },
@@ -67,27 +83,24 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const registerUrl = `${inngestUrl.replace(/\/+$/, '')}/fn/register`;
   let upstream: Response;
   try {
-    upstream = await fetch(registerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: appUrl }),
-    });
+    upstream = await fetch(appUrl, { method: 'PUT' });
   } catch (e) {
     return NextResponse.json(
-      { ok: false, inngestUrl, appUrl, error: `Cannot reach Inngest at ${registerUrl}: ${(e as Error).message}` },
+      { ok: false, inngestUrl, appUrl, error: `Cannot PUT ${appUrl}: ${(e as Error).message}` },
       { status: 502 },
     );
   }
 
-  // Parse response — Inngest dev returns { ok, modified } typically.
-  let raw: unknown = null;
-  try {
-    raw = await upstream.json();
-  } catch {
-    raw = await upstream.text().catch(() => null);
+  const rawText = await upstream.text().catch(() => '');
+  let raw: unknown = rawText || null;
+  if (rawText) {
+    try {
+      raw = JSON.parse(rawText);
+    } catch {
+      raw = rawText;
+    }
   }
 
   if (!upstream.ok) {
@@ -103,19 +116,33 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // Try to extract function count from raw. Inngest dev typically returns
-  // shape { ok: true, modified: <bool> }. The actual fn count must be read
-  // back from listFunctions on the next poll — we set null when unknown.
-  const functionsRegistered =
-    raw && typeof raw === 'object' && 'functions' in raw && Array.isArray((raw as { functions: unknown }).functions)
-      ? ((raw as { functions: unknown[] }).functions.length)
-      : null;
+  const functionsRegistered = await probeMainFunctionCount(inngestUrl);
 
   return NextResponse.json({
     ok: true,
     inngestUrl,
     appUrl,
     functionsRegistered,
+    expectedFunctions: RAAS_V1_EXPECTED_FUNCTION_COUNT,
     raw,
   });
+}
+
+async function probeMainFunctionCount(inngestUrl: string): Promise<number | null> {
+  try {
+    const res = await fetch(`${inngestUrl.replace(/\/+$/, '')}/v0/gql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '{ apps { name functionCount } }' }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      data?: { apps?: Array<{ name: string; functionCount: number }> };
+    };
+    const app = body.data?.apps?.find((a) => a.name === RAAS_V1_APP_ID);
+    return typeof app?.functionCount === 'number' ? app.functionCount : null;
+  } catch {
+    return null;
+  }
 }
