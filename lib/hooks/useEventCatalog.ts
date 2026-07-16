@@ -10,10 +10,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { EventsResponse, EventContract } from "@/lib/api/types";
+import { useDomain } from "@/lib/domains";
 
 const CACHE_TTL_MS = 30_000;
-let cached: { ts: number; data: EventsResponse } | null = null;
-const subscribers = new Set<(d: EventsResponse | null) => void>();
+const cachedByDomain = new Map<string, { ts: number; data: EventsResponse }>();
+const subscribers = new Set<(domain: string, d: EventsResponse | null) => void>();
 
 export type UseEventCatalogResult = {
   events: EventContract[];
@@ -30,38 +31,46 @@ function deriveStaleness(iso: string | null | undefined): "fresh" | "stale" | "n
   return "stale";
 }
 
-async function doFetch(): Promise<void> {
+async function doFetch(domain: string): Promise<void> {
   try {
-    const r = await fetch("/api/events");
+    const params = new URLSearchParams({ domain });
+    const r = await fetch(`/api/events?${params.toString()}`);
     if (!r.ok) return;
     const d = (await r.json()) as EventsResponse;
-    cached = { ts: Date.now(), data: d };
-    subscribers.forEach((fn) => fn(d));
+    cachedByDomain.set(domain, { ts: Date.now(), data: d });
+    subscribers.forEach((fn) => fn(domain, d));
   } catch {
     // keep prior cached data
   }
 }
 
 export function useEventCatalog(): UseEventCatalogResult {
+  const { domain } = useDomain();
+  const cached = cachedByDomain.get(domain);
   const [data, setData] = useState<EventsResponse | null>(
     cached && Date.now() - cached.ts < CACHE_TTL_MS ? cached.data : null
   );
 
   useEffect(() => {
-    subscribers.add(setData);
-    if (!cached || Date.now() - cached.ts >= CACHE_TTL_MS) {
-      void doFetch();
+    const nextCached = cachedByDomain.get(domain);
+    setData(nextCached && Date.now() - nextCached.ts < CACHE_TTL_MS ? nextCached.data : null);
+    const onUpdate = (updatedDomain: string, next: EventsResponse | null) => {
+      if (updatedDomain === domain) setData(next);
+    };
+    subscribers.add(onUpdate);
+    if (!nextCached || Date.now() - nextCached.ts >= CACHE_TTL_MS) {
+      void doFetch(domain);
     }
     return () => {
-      subscribers.delete(setData);
+      subscribers.delete(onUpdate);
     };
-  }, []);
+  }, [domain]);
 
   return {
     events: data?.events ?? [],
     loading: !data,
     lastSyncAt: data?.meta.lastNeo4jSyncAt ?? null,
     staleness: deriveStaleness(data?.meta.lastNeo4jSyncAt),
-    refresh: doFetch,
+    refresh: () => doFetch(domain),
   };
 }

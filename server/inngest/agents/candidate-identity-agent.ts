@@ -14,7 +14,8 @@
 // 模块(resolveIdentityMatch + auditIdentityResolution),与解析端永远同一套逻辑。
 //
 // 三级规则:精确字段(手机号/邮箱/性别)直接比对,模糊字段(姓名/学校/专业/学历)
-// 大模型语义等价;弱命中(第3级六字段)只标人工复核,绝不自动合并。全程 soft-fail。
+// 大模型语义等价;弱命中(第3级六字段)只标人工复核,绝不自动合并。业务依赖可降级,
+// 但审计库写失败会抛出重试,禁止产生无审计结论。
 
 import { inngest } from '@/server/inngest/client';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
@@ -25,6 +26,7 @@ import {
 import { resolveIdentityMatch, type IdentityResolution } from '@/lib/rule-check/candidate-match/resolve-identity';
 import { auditIdentityResolution } from '@/lib/rule-check/candidate-match/audit-identity';
 import { type PersistCandidateCheckArgs, persistCandidateRuleCheck } from '@/lib/rule-check/candidate-match/persist';
+import { isRuleAuditPersistenceFailure } from '@/lib/rule-check/ontology-audit-writer';
 import {
   candidateFromResumeProcessed,
   partnerPgCandidateRepo,
@@ -69,7 +71,7 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
 
   const ev = ((ctx.event as { data?: Record<string, unknown> }).data ?? ctx.event) as Record<string, any>;
   const rec = candidateFromResumeProcessed(ev);
-  const caseId = (ev.upload_id as string) ?? ctx.runId ?? rec.candidate_id;
+  const caseId = ctx.runId ?? (ev.upload_id as string) ?? rec.candidate_id;
   const ruleset = loadCandidateMatchRules();
   const rules = identityRulesByPriority(ruleset);
 
@@ -88,7 +90,7 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
         resolveIdentityMatch(rec, deps.repo, rules, deps.judge),
       )) as IdentityResolution;
 
-      // ② 同一份结论落审计(抓 9-15 + 大模型判定依据 + persist;内部全 soft-fail)。
+      // ② 同一份结论落审计(抓 9-15 + 大模型判定依据 + mandatory persist)。
       const audit = (await ctx.step.run('persist-identity-audit', async () =>
         auditIdentityResolution({
           resolution: computed,
@@ -96,10 +98,11 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
           rulesTotal: rules.length,
           snapshotSource: ruleset.source,
           caseId,
+          runId: ctx.runId ?? caseId,
           traceId: (ev.trace_id as string) ?? null,
           persist: deps.persist,
         }),
-      )) as { id: string } | null;
+      )) as { id: string };
 
       // ③ 本体蓝图闭环:发 CANDIDATE_IDENTITY_CHECKED(当前无订阅者,纯通知)。
       if (ctx.step.sendEvent) {
@@ -113,7 +116,7 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
             same_as_candidate_id: computed.sameAsCandidateId,
             dedup_action: computed.dedupAction,
             matched_rule: computed.result.matchedRule?.ruleId ?? null,
-            audit_id: audit?.id ?? null,
+            audit_id: audit.id,
           },
         });
       }
@@ -122,7 +125,7 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
         same_person: computed.result.samePerson,
         matched_rule: computed.result.matchedRule?.ruleId ?? null,
         dedup_action: computed.dedupAction,
-        audit_id: audit?.id ?? null,
+        audit_id: audit.id,
       });
       // ④ 返回结论 —— 这是 step.invoke 的返回值,简历解析用它驱动落库。
       return {
@@ -135,9 +138,10 @@ export async function candidateIdentityHandler(ctx: HandlerCtx, depsOverride: Pa
         dedupAction: computed.dedupAction,
         needsHumanReview: computed.result.needsHumanReview,
         poolSize: computed.poolSize,
-        auditId: audit?.id ?? null,
+        auditId: audit.id,
       };
     } catch (e) {
+      if (isRuleAuditPersistenceFailure(e)) throw e;
       // Soft-fail:查重绝不向调用方(简历解析)抛错 —— 返回 error,解析按新人降级。
       fileLogger.event('handler.error', { error: (e as Error).message ?? String(e) });
       return { skipped: false as const, error: (e as Error).message ?? String(e) };

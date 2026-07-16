@@ -47,12 +47,13 @@ import {
   RunDetailExpansion,
   fetchRunDetail,
   statusLabel,
-  statusDotColor,
   relTime,
   type RunRow,
   type RunDetail,
   type RunStatus,
 } from "@/components/shared/RunTrace";
+import { useDeepLinkFocus } from "@/lib/hooks/useDeepLinkFocus";
+import { OutcomeBadges } from "./OutcomeBadges";
 
 // /monitor — 运行监控
 //
@@ -91,6 +92,8 @@ export function MonitorContent() {
   const windowId = (sp.get("window") ?? "24h") as WindowId;
   const eventName = sp.get("event");
   const runIdParam = sp.get("run");
+  const infraIdParam = sp.get("infra");
+  const focusParam = sp.get("focus");
   const page = readPage(sp.get("page"));
   const pageSize = readPageSize(sp.get("pageSize"), [20, 50, 100], 50);
 
@@ -112,14 +115,21 @@ export function MonitorContent() {
   const [totalPages, setTotalPages] = React.useState<number | null>(null);
   const [runsLoading, setRunsLoading] = React.useState(true);
   const requestSeq = React.useRef(0);
+  const requestInFlight = React.useRef(false);
 
   const refreshRuns = React.useCallback(async () => {
+    // Postgres-first monitor reads can exceed the 5s poll interval on large
+    // archives. Overlapping calls used to invalidate each other forever, which
+    // left notification deep-links stuck on “loading”. Keep one read in flight.
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     const request = ++requestSeq.current;
     const params = new URLSearchParams({ domain });
     setPaginationParams(params, page, pageSize);
     if (agentSlug) params.set("fn", agentSlug);
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (eventName) params.set("event", eventName);
+    if (runIdParam) params.set("runId", runIdParam);
     params.set("sinceHours", windowId === "1h" ? "1" : windowId === "24h" ? "24" : windowId === "7d" ? "168" : "all");
     setRunsLoading(true);
     try {
@@ -142,9 +152,10 @@ export function MonitorContent() {
       setRunsError(cause instanceof Error ? cause.message : t("mox_request_failed"));
       setRuns((previous) => previous ?? []);
     } finally {
+      requestInFlight.current = false;
       if (request === requestSeq.current) setRunsLoading(false);
     }
-  }, [agentSlug, domain, eventName, page, pageSize, statusFilter, t, windowId]);
+  }, [agentSlug, domain, eventName, page, pageSize, runIdParam, statusFilter, t, windowId]);
 
   React.useEffect(() => {
     void refreshRuns();
@@ -183,8 +194,12 @@ export function MonitorContent() {
         return new Date(r.startedAt).getTime() >= cutoff;
       });
     }
+    // Preserve the notification target even when it is older than the active
+    // window or outside a stale filter carried in the URL.
+    const target = runIdParam ? runs.find((run) => run.id === runIdParam) : null;
+    if (target && !xs.some((run) => run.id === target.id)) xs = [target, ...xs];
     return xs;
-  }, [runs, statusFilter, eventName, windowId, domain, slugToDomain]);
+  }, [runs, statusFilter, eventName, windowId, domain, slugToDomain, runIdParam]);
 
   const counts = React.useMemo(() => {
     const c = { running: 0, completed: 0, failed: 0, cancelled: 0 };
@@ -255,7 +270,7 @@ export function MonitorContent() {
             <div className="text-ink-3 mb-2 flex items-baseline gap-2" style={{ fontSize: 12 }}>
               {t("mox_infra")}
             </div>
-            <SystemStatusCards />
+            <SystemStatusCards focusId={infraIdParam} />
           </div>
 
           {/* secondary filter chips — only shown when active. The 智能体 +
@@ -315,7 +330,12 @@ export function MonitorContent() {
               </div>
             )}
             {runs !== null && filtered.length > 0 && (
-              <RunsList runs={filtered} initialExpandedId={runIdParam} onRunsMutated={refreshRuns} />
+              <RunsList
+                runs={filtered}
+                initialExpandedId={runIdParam}
+                focusKey={focusParam ?? (runIdParam ? `run:${runIdParam}` : null)}
+                onRunsMutated={refreshRuns}
+              />
             )}
             {runs !== null && (runs.length > 0 || page > 1) && (
               <Pagination
@@ -346,8 +366,8 @@ export function MonitorContent() {
 
 // ── runs list with expandable trace ─────────────────────────────
 
-function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; initialExpandedId: string | null; onRunsMutated?: () => void }) {
-  const { t } = useApp();
+function RunsList({ runs, initialExpandedId, focusKey, onRunsMutated }: { runs: RunRow[]; initialExpandedId: string | null; focusKey: string | null; onRunsMutated?: () => void }) {
+  const { t, lang } = useApp();
   const [expandedId, setExpandedId] = React.useState<string | null>(initialExpandedId);
   const [details, setDetails] = React.useState<Record<string, RunDetail | "loading" | "error">>({});
   // Bulk selection — "全选" scopes to the current view (switch to the 失败 tab
@@ -356,6 +376,7 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
   // trigger eventId. Selection is kept as run ids and derived against the
   // current view so rows that left the page/filter drop out of the batch.
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
+  useDeepLinkFocus(focusKey, focusKey ? runs.some((run) => `run:${run.id}` === focusKey) : true);
   const selectedRuns = React.useMemo(
     () => runs.filter((r) => selected.has(r.id)),
     [runs, selected],
@@ -431,12 +452,13 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
       />
       <div
         className="grid gap-4 text-ink-3 border-b border-line"
-        style={{ gridTemplateColumns: "24px 200px minmax(0, 1fr) 110px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5, minWidth: 790 }}
+        style={{ gridTemplateColumns: "24px 180px minmax(0, 1fr) 122px 150px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5, minWidth: 940 }}
       >
         <span />
         <span>{t("mox_col_agent")}</span>
         <span>{t("mox_col_trigger_event")}</span>
         <span>{t("mox_col_status")}</span>
+        <span>{lang === "zh" ? "业务结果" : "Business outcome"}</span>
         <span style={{ textAlign: "right" }}>{t("mox_col_started")}</span>
         <span style={{ textAlign: "right" }}>{t("mox_col_duration")}</span>
         <span style={{ textAlign: "center" }}>{t("mox_col_rerun")}</span>
@@ -446,10 +468,15 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
         const expanded = expandedId === r.id;
         const agentShort = slugToShort(r.function?.slug);
         return (
-          <div key={r.id} className="border-b border-line ao-fade-rise" style={{ ["--ao-i"]: Math.min(i, 18) } as React.CSSProperties}>
+          <div
+            key={r.id}
+            data-focus-key={`run:${r.id}`}
+            className="border-b border-line ao-fade-rise"
+            style={{ ["--ao-i"]: Math.min(i, 18) } as React.CSSProperties}
+          >
             <div
               className="w-full grid items-center gap-4 hover:bg-panel transition-colors"
-              style={{ padding: "12px 12px", gridTemplateColumns: "24px 200px minmax(0, 1fr) 110px 90px 80px 90px 18px", minWidth: 790 }}
+              style={{ padding: "12px 12px", gridTemplateColumns: "24px 180px minmax(0, 1fr) 122px 150px 90px 80px 90px 18px", minWidth: 940 }}
             >
               <span className="flex items-center justify-center">
                 <input
@@ -473,12 +500,11 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
                 <span className="text-ink-3 truncate" style={{ fontSize: 12 }}>
                   {r.eventName ?? "—"}
                 </span>
-                <span className="flex items-center gap-2">
-                  <span className="rounded-full inline-block" style={{ width: 7, height: 7, background: statusDotColor(r.status) }} />
-                  <span style={{ fontSize: 12.5, color: r.status === "Failed" ? "var(--c-err)" : "var(--c-ink-1)" }}>
-                    {statusLabel(r.status, t)}
-                  </span>
+                <span className="flex flex-col items-start gap-1" title={`${statusLabel(r.status, t)} · Inngest`}>
+                  <OutcomeBadges outcome={r.outcome} axes="technical" compact />
+                  <span className="text-[9.5px] text-ink-4">Inngest: {statusLabel(r.status, t)}</span>
                 </span>
+                <span><OutcomeBadges outcome={r.outcome} axes="business" compact /></span>
                 <span className="text-ink-3 tabular-nums" style={{ textAlign: "right", fontSize: 12 }}>
                   {relTime(r.startedAt, t)}
                 </span>
@@ -537,6 +563,7 @@ function BulkActionsBar({
   onMutated: () => void;
 }) {
   const { t } = useApp();
+  const allSelected = selectableCount > 0 && selectedCount === selectableCount;
   const [busy, setBusy] = React.useState<null | "retry" | "delete">(null);
   const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null);
   // Delete is destructive → two-step confirm: first click arms the button,
@@ -611,11 +638,13 @@ function BulkActionsBar({
     <div className="flex items-center gap-3 flex-wrap border-b border-line" style={{ padding: "8px 12px", fontSize: 12 }}>
       <button
         type="button"
-        onClick={onSelectAll}
+        onClick={allSelected ? onClear : onSelectAll}
         disabled={selectableCount === 0}
         className="text-[11px] px-2 py-1 rounded border border-line bg-surface text-ink-2 hover:border-line-strong hover:text-ink-1 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
       >
-        {t("mox_select_all").replace("{n}", String(selectableCount))}
+        {allSelected
+          ? t("mox_deselect_all")
+          : t("mox_select_all").replace("{n}", String(selectableCount))}
       </button>
       {selectedCount > 0 && (
         <span className="text-ink-3 tabular-nums">

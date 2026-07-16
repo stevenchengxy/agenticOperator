@@ -58,11 +58,21 @@ vi.mock('@/lib/allmeta-writers', () => ({
   writeCandidateMatchResultInstance: vi.fn(async () => ({ ok: true })),
 }));
 
-// Prisma — audit + flag persistence is soft-fail; stub the methods used.
+const dbMocks = vi.hoisted(() => ({
+  auditCreate: vi.fn(async () => ({})),
+  auditUpsert: vi.fn(async () => ({})),
+  flagDeleteMany: vi.fn(async () => ({ count: 0 })),
+  flagCreateMany: vi.fn(async () => ({ count: 0 })),
+  transaction: vi.fn(),
+}));
+
+// Prisma — transaction callback uses the same spies exposed on `prisma`, so
+// tests can assert both the atomic write and its retry failure behavior.
 vi.mock('@/server/db', () => ({
   prisma: {
-    ruleCheckAudit: { create: vi.fn(async () => ({})), upsert: vi.fn(async () => ({})) },
-    ruleCheckFlag: { createMany: vi.fn(async () => ({ count: 0 })) },
+    $transaction: dbMocks.transaction,
+    ruleCheckAudit: { create: dbMocks.auditCreate, upsert: dbMocks.auditUpsert },
+    ruleCheckFlag: { deleteMany: dbMocks.flagDeleteMany, createMany: dbMocks.flagCreateMany },
     notification: {
       upsert: vi.fn(async () => ({ id: 'n1' })),
       create: vi.fn(async () => ({ id: 'n1' })),
@@ -96,12 +106,13 @@ vi.mock('@/lib/partner-pg/rule-check-result', () => ({
   })),
 }));
 
-const notifyRecruitmentLifecycle = vi.fn(async () => {});
+const notifyRecruitmentLifecycle = vi.fn(async (_step: unknown, _signal: unknown, _ctx: unknown) => {});
 vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
-  notifyRecruitmentLifecycle: (...a: unknown[]) => notifyRecruitmentLifecycle(...a),
+  notifyRecruitmentLifecycle: (step: unknown, signal: unknown, ctx: unknown) =>
+    notifyRecruitmentLifecycle(step, signal, ctx),
 }));
 
-import { ruleCheckAgentHandler } from './rule-check-agent';
+import { makePersistentAuditId, ruleCheckAgentHandler } from './rule-check-agent';
 import { prisma } from '@/server/db';
 import { runRuleCheck } from '@/lib/rule-check';
 import { extractDims } from '@/lib/rule-check/ontology';
@@ -197,8 +208,32 @@ const passResult = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  dbMocks.transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+    fn({
+      ruleCheckAudit: { upsert: dbMocks.auditUpsert },
+      ruleCheckFlag: { deleteMany: dbMocks.flagDeleteMany, createMany: dbMocks.flagCreateMany },
+    }),
+  );
   notifyRecruitmentLifecycle.mockClear();
   mockExtractDims.mockReturnValue({ client_id: '腾讯', business_group: null, studio: null });
+});
+
+describe('ruleCheckAgent — durable audit identity', () => {
+  const base = {
+    kind: 'decision' as const,
+    runId: 'run-1',
+    uploadId: 'U1',
+    candidateId: 'C1',
+    resumeId: 'R1',
+    jobRequisitionId: 'JR1',
+  };
+
+  it('reuses one id for a retry but never overwrites a later run', () => {
+    expect(makePersistentAuditId(base)).toBe(makePersistentAuditId(base));
+    expect(makePersistentAuditId({ ...base, runId: 'run-2' })).not.toBe(
+      makePersistentAuditId(base),
+    );
+  });
 });
 
 describe('ruleCheckAgent — path A (linked job_requisition_id)', () => {
@@ -233,6 +268,27 @@ describe('ruleCheckAgent — path A (linked job_requisition_id)', () => {
       'MATCH_RULE_CHECK_PASSED',
       expect.objectContaining({ anchors: expect.objectContaining({ job_requisition_id: expect.anything() }) }),
     );
+  });
+
+  it('persists replay lineage on the new append-only audit row', async () => {
+    mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
+    mockGetParsedResume.mockResolvedValue({ data: { name: 'John' }, parsed_content: null });
+    mockRunRuleCheck.mockResolvedValue(passResult as any);
+
+    await ruleCheckAgentHandler({
+      event: thinEvt({
+        job_requisition_id: 'JR1',
+        replay_meta: { parent_audit_id: 'rca-parent' },
+      }) as any,
+      step: mockStep() as any,
+      logger: mockLogger as any,
+      runId: 'run-replay-2',
+    });
+
+    expect(dbMocks.auditUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ parent_audit_id: 'rca-parent' }),
+      update: expect.objectContaining({ parent_audit_id: 'rca-parent' }),
+    }));
   });
 });
 
@@ -285,6 +341,27 @@ describe('ruleCheckAgent — F1 thick event compat', () => {
 });
 
 describe('ruleCheckAgent — decision branches', () => {
+  it('does not write downstream or emit when the audit transaction fails', async () => {
+    mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
+    mockGetParsedResume.mockResolvedValue({ data: { name: 'John' }, parsed_content: null });
+    mockRunRuleCheck.mockResolvedValue(passResult as any);
+    dbMocks.transaction.mockRejectedValueOnce(new Error('postgres unavailable'));
+
+    const step = mockStep();
+    await expect(
+      ruleCheckAgentHandler({
+        event: thinEvt({ job_requisition_id: 'JR1' }) as any,
+        step: step as any,
+        logger: mockLogger as any,
+        runId: 'run-audit-retry',
+      }),
+    ).rejects.toThrow('postgres unavailable');
+
+    expect(step.sent).toHaveLength(0);
+    expect(mockWriteCmr).not.toHaveBeenCalled();
+    expect(mockSavePartnerFail).not.toHaveBeenCalled();
+  });
+
   it('emits MATCH_RULE_CHECK_FAILED + writes partner/Neo4j on a REAL rule violation (no fail_reason)', async () => {
     mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
     mockGetParsedResume.mockResolvedValue({ data: { name: 'John' }, parsed_content: null });
@@ -351,6 +428,32 @@ describe('ruleCheckAgent — decision branches', () => {
 
     expect(step.sent[0].name).toBe('MATCH_RULE_CHECK_PASSED');
   });
+
+  it('blocks FAIL with no explanations even when fail_reason is missing', async () => {
+    mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
+    mockGetParsedResume.mockResolvedValue({ data: { name: 'John' }, parsed_content: null });
+    mockRunRuleCheck.mockResolvedValue({
+      decision: 'FAIL',
+      stats: { total: 2, pass: 0, fail: 0, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
+      rule_results: [],
+      explanations: [],
+      audit: { rules_evaluated: 2, graph_calls: 6, llm_model: 'kimi', llm_duration_ms: 1, llm_round_trips: 0, rule_source: 'ontology-api' },
+    } as any);
+
+    const step = mockStep();
+    await expect(
+      ruleCheckAgentHandler({
+        event: thinEvt({ job_requisition_id: 'JR1' }) as any,
+        step: step as any,
+        logger: mockLogger as any,
+      }),
+    ).rejects.toThrow(/blocked unsafe MATCH_RULE_CHECK_FAILED/);
+
+    expect(step.sent.find((e) => e.name === 'MATCH_RULE_CHECK_FAILED')).toBeUndefined();
+    expect(mockSavePartnerFail).not.toHaveBeenCalled();
+    expect(mockWriteCmr).not.toHaveBeenCalled();
+    expect((prisma.ruleCheckAudit as any).create).not.toHaveBeenCalled();
+  });
 });
 
 describe('ruleCheckAgent — infra failure does NOT reject the candidate', () => {
@@ -410,7 +513,7 @@ describe('ruleCheckAgent — infra failure does NOT reject the candidate', () =>
       const upsert = (prisma.ruleCheckAudit as any).upsert as ReturnType<typeof vi.fn>;
       expect(upsert).toHaveBeenCalledTimes(1);
       const arg = upsert.mock.calls[0][0];
-      expect(arg.where.audit_id).toBe('rca_parked_C1_JR1');
+      expect(arg.where.audit_id).toMatch(/^rca_parked_[a-f0-9]{40}$/);
       expect(arg.create.decision).toBe('FAIL');
       expect(arg.create.fail_reason).toBe(reason);
       expect(JSON.parse(arg.create.rule_provenance)).toHaveLength(1);
@@ -418,6 +521,39 @@ describe('ruleCheckAgent — infra failure does NOT reject the candidate', () =>
       expect((prisma.ruleCheckFlag as any).createMany).not.toHaveBeenCalled();
     });
   }
+
+  it('propagates a tagged persistence error when the PARKED audit cannot be written', async () => {
+    mockGetRequirementDetail.mockResolvedValue(detailOf(sampleReq));
+    mockGetParsedResume.mockResolvedValue({ data: { name: 'John' }, parsed_content: null });
+    mockRunRuleCheck.mockResolvedValue({
+      decision: 'FAIL',
+      stats: { total: 0, pass: 0, fail: 0, pending: 0, insufficient_info: 0, not_triggered: 0, not_executed: 0 },
+      rule_results: [],
+      explanations: [],
+      audit: {
+        rules_evaluated: 1,
+        graph_calls: 0,
+        llm_model: 'unknown',
+        llm_duration_ms: 0,
+        llm_round_trips: 0,
+        rule_source: 'ontology-api',
+        fail_reason: 'gateway-unavailable',
+      },
+    } as any);
+    dbMocks.auditUpsert.mockRejectedValueOnce(new Error('postgres unavailable'));
+
+    const step = mockStep();
+    await expect(ruleCheckAgentHandler({
+      event: thinEvt({ job_requisition_id: 'JR1' }) as any,
+      step: step as any,
+      logger: mockLogger as any,
+      runId: 'run-parked-persist-retry',
+    })).rejects.toThrow('RULE_AUDIT_PERSISTENCE_FAILED');
+
+    expect(step.sent).toHaveLength(0);
+    expect(mockSavePartnerFail).not.toHaveBeenCalled();
+    expect(mockWriteCmr).not.toHaveBeenCalled();
+  });
 });
 
 describe('ruleCheckAgent — unparseable/empty resume gate', () => {

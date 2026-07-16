@@ -19,7 +19,7 @@
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { em } from "@/server/em";
+import { blockUnsafeDevRouteInProduction } from "@/lib/unsafe-route-guard";
 
 type TriggerInput = Partial<{
   bucket: string;
@@ -53,6 +53,9 @@ type TriggerInput = Partial<{
 }>;
 
 export async function POST(req: Request): Promise<Response> {
+  const blocked = blockUnsafeDevRouteInProduction("/api/test/trigger-resume-uploaded");
+  if (blocked) return blocked;
+
   let body: TriggerInput = {};
   try {
     body = await req.json();
@@ -114,6 +117,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const externalEventId = envelope.event_id;
   try {
+    const { em } = await import("@/server/em");
     const result = await em.publish("RESUME_DOWNLOADED", envelope, {
       source: "manual.test-trigger",
       externalEventId,

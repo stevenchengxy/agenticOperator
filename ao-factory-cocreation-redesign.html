@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Agent 工厂 2.0 · 人机共创重设计</title>
+<style>
+  :root{
+    --bg:#0a0e14;--bg2:#0f1620;--panel:#111a26;--panel2:#16212f;--panel3:#0e1826;
+    --line:#1f2c3d;--soft:#2a3a4f;
+    --ink:#e8eef6;--ink2:#9fb2c8;--ink3:#6b7f96;
+    --accent:#5bb8ff;--meta:#b79bff;--ok:#43d39e;--warn:#f5b556;--gen:#ff8db0;--sel:#7ad6ff;--edit:#ffcf6b;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 700px at 75% -10%,#13203012,transparent),var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  code{font-family:var(--mono);font-size:.85em;background:#0c1622;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#c9dcf0}
+  a{color:var(--accent);text-decoration:none}
+
+  header{padding:70px 0 44px;border-bottom:1px solid var(--line);background:radial-gradient(800px 360px at 18% 0%,#b79bff12,transparent)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--meta);margin-bottom:16px}
+  h1{font-size:44px;line-height:1.12;margin:0 0 16px;letter-spacing:-.02em;font-weight:760}
+  h1 .grad{background:linear-gradient(100deg,var(--meta),var(--accent) 50%,var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:18.5px;color:var(--ink2);max-width:780px;margin:0}
+  .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+  .pill{font-size:12.5px;font-family:var(--mono);border:1px solid var(--soft);border-radius:999px;padding:6px 13px;color:var(--ink2);background:#0d1622}
+  .pill b{color:var(--ink)}
+
+  section{padding:56px 0;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink3);margin-bottom:12px}
+  h2{font-size:29px;margin:0 0 14px;letter-spacing:-.015em;font-weight:720}
+  h3{font-size:18px;margin:26px 0 10px;font-weight:660}
+  p{color:var(--ink2)}
+  p strong,li strong{color:var(--ink)}
+  .muted{color:var(--ink3)}
+  ul{color:var(--ink2)}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:860px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:15px;padding:18px 20px}
+  .card h4{margin:0 0 7px;font-size:15.5px;display:flex;align-items:center;gap:8px}
+  .card p{margin:0;font-size:14px;color:var(--ink2)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+
+  /* ---- UI MOCKUP ---- */
+  .mock{margin:26px 0 6px;border:1px solid var(--soft);border-radius:18px;overflow:hidden;background:#0b1119;box-shadow:0 30px 80px -40px #000}
+  .mock-top{display:flex;align-items:center;gap:8px;padding:11px 16px;background:#0d141d;border-bottom:1px solid var(--line)}
+  .mock-top .tl{width:11px;height:11px;border-radius:50%;background:#2a3a4f}
+  .mock-top .title{margin-left:10px;font-size:12.5px;color:var(--ink3);font-family:var(--mono)}
+  .mock-body{display:grid;grid-template-columns:172px 1fr 230px;min-height:560px}
+  @media(max-width:860px){.mock-body{grid-template-columns:1fr}.mock-rail,.mock-right{display:none}}
+  .mock-rail{border-right:1px solid var(--line);padding:14px 12px;background:#0c1320}
+  .mock-right{border-left:1px solid var(--line);padding:14px 12px;background:#0c1320}
+  .mock-center{padding:16px;display:flex;flex-direction:column;gap:13px;background:linear-gradient(180deg,#0b1119,#0a0f17)}
+  .rl{font-size:11px;color:var(--ink3);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;margin:4px 0 8px}
+  .rl2{margin-top:16px}
+  .dom{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--ink2);padding:7px 9px;border-radius:8px;margin-bottom:4px}
+  .dom.on{background:#11202e;color:var(--ink);border:1px solid #1d3344}
+  .dom small{color:var(--ink3);font-family:var(--mono);font-size:10px}
+  .tab{display:inline-block;font-size:11.5px;color:var(--ink3);padding:5px 9px;border-radius:7px;margin:0 3px 4px 0}
+  .tab.on{background:#13202e;color:var(--ink)}
+
+  .userbubble{align-self:flex-start;background:#13202e;border:1px solid #1d3344;border-radius:13px 13px 13px 4px;padding:9px 14px;font-size:13.5px;color:var(--ink);max-width:80%}
+  .narr{font-size:13px;color:var(--ink2);display:flex;gap:8px;align-items:flex-start}
+  .narr .ic{flex:0 0 auto}
+
+  /* agent card */
+  .acard{border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#111c2a,#0d1623);overflow:hidden}
+  .acard.proposed{border-color:#5a4520;box-shadow:0 0 0 1px #5a452040}
+  .acard.accepted{border-color:#1e4a3a}
+  .acard-h{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .acard-h .nm{font-weight:660;font-size:14.5px}
+  .acard-h .sig{font-family:var(--mono);font-size:10.5px;color:var(--ink3)}
+  .badge{font-size:10.5px;font-family:var(--mono);padding:2px 8px;border-radius:6px;border:1px solid var(--soft);color:var(--ink2);white-space:nowrap}
+  .badge.b-prop{color:var(--warn);border-color:#5a4520;background:#1d160a}
+  .badge.b-acc{color:var(--ok);border-color:#1e4a3a;background:#0d201a}
+  .badge.b-gen{color:var(--gen);border-color:#4a2c40;background:#171022}
+  .badge.b-re{color:var(--meta);border-color:#352a55;background:#15102a}
+  .acard-b{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+  .reasoning{font-size:12.5px;color:var(--ink2);border-left:2px solid #2a3a4f;padding-left:10px}
+  .codepane{background:#0a121c;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:#bcd0e6;line-height:1.55;overflow:auto;max-height:140px}
+  .codepane .kw{color:#b79bff}.codepane .st{color:#9be38a}.codepane .cm{color:#5d7088}.codepane .fn{color:#7ad6ff}
+  .tabs2{display:flex;gap:6px;font-size:11.5px}
+  .tabs2 .t2{padding:3px 9px;border-radius:6px;color:var(--ink3);border:1px solid transparent}
+  .tabs2 .t2.on{background:#11202e;color:var(--ink);border-color:#1d3344}
+  .acard-f{display:flex;gap:8px;flex-wrap:wrap;padding:11px 14px;border-top:1px solid var(--line);background:#0c1421}
+  .btn{font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;border:1px solid var(--soft);background:#0e1826;color:var(--ink2);cursor:default}
+  .btn.pri{background:linear-gradient(180deg,#16352a,#103024);border-color:#1e4a3a;color:#7fe3bc}
+  .btn.re{background:#15102a;border-color:#352a55;color:#c3b2ff}
+  .btn.ed{background:#1d160a;border-color:#5a4520;color:#f0c97a}
+
+  /* decision card */
+  .dcard{border:1px solid #3a2d5e;border-radius:14px;background:linear-gradient(180deg,#16112a,#0f0c1e);overflow:hidden}
+  .dcard-h{padding:11px 14px;border-bottom:1px solid #2a2348;font-size:13px;color:#cdbcff;display:flex;gap:8px;align-items:center}
+  .dcard-b{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+  .opt{border:1px solid var(--soft);border-radius:10px;padding:9px 12px;font-size:12.5px;color:var(--ink2);display:flex;justify-content:space-between;gap:10px}
+  .opt.sel{border-color:#3a5fb0;background:#101a2e;color:var(--ink)}
+  .opt b{color:var(--ink)}
+  .opt .why{color:var(--ink3);font-size:11px}
+  .opt.other{border-style:dashed;color:var(--ink3)}
+  .opt.other input{flex:1;background:transparent;border:none;color:var(--ink);font:inherit;font-size:12.5px;outline:none}
+
+  /* steering bar */
+  .steer{margin-top:auto;display:flex;gap:8px;align-items:center;padding:10px 12px;border:1px solid #4a3c1a;border-radius:12px;background:#15110a}
+  .steer input{flex:1;background:transparent;border:none;color:var(--ink);font:inherit;font-size:13px;outline:none}
+  .steer .lbl{font-size:11px;color:var(--warn);font-family:var(--mono)}
+
+  figure{margin:28px 0 8px;background:var(--panel2);border:1px solid var(--line);border-radius:18px;padding:22px;overflow:hidden}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{color:var(--ink3);font-size:13px;margin-top:14px;text-align:center}
+  text{font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif}
+
+  table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink3);font-weight:600;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+  td b{color:var(--ink)} td code{font-size:11.5px}
+  .callout{border-left:3px solid var(--meta);background:#100c1e;border-radius:0 12px 12px 0;padding:15px 19px;margin:20px 0;color:var(--ink2)}
+  .callout b{color:var(--ink)}
+  .ladder{display:flex;flex-direction:column;gap:12px;margin-top:20px}
+  .rung{display:grid;grid-template-columns:96px 1fr;gap:16px;align-items:center;border:1px solid var(--line);border-radius:13px;padding:14px 17px;background:linear-gradient(180deg,var(--panel),var(--bg2))}
+  .rung .ph b{display:block;font-size:20px;color:var(--ink)} .rung .ph{font-family:var(--mono);font-size:12px;color:var(--ink3)}
+  footer{padding:46px 0 80px;color:var(--ink3);font-size:13.5px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Agent Factory 2.0 · Frontend Redesign</div>
+    <h1>从「看 AI 自己跑」<br/>到 <span class="grad">和 AI 一起共创</span></h1>
+    <p class="lede">把工厂从一条只能旁观的自主流,改成一块<b>人机共创的构建画布</b>:每个生成的智能体是一张可预览、可改码、可采纳/可重想的<b>卡片</b>;AI 拿不准时主动给你几个方案 +「其他」;你随时能打断说出想要的改动,Harness 自己判断该回到哪个节点重跑。自治不变,但方向盘随时能交到你手上。</p>
+    <div class="pillrow">
+      <span class="pill"><b>智能体卡片</b> 预览/编辑码 · 采纳/重想</span>
+      <span class="pill"><b>决策点</b> AI 给方案 + 其他</span>
+      <span class="pill"><b>打断即重规划</b> 回到节点重跑</span>
+      <span class="pill"><b>每节点一道人工闸</b></span>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== THE MOCKUP ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">01 · 新界面长这样</div>
+    <h2>构建画布:卡片 · 决策点 · 介入条</h2>
+    <p>中央不再是一条推理瀑布,而是一块画布:计划事件图在顶,智能体<b>卡片</b>逐个长出来等你处置,AI 不确定时弹<b>决策卡</b>,底部常驻一条<b>介入条</b>随时打断。</p>
+
+    <div class="mock">
+      <div class="mock-top"><span class="tl"></span><span class="tl"></span><span class="tl"></span><span class="title">agentic-operator · 智能体工厂 · Agents-generation</span></div>
+      <div class="mock-body">
+
+        <!-- left rail -->
+        <div class="mock-rail">
+          <div class="rl">业务域</div>
+          <div class="dom on">招聘 (生成)<small>live</small></div>
+          <div class="dom">能源调度<small>live</small></div>
+          <div class="dom">费控<small>live</small></div>
+          <div class="rl rl2">本次构建</div>
+          <div style="font-size:12px;color:var(--ink2);padding:4px 9px">6 个动作 · 4/6 已采纳</div>
+          <div style="height:6px;border-radius:4px;background:#11202e;margin:6px 9px;overflow:hidden"><div style="width:66%;height:100%;background:linear-gradient(90deg,#43d39e,#5bb8ff)"></div></div>
+          <div class="rl rl2">历史构建</div>
+          <div style="font-size:11.5px;color:var(--ink3);padding:4px 9px">6 agent · 跑通 · 2分钟前</div>
+        </div>
+
+        <!-- center build canvas -->
+        <div class="mock-center">
+          <div class="userbubble">为这个域生成能真正跑通的 agents，沙箱里验证全部跑通。</div>
+          <div class="narr"><span class="ic">📋</span><span><b style="color:var(--ink)">计划 v1</b> · 6 个 agent,事件链 dedup → 解析 → 合规校验 → 匹配 → 邀约 ＋ createJD。<a href="#">看事件图 →</a></span></div>
+
+          <!-- accepted agent card (collapsed) -->
+          <div class="acard accepted">
+            <div class="acard-h">
+              <span class="dot" style="background:var(--ok)"></span>
+              <span class="nm">简历解析 ProcessResume</span>
+              <span class="sig">RESUME_DOWNLOADED → RESUME_PROCESSED · 工具 3</span>
+              <span style="flex:1"></span>
+              <span class="badge b-acc">✓ 已采纳 · 沙箱跑通</span>
+            </div>
+          </div>
+
+          <!-- PROPOSED agent card (expanded, awaiting decision) -->
+          <div class="acard proposed">
+            <div class="acard-h">
+              <span class="dot" style="background:var(--warn)"></span>
+              <span class="nm">岗位匹配 MatchResume</span>
+              <span class="sig">MATCH_RULE_CHECK_PASSED → MATCH_PASSED / MATCH_FAILED</span>
+              <span style="flex:1"></span>
+              <span class="badge b-gen">AI 亲写</span>
+              <span class="badge b-prop">待你确认</span>
+            </div>
+            <div class="acard-b">
+              <div class="reasoning">为什么这样设计:它只做人岗匹配打分,<b>不碰任何业务规则</b>——规则在前置的合规校验闸口动态抓。匹配低于阈值或 JD 缺失 → MATCH_FAILED。</div>
+              <div class="tabs2"><span class="t2 on">代码 .ts</span><span class="t2">Prompt</span><span class="t2">输入/输出 schema</span><span class="t2">决策分支</span></div>
+              <div class="codepane"><span class="cm">// MatchResume — AI 亲写 · 过 TS 编译 + import/事件接地校验</span>
+<span class="kw">import</span> { inngest } <span class="kw">from</span> <span class="st">'@/server/inngest/client'</span>;
+<span class="kw">import</span> { matchResume } <span class="kw">from</span> <span class="st">'@/lib/tools/robohire'</span>;
+<span class="kw">export const</span> <span class="fn">matchResumeAgent</span> = inngest.<span class="fn">createFunction</span>(
+  { id:<span class="st">'…-match-resume'</span>, triggers:[{event:<span class="st">'MATCH_RULE_CHECK_PASSED'</span>}] },
+  <span class="kw">async</span> ({ event, step }) => { <span class="cm">/* 打分 → 选分支 emit */</span> } );</div>
+            </div>
+            <div class="acard-f">
+              <span class="btn pri">✓ 采纳</span>
+              <span class="btn re">↻ 重想（可附提示）</span>
+              <span class="btn ed">✎ 直接改码</span>
+              <span style="flex:1"></span>
+              <span class="badge">沙箱:待跑</span>
+            </div>
+          </div>
+
+          <!-- DECISION CARD: AI uncertain -> options + other -->
+          <div class="dcard">
+            <div class="dcard-h">🤔 <b style="color:#dcccff">AI 拿不准 · 请你定</b> —— MatchResume 的匹配通过阈值用多少?</div>
+            <div class="dcard-b">
+              <div class="opt sel"><span><b>70 分</b> <span class="why">· 行业常用基线,平衡通过率与质量(推荐)</span></span><span>●</span></div>
+              <div class="opt"><span><b>60 分</b> <span class="why">· 放宽,多进面、人工再筛</span></span><span>○</span></div>
+              <div class="opt"><span><b>80 分</b> <span class="why">· 收紧,只放高匹配,省面试成本</span></span><span>○</span></div>
+              <div class="opt other"><span>其他 ▸</span><input value="按客户分档:大客户 75、普通 65" /></div>
+            </div>
+          </div>
+
+          <!-- live activity -->
+          <div class="narr"><span class="ic">🔧</span><span style="color:var(--ink3)">正在为 InviteInterview 写代码…</span></div>
+
+          <!-- steering bar (always on) -->
+          <div class="steer">
+            <span class="lbl">介入 ↵</span>
+            <input value="把 createJD 改成监听 INTERVIEW_INVITED,别当独立入口" />
+          </div>
+        </div>
+
+        <!-- right panel -->
+        <div class="mock-right">
+          <div style="margin-bottom:8px"><span class="tab on">智能体</span><span class="tab">事件图</span></div>
+          <div><span class="tab">轨迹</span><span class="tab">决策点</span><span class="tab">验收</span></div>
+          <div class="rl rl2">验收 (实时)</div>
+          <div style="font-size:11.5px;color:var(--ink2);line-height:2">
+            <div>✓ 覆盖 6/6（按计划）</div>
+            <div>✓ 事件图闭合</div>
+            <div>⏳ 沙箱:4/6 真跑</div>
+            <div style="color:var(--ink3)">○ 全链路跑通(无降级)</div>
+          </div>
+          <div class="rl rl2">决策点历史</div>
+          <div style="font-size:11px;color:var(--ink3);line-height:1.9">
+            <div>· 阈值 → 待你定</div>
+            <div>· dedup 归属策略 → 选「锁定人优先」</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <figcaption style="margin-top:14px">中央画布:已采纳卡片折叠、待确认卡片展开等处置、AI 决策卡内联弹出、底部介入条常驻。右栏新增「决策点」tab 记录每个被问过的选择。</figcaption>
+  </div>
+</section>
+
+<!-- ===================== AGENT CARD ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">02 · 智能体卡片</div>
+    <h2>每个 agent = 一张可处置的卡片</h2>
+    <p>卡片把「黑箱生成」变成「逐个过目」。每张卡片有完整生命周期与三个动作:</p>
+    <div class="grid g3">
+      <div class="card"><h4><span class="dot" style="background:var(--ok)"></span>✓ 采纳</h4><p>认可这个 agent。它进入待部署集;<b>只有全部采纳 + 沙箱全跑通,才能 finish 落 Fleet 草稿。</b></p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--meta)"></span>↻ 重想</h4><p>让 AI 重新设计这一个(可附一句提示,如「工具少了落库」)。触发 refine/重新 design,只重做这张卡,不动别的。</p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--edit)"></span>✎ 直接改码</h4><p>你自己改 prompt / 代码 / schema。改完走同一套校验(TS 编译 + import/事件接地),并标记为「人工编辑」。</p></div>
+    </div>
+
+    <h3>卡片状态机</h3>
+    <figure>
+      <svg viewBox="0 0 980 180" xmlns="http://www.w3.org/2000/svg" aria-label="卡片状态机">
+        <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#6b7f96"/></marker></defs>
+        <g font-size="12.5" text-anchor="middle">
+          <rect x="20" y="66" width="110" height="48" rx="11" fill="#0e1826" stroke="#23344a"/><text x="75" y="95" fill="#dce8f5">草拟中</text>
+          <line x1="130" y1="90" x2="156" y2="90" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="160" y="66" width="120" height="48" rx="11" fill="#1d160a" stroke="#5a4520"/><text x="220" y="95" fill="#f5c574">待确认</text>
+          <!-- accept -->
+          <line x1="280" y1="80" x2="400" y2="50" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#a)"/><text x="330" y="58" fill="#7fe3bc" font-size="11">采纳</text>
+          <rect x="404" y="28" width="120" height="44" rx="11" fill="#0d201a" stroke="#1e4a3a"/><text x="464" y="55" fill="#7fe3bc">写码+沙箱</text>
+          <line x1="524" y1="50" x2="640" y2="50" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#a)"/>
+          <rect x="644" y="28" width="120" height="44" rx="11" fill="#0d201a" stroke="#1e4a3a"/><text x="704" y="55" fill="#7fe3bc">✓ 已采纳</text>
+          <!-- regenerate -->
+          <line x1="280" y1="100" x2="400" y2="130" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#a)"/><text x="330" y="132" fill="#c3b2ff" font-size="11">重想/改码</text>
+          <rect x="404" y="108" width="120" height="44" rx="11" fill="#15102a" stroke="#352a55"/><text x="464" y="135" fill="#c3b2ff">重做这一张</text>
+          <path d="M464 108 C464 90, 300 90, 230 114" fill="none" stroke="#4a4068" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#a)"/>
+          <!-- sandbox fail loops back -->
+          <path d="M704 72 C704 165, 470 168, 222 116" fill="none" stroke="#5a4a2a" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#a)"/>
+          <text x="500" y="172" fill="#9a8550" font-size="10.5" font-family="ui-monospace,monospace">沙箱没跑通 → 自动退回「待确认」让你/AI 处理</text>
+        </g>
+      </svg>
+      <figcaption>采纳后才写码+沙箱;沙箱不过自动退回。「重想/改码」只重做这一张卡,其余已采纳的不受影响。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ===================== DECISION POINTS ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">03 · 决策点</div>
+    <h2>AI 拿不准时,主动给你几个方案 +「其他」</h2>
+    <p>与其偷偷拍板一个可能错的值(如匹配阈值、归属策略、是否需要面试),不如<b>把不确定性显式抛给你</b>。新增一个大脑工具 <code>ask_user</code>:它产出问题 + 2-3 个带理由的选项 + 一个「其他」输入框,然后<b>挂起等你选</b>,你选完(或填 other)再继续。</p>
+
+    <figure>
+      <svg viewBox="0 0 980 230" xmlns="http://www.w3.org/2000/svg" aria-label="决策点时序">
+        <defs><marker id="b" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#7a8aa0"/></marker></defs>
+        <line x1="150" y1="40" x2="150" y2="210" stroke="#23344a"/><text x="150" y="26" text-anchor="middle" fill="#cdbcff" font-size="12.5">Harness 大脑</text>
+        <line x1="830" y1="40" x2="830" y2="210" stroke="#23344a"/><text x="830" y="26" text-anchor="middle" fill="#7ad6ff" font-size="12.5">你 (UI)</text>
+        <g font-size="12">
+          <line x1="150" y1="62" x2="822" y2="62" stroke="#7a8aa0" stroke-width="1.4" marker-end="url(#b)"/>
+          <text x="490" y="55" text-anchor="middle" fill="#9fb2c8">ask_user(问题, [方案1·理由, 方案2·理由, 方案3·理由], allow_other)</text>
+          <rect x="360" y="78" width="260" height="30" rx="8" fill="#16112a" stroke="#3a2d5e"/><text x="490" y="98" text-anchor="middle" fill="#cdbcff">UI 渲染「决策卡」· 大脑挂起等待</text>
+          <line x1="822" y1="138" x2="158" y2="138" stroke="#7a8aa0" stroke-width="1.4" marker-end="url(#b)"/>
+          <text x="490" y="131" text-anchor="middle" fill="#9fb2c8">你选「方案1」/ 填 other「按客户分档」 → POST /choice</text>
+          <line x1="150" y1="186" x2="822" y2="186" stroke="#3a4658" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#b)"/>
+          <text x="490" y="179" text-anchor="middle" fill="#7f93a8" font-size="11.5">大脑拿到你的选择,据此继续设计(选择存进 ctx + 轨迹,可审计)</text>
+        </g>
+      </svg>
+      <figcaption>ask_user 是一个会挂起的工具,和我已建的人在环路邮箱共用通道。你的选择被记录进决策点历史,可回溯。</figcaption>
+    </figure>
+    <p class="muted">触发时机由 AI 自己判断:阈值/分档/策略这类「没有唯一正确答案、且影响业务」的点才问;能从本体或规则确定的(如事件名)绝不问。问太多会烦,所以 <code>ask_user</code> 的 prompt 里明确「只在真有业务歧义时用」。</p>
+  </div>
+</section>
+
+<!-- ===================== INTERRUPT & REROUTE ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">04 · 打断与重路由</div>
+    <h2>你中途说一句,Harness 自己判断回到哪个节点重跑</h2>
+    <p>底部介入条随时可用。你打一句话(「把 createJD 改成监听 INTERVIEW_INVITED」),Harness 在 turn 边界收到后,<b>不是从头再来,而是判断这句话影响哪个节点,只回到那个节点重执行</b>,再用确定性的 verify_chain + 行为门重新验证整条链。</p>
+
+    <figure>
+      <svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" aria-label="打断重路由">
+        <defs><marker id="c" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#6b7f96"/></marker></defs>
+        <rect x="30" y="100" width="150" height="56" rx="12" fill="#15110a" stroke="#4a3c1a"/><text x="105" y="124" text-anchor="middle" fill="#f5c574" font-size="13" font-weight="600">你打断</text><text x="105" y="143" text-anchor="middle" fill="#cbab78" font-size="11">「createJD 改触发」</text>
+        <line x1="180" y1="128" x2="226" y2="128" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#c)"/>
+        <rect x="230" y="96" width="180" height="64" rx="12" fill="url(#metaG)" style="fill:#16112a" stroke="#3a2d5e"/><text x="320" y="120" text-anchor="middle" fill="#cdbcff" font-size="13" font-weight="600">Harness 分类</text><text x="320" y="140" text-anchor="middle" fill="#9c8fc9" font-size="11">这句话影响哪个节点?</text>
+        <line x1="410" y1="128" x2="456" y2="128" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#c)"/>
+        <rect x="460" y="96" width="180" height="64" rx="12" fill="#0e1826" stroke="#23344a"/><text x="550" y="120" text-anchor="middle" fill="#dce8f5" font-size="13" font-weight="600">回到 createJD 节点</text><text x="550" y="140" text-anchor="middle" fill="#7f93a8" font-size="11">refine→codegen→只重跑它</text>
+        <line x1="640" y1="128" x2="686" y2="128" stroke="#6b7f96" stroke-width="1.5" marker-end="url(#c)"/>
+        <rect x="690" y="96" width="170" height="64" rx="12" fill="#1c160a" stroke="#5a4520"/><text x="775" y="120" text-anchor="middle" fill="#f5c574" font-size="13" font-weight="600">verify_chain</text><text x="775" y="140" text-anchor="middle" fill="#cbab78" font-size="11">重验整条链+沙箱</text>
+        <path d="M775 160 C775 215, 320 215, 320 162" fill="none" stroke="#3a4658" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#c)"/>
+        <text x="548" y="212" text-anchor="middle" fill="#7f93a8" font-size="11" font-family="ui-monospace,monospace">链断了 → 继续重路由相关节点,直到重新全绿</text>
+        <text x="320" y="58" text-anchor="middle" fill="#9c8fc9" font-size="11.5">分类用 LLM:对照当前节点状态机 + 这句话语义 → 选受影响的最小节点集</text>
+      </svg>
+      <figcaption>「回到哪个节点」由大脑结合 ① 每个 agent 的状态 ② 你这句话的语义来判断,只重做受影响的最小集合,再用确定性验证兜底,避免误判把好节点也推翻。</figcaption>
+    </figure>
+    <div class="callout"><b>已经有的地基:</b>我上一轮做的人在环路邮箱(turn 边界注入人类消息 + 进状态摘要)就是这条的底层。这次新增的是<b>「把打断分类成『重做哪个节点』」</b>的智能 + UI 上的可视化反馈(「↩ 已回到 createJD 重新执行」)。</p>
+  </div>
+</section>
+
+<!-- ===================== TECH DETAILS ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">05 · 要补的技术细节(事件 + 接口 + 状态)</div>
+    <h2>让上面三套交互真的能跑的底层契约</h2>
+
+    <h3>新增 / 扩展的流式事件(大脑 → UI)</h3>
+    <table>
+      <thead><tr><th>事件</th><th>含义</th><th>UI 渲染</th></tr></thead>
+      <tbody>
+        <tr><td><code>agent.proposed</code></td><td>一个 agent 设计好,<b>等你确认</b>(不再自动往下)</td><td>展开的「待确认」卡片 + 采纳/重想/改码</td></tr>
+        <tr><td><code>agent.state</code></td><td>卡片状态变更(采纳/重想中/沙箱中/已采纳)</td><td>卡片徽章 + 状态机推进</td></tr>
+        <tr><td><code>choice</code></td><td>AI 不确定 → 问题 + 选项[] + allow_other</td><td>内联决策卡,挂起等选</td></tr>
+        <tr><td><code>route.back</code></td><td>打断后判定重路由到某节点</td><td>「↩ 已回到 X 重执行」横幅 + 该卡回到待确认</td></tr>
+      </tbody>
+    </table>
+
+    <h3>新增的入站接口(UI → 大脑,走同一邮箱机制)</h3>
+    <table>
+      <thead><tr><th>接口</th><th>载荷</th><th>大脑侧</th></tr></thead>
+      <tbody>
+        <tr><td><code>POST …/agent-action</code></td><td>{runId, agent, action: accept｜regenerate｜edit, hint?, code?}</td><td>转成该 agent 的待办,drive 状态机</td></tr>
+        <tr><td><code>POST …/choice</code></td><td>{runId, choiceId, optionId｜otherText}</td><td>解挂 ask_user,返回选择</td></tr>
+        <tr><td><code>POST …/inject</code> <span class="muted">(已有)</span></td><td>{runId, text}</td><td>打断 → 重路由分类</td></tr>
+      </tbody>
+    </table>
+
+    <h3>新增的大脑工具</h3>
+    <ul>
+      <li><code>ask_user(question, options[], allow_other)</code> — 抛出不确定决策,挂起等人选。<b>只在真有业务歧义时用。</b></li>
+      <li><code>propose_agent</code> 取代「设计完自动 codegen」 —— 改成<b>设计完先 propose,等人采纳再 codegen</b>(每节点一道人工闸,可配置「自动采纳」跳过)。</li>
+      <li>打断分类内建在主循环:收到人类消息 → 让大脑判断「这是改某节点 / 改全局计划 / 只是提示」→ 走最小重路由。</li>
+    </ul>
+
+    <div class="callout"><b>状态来源单一可信:</b>每个 agent 的卡片状态 = <code>ctx.specs[i]</code> + 一个 <code>cardState</code> 字段;采纳/重想/编辑/沙箱结果都写这里,UI 只是它的投影。这样刷新、压缩、回放都不丢卡片状态。</div>
+  </div>
+</section>
+
+<!-- ===================== ARCH DEEPEN ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">06 · 回扣宏观架构</div>
+    <h2>这些交互,正是元编排的「人工决策节点」</h2>
+    <p>前端这三套交互不是孤立功能,它们是宏观蓝图里<b>人在环路</b>与<b>元编排重规划</b>的具体落点 —— 把抽象的「人机协作」变成可点的按钮:</p>
+    <div class="grid g3">
+      <div class="card"><h4>卡片采纳闸</h4><p>= 元编排在<b>每个节点</b>上的人工 approval gate。对应「Build-vs-Reuse」之后的「人是否认可这个节点」。</p></div>
+      <div class="card"><h4>决策卡 (ask_user)</h4><p>= 元编排遇到<b>自己没把握的分叉</b>时,把决策权上交给人,而不是赌一个。</p></div>
+      <div class="card"><h4>打断重路由</h4><p>= 元编排的<b>重规划入口</b>:人给新约束 → 重新点将/重做受影响节点。这正是「返回哪个节点重执行」。</p></div>
+    </div>
+    <h3>顺带补的两个架构技术点</h3>
+    <ul>
+      <li><b>智能体注册表 schema</b>(P1 地基):<code>{ id, name, source: generated｜handwritten, domain, capability, triggerEvents[], emitEvents[], inputSchema, outputSchema, codeRef, version, status, sandboxProof }</code>。选择 Harness 按 <code>triggerEvents/emitEvents + capability</code> 检索;卡片采纳后写入。</li>
+      <li><b>选择 Harness 的匹配</b>:先确定性(事件签名 + 域精确/超集匹配)→ 再 LLM 语义排序候选 → 给出「复用 X(置信度)/ 没有合适的,建议生成」。决策权仍在元编排(可被你用决策卡覆盖)。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== BUILD ORDER ===================== -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">07 · 落地顺序</div>
+    <h2>前端重设计,增量四步</h2>
+    <div class="ladder">
+      <div class="rung"><div class="ph"><b>F1</b></div><div>卡片化 + 状态机:把现有 agent 区改成卡片,接 <code>agent.proposed/state</code> + <code>POST agent-action</code>。<b>采纳/重想/改码</b>三键先跑通(沙箱仍自动)。</div></div>
+      <div class="rung"><div class="ph"><b>F2</b></div><div>决策卡:加 <code>ask_user</code> 工具 + <code>choice</code> 事件 + <code>POST choice</code> + 内联选项 UI(含 other)。</div></div>
+      <div class="rung"><div class="ph"><b>F3</b></div><div>打断重路由:在已有 inject 邮箱上加「分类→最小重路由」+ <code>route.back</code> 可视化。</div></div>
+      <div class="rung"><div class="ph"><b>F4</b></div><div>每节点人工闸 + 决策点历史 tab + 可配置「自动采纳」开关(从全手动到全自动连续可调)。</div></div>
+    </div>
+    <div class="callout"><b>不破坏现有自治:</b>默认仍可一键全自动(自动采纳 + 不问),交互层是<b>可选的方向盘</b>——想接管时随时接管,不想管时它自己跑完。这就是你要的「自治 × 人机协作」连续光谱。</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="color:var(--ink2);font-size:15px;margin-bottom:6px">一句话总括</p>
+    <p style="max-width:800px">把工厂从「AI 自己跑、你只能看」,升级成「AI 主跑、你随时能接管」的<b>共创画布</b>:每个 agent 一张可采纳/重想/改码的卡片,AI 拿不准就给你几个方案+其他,你一句话打断它就自己判断回哪个节点重跑——自治不减,但方向盘随时在你手边。</p>
+    <p style="margin-top:24px" class="muted">Agentic Operator · Agent 工厂 2.0 前端重设计 + 交互协议 · v1 · 标注「已有」者复用现有机制,其余为待建增量。</p>
+  </div>
+</footer>
+
+</body>
+</html>

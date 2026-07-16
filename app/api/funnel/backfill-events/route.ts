@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
+import { inferEventDomain } from "@/lib/events/domain-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -37,20 +38,23 @@ export async function POST(): Promise<Response> {
 
     const rows = audits.map((a) => {
       const pass = a.decision === "PASS";
+      const payload = {
+        candidate_id: a.candidate_id,
+        job_requisition_id: a.job_requisition_id,
+        trace_id: a.trace_id ?? a.run_id,
+        run_id: a.run_id,
+        decision: a.decision,
+        audit_id: a.audit_id,
+        backfilled: true,
+      };
+      const name = pass ? "MATCH_RULE_CHECK_PASSED" : "MATCH_RULE_CHECK_FAILED";
       return {
         externalEventId: `evt_rcheck_${a.audit_id}`,
-        name: pass ? "MATCH_RULE_CHECK_PASSED" : "MATCH_RULE_CHECK_FAILED",
+        name,
         source: "rule-check-backfill",
         status: "accepted",
-        payloadSummary: JSON.stringify({
-          candidate_id: a.candidate_id,
-          job_requisition_id: a.job_requisition_id,
-          trace_id: a.trace_id ?? a.run_id,
-          run_id: a.run_id,
-          decision: a.decision,
-          audit_id: a.audit_id,
-          backfilled: true,
-        }),
+        payloadSummary: JSON.stringify(payload),
+        domain: inferEventDomain({ name, data: payload }),
         ts: a.created_at,
       };
     });

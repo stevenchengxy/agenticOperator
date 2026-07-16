@@ -39,6 +39,7 @@ const bool = (v: unknown): boolean => v === true;
 
 // ── validateConstraints — CR-* 约束规则校验 ──────────────────────────────────
 const validateConstraints: EnergyBehavior = {
+  retries: 3,
   async compute(ctx) {
     const d = ctx.dataset;
     if (!d) return { skip: true, skipReason: "no-dataset" };
@@ -54,7 +55,7 @@ const validateConstraints: EnergyBehavior = {
     ctx.logger.event("decision", { action: "validateConstraints", decision: chk.decision, redlineFlag: chk.redlineFlag, violations: violations.length });
 
     await ctx.step.run("persist-rulecheck", () =>
-      persistRuleCheck({ agentSlug: "energy-validate-constraints", agentName: "ValidateConstraintsAgent", stage: chk.stage, caseId: ctx.caseId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.redlineFlag, rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
+      persistRuleCheck({ agentSlug: "energy-validate-constraints", agentName: "ValidateConstraintsAgent", stage: chk.stage, caseId: ctx.caseId, runId: ctx.runId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.redlineFlag, rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
     );
 
     return {
@@ -74,6 +75,7 @@ const validateConstraints: EnergyBehavior = {
 
 // ── triageScheme — 分流判断(5 直通条件)────────────────────────────────────
 const triageScheme: EnergyBehavior = {
+  retries: 3,
   async compute(ctx) {
     const d = ctx.dataset;
     if (!d) return { skip: true, skipReason: "no-dataset" };
@@ -90,7 +92,7 @@ const triageScheme: EnergyBehavior = {
     ctx.logger.event("decision", { action: "triageScheme", route: chk.decision.route, failedConditions: chk.decision.failedConditions, revised });
 
     await ctx.step.run("persist-rulecheck", () =>
-      persistRuleCheck({ agentSlug: "energy-triage-scheme", agentName: "TriageSchemeAgent", stage: chk.stage, caseId: ctx.caseId, dsNo: ctx.dsNo, decision: chk.decision.route.toUpperCase(), redlineFlag, rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.decision.evals, ruleSource: ruleset.source }),
+      persistRuleCheck({ agentSlug: "energy-triage-scheme", agentName: "TriageSchemeAgent", stage: chk.stage, caseId: ctx.caseId, runId: ctx.runId, dsNo: ctx.dsNo, decision: chk.decision.route.toUpperCase(), redlineFlag, rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.decision.evals, ruleSource: ruleset.source }),
     );
 
     return { payloadByEvent: { ROUTING_DECIDED: { route: chk.decision.route, failedConditions: chk.decision.failedConditions, confidence, gzlDeviationPct: d.gzlDeviationPct } } };
@@ -212,6 +214,7 @@ const finalizePlan: EnergyBehavior = {
 
 // ── forecastOutput — 出力预测 QC 规则校验(per-step rule-check #3)──────────────
 const forecastOutput: EnergyBehavior = {
+  retries: 3,
   async compute(ctx) {
     const d = ctx.dataset;
     if (!d) return { skip: true, skipReason: "no-dataset" };
@@ -221,7 +224,7 @@ const forecastOutput: EnergyBehavior = {
     ctx.logger.event("selection_verified", { ok: chk.verification.ok, missing: chk.verification.missing, note: "二次验证:出力预测关键规则(置信区间/版本)是否覆盖" });
     ctx.logger.event("decision", { action: "forecastOutput", decision: chk.decision, confidence: d.forecastConfidence });
     await ctx.step.run("persist-rulecheck", () =>
-      persistRuleCheck({ agentSlug: "energy-forecast-output", agentName: "ForecastOutputAgent", stage: chk.stage, caseId: ctx.caseId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.decision === "VIOLATED", rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
+      persistRuleCheck({ agentSlug: "energy-forecast-output", agentName: "ForecastOutputAgent", stage: chk.stage, caseId: ctx.caseId, runId: ctx.runId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.decision === "VIOLATED", rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
     );
     return { payloadByEvent: { FORECAST_COMPLETED: { fcNo: d.fcNo, forecastConfidence: d.forecastConfidence, p50p90: true } } };
   },
@@ -229,6 +232,7 @@ const forecastOutput: EnergyBehavior = {
 
 // ── generateSuggestion — 调度建议生成 QC 规则校验(per-step rule-check #4)───────
 const generateSuggestion: EnergyBehavior = {
+  retries: 3,
   async compute(ctx) {
     const d = ctx.dataset;
     if (!d) return { skip: true, skipReason: "no-dataset" };
@@ -238,7 +242,7 @@ const generateSuggestion: EnergyBehavior = {
     ctx.logger.event("selection_verified", { ok: chk.verification.ok, missing: chk.verification.missing, note: "二次验证:建议生成关键规则(关口对齐/目标优先级)是否覆盖" });
     ctx.logger.event("decision", { action: "generateSuggestion", decision: chk.decision, gzlDeviationPct: d.gzlDeviationPct, revised: bool(ctx.upstream.revised) });
     await ctx.step.run("persist-rulecheck", () =>
-      persistRuleCheck({ agentSlug: "energy-generate-suggestion", agentName: "GenerateSuggestionAgent", stage: chk.stage, caseId: ctx.caseId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.decision === "VIOLATED", rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
+      persistRuleCheck({ agentSlug: "energy-generate-suggestion", agentName: "GenerateSuggestionAgent", stage: chk.stage, caseId: ctx.caseId, runId: ctx.runId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.decision === "VIOLATED", rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
     );
     return { payloadByEvent: { SUGGESTION_GENERATED: { gzlDeviationPct: d.gzlDeviationPct } } };
   },

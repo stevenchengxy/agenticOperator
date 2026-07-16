@@ -107,7 +107,7 @@ describe("GET /api/ontology/rules/[ruleId] — 费控 live/snapshot id divergenc
   });
 });
 
-describe("GET /api/ontology/rules/[ruleId] — 招聘域全阶段 (非 matchResume 也能解析)", () => {
+describe("GET /api/ontology/rules/[ruleId] — RAAS 招聘域全阶段 (非 matchResume 也能解析)", () => {
   beforeEach(() => {
     // ALLMETA 配置存在 → 走 live ontology(而非直接回退打包 JSON)。
     vi.stubEnv("ALLMETA_BASE_URL", "http://allmeta.test");
@@ -132,7 +132,7 @@ describe("GET /api/ontology/rules/[ruleId] — 招聘域全阶段 (非 matchResu
       ]),
     );
 
-    const res = await get("20-07", "招聘-v1");
+    const res = await get("20-07", "RAAS-v1");
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -140,7 +140,7 @@ describe("GET /api/ontology/rules/[ruleId] — 招聘域全阶段 (非 matchResu
     expect(body.rule.id).toBe("20-07");
     expect(body.rule.standardizedLogicRule).toContain("推荐包");
     // 用整域 ontology 解析,绝不碰 matchResume action 快照。
-    expect(fetchDomainOntology).toHaveBeenCalledWith("招聘-v1");
+    expect(fetchDomainOntology).toHaveBeenCalledWith("RAAS-v1");
   });
 
   it("falls back to bundled rules.json when the live ontology lacks the id", async () => {
@@ -151,7 +151,7 @@ describe("GET /api/ontology/rules/[ruleId] — 招聘域全阶段 (非 matchResu
     ]);
     vi.mocked(fetchDomainOntology).mockResolvedValue(ontology("allmeta", []));
 
-    const res = await get("10-42", "招聘-v1");
+    const res = await get("10-42", "RAAS-v1");
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);

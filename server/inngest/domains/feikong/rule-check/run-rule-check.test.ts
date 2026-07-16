@@ -51,6 +51,18 @@ describe("费控 rule-check (validateExpenseRules)", () => {
     expect(r.risk?.riskType).toBe("T7");
     expect(r.risk?.riskLevel).toBe("L4");
   });
+
+  it("optional risk hit remains in evals but does not mark the claim VIOLATED", () => {
+    const optionalCmp01 = rules.map((rule) =>
+      rule.code === "RULE-CMP-01" ? { ...rule, hardSoft: "soft" as const } : rule,
+    );
+    const r = runExpenseRuleCheck(optionalCmp01, buildFeikongScenario("risk-split"));
+    const hit = r.evals.find((item) => item.code === "RULE-CMP-01");
+    expect(hit?.result).toBe("FAIL");
+    expect(hit?.hardSoft).toBe("soft");
+    expect(r.decision).toBe("VALIDATED");
+    expect(r.risk).toBeNull();
+  });
 });
 
 describe("费控 agent derivation", () => {

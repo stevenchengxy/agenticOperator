@@ -92,6 +92,30 @@ export type RunTrailStep = {
   relatedEpisodeId: string | null;
 };
 
+export type MonitorFailureInfo = {
+  component: string;
+  reason: string;
+  retryable: boolean;
+  summary: string;
+  detail: string | null;
+  code?: string | null;
+  status?: number | null;
+  provider?: string | null;
+  op?: string | null;
+};
+
+export type MonitorRunFailureLog = {
+  id: string;
+  ts: string;
+  level: string;
+  category: string;
+  source: string;
+  agent: string | null;
+  eventName: string | null;
+  message: string;
+  failure: MonitorFailureInfo;
+};
+
 export type MonitorRunDetail = {
   run: {
     id: string;
@@ -117,6 +141,10 @@ export type MonitorRunDetail = {
   }>;
   tokensByAgent: Record<string, { prompt: number; completion: number; total: number; model: string | null }>;
   hitl: Array<{ taskId: string; status: string; title: string; createdAt: string; completedAt: string | null }>;
+  failureSummary: {
+    primary: MonitorRunFailureLog | null;
+    failures: MonitorRunFailureLog[];
+  };
 };
 
 export type CandidateDistributionEntry = {
@@ -195,6 +223,8 @@ export type MonitorFailureDetailResponse = {
     status: string;
     ts: string;
   }>;
+  logFailures: MonitorRunFailureLog[];
+  primaryFailure: MonitorRunFailureLog | null;
 };
 
 export type MonitorQueueEventRow = {

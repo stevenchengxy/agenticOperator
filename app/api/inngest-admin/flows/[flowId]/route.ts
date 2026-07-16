@@ -13,6 +13,7 @@ import {
   flowLabel,
   getRunHistory,
 } from '@/lib/inngest-source';
+import { deriveRunOutcome } from '@/lib/monitor/run-outcome';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,10 +23,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ flowId:
 
   try {
     const fns = await listFunctions();
-    // Pull recent runs from each function, then filter to this flowId.
+    // Pull archived history from each function, then filter to this flowId.
+    // The live source still contributes its recent window in auto mode, while
+    // the Postgres archive keeps older flows available after Inngest evicts
+    // them from its live buffer.
     const allRuns: Awaited<ReturnType<typeof listRunsWithEvents>> = [];
     for (const fn of fns) {
-      const runs = await listRunsWithEvents(fn.slug, { limit: 60, sinceHours: 24 });
+      const runs = await listRunsWithEvents(fn.slug, { limit: 1000 });
       for (const r of runs) {
         if (r.flowId === flowId) {
           allRuns.push(r);
@@ -67,7 +71,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ flowId:
       runCount: allRuns.length,
       runs: enriched.map((r) => ({
         runId: r.runId,
-        functionSlug: fns.find((f) => f.slug)?.slug ?? null,
+        functionSlug: r.detail?.function?.slug ?? null,
         eventName: r.eventName,
         eventId: r.eventId,
         eventPayload: r.eventPayload,
@@ -78,6 +82,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ flowId:
         steps: r.detail?.steps ?? [],
         output: r.detail?.output ?? null,
         function: r.detail?.function ?? null,
+        outcome: deriveRunOutcome({
+          status: r.status,
+          functionSlug: r.detail?.function?.slug ?? null,
+          triggerEvent: r.eventName,
+          output: r.detail?.output ?? null,
+        }),
       })),
       meta: { generatedAt: new Date().toISOString() },
     });

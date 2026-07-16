@@ -7,6 +7,7 @@ import {
   DomainInngestAppManager,
   MainInngestAppRegistration,
 } from "@/components/shared/InngestAppRegistrationControls";
+import { ProcessControlPanel } from "@/components/settings/ProcessControlPanel";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type { SystemEnvConfigResponse, SystemEnvConfigUpdateResponse } from "@/app/api/system/env-config/route";
@@ -262,6 +263,8 @@ export function EnvironmentConfigContent() {
             </Btn>
           </div>
         </section>
+
+        <ProcessControlPanel onChanged={() => load({ silent: true, preserveDraft: true, preserveMessage: true })} />
 
         <section className="min-w-0">
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">

@@ -9,25 +9,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { buildLogQuery } from '@/server/notifications/correlate';
-
-/** Resolve a notification's deep-link target (mirrors the list route). */
-function hrefFor(linkKind: string | null, linkId: string | null): string | null {
-  if (!linkId) return null;
-  switch (linkKind) {
-    case 'rule_check':
-      return `/rule-check/audits/${linkId}`;
-    case 'run':
-      return `/monitor/runs/${linkId}`;
-    case 'trace':
-      return `/correlations/${linkId}`;
-    case 'event':
-      return `/events?eventInstanceId=${encodeURIComponent(linkId)}`;
-    case 'infra':
-      return `/monitor?infra=${encodeURIComponent(linkId)}`;
-    default:
-      return null;
-  }
-}
+import { notificationHref } from '@/lib/notifications/deep-link';
 
 export async function GET(
   _req: Request,
@@ -46,6 +28,10 @@ export async function GET(
       lastSeenAt: n.lastSeenAt,
     });
     const logs = await prisma.logEvent.findMany(query);
+    const aiFresh =
+      n.aiSummary != null &&
+      n.aiGeneratedAt != null &&
+      n.aiGeneratedAt.getTime() >= n.lastSeenAt.getTime();
 
     return NextResponse.json({
       ok: true,
@@ -58,9 +44,9 @@ export async function GET(
         source: n.source,
         title: n.title,
         body: n.body,
-        aiSummary: n.aiSummary,
-        aiSource: n.aiSource,
-        llmModel: n.llmModel,
+        aiSummary: aiFresh ? n.aiSummary : null,
+        aiSource: aiFresh ? n.aiSource : null,
+        llmModel: aiFresh ? n.llmModel : null,
         count: n.count,
         firstSeenAt: n.firstSeenAt,
         lastSeenAt: n.lastSeenAt,
@@ -72,7 +58,7 @@ export async function GET(
         traceId: n.traceId,
         agent: n.agent,
       },
-      href: hrefFor(n.linkKind, n.linkId),
+      href: notificationHref(n.linkKind, n.linkId),
       logs: logs.map((l) => ({
         id: l.id,
         ts: l.ts,

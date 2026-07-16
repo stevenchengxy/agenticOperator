@@ -3,6 +3,9 @@ import { prisma } from '@/server/db';
 import { nodeById, NODES } from '@/lib/workflow-graph-meta';
 import { sumTokensFromActivities, buildHourlyBuckets, safeParse } from '@/lib/monitor/aggregations';
 import type { MonitorAgentDetail, CandidateDistributionEntry } from '@/lib/monitor/types';
+import { AGENT_MAP, type AgentMeta } from '@/lib/agent-mapping';
+import { listEvents } from '@/lib/inngest-source';
+import { eventLeafName, eventMatchesDomain } from '@/lib/events/domain-scope';
 
 // ── /api/monitor/agents/[name] ────────────────────────────────────────
 //
@@ -24,6 +27,39 @@ function extractEventNameFromNarrative(narrative: string): string | null {
   return m ? m[1] : null;
 }
 
+function eventTs(e: { received_at?: string; ts?: number }): string {
+  if (e.received_at) return e.received_at;
+  if (typeof e.ts === 'number') return new Date(e.ts).toISOString();
+  return new Date().toISOString();
+}
+
+async function archivedEventActivityForAgent(
+  meta: AgentMeta | undefined,
+): Promise<MonitorAgentDetail['recentEventActivity']> {
+  if (!meta) return [];
+  const triggerNames = new Set(meta.triggersEvents ?? []);
+  const emitNames = new Set(meta.emitsEvents ?? []);
+  const eventNames = new Set([...triggerNames, ...emitNames]);
+  if (eventNames.size === 0) return [];
+
+  const events = await listEvents(300);
+  return events
+    .filter((e) => eventNames.has(e.name) || eventNames.has(eventLeafName(e.name)))
+    .filter((e) => eventMatchesDomain(e, meta.domain))
+    .slice(0, 50)
+    .map((e) => {
+      const leafName = eventLeafName(e.name);
+      const emitted = (emitNames.has(e.name) || emitNames.has(leafName)) && !(triggerNames.has(e.name) || triggerNames.has(leafName));
+      return {
+        ts: eventTs(e),
+        type: emitted ? 'event_emitted' : 'event_received',
+        eventName: leafName || e.name,
+        narrative: emitted ? `Emitted ${leafName || e.name}` : `Received ${leafName || e.name}`,
+        runId: null,
+      };
+    });
+}
+
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ name: string }> },
@@ -33,11 +69,14 @@ export async function GET(
   if (!node) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   const agentName = node.agentName ?? node.title;
+  const agentMeta = AGENT_MAP.find(
+    (a) => a.short === agentName || a.inngestName === agentName || a.wsId === node.wsId,
+  );
 
   try {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const [activities, episodes, config, distributionGroups, eventActivities] = await Promise.all([
+    const [activities, episodes, config, distributionGroups, eventActivities, archivedEventActivities] = await Promise.all([
       prisma.agentActivity.findMany({
         where: { agentName, createdAt: { gte: since24h } },
         orderBy: { createdAt: 'asc' },
@@ -67,6 +106,7 @@ export async function GET(
         take: 50,
         select: { type: true, metadata: true, createdAt: true, narrative: true, runId: true },
       }).catch(() => []),
+      archivedEventActivityForAgent(agentMeta).catch(() => []),
     ]);
 
     // ── 24h hourly token buckets ──────────────────────────────
@@ -139,7 +179,7 @@ export async function GET(
     });
 
     // ── Recent emit/receive event activity ───────────────────
-    const recentEventActivity: MonitorAgentDetail['recentEventActivity'] = (
+    const activityBackedEventActivity: MonitorAgentDetail['recentEventActivity'] = (
       eventActivities as Array<{ type: string; metadata: string | null; createdAt: Date; narrative: string; runId: string | null }>
     ).map(a => {
       const meta = a.metadata ? safeParse(a.metadata) : undefined;
@@ -151,6 +191,10 @@ export async function GET(
         runId: a.runId,
       };
     });
+    const recentEventActivity =
+      activityBackedEventActivity.length > 0
+        ? activityBackedEventActivity
+        : archivedEventActivities;
 
     const detail: MonitorAgentDetail = {
       name: node.id,
@@ -188,4 +232,3 @@ export async function GET(
     return NextResponse.json({ error: 'internal' }, { status: 500 });
   }
 }
-

@@ -46,6 +46,7 @@ const runInvoiceOCR: FeikongBehavior = {
 
 // ── validateExpenseRules — 四组规则校验(INV→STD→CMP→BUD,PIPE-02/04)──────────
 const validateExpenseRules: FeikongBehavior = {
+  retries: 3,
   async compute(ctx): Promise<ComputeResult> {
     const d = ctx.dataset;
     if (!d) return { skip: true, skipReason: "no-dataset" };
@@ -60,7 +61,7 @@ const validateExpenseRules: FeikongBehavior = {
     ctx.logger.event("decision", { action: "validateExpenseRules", decision: chk.decision, deduction: chk.deductionTotal, payable: chk.payableAfterDeduction, risk: chk.risk?.riskType });
 
     await ctx.step.run("persist-rulecheck", () =>
-      persistRuleCheck({ agentSlug: "feikong-validate-expense-rules", agentName: "ValidateExpenseRulesAgent", stage: chk.stage, caseId: ctx.caseId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.redlineFlag, rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
+      persistRuleCheck({ agentSlug: "feikong-validate-expense-rules", agentName: "ValidateExpenseRulesAgent", stage: chk.stage, caseId: ctx.caseId, runId: ctx.runId, dsNo: ctx.dsNo, decision: chk.decision, redlineFlag: chk.redlineFlag, rulesTotal: ruleset.total, rulesExpected: chk.rulesExpected, selected: chk.selected, verification: chk.verification, evals: chk.evals, ruleSource: ruleset.source }),
     );
 
     if (chk.risk) {

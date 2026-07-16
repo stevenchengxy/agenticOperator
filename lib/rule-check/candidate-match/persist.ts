@@ -5,8 +5,8 @@
 // merges ontologyAuditList(RECRUITMENT_DOMAIN_ID) for recruitment). Mirrors the energy
 // persistRuleCheck writer (server/inngest/domains/energy/rule-check/run-rule-check.ts).
 
-import { prisma } from '@/server/db';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import { persistOntologyRuleCheckAudit } from '@/lib/rule-check/ontology-audit-writer';
 import type { CandidateOntologyCheck } from './to-ontology-check';
 
 export interface PersistCandidateCheckArgs {
@@ -14,7 +14,7 @@ export interface PersistCandidateCheckArgs {
   agentName: string;
   stage: string;
   caseId: string;
-  runId?: string | null;
+  runId: string;
   traceId?: string | null;
   dsNo?: string | null;
   ruleSource: string;
@@ -26,51 +26,33 @@ export async function persistCandidateRuleCheck(
   a: PersistCandidateCheckArgs,
 ): Promise<{ id: string }> {
   const { check } = a;
-  // Deterministic id (caseId + agentSlug) → idempotent upsert. A step retry / replay
-  // re-runs with the same caseId and updates the row in place instead of writing a
-  // duplicate audit. Mirrors rule-check-agent's stable parked-audit id pattern.
-  const id = `cm_${a.agentSlug}_${a.caseId}`;
-  const evalsCreate = check.evals.map((e) => ({
-    ruleId: e.ruleId,
-    ruleName: e.ruleName,
-    ruleGroup: e.ruleGroup,
-    hardSoft: e.hardSoft,
-    result: e.result,
-    checkPoint: e.checkPoint ?? null,
-    evidence: e.evidence ?? null,
-  }));
-  const selectionNote = a.selectionNote != null ? JSON.stringify(a.selectionNote) : null;
-  const verdict = {
+  const id = await persistOntologyRuleCheckAudit({
+    domain: RECRUITMENT_DOMAIN_ID,
+    agentSlug: a.agentSlug,
+    agentName: a.agentName,
+    stage: a.stage,
+    caseId: a.caseId,
+    runId: a.runId,
+    traceId: a.traceId ?? null,
+    dsNo: a.dsNo ?? null,
     decision: check.decision,
     redlineFlag: check.redlineFlag,
     rulesTotal: check.rulesTotal,
     rulesSelected: check.rulesSelected,
     rulesExpected: check.rulesExpected,
     selectionOk: check.selectionOk,
-    selectionNote,
+    selectionNote: a.selectionNote != null ? JSON.stringify(a.selectionNote) : null,
     rulesEvaluated: check.rulesEvaluated,
     ruleSource: a.ruleSource,
-  };
-  const row = await prisma.ontologyRuleCheck.upsert({
-    where: { id },
-    create: {
-      id,
-      domain: RECRUITMENT_DOMAIN_ID,
-      agentSlug: a.agentSlug,
-      agentName: a.agentName,
-      stage: a.stage,
-      caseId: a.caseId,
-      runId: a.runId ?? a.caseId,
-      traceId: a.traceId ?? null,
-      dsNo: a.dsNo ?? null,
-      ...verdict,
-      evals: { create: evalsCreate },
-    },
-    update: {
-      ...verdict,
-      // refresh evals on replay so the row reflects the latest evaluation
-      evals: { deleteMany: {}, create: evalsCreate },
-    },
+    evals: check.evals.map((e) => ({
+      ruleId: e.ruleId,
+      ruleName: e.ruleName,
+      ruleGroup: e.ruleGroup,
+      hardSoft: e.hardSoft,
+      result: e.result,
+      checkPoint: e.checkPoint ?? null,
+      evidence: e.evidence ?? null,
+    })),
   });
-  return { id: row.id };
+  return { id };
 }

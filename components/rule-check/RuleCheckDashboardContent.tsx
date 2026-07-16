@@ -1,9 +1,11 @@
 "use client";
 import React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
+import { Ic } from "@/components/shared/Ic";
 import { RuleDefinitionBody, type OntologyRuleResponse } from "@/components/rule-check/RuleDefinitionPanel";
 import type { RuleHealthRow } from "@/lib/rule-check/rule-health";
 import type { RuleHealthResponse, InfraParkedEntry } from "@/app/api/rule-check-audits/rule-health/route";
@@ -23,6 +25,7 @@ type Win = "7d" | "30d" | "90d" | "all";
 export function RuleCheckDashboardContent() {
   const { t } = useApp();
   const { domain } = useDomain();
+  const router = useRouter();
   const [data, setData] = React.useState<RuleHealthResponse | null>(null);
   const [err, setErr] = React.useState(false);
   const [win, setWin] = React.useState<Win>("30d");
@@ -84,6 +87,15 @@ export function RuleCheckDashboardContent() {
   );
   const parked = data?.infra_parked ?? [];
   const deadRules = data?.dead_rules ?? [];
+  const openRuleAudits = React.useCallback(
+    (ruleId: string) => {
+      const next = new URLSearchParams();
+      next.set("view", "audits");
+      next.set("ruleId", ruleId);
+      router.replace(`/rule-check?${next.toString()}`);
+    },
+    [router],
+  );
 
   return (
     <div className="flex flex-col gap-5" style={{ padding: "18px 32px 40px" }}>
@@ -115,6 +127,13 @@ export function RuleCheckDashboardContent() {
         <HealthStrip totals={totals} parkedCount={parked.length} t={t} />
       </section>
 
+      {err && data ? (
+        <div className="rc-alert-line rc-card-in" style={{ background: "var(--c-warn-bg)" }}>
+          <span className="rc-status-dot" style={{ background: "var(--c-warn)" }} />
+          <span className="text-ink-1">{t("rc_rh_error")}</span>
+        </div>
+      ) : null}
+
       {parked.length > 0 && (
         <Link href="/fleet" className="rc-alert-line no-underline rc-card-in">
           <span className="rc-status-dot" style={{ background: "var(--c-warn)" }} />
@@ -123,7 +142,7 @@ export function RuleCheckDashboardContent() {
         </Link>
       )}
 
-      <div className="grid gap-5 items-start" style={{ gridTemplateColumns: "minmax(0, 1fr) 310px" }}>
+      <div className="grid gap-5 items-start rc-dashboard-grid">
         <section className="rc-surface-panel min-w-0 rc-card-in" style={{ padding: 0 }}>
           <div className="flex flex-col gap-3 border-b border-line" style={{ padding: 14 }}>
             <div className="flex items-center gap-2">
@@ -161,16 +180,17 @@ export function RuleCheckDashboardContent() {
           ) : shownRules.length === 0 ? (
             <div className="text-ink-3 py-12 text-center" style={{ fontSize: 12.5 }}>{t("rc_rh_empty")}</div>
           ) : (
-            <div>
-              <div className="grid items-center text-ink-3" style={{ gridTemplateColumns: "minmax(0, 2.1fr) 70px minmax(160px, 1.5fr) 86px", gap: 12, padding: "9px 14px", fontSize: 10.5, borderBottom: "1px solid var(--c-line)" }}>
+            <div className="rc-rule-table-wrap">
+              <div className="grid items-center text-ink-3 rc-rule-table-head">
                 <span>{t("rc_rh_col_rule")}</span>
                 <span style={{ textAlign: "right" }}>{t("rc_rh_col_fired")}</span>
                 <span>{t("rc_rh_col_passfail")}</span>
                 <span>{t("rc_rh_col_health")}</span>
+                <span aria-hidden />
               </div>
               {shownRules.map((r, i) => (
                 <div key={r.rule_id} className="rc-row-in" style={{ ["--rc-i"]: Math.min(i, 14) } as React.CSSProperties}>
-                  <RuleRow r={r} t={t} onSelect={setSelectedRule} />
+                  <RuleRow r={r} t={t} onSelect={setSelectedRule} onOpenAudits={openRuleAudits} />
                 </div>
               ))}
             </div>
@@ -360,57 +380,77 @@ function RuleDefinitionDrawer({ ruleId, domain, onClose }: { ruleId: string; dom
 
 // ── rule row ────────────────────────────────────────────────────────────────
 
-function RuleRow({ r, t, onSelect }: { r: RuleHealthRow; t: (k: string) => string; onSelect: (id: string) => void }) {
+function RuleRow({
+  r,
+  t,
+  onSelect,
+  onOpenAudits,
+}: {
+  r: RuleHealthRow;
+  t: (k: string) => string;
+  onSelect: (id: string) => void;
+  onOpenAudits: (id: string) => void;
+}) {
   const passW = Math.max(r.passed, 0);
   const failW = Math.max(r.failed, 0);
   const redline = r.severity === "terminal";
   const healthTone: "ok" | "err" | "muted" =
     r.health === "blocking" ? "err" : r.health === "unassessed" || r.health === "dead" ? "muted" : "ok";
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(r.rule_id)}
-      className="grid items-center w-full text-left rc-row-hover"
-      style={{ gridTemplateColumns: "minmax(0, 2.1fr) 70px minmax(160px, 1.5fr) 86px", gap: 12, padding: "11px 14px", borderBottom: "1px solid var(--c-line)", background: "transparent", cursor: "pointer" }}
-      title={r.name}
-    >
-      <span className="flex items-baseline gap-2 min-w-0">
-        <code className="text-ink-1 tabular-nums flex-none" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>{r.rule_id}</code>
-        <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.name !== r.rule_id ? r.name : ""}</span>
-        {r.stage && (
-          <span className="flex-none text-ink-3" style={{ fontSize: 9, border: "1px solid var(--c-line)", padding: "0 4px", borderRadius: 3, background: "var(--c-panel)", whiteSpace: "nowrap" }}>
-            {r.stage}
+    <div className="grid items-center w-full rc-row-hover rc-rule-table-row" title={r.name}>
+      <button
+        type="button"
+        onClick={() => onSelect(r.rule_id)}
+        className="grid items-center text-left rc-rule-main-action"
+      >
+        <span className="flex items-baseline gap-2 min-w-0">
+          <code className="text-ink-1 tabular-nums flex-none" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>{r.rule_id}</code>
+          <span className="text-ink-2 truncate" style={{ fontSize: 11.5 }}>{r.name !== r.rule_id ? r.name : ""}</span>
+          {r.stage && (
+            <span className="flex-none text-ink-3" style={{ fontSize: 9, border: "1px solid var(--c-line)", padding: "0 4px", borderRadius: 3, background: "var(--c-panel)", whiteSpace: "nowrap" }}>
+              {r.stage}
+            </span>
+          )}
+          {redline && (
+            <span className="flex-none" style={{ fontSize: 9, color: "var(--c-err)", background: "var(--c-err-bg)", padding: "1px 5px", borderRadius: 999 }}>
+              {t("rc_rh_redline")}
+            </span>
+          )}
+        </span>
+        <span className="tabular-nums text-ink-2" style={{ textAlign: "right", fontSize: 12.5 }}>{r.evaluated}</span>
+        <span className="min-w-0">
+          <span className="flex rounded-full overflow-hidden" style={{ height: 6, background: "var(--c-panel)" }} title={t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}>
+            {passW > 0 && <span className="rc-meter-fill" style={{ flex: passW, background: "var(--c-ok)" }} />}
+            {failW > 0 && <span className="rc-meter-fill" style={{ flex: failW, background: "var(--c-err)" }} />}
           </span>
-        )}
-        {redline && (
-          <span className="flex-none" style={{ fontSize: 9, color: "var(--c-err)", background: "var(--c-err-bg)", padding: "1px 5px", borderRadius: 999 }}>
-            {t("rc_rh_redline")}
+          <span className="text-ink-3" style={{ fontSize: 9.5 }}>
+            {t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}
           </span>
-        )}
-      </span>
-      <span className="tabular-nums text-ink-2" style={{ textAlign: "right", fontSize: 12.5 }}>{r.evaluated}</span>
-      <span className="min-w-0">
-        <span className="flex rounded-full overflow-hidden" style={{ height: 6, background: "var(--c-panel)" }} title={t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}>
-          {passW > 0 && <span className="rc-meter-fill" style={{ flex: passW, background: "var(--c-ok)" }} />}
-          {failW > 0 && <span className="rc-meter-fill" style={{ flex: failW, background: "var(--c-err)" }} />}
         </span>
-        <span className="text-ink-3" style={{ fontSize: 9.5 }}>
-          {t("rc_rh_passfail").replace("{pass}", String(r.passed)).replace("{fail}", String(r.failed))}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="rc-status-dot" style={{ background: toneColor(healthTone) }} />
+          <span className={healthTone === "err" ? "text-err" : "text-ink-3"} style={{ fontSize: 10.5 }}>
+            {r.health === "blocking"
+              ? t("rc_rh_health_blocking")
+              : r.health === "unassessed"
+                ? t("rc_rh_health_unassessed")
+                : r.health === "dead"
+                  ? t("rc_rh_health_dead")
+                  : t("rc_rh_health_idle")}
+          </span>
         </span>
+      </button>
+      <span className="flex justify-end">
+        <button
+          type="button"
+          title={t("rc_rh_open_audits")}
+          className="rc-mini-icon-action"
+          onClick={() => onOpenAudits(r.rule_id)}
+        >
+          <Ic.search />
+        </button>
       </span>
-      <span className="flex items-center gap-1.5 min-w-0">
-        <span className="rc-status-dot" style={{ background: toneColor(healthTone) }} />
-        <span className={healthTone === "err" ? "text-err" : "text-ink-3"} style={{ fontSize: 10.5 }}>
-          {r.health === "blocking"
-            ? t("rc_rh_health_blocking")
-            : r.health === "unassessed"
-              ? t("rc_rh_health_unassessed")
-              : r.health === "dead"
-                ? t("rc_rh_health_dead")
-                : t("rc_rh_health_idle")}
-        </span>
-      </span>
-    </button>
+    </div>
   );
 }
 

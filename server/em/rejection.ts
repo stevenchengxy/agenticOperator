@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db";
+import { inferEventDomain } from "../../lib/events/domain-scope";
 import { inngest } from "../inngest/client";
 
 export const EVENT_REJECTED_NAME = "EVENT_REJECTED";
@@ -129,6 +130,7 @@ export async function emitRejection(input: RejectionInput): Promise<{
         causedByEventId: input.originalEventId ?? null,
         causedByName: input.originalEventName,
         payloadSummary: JSON.stringify(envelope.payload).slice(0, 500),
+        domain: inferEventDomain({ name: EVENT_REJECTED_NAME, data: envelope }),
       },
     });
   } catch (err) {

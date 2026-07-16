@@ -42,7 +42,9 @@ describe('GET /api/monitor/overview', () => {
     expect(Array.isArray(j.nodes)).toBe(true);
     expect(j.nodes.length).toBe(24); // matches workflow-graph-meta NODES (22 canonical agents + ruleCheck + trig)
     expect(Array.isArray(j.edges)).toBe(true);
-    expect(j.edges.length).toBe(30); // matches workflow-graph-meta EDGES.length (28 prior + 2 ruleCheck out)
+    // 29 live AO edges: NEED_INTERVIEW leaves AO for RAAS/HSM before an
+    // INTERVIEW_INVITATION_REQUESTED event re-enters at InterviewInviter.
+    expect(j.edges.length).toBe(29);
     expect(Array.isArray(j.failures)).toBe(true);
     expect(Array.isArray(j.hitl)).toBe(true);
     expect(Array.isArray(j.recentRuns)).toBe(true);

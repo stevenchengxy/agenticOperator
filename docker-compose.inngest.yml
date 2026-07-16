@@ -20,7 +20,7 @@
 
 services:
   inngest:
-    image: inngest/inngest:latest
+    image: ${INNGEST_IMAGE:-inngest/inngest:v1.19.2}
     container_name: ao-inngest
     restart: unless-stopped
     command:
@@ -30,6 +30,9 @@ services:
       - "0.0.0.0"
       - --port
       - "8288"
+      # A volume alone is not enough: the dev server only writes its SQLite
+      # state when --persist is enabled.
+      - --persist
       # 启动时主动 sync 本仓的 Next.js SDK:
       #   AO main (端口 3002) 现在包含全部 agent runtime:
       #     - resumeParserAgent  (RESUME_DOWNLOADED → RESUME_PROCESSED)
@@ -45,8 +48,15 @@ services:
       - "0.0.0.0:8289:8289"   # connect-gateway
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    working_dir: /var/lib/inngest
     volumes:
-      - inngest-data:/var/lib/inngest
+      - inngest-data:/var/lib/inngest/.inngest
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
 volumes:
   inngest-data:

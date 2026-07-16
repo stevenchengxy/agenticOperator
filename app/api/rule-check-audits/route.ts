@@ -1,17 +1,19 @@
-// GET /api/rule-check-audits — Q架构纠偏后:从 Prisma 读 audit
+// GET /api/rule-check-audits — Q架构纠偏后:从 Postgres 读 audit
 //
 // 旧实现:从 Neo4j MATCH (a:RuleCheckAudit) 查 → 节点重、不支持 SQL 索引
-// 新实现:从 Prisma SQLite ruleCheckAudit 表查 → 走索引、有事务、轻量
+// 新实现:从 Prisma/Postgres ruleCheckAudit 表查 → 走索引、有事务、持久化分页
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { isRuleCheckDomain } from '@/lib/rule-check/domain-scope';
 import {
   hasOntologyRuleChecks,
-  ontologyAuditList,
+  ontologyAuditCount,
+  ontologyAuditRows,
   ontologyAuditFacets,
+  type OntologyAuditFilters,
 } from '@/lib/rule-check/ontology-audit-source';
-import { foldVerdict, applyAuditFacets, type Verdict } from '@/lib/rule-check/audit-facets';
+import { foldVerdict, type Verdict } from '@/lib/rule-check/audit-facets';
 import { agentsForDomain, JR_COMPLIANCE_AGENT_ID, lookupAgent } from '@/lib/rule-check/agent-registry';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 
@@ -65,6 +67,9 @@ export type RuleCheckAuditRow = {
 export type RuleCheckAuditListResponse = {
   rows: RuleCheckAuditRow[];
   total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
   meta: {
     empty: boolean;
     not_configured?: boolean;
@@ -101,29 +106,55 @@ export async function GET(req: Request) {
     verdictParam === 'pass' || verdictParam === 'fail' || verdictParam === 'parked'
       ? verdictParam
       : '';
-  const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 200);
+  // `limit` remains the page-size alias used by old deep-links/clients.
+  const legacyLimit = positiveInt(searchParams.get('limit'), 50, 200);
+  const page = positiveInt(searchParams.get('page'), 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positiveInt(searchParams.get('pageSize'), legacyLimit, 200);
+  const offset = safeOffset(page, pageSize);
+
+  const ontologyFilters: OntologyAuditFilters = {
+    decision: decision ?? undefined,
+    client: client || undefined,
+    jrId: jrId || undefined,
+    ruleId: ruleId || undefined,
+    agent: agent || undefined,
+    stage: stage || undefined,
+    verdict,
+  };
 
   // Non-recruitment domains: serve from the generic ontology rule-check store.
   const domain = searchParams.get('domain');
   if (!isRuleCheckDomain(domain)) {
-    if (await hasOntologyRuleChecks(domain)) {
-      const d = domain!.trim();
-      let rows = await ontologyAuditList(d, limit);
-      if (decision === 'PASS' || decision === 'FAIL') rows = rows.filter((r) => r.decision === decision);
-      if (client) rows = rows.filter((r) => r.client_name === client);
-      rows = applyAuditFacets(rows, { agent, stage, verdict });
-      const facets = await ontologyAuditFacets(d);
+    try {
+      if (await hasOntologyRuleChecks(domain)) {
+        const d = domain!.trim();
+        const [total, facets] = await Promise.all([
+          ontologyAuditCount(d, ontologyFilters),
+          ontologyAuditFacets(d),
+        ]);
+        const rows = offset < total
+          ? await ontologyAuditRows(d, { skip: offset, take: pageSize, filters: ontologyFilters })
+          : [];
+        return NextResponse.json<RuleCheckAuditListResponse>({
+          rows,
+          total,
+          page,
+          pageSize,
+          totalPages: totalPages(total, pageSize),
+          meta: { empty: rows.length === 0, generatedAt: new Date().toISOString(), facets },
+        });
+      }
       return NextResponse.json<RuleCheckAuditListResponse>({
-        rows,
-        total: rows.length,
-        meta: { empty: rows.length === 0, generatedAt: new Date().toISOString(), facets },
+        rows: [],
+        total: 0,
+        page,
+        pageSize,
+        totalPages: 1,
+        meta: { empty: true, generatedAt: new Date().toISOString(), facets: { agents: [], stages: [] } },
       });
+    } catch (e) {
+      return auditReadError(e, page, pageSize);
     }
-    return NextResponse.json<RuleCheckAuditListResponse>({
-      rows: [],
-      total: 0,
-      meta: { empty: true, generatedAt: new Date().toISOString(), facets: { agents: [], stages: [] } },
-    });
   }
 
   try {
@@ -159,15 +190,36 @@ export async function GET(req: Request) {
     else if (verdict === 'parked') { where.decision = 'FAIL'; where.fail_reason = { not: null }; }
     else if (decision === 'PASS' || decision === 'FAIL') where.decision = decision;
 
-    const audits = wantsCompliance
-      ? await prisma.ruleCheckAudit.findMany({
-          where,
-          orderBy: { created_at: 'desc' },
-          take: limit,
-          include: { _count: { select: { flags: true } } },
-        })
-      : [];
-    const prismaTotal = wantsCompliance ? await prisma.ruleCheckAudit.count({ where }) : 0;
+    // Count both persistent stores first. Recruitment currently has the LLM
+    // compliance audits in RuleCheckAudit and deterministic identity/ownership
+    // audits in OntologyRuleCheck. The combined total is therefore exact.
+    const [prismaTotal, ontologyTotal] = await Promise.all([
+      wantsCompliance ? prisma.ruleCheckAudit.count({ where }) : Promise.resolve(0),
+      ontologyAuditCount(RECRUITMENT_DOMAIN_ID, ontologyFilters),
+    ]);
+    const total = prismaTotal + ontologyTotal;
+
+    // To create a stable page across the two tables, load only the prefix needed
+    // for this requested page from each indexed source, then merge by the same
+    // (created_at DESC, audit_id DESC) key. There is no hidden history cap:
+    // deeper page numbers expand the prefix, and pages beyond total do no read.
+    const prefixTake = offset < total ? offset + pageSize : 0;
+    const [audits, ontoRows] = prefixTake > 0
+      ? await Promise.all([
+          wantsCompliance
+            ? prisma.ruleCheckAudit.findMany({
+                where,
+                orderBy: [{ created_at: 'desc' }, { audit_id: 'desc' }],
+                take: prefixTake,
+                include: { _count: { select: { flags: true } } },
+              })
+            : Promise.resolve([]),
+          ontologyAuditRows(RECRUITMENT_DOMAIN_ID, {
+            take: prefixTake,
+            filters: ontologyFilters,
+          }),
+        ])
+      : [[], []];
 
     const prismaRows: RuleCheckAuditRow[] = audits.map((a) => {
       const resume = parseJsonObj(a.parsed_resume_json);
@@ -207,35 +259,57 @@ export async function GET(req: Request) {
       };
     });
 
-    // Merge generic-store rule-checks recorded under the recruitment domain —
-    // the planned 候选人身份去重 / 归属 agents write there (one row per run).
-    // Empty today; the page is forward-compatible, so those agents light up the
-    // agent facet the moment they start emitting.
-    let ontoRows = await ontologyAuditList(RECRUITMENT_DOMAIN_ID, limit).catch(() => []);
-    ontoRows = applyAuditFacets(ontoRows, { agent, stage, verdict });
-    if (decision === 'PASS' || decision === 'FAIL') ontoRows = ontoRows.filter((r) => r.decision === decision);
-    if (client) ontoRows = ontoRows.filter((r) => r.client_name === client);
-
     const rows = [...prismaRows, ...ontoRows]
-      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
-      .slice(0, limit);
+      .sort(compareAuditRows)
+      .slice(offset, offset + pageSize);
 
     return NextResponse.json<RuleCheckAuditListResponse>({
       rows,
-      total: prismaTotal + ontoRows.length,
+      total,
+      page,
+      pageSize,
+      totalPages: totalPages(total, pageSize),
       meta: { empty: rows.length === 0, generatedAt: new Date().toISOString(), facets },
     });
   } catch (e) {
-    return NextResponse.json<RuleCheckAuditListResponse>({
-      rows: [],
-      total: 0,
-      meta: {
-        empty: true,
-        error: (e as Error).message.slice(0, 200),
-        generatedAt: new Date().toISOString(),
-      },
-    });
+    return auditReadError(e, page, pageSize);
   }
+}
+
+function auditReadError(error: unknown, page: number, pageSize: number) {
+  const message = error instanceof Error ? error.message : String(error);
+  return NextResponse.json<RuleCheckAuditListResponse>({
+    rows: [],
+    total: 0,
+    page,
+    pageSize,
+    totalPages: 1,
+    meta: {
+      empty: true,
+      error: message.slice(0, 200),
+      generatedAt: new Date().toISOString(),
+    },
+  }, { status: 500 });
+}
+
+function compareAuditRows(a: RuleCheckAuditRow, b: RuleCheckAuditRow): number {
+  const time = b.created_at.localeCompare(a.created_at);
+  return time !== 0 ? time : b.audit_id.localeCompare(a.audit_id);
+}
+
+function positiveInt(raw: string | null, fallback: number, max: number): number {
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(max, Math.max(1, Math.floor(n))) : fallback;
+}
+
+function safeOffset(page: number, pageSize: number): number {
+  if (page - 1 > Math.floor(Number.MAX_SAFE_INTEGER / pageSize)) return Number.MAX_SAFE_INTEGER;
+  return (page - 1) * pageSize;
+}
+
+function totalPages(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize));
 }
 
 function safeJsonArray(s: string | null): string[] {

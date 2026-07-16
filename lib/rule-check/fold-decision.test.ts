@@ -10,8 +10,12 @@ function sev(entries: Record<string, Severity>): Map<string, Severity> {
 }
 
 describe('foldDecision (2026-06-01: fail-closed on unconfirmable 底线规则)', () => {
-  it('confirmed fail → FAIL regardless of severity', () => {
-    expect(foldDecision([rr('10-1', 'fail')], sev({ '10-1': 'flag_only' }))).toBe('FAIL');
+  it('confirmed fail on optional/flag_only → PASS (result retained, gate not blocked)', () => {
+    expect(foldDecision([rr('10-1', 'fail')], sev({ '10-1': 'flag_only' }))).toBe('PASS');
+  });
+
+  it('confirmed fail on terminal → FAIL', () => {
+    expect(foldDecision([rr('10-1', 'fail')], sev({ '10-1': 'terminal' }))).toBe('FAIL');
   });
 
   it('insufficient_info on terminal → FAIL', () => {
@@ -79,10 +83,10 @@ describe('explanationTag / formatExplanation (人工复核标注)', () => {
 });
 
 describe('severityOfRule', () => {
-  it('prefers an explicit severity field', () => {
+  it('optional governance wins over a stale contradictory severity field', () => {
     expect(
       severityOfRule({ severity: 'terminal', enforcementLevel: 'optional', failurePolicy: 'warn' }),
-    ).toBe('terminal');
+    ).toBe('flag_only');
   });
   it('derives needs_human from mandatory + warn', () => {
     expect(severityOfRule({ enforcementLevel: 'mandatory', failurePolicy: 'warn' })).toBe('needs_human');

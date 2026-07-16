@@ -209,6 +209,7 @@ export function createAgentLogger(ctx: AgentLoggerCtx): AgentLogger {
       agent: ctx.agent,
       runId: ctx.runId,
       traceId: ctx.traceId,
+      anchors: ctx.anchors,
       kind,
       payload,
     });

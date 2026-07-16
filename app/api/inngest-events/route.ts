@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { listEventsPage } from "@/lib/inngest-source";
 import { eventMatchesDomain, inferEventDomain } from "@/lib/events/domain-scope";
+import { deriveEventOutcome, deriveRunOutcome } from "@/lib/monitor/run-outcome";
 
 const RAAS_INNGEST = process.env.RAAS_INNGEST_URL ?? "";
 
@@ -130,6 +131,49 @@ export async function GET(req: Request): Promise<Response> {
     // DB unavailable — silently continue without source enrichment
   }
 
+  const eventIds = [...new Set(enriched.flatMap((event) => [event.id, event.internal_id].filter((id): id is string => Boolean(id))))];
+  const relatedRuns = eventIds.length > 0
+    ? await prisma.inngestRunArchive.findMany({
+        where: { OR: eventIds.map((id) => ({ triggerEventIds: { contains: id } })) },
+        select: {
+          runId: true,
+          status: true,
+          functionSlug: true,
+          eventName: true,
+          triggerEventIds: true,
+          output: true,
+        },
+      }).catch(() => [])
+    : [];
+  const runsByEvent = new Map<string, typeof relatedRuns>();
+  for (const run of relatedRuns) {
+    for (const id of parseStringArray(run.triggerEventIds)) {
+      const rows = runsByEvent.get(id) ?? [];
+      rows.push(run);
+      runsByEvent.set(id, rows);
+    }
+  }
+  const eventsWithOutcome = enriched.map((event) => {
+    const ids = [event.internal_id, event.id].filter((id): id is string => Boolean(id));
+    const uniqueRuns = [...new Map(ids.flatMap((id) => runsByEvent.get(id) ?? []).map((run) => [run.runId, run])).values()];
+    const processingRuns = uniqueRuns.map((run) => ({
+      runId: run.runId,
+      status: run.status,
+      functionSlug: run.functionSlug,
+      outcome: deriveRunOutcome({
+        status: run.status,
+        functionSlug: run.functionSlug,
+        triggerEvent: run.eventName,
+        output: safeJson(run.output),
+      }),
+    }));
+    return {
+      ...event,
+      processingRuns,
+      outcome: deriveEventOutcome(event.name, event.data, processingRuns.map((run) => run.outcome)),
+    };
+  });
+
   const localIds = new Set(all.filter((event) => event._source === "local").map((event) => event.id));
   const sharedObserved = includeShared
     ? new Set(
@@ -142,7 +186,7 @@ export async function GET(req: Request): Promise<Response> {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return NextResponse.json({
-    events: enriched,
+    events: eventsWithOutcome,
     page,
     pageSize,
     // Local history is exact and counted in Postgres. Shared rows are live-only
@@ -162,6 +206,20 @@ export async function GET(req: Request): Promise<Response> {
       generatedAt: new Date().toISOString(),
     },
   });
+}
+
+function safeJson(value: string | null): unknown {
+  if (value == null) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseStringArray(value: string | null): string[] {
+  const parsed = safeJson(value);
+  return Array.isArray(parsed) ? parsed.map(String) : [];
 }
 
 function positiveInt(raw: string | null, fallback: number, max: number): number {

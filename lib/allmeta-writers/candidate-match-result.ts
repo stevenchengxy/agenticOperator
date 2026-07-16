@@ -46,7 +46,13 @@ export async function writeCandidateMatchResultInstance(
     candidate_id: input.candidate_id,
     job_position_id: input.job_requisition_id, // canonical 字段名是 job_position_id
     rule_check_result: input.rule_check_result,
-    rule_check_reason: nonEmptyString(input.rule_check_reason),
+    // Stage 2 (matchResume) updates the same node without rule-check fields.
+    // Omitting the key preserves the optional-rule reference written by stage
+    // 1; an explicitly provided empty string still maps to null and clears a
+    // stale reason on a later PASS re-check.
+    ...(input.rule_check_reason !== undefined
+      ? { rule_check_reason: nonEmptyString(input.rule_check_reason) }
+      : {}),
     overall_match_score: asNumberOrNull(input.overall_match_score),
     overall_fit_verdict: nonEmptyString(input.overall_fit_verdict),
     overall_fit_summary: nonEmptyString(input.overall_fit_summary),

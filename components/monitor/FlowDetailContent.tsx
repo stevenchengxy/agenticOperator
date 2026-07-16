@@ -6,6 +6,8 @@ import { useApp } from '@/lib/i18n';
 import { formatDateTime, statusLabel } from './i18n-utils';
 import { EvidenceTrail } from './EvidenceTrail';
 import { describeStep } from '@/lib/monitor-step-descriptor';
+import { OutcomeBadges } from './OutcomeBadges';
+import type { OutcomeSummary } from '@/lib/monitor/run-outcome';
 
 type FlowDetail = {
   flowId: string;
@@ -35,6 +37,7 @@ type FlowDetail = {
     }>;
     output: unknown;
     function: { name: string; slug: string } | null;
+    outcome: OutcomeSummary;
   }>;
 };
 
@@ -70,7 +73,8 @@ export function FlowDetailContent({ flowIdEncoded }: { flowIdEncoded: string }) 
   const { label, runs } = detail;
   const kind = flowId.startsWith('upload:') ? 'upload' : flowId.startsWith('jr:') ? 'jr' : 'evt';
   const idValue = flowId.split(':').slice(1).join(':');
-  const failedRuns = runs.filter((r) => r.status === 'Failed');
+  const technicalFailures = runs.filter((r) => r.outcome.technical === 'failed' || r.outcome.technical === 'degraded');
+  const businessRejected = runs.filter((r) => r.outcome.business === 'rejected' || r.outcome.business === 'mixed');
 
   return (
     <div className="p-6 max-w-[1620px] mx-auto">
@@ -100,8 +104,11 @@ export function FlowDetailContent({ flowIdEncoded }: { flowIdEncoded: string }) 
           )}
           <span className="text-ink-4">·</span>
           <span className="text-ink-3">{t('monitor_flow_runs').replace('{n}', String(runs.length))}</span>
-          {failedRuns.length > 0 && (
-            <span className="text-err">· {t('monitor_flow_failed_dlq').replace('{n}', String(failedRuns.length))}</span>
+          {technicalFailures.length > 0 && (
+            <span className="text-err">· 技术异常 {technicalFailures.length}</span>
+          )}
+          {businessRejected.length > 0 && (
+            <span style={{ color: "var(--c-warn)" }}>· 业务未通过 {businessRejected.length}</span>
           )}
         </div>
       </div>
@@ -140,11 +147,11 @@ function RunRow({
   const { t, lang } = useApp();
   const time = formatDateTime(run.startedAt, lang);
   const statusColor =
-    run.status === 'Completed'
+    run.outcome.technical === 'healthy'
       ? 'border-ok bg-ok-bg/30'
-      : run.status === 'Failed'
+      : run.outcome.technical === 'failed'
       ? 'border-err bg-err-bg/30'
-      : run.status === 'Running'
+      : run.outcome.technical === 'running' || run.outcome.technical === 'degraded'
       ? 'border-warn bg-warn-bg/30'
       : 'border-line';
   return (
@@ -163,19 +170,28 @@ function RunRow({
           <div className="text-[10.5px] mono text-ink-4 mt-0.5">
             {time} · {run.durationMs != null ? `${run.durationMs}ms` : '—'} · run={run.runId.slice(0, 14)}
           </div>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <OutcomeBadges outcome={run.outcome} compact />
+            <Link
+              href={`/monitor?run=${encodeURIComponent(run.runId)}&focus=${encodeURIComponent(`run:${run.runId}`)}`}
+              className="text-[10.5px] text-accent hover:underline"
+              onClick={(event) => event.stopPropagation()}
+            >
+              定位运行记录 →
+            </Link>
+            {run.eventId && (
+              <Link
+                href={`/events?id=${encodeURIComponent(run.eventId)}&window=all&focus=${encodeURIComponent(`event-stream:${run.eventId}`)}`}
+                className="text-[10.5px] text-accent hover:underline"
+                onClick={(event) => event.stopPropagation()}
+              >
+                定位触发事件 →
+              </Link>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span
-            className={`text-[11px] font-medium ${
-              run.status === 'Completed'
-                ? 'text-ok'
-                : run.status === 'Failed'
-                ? 'text-err'
-                : 'text-warn'
-            }`}
-          >
-            {statusLabel(run.status, t)}
-          </span>
+          <span className="text-[10px] text-ink-4">Inngest: {statusLabel(run.status, t)}</span>
           <span className="text-ink-4">{expanded ? '▴' : '▾'}</span>
         </div>
       </button>

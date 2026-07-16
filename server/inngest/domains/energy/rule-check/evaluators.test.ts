@@ -34,7 +34,7 @@ const CONSTRAINT_RULES: Rule[] = [
 ];
 
 function routeRule(id: string, name: string): Rule {
-  return { ...cr(id, name, false), specificScenarioStage: "分流与人工确认" };
+  return { ...cr(id, name, true), specificScenarioStage: "分流与人工确认" };
 }
 const ROUTING_RULES: Rule[] = [
   routeRule("41", "直通自动采纳五条件(AND)"),
@@ -42,7 +42,11 @@ const ROUTING_RULES: Rule[] = [
   routeRule("43", "高等级风险转人工"),
   routeRule("44", "低置信度预测转人工"),
   routeRule("45", "命中硬约束红线转人工"),
-  routeRule("46", "需人工裁量场景转人工"),
+  {
+    ...routeRule("46", "需人工裁量场景转人工"),
+    enforcementLevel: "optional",
+    failurePolicy: "warn",
+  },
 ];
 
 describe("engine select + verify", () => {
@@ -55,6 +59,13 @@ describe("engine select + verify", () => {
     const mkt = er.find((r) => r.code === "CR-MKT-02")!;
     expect(mkt.hardSoft).toBe("soft");
     expect(mkt.redline).toBe(false);
+  });
+
+  it("optional governance stays soft even if failurePolicy is stale block", () => {
+    const [optional] = toEngineRules([
+      { ...cr("O-1", "optional reference", true), enforcementLevel: "optional" },
+    ]);
+    expect(optional.hardSoft).toBe("soft");
   });
 
   it("二次验证: flags a missing red-line", () => {
@@ -152,5 +163,18 @@ describe("judgeRouting", () => {
     const d = buildScenarioData("risk-redline");
     const r = judgeRouting(er, { gzlDeviationPct: d.gzlDeviationPct, forecastConfidence: d.forecastConfidence, schemeDominant: d.schemeDominant, redlineFlag: true });
     expect(r.route).toBe("risk-first");
+  });
+
+  it("optional condition fail is evaluated but does not force manual routing", () => {
+    const r = judgeRouting(er, {
+      gzlDeviationPct: 1,
+      forecastConfidence: 0.95,
+      schemeDominant: false,
+      redlineFlag: false,
+    });
+    expect(r.evals.find((e) => e.code === "46")?.result).toBe("FAIL");
+    expect(r.evals.find((e) => e.code === "46")?.hardSoft).toBe("soft");
+    expect(r.route).toBe("auto");
+    expect(r.failedConditions).toHaveLength(0);
   });
 });

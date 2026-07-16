@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import type { OutcomeSummary } from "@/lib/monitor/run-outcome";
 
 export type InngestEventRow = {
   id: string;
@@ -14,6 +15,13 @@ export type InngestEventRow = {
   /** EventInstance.source value — e.g. "raas-bridge", "rpa.matchResumeAgent", "manual.test-trigger".
    *  Populated by the API route when the event can be correlated to an EventInstance row. */
   source?: string | null;
+  outcome?: OutcomeSummary;
+  processingRuns?: Array<{
+    runId: string;
+    status: string;
+    functionSlug: string;
+    outcome: OutcomeSummary;
+  }>;
 };
 
 export type InngestEventsResponse = {

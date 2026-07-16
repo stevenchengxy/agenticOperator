@@ -3,21 +3,30 @@
 
 import { startRaasBridge } from "./inngest/raas-bridge";
 import { startEventDefinitionSync } from "./em/sync/event-definition-sync";
-import { checkEnv, printEnvCheck } from "./env-check";
+import { assertProductionRuntimeEnv, checkEnv, printEnvCheck } from "./env-check";
 import { ensureRecruitmentDeployed } from "./inngest/recruitment-deploy";
 
 let _booted = false;
 
+function isBuildPhase(): boolean {
+  return (
+    process.env.NEXT_PHASE === "phase-production-build" ||
+    process.env.npm_lifecycle_event === "build"
+  );
+}
+
 export function bootOnce(): void {
+  if (isBuildPhase()) return;
   if (_booted) return;
-  _booted = true;
   // Env preflight — print a status table on first boot so partners can see
-  // immediately which vars are missing. Doesn't throw on missing RECOMMENDED
-  // vars; each subsystem (Inngest, Allmeta, MinIO…) handles its own absence.
+  // immediately which vars are missing. Development keeps soft warnings;
+  // production fails fast when RAAS-v1 runtime dependencies are absent.
   const result = checkEnv();
   if (!result.ok || result.recommended.some((r) => !r.present)) {
     printEnvCheck(result);
   }
+  assertProductionRuntimeEnv(result);
+  _booted = true;
   // Bridge is gated on RAAS_BRIDGE_ENABLED=1 — see raas-bridge.ts.
   startRaasBridge();
   // Neo4j → EventDefinition sync. Gated on NEO4J_SYNC_ENABLED=1 and

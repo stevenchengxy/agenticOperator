@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const recordNotification = vi.fn(async () => ({ id: 'n1' }));
-vi.mock('./ingest', () => ({ recordNotification: (...a: unknown[]) => recordNotification(...a) }));
+const recordNotification = vi.fn(async (_input: unknown) => ({ id: 'n1' }));
+vi.mock('./ingest', () => ({ recordNotification: (input: unknown) => recordNotification(input) }));
 
 import { notifyRecruitmentLifecycle } from './recruitment-lifecycle';
 
@@ -26,7 +26,7 @@ describe('notifyRecruitmentLifecycle', () => {
       runId: 'r1',
       traceId: 't1',
     });
-    expect(step.ids).toEqual(['notify:RESUME_PROCESSED']);
+    expect(step.ids).toEqual(['notify:RESUME_PROCESSED:candidate_id-c1-upload_id-u1']);
     expect(recordNotification).toHaveBeenCalledTimes(1);
     const arg = recordNotification.mock.calls[0][0] as Record<string, unknown>;
     expect(arg.level).toBe('info');
@@ -55,6 +55,7 @@ describe('notifyRecruitmentLifecycle', () => {
     const signals = [
       'RESUME_PROCESSED', 'MATCH_RULE_CHECK_PASSED', 'MATCH_RULE_CHECK_FAILED',
       'MATCH_PASSED_NEED_INTERVIEW', 'MATCH_FAILED', 'JD_GENERATED', 'INTERVIEW_INVITATION_SENT',
+      'INTERVIEW_INVITATION_FAILED',
     ] as const;
     for (const s of signals) {
       recordNotification.mockClear();
@@ -63,8 +64,22 @@ describe('notifyRecruitmentLifecycle', () => {
       const arg = recordNotification.mock.calls[0][0] as Record<string, unknown>;
       expect(typeof arg.message).toBe('string');
       expect((arg.message as string).length).toBeGreaterThan(0);
-      expect(step.ids[0]).toBe(`notify:${s}`);
+      expect(step.ids[0]).toBe(`notify:${s}:candidate_id-c`);
     }
+  });
+
+  it('同一 run 内不同 JR 使用不同 step id，不会只记录第一条通知', async () => {
+    const step = mockStep();
+    await notifyRecruitmentLifecycle(step, 'MATCH_RULE_CHECK_FAILED', {
+      anchors: { candidate_id: 'c1', job_requisition_id: 'jr1' },
+    });
+    await notifyRecruitmentLifecycle(step, 'MATCH_RULE_CHECK_FAILED', {
+      anchors: { candidate_id: 'c1', job_requisition_id: 'jr2' },
+    });
+    expect(step.ids).toEqual([
+      'notify:MATCH_RULE_CHECK_FAILED:candidate_id-c1-job_requisition_id-jr1',
+      'notify:MATCH_RULE_CHECK_FAILED:candidate_id-c1-job_requisition_id-jr2',
+    ]);
   });
 
   it('recordNotification 抛错不向上冒泡（fire-and-forget）', async () => {

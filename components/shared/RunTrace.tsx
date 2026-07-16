@@ -7,6 +7,8 @@ import { describeStep, describeLogKind } from "@/lib/monitor-step-descriptor";
 import { useApp } from "@/lib/i18n";
 import { fetchJson } from "@/lib/api/client";
 import type { RunSummaryResponse } from "@/app/api/runs/[id]/summary/route";
+import type { OutcomeSummary } from "@/lib/monitor/run-outcome";
+import { OutcomeBadges } from "@/components/monitor/OutcomeBadges";
 
 // Shared run-detail / trace components.
 // Used by /monitor (run inspection) and /fleet/[short] (light "today's stats"
@@ -25,6 +27,7 @@ export type RunRow = {
   eventName: string | null;
   eventId?: string | null;
   function?: { name: string; slug: string };
+  outcome?: OutcomeSummary;
 };
 
 export type RunHistoryEvent = { type: string; createdAt: string; stepName?: string | null };
@@ -661,9 +664,45 @@ export function RunDetailBody({
   const app = appFromSlug(run.function?.slug);
   const fnName = run.function?.name ?? null;
   const poll = run.status === "Running";
+  const { lang } = useApp();
 
   return (
     <div className="flex flex-col gap-3">
+      {run.outcome && (
+        <div
+          className="rounded-lg flex items-start gap-4 flex-wrap"
+          style={{
+            padding: "10px 12px",
+            background: "var(--c-panel)",
+            border: "1px solid var(--c-line)",
+          }}
+        >
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-ink-4 mb-1">
+              {lang === "zh" ? "双轴运行判定" : "Two-axis outcome"}
+            </div>
+            <OutcomeBadges outcome={run.outcome} />
+          </div>
+          <div className="min-w-0 flex-1 text-[11.5px] text-ink-3 leading-relaxed">
+            {run.outcome.technical === "healthy" && run.outcome.business === "rejected"
+              ? lang === "zh"
+                ? "智能体和依赖调用正常完成；候选人因业务匹配结论未通过。这不是技术故障，不应计入运行失败率。"
+                : "The agent completed normally; the candidate was rejected by the business decision. This is not a technical failure."
+              : run.outcome.business === "blocked"
+                ? lang === "zh"
+                  ? "技术或数据问题阻断了业务结论，不能把空结果当作成功上传。"
+                  : "A technical or data issue blocked the business verdict; an empty result must not be treated as success."
+                : lang === "zh"
+                  ? "执行健康度与业务结果分别统计。"
+                  : "Execution health and business outcome are tracked separately."}
+            {(run.outcome.code || run.outcome.reason) && (
+              <div className="mono text-[10.5px] text-ink-4 mt-1 break-all">
+                {[run.outcome.code, run.outcome.reason].filter(Boolean).join(" · ")}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* AI summary banner — one-line read */}
       <RunSummaryBanner run={run} detail={detail} agentName={fnName ?? agentShortForLinks} />
 

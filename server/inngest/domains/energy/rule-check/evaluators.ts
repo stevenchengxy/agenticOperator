@@ -157,12 +157,20 @@ export function judgeRouting(selected: EngineRule[], ctx: RoutingContext): Routi
 
   const evals: RuleEval[] = [];
   const failedConditions: string[] = [];
+  const blockingConditionsPass = selected.every((rule) => {
+    const condition = conditions.find((item) => item.match.test(rule.name));
+    return !condition || rule.hardSoft === "soft" || condition.pass;
+  });
   for (const r of selected) {
     const c = conditions.find((x) => x.match.test(r.name));
     // rule 41 = 直通五条件(AND) meta-rule → reflects overall
     const isMeta = /五条件|AND|直通自动采纳/.test(r.name) && !c;
-    const pass = isMeta ? conditions.every((x) => x.pass) : c ? c.pass : true;
-    if (c && !c.pass) failedConditions.push(`${c.name}(${c.detail})`);
+    const pass = isMeta ? blockingConditionsPass : c ? c.pass : true;
+    // Optional conditions are still evaluated and returned in evals, but they
+    // are reference-only and must not force the route from auto to manual.
+    if (c && !c.pass && r.hardSoft === "hard") {
+      failedConditions.push(`${c.name}(${c.detail})`);
+    }
     evals.push({
       ruleId: r.id,
       code: r.code,

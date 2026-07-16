@@ -41,11 +41,14 @@ describe('workflow-graph-meta', () => {
     expect(nodeById('ruleCheck')?.wsId).toBe('10-5');
   });
 
-  it('has 30 edges (canonical flow + RuleCheck edges incl. terminal FAILED)', () => {
+  it('has 29 edges (live AO flow + RuleCheck edges incl. terminal FAILED)', () => {
     // Original 28 edges from canonical JSON, minus the direct resumeParser→matcher edge
     // (RESUME_PROCESSED), plus: resumeParser→ruleCheck, ruleCheck→matcher (PASSED),
-    // and ruleCheck→'' (FAILED terminal dashed edge) = 28 - 1 + 1 + 1 + 1 = 30.
-    expect(EDGES).toHaveLength(30);
+    // and ruleCheck→'' (FAILED terminal dashed edge). The live InterviewInviter
+    // subscribes to INTERVIEW_INVITATION_REQUESTED (emitted by RAAS/HSM), so the old
+    // canonical Matcher→InterviewInviter edge is intentionally absent:
+    // 28 - 1 + 1 + 1 + 1 - 1 = 29.
+    expect(EDGES).toHaveLength(29);
   });
 
   it('every non-dashed edge has an eventName populated', () => {
@@ -93,16 +96,18 @@ describe('workflow-graph-meta', () => {
     }
   });
 
-  it('matcher node fans out to 2 edges (MATCH_FAILED is terminal in canonical spec)', () => {
-    // MATCH_FAILED has no consumer in the canonical workflow JSON.
-    // MatchReviewer was removed as it does not appear in the authoritative spec.
+  it('matcher has one in-graph edge and hands NEED_INTERVIEW off to RAAS/HSM', () => {
+    // MATCH_PASSED_NO_INTERVIEW continues directly to ResumeRefiner inside AO.
+    // MATCH_PASSED_NEED_INTERVIEW is consumed outside this graph by RAAS/HSM,
+    // which later emits INTERVIEW_INVITATION_REQUESTED for InterviewInviter.
+    // MATCH_FAILED is also terminal; MatchReviewer was removed from the spec.
     const fromMatcher = EDGES.filter(e => e.from === 'matcher');
-    expect(fromMatcher).toHaveLength(2);
+    expect(fromMatcher).toHaveLength(1);
     const events = fromMatcher.map(e => e.eventName);
-    expect(events).toContain('MATCH_PASSED_NEED_INTERVIEW');
     expect(events).toContain('MATCH_PASSED_NO_INTERVIEW');
-    // MATCH_FAILED is terminal — no edge for it in the graph
+    expect(events).not.toContain('MATCH_PASSED_NEED_INTERVIEW');
     expect(events).not.toContain('MATCH_FAILED');
+    expect(TERMINAL_EVENTS.has('MATCH_PASSED_NEED_INTERVIEW')).toBe(true);
   });
 
   it('reClarifier node exists (3-2 per canonical JSON)', () => {

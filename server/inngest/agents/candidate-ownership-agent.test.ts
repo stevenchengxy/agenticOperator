@@ -64,13 +64,12 @@ describe('candidateOwnershipHandler', () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it('soft-fails when persist throws', async () => {
+  it('retries when persist throws so no ownership decision lacks an audit', async () => {
     const persist = vi.fn(async () => { throw new Error('db down'); });
     const ctx: OwnershipContext = { lockState: 1, blacklisted: false, lockByEmail: null, claimantEmail: 'me@c.com', client: null, tencentRelationship: false };
-    const r = await candidateOwnershipHandler(
+    await expect(candidateOwnershipHandler(
       { event: { data: ev }, step: mkStep() },
       { enabled: true, persist, loadContext: async () => ctx },
-    );
-    expect(r.error).toBeTruthy();
+    )).rejects.toThrow(/RULE_AUDIT_PERSISTENCE_FAILED.*db down/);
   });
 });

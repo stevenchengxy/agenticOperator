@@ -10,22 +10,15 @@
 //   - timestamp · name · payload preview
 //   - click → expand to show full payload JSON + triggered runs (with status)
 
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useApp } from '@/lib/i18n';
+import { useCallback, useEffect, useState } from "react";
+import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
+import type { InngestEventRow } from "@/lib/api/inngest-events";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 const REFRESH_MS = 5000;
-
-type InngestEventRow = {
-  id: string;
-  internal_id?: string;
-  name: string;
-  data: unknown;
-  ts?: number;
-  received_at?: string;
-  _source?: string;
-};
 
 type RunForEvent = {
   run_id: string;
@@ -45,6 +38,7 @@ const HIDE_NAMES_DEFAULT = new Set([
 
 export function InngestEventsTab() {
   const { t } = useApp();
+  const { domain } = useDomain();
   const [events, setEvents] = useState<InngestEventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [nameFilter, setNameFilter] = useState('');
@@ -54,12 +48,11 @@ export function InngestEventsTab() {
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
   const [auto, setAuto] = useState(true);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
-      const url = nameFilter
-        ? `/api/inngest-events?limit=100&name=${encodeURIComponent(nameFilter)}`
-        : `/api/inngest-events?limit=100`;
-      const r = await fetch(url);
+      const params = new URLSearchParams({ limit: "100", domain });
+      if (nameFilter) params.set("name", nameFilter);
+      const r = await fetch(`/api/inngest-events?${params.toString()}`);
       const b = await r.json();
       setEvents(b.events ?? []);
       setLastRefresh(new Date().toLocaleTimeString());
@@ -67,7 +60,7 @@ export function InngestEventsTab() {
     } catch {
       /* soft */
     }
-  }
+  }, [domain, nameFilter]);
 
   async function fetchRunsFor(eventId: string) {
     if (runsByEvent.has(eventId)) return;
@@ -87,11 +80,11 @@ export function InngestEventsTab() {
   }
 
   useEffect(() => {
-    load();
+    void load();
     if (!auto) return;
     const t = setInterval(load, REFRESH_MS);
     return () => clearInterval(t);
-  }, [nameFilter, auto]);
+  }, [load, auto]);
 
   const filtered = hideMeta ? events.filter((e) => !HIDE_NAMES_DEFAULT.has(e.name)) : events;
 
@@ -125,13 +118,13 @@ export function InngestEventsTab() {
           <span className="text-[10px] mono text-ink-4">{lastRefresh}</span>
         )}
         <span className="ml-auto text-[11px] text-ink-4 mono">
-          {filtered.length} / {events.length} {t('monitor_events_total')}
+          {filtered.length} / {events.length} {t("monitor_events_total")}
         </span>
         <button
           onClick={load}
           className="text-[11px] px-2 py-1 border border-line rounded hover:bg-surface-hover"
         >
-          ↻ {t('monitor_events_refresh')}
+          ↻ {t("monitor_events_refresh")}
         </button>
       </div>
 
@@ -225,13 +218,14 @@ function EventRow({
     : isInbound
     ? 'text-accent'
     : 'text-ink-2';
-  const dirLabel = isMeta
-    ? '⚙'
+  const dirLabel = isMeta ? "⚙" : isAoEmit ? "↗" : isInbound ? "↘" : "·";
+  const dirTip = isMeta
+    ? "Inngest meta"
     : isAoEmit
-    ? '↗ AO emit'
-    : isInbound
-    ? '↘ RAAS → AO'
-    : '· other';
+      ? "AO emit"
+      : isInbound
+        ? "RAAS → AO"
+        : event.domain ?? "other";
 
   // Preview of payload (truncated)
   const preview = JSON.stringify(event.data ?? {}).slice(0, 120);
@@ -242,13 +236,14 @@ function EventRow({
         onClick={onToggle}
         className="w-full text-left p-2.5 flex items-start gap-3 hover:bg-surface-hover"
       >
-        <span className={`text-[10px] mono font-medium shrink-0 mt-0.5 w-[80px] ${dirColor}`}>
+        <span className={`text-[10px] mono font-medium shrink-0 mt-0.5 w-5 ${dirColor}`} title={dirTip}>
           {dirLabel}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-[12px] font-semibold mono text-ink-1">{event.name}</span>
             <span className="text-[10px] mono text-ink-4">{event.id}</span>
+            {event.domain && <HelpTip tip={event.domain} />}
           </div>
           <div className="text-[10px] mono text-ink-4 mt-0.5">{time}</div>
           {!expanded && (

@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic Operator · 深度分析与战略建议</title>
+<style>
+  :root {
+    --bg: #0a0c10; --surface: #11141b; --panel: #161a23;
+    --ink-1: #e6ecf3; --ink-2: #b3bccb; --ink-3: #7d889d; --ink-4: #4f5a72;
+    --line: #1e2330; --soft: rgba(125, 136, 157, 0.18);
+    --accent: #6aa1ff; --accent-bg: rgba(106, 161, 255, 0.12);
+    --ok: #4ade80; --ok-bg: rgba(74, 222, 128, 0.10);
+    --warn: #fbbf24; --warn-bg: rgba(251, 191, 36, 0.10);
+    --bad: #f87171; --bad-bg: rgba(248, 113, 113, 0.10);
+    --magenta: #c084fc; --magenta-bg: rgba(192, 132, 252, 0.10);
+    --gold: #fcd34d; --gold-bg: rgba(252, 211, 77, 0.12);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fbfcfd; --surface: #ffffff; --panel: #f3f5f9;
+      --ink-1: #0e131c; --ink-2: #29344a; --ink-3: #5c6781; --ink-4: #8c95ad;
+      --line: #e7ebf2; --soft: rgba(92, 103, 129, 0.16);
+      --accent: #2563eb; --accent-bg: rgba(37, 99, 235, 0.08);
+      --ok: #16a34a; --ok-bg: rgba(22, 163, 74, 0.08);
+      --warn: #d97706; --warn-bg: rgba(217, 119, 6, 0.08);
+      --bad: #dc2626; --bad-bg: rgba(220, 38, 38, 0.08);
+      --magenta: #9333ea; --magenta-bg: rgba(147, 51, 234, 0.08);
+      --gold: #d97706; --gold-bg: rgba(217, 119, 6, 0.10);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink-1); font-family: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  code { font-size: 12.5px; padding: 1px 6px; background: var(--panel); border: 1px solid var(--soft); border-radius: 5px; color: var(--ink-1); }
+  .container { max-width: 1080px; margin: 0 auto; padding: 56px 32px 96px; }
+
+  header { margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3); font-weight: 600; margin-bottom: 12px; }
+  h1 { margin: 0; font-size: 34px; line-height: 1.22; letter-spacing: -0.015em; font-weight: 700; }
+  .subtitle { margin-top: 16px; color: var(--ink-2); font-size: 17px; line-height: 1.6; max-width: 800px; }
+  h2 { margin: 60px 0 16px; font-size: 24px; line-height: 1.3; font-weight: 700; letter-spacing: -0.005em; }
+  h2 .num { font-size: 14px; color: var(--ink-3); font-weight: 500; margin-left: 8px; letter-spacing: 0; }
+  h3 { margin: 30px 0 10px; font-size: 17px; font-weight: 600; }
+  p { margin: 8px 0 12px; color: var(--ink-2); }
+
+  /* Truth hero — the one-liner */
+  .truth-hero { display: grid; grid-template-columns: auto 1fr; gap: 24px; align-items: center; padding: 26px 30px; border-radius: 16px; margin: 8px 0 36px; border: 1px solid var(--magenta); background: var(--magenta-bg); }
+  .truth-num { font-size: 64px; line-height: 1; font-weight: 800; letter-spacing: -0.03em; color: var(--magenta); }
+  .truth-text { font-size: 17px; line-height: 1.6; color: var(--ink-1); }
+  .truth-text b { color: var(--magenta); }
+
+  /* What this is — three layer diagram */
+  .layers { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 16px 0 26px; }
+  .layer { border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; background: var(--surface); display: grid; grid-template-columns: 36px 1fr; gap: 16px; align-items: start; }
+  .layer-num { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .layer.l2 .layer-num { color: var(--ok); }
+  .layer.l3 .layer-num { color: var(--magenta); }
+  .layer-title { font-size: 15px; font-weight: 600; color: var(--ink-1); margin-bottom: 4px; }
+  .layer-body { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
+  .layer-tag { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 5px; font-weight: 600; margin-left: 8px; letter-spacing: 0.04em; }
+  .layer-tag.real { color: var(--ok); background: var(--ok-bg); }
+  .layer-tag.partial { color: var(--warn); background: var(--warn-bg); }
+  .layer-tag.young { color: var(--magenta); background: var(--magenta-bg); }
+
+  /* Cards (strengths / weaknesses / innovations) */
+  .grid { display: grid; gap: 12px; margin: 18px 0; }
+  @media (min-width: 900px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: 13px; padding: 16px 20px; background: var(--surface); display: grid; grid-template-columns: 28px 1fr; gap: 14px; align-items: start; }
+  .card-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 16px; font-weight: 700; flex: none; }
+  .card.strength .card-icon { color: var(--ok); background: var(--ok-bg); }
+  .card.weakness .card-icon.sev-critical { color: var(--bad); background: var(--bad-bg); }
+  .card.weakness .card-icon.sev-serious { color: var(--warn); background: var(--warn-bg); }
+  .card.weakness .card-icon.sev-moderate { color: var(--ink-3); background: var(--panel); border: 1px solid var(--soft); }
+  .card.innovation .card-icon { color: var(--magenta); background: var(--magenta-bg); }
+  .card-title { font-size: 14.5px; font-weight: 600; color: var(--ink-1); line-height: 1.45; margin-bottom: 7px; }
+  .card-evidence { font-size: 12px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; line-height: 1.55; padding: 7px 10px; border-radius: 7px; background: var(--panel); border: 1px solid var(--soft); }
+  .card-evidence b { color: var(--ink-2); font-weight: 600; font-family: inherit; }
+  .card-body-text { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
+  .card-body-text b { color: var(--ink-1); font-weight: 600; }
+  .innov-transfer { margin-top: 8px; font-size: 12.5px; color: var(--accent); line-height: 1.55; padding: 6px 10px; border-radius: 7px; background: var(--accent-bg); border: 1px solid color-mix(in oklch, var(--accent) 25%, transparent); }
+  .innov-transfer b { color: var(--accent); font-weight: 700; }
+  .sev-chip { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.06em; margin-left: 6px; vertical-align: middle; }
+  .sev-chip.sev-critical { color: var(--bad); background: var(--bad-bg); }
+  .sev-chip.sev-serious { color: var(--warn); background: var(--warn-bg); }
+  .sev-chip.sev-moderate { color: var(--ink-3); background: var(--panel); }
+
+  /* Recommendation cards */
+  .rec { border: 1px solid var(--line); border-radius: 14px; padding: 18px 22px; background: var(--surface); margin: 14px 0; display: grid; gap: 12px; }
+  .rec.rec-P0 { border-left: 4px solid var(--bad); }
+  .rec.rec-P1 { border-left: 4px solid var(--warn); }
+  .rec.rec-P2 { border-left: 4px solid var(--accent); }
+  .rec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pri-chip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; letter-spacing: 0.06em; }
+  .pri-chip.pri-P0 { color: var(--bad); background: var(--bad-bg); }
+  .pri-chip.pri-P1 { color: var(--warn); background: var(--warn-bg); }
+  .pri-chip.pri-P2 { color: var(--accent); background: var(--accent-bg); }
+  .effort-chip { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; color: var(--ink-3); background: var(--panel); border: 1px solid var(--soft); letter-spacing: 0.04em; text-transform: uppercase; }
+  .rec-title { font-size: 16px; font-weight: 600; color: var(--ink-1); }
+  .rec-what, .rec-why, .rec-unlocks { font-size: 13.5px; color: var(--ink-2); line-height: 1.65; }
+  .rec-what b, .rec-why b, .rec-unlocks b { display: inline-block; color: var(--ink-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin-bottom: 3px; }
+  .rec-what { padding: 10px 14px; background: var(--panel); border-radius: 9px; border: 1px solid var(--soft); }
+
+  /* Strategic options grid */
+  .strats { display: grid; gap: 14px; margin: 18px 0; }
+  @media (min-width: 1000px) { .strats { grid-template-columns: 1fr 1fr 1fr; } }
+  .strat-card { border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; background: var(--surface); display: flex; flex-direction: column; gap: 14px; }
+  .strat-name { font-size: 15px; font-weight: 700; color: var(--ink-1); line-height: 1.4; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .strat-section { display: flex; flex-direction: column; gap: 4px; }
+  .strat-label { font-size: 11px; color: var(--ink-3); font-weight: 700; letter-spacing: 0.06em; }
+  .strat-body { font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+
+  /* "What I'd do this week" — big standout box */
+  .week-hero { margin: 36px 0 28px; padding: 28px 32px; border-radius: 16px; border: 2px solid var(--gold); background: var(--gold-bg); display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: flex-start; }
+  .week-num { font-size: 30px; line-height: 1; font-weight: 800; color: var(--gold); letter-spacing: -0.02em; }
+  .week-title { font-size: 18px; font-weight: 700; color: var(--ink-1); margin-bottom: 10px; }
+  .week-body { font-size: 14.5px; line-height: 1.7; color: var(--ink-1); }
+
+  /* TOC */
+  .toc { border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin: 24px 0 32px; background: var(--surface); }
+  .toc h4 { margin: 0 0 10px; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; }
+  .toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 28px; font-size: 14px; }
+  .toc a { color: var(--ink-2); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  @media (max-width: 700px) { .toc ol { columns: 1; } }
+
+  /* Footnote */
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+  footer .meta { display: flex; gap: 18px; flex-wrap: wrap; }
+  footer .meta span { color: var(--ink-3); }
+  footer .meta b { color: var(--ink-2); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="eyebrow">Agentic Operator · 全项目深度分析与战略建议</div>
+    <h1>从代码里读出来的真相</h1>
+    <p class="subtitle">12 个独立调查员（8 个不同视角的代码读者 + 4 个不同维度的产品/技术批评者）并行扫描了整个项目，再由一个合成器整理。文中所有强项、弱点、创新点都带 file:line 证据；建议全部是具体行动，不允许「improve/enhance」之类的空动词。</p>
+  </header>
+
+  <div class="truth-hero">
+    <div class="truth-num">★</div>
+    <div class="truth-text">AO 是一个本体驱动的 agent 运维控制台:确定性事件底盘 + 自主 ReAct 大脑生成 agent + 招聘域已生产化的双写契约,正在从"招聘 RPO 工具"长成"领域 agent fleet 的 vertical platform"。</div>
+  </div>
+
+  <nav class="toc">
+    <h4>目录</h4>
+    <ol>
+      <li><a href="#what">AO 真正在变成什么</a></li>
+      <li><a href="#strengths">真实的强项 (7)</a></li>
+      <li><a href="#weaknesses">真实的弱点 (8)</a></li>
+      <li><a href="#innovations">值得标注的创新 (7)</a></li>
+      <li><a href="#recommendations">具体建议 (10)</a></li>
+      <li><a href="#strategy">3 个战略选项</a></li>
+      <li><a href="#thisweek">这周该做什么</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="what">AO 真正在变成什么 <span class="num">三层物种</span></h2>
+  <p>AO 表面上是"招聘 AI 控制台",但代码里真正在长出来的是一个三层物种:① 一个事件驱动的多域运行底盘(Inngest + Postgres archive 写穿 + 双写 partner-pg/Neo4j),招聘域 6 个真 agent 在上面跑业务,能源/费控 28+14 个 agent 由 ontology snapshot 派生;② 一个确定性优先的监控控制平面(blackboard 模式,LLM 只采样陪审,critical path 不依赖网关),Notification 是 system of record 而不是派生流;③ 一个最近三周才长出来的"自主大脑"(Agent Factory v3),它已经不是确定性流水线,而是一个 60-turn / 600k-token 的 ReAct 循环,带 FailureReflection 跨 run 学习、refine_agent diff、sandbox_run 真部署到隔离 Inngest 域、score_spec A-D 评级。三个层在代码里是清楚分层的(v3 → {v2 deploy, gen persist}),但在用户故事里还没有合体——Fleet 承诺的三柱(Monitor/Manage/Behavior)只有 Monitor 真的能用,Behavior 是 v3 在 /tools 路径下独立生长,Manage(暂停/回滚/RBAC/审批闸)基本是空的。AO 不是 LangGraph 的竞品,也不再只是"招聘工具",它在变成一个"领域本体 → 自主生成 agent → 运行 → 可观测 → 治理"的端到端 vertical platform,但目前仍只有招聘域是真的、其他两个域是 snapshot-driven 的演示。</p>
+
+  <div class="layers">
+    <div class="layer l1">
+      <div class="layer-num">①</div>
+      <div>
+        <div class="layer-title">事件驱动的多域运行底盘 <span class="layer-tag real">招聘域真生产</span></div>
+        <div class="layer-body">Inngest + Postgres write-through archive + 双写 partner-pg / Neo4j。招聘域 6 个真 agent 在跑业务（~4000 行业务代码 + 18 个手写工具 + dependency-health 分类），能源 28 个 + 费控 14 个 agent 由 ontology snapshot 派生（演示，未真生产）。</div>
+      </div>
+    </div>
+    <div class="layer l2">
+      <div class="layer-num">②</div>
+      <div>
+        <div class="layer-title">确定性优先的监控控制平面 <span class="layer-tag real">已成熟</span></div>
+        <div class="layer-body">Blackboard 模式：lib/monitor/* 是纯算法（health / sla / cost / error-rate）；LLM 只采样陪审（rule-check 才用 LLM 且二次 verify）；critical path 不依赖 LLM 网关。Notification 是 system of record（@@unique dedupeKey），不是派生流。</div>
+      </div>
+    </div>
+    <div class="layer l3">
+      <div class="layer-num">③</div>
+      <div>
+        <div class="layer-title">自主 ReAct 大脑（Agent Factory v3） <span class="layer-tag young">最近三周长出</span></div>
+        <div class="layer-body">60-turn / 600k-token 的 ReAct 循环。带 FailureReflection 跨 run 学习（DB 表当 episodic memory）+ refine_agent 结构化 diff + sandbox_run 真部署到隔离 Inngest 域 + score_spec A-D 评级。三层分层清楚（v3 → v2 deploy + gen persist），但<b>跨域生成至今未在非招聘域端到端跑通</b>——这是叙事和证据最大的 gap。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="strengths">真实的强项 <span class="num">7 项，全部带证据</span></h2>
+  <div class="grid">
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">确定性骨架 + LLM 增强的分层架构,在 LLM 网关挂了也活着</div>
+        <div class="card-evidence"><b>evidence</b> lib/monitor/{health,sla,cost,error-rate}.ts 是纯算法 + Postgres blackboard;rule-check 才用 LLM 做事实校验且有二次 verify;Factory v3 prompt 有 templatePrompt 确定性兜底(generate.ts:130-151);WriteThroughMiddleware best-effort 不抛错(write-through-middleware.ts:14-40)。这是同类项目最少见的'失败方向正确'。</div>
+      </div>
+    </div>
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">写穿(write-through)+ 轮询对账的双路径持久化,Inngest 重启不丢数据</div>
+        <div class="card-evidence"><b>evidence</b> lib/inngest-archive/write-through.ts:14-99 在 inngest.send/onRunComplete/onRunError 直写 Postgres,30s archiver 是兜底对账网;lib/inngest-source.ts:1-50 读端 live∪archive 合并,live 优先 archive 补全。这是 Inngest 生态里很少有人做到的耐久性补丁。</div>
+      </div>
+    </div>
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">招聘域的 dual-write 契约真的在跑,带 6 个生产 agent + 18 个手写工具 + 完整 dependency-health 分类</div>
+        <div class="card-evidence"><b>evidence</b> server/inngest/agents/{create-jd,resume-parser,rule-check,match-resume,interview-inviter}-agent.ts 共 ~4000 行业务代码;lib/tools/recruitment-tools.ts:36-331 18 个带 sideEffect 标签的工具(read/write/dual-write);lib/dependency-health/report.ts:37-97 把 RoboHire 402/429/5xx 分成 recoverable(park+retry)vs non-recoverable(emit terminal),不是 demo。</div>
+      </div>
+    </div>
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">FailureReflection 作为跨 run 元学习的闭环,大脑不重复犯错</div>
+        <div class="card-evidence"><b>evidence</b> agent-factory-v3/brain/conductor.ts:133-135 loadReflections(take=8) 把上一轮失败课程织进 system prompt;tools/index.ts:653-684 analyze_failure + finish 强制写 reflection(brain 不写代码会合成兜底)。这是把'agent 学习'变成数据库表 + 系统提示词织入,而不是 chat history。</div>
+      </div>
+    </div>
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">三层 v2/gen/v3 工厂分层清晰,不是版本迭代而是能力栈</div>
+        <div class="card-evidence"><b>evidence</b> agent-factory-v3/tools/index.ts:9-12 显示 v3 复用 v2 的 deploy/sandbox + gen 的 persist/types;不同心智模型(builder pipeline → declarative gen → autonomous brain)被故意保留,可降级。v3 brain 调用 gen 的 buildSpec + v2 的 fireAndObserve,是真正的'大脑驱动工具',不是大脑替代工具。</div>
+      </div>
+    </div>
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">Notification 是 system of record(非派生流),去重契约 + 恢复信号</div>
+        <div class="card-evidence"><b>evidence</b> server/notifications/derive.ts:1-224 纯函数派生(零 LLM),Notification 表 @@unique([dedupeKey, status]) 防重复;channels.ts 在告警自愈时发 __ALERT_RESOLVED。BehaviorAlert.@@unique([alertKey, resolvedAt]) 保证'一个 key 只有一条未解决告警'。运维语义比大多数 alert pipeline 完整。</div>
+      </div>
+    </div>
+    <div class="card strength">
+      <div class="card-icon">✓</div>
+      <div class="card-body">
+        <div class="card-title">Agent Factory v3 的 reasoning + diff + sandbox 三件套让生成过程可审计</div>
+        <div class="card-evidence"><b>evidence</b> tools/index.ts:417-508 refine_agent 保留 attemptHistory[actionName] + 结构化 diff(systemPromptChanged/toolsAdded/toolsRemoved/decisionLogicChanged);tools/index.ts:243-290 sandbox_run 真部署到隔离 Inngest 域并流式 deploying→deployed→firing→polling→settled;tools/index.ts:749-772 score_spec 给 A-D 等级。这不是'AI 生成 agent'的 demo,是带审计闭环的工程系统。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="weaknesses">真实的弱点 <span class="num">8 项，按严重度排序</span></h2>
+  <div class="grid">
+    <div class="card weakness">
+      <div class="card-icon sev-critical">⨯</div>
+      <div class="card-body">
+        <div class="card-title">零多租户隔离 + 共享密钥的 factory token,招聘 PII 数据合规层完全空白 <span class="sev-chip sev-critical">CRITICAL</span></div>
+        <div class="card-evidence"><b>evidence</b> app/api/monitor/overview/route.ts:52-67 + app/api/rule-check-audits/route.ts:113,217 显示 clientId 是 post-fetch 内存过滤,不是 SQL WHERE;lib/factory-auth.ts 是 FACTORY_ADMIN_TOKEN 共享密钥;NEXT_PUBLIC_FACTORY_TOKEN build-time 进 bundle;AuditLog.payloadDigest 只是可选 hash 不是 HMAC。招聘=PII+GDPR 监管域,这是阻塞中型客户落地的硬伤。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-critical">⨯</div>
+      <div class="card-body">
+        <div class="card-title">LLM 成本只监控不限制,生成 agent 的 tight loop 可以在几分钟烧光预算 <span class="sev-chip sev-critical">CRITICAL</span></div>
+        <div class="card-evidence"><b>evidence</b> lib/monitor/cost.ts 只在域级 2M tokens/1h 越界后告警;agent-factory-v3 600k token 单次预算无硬熔断;FactoryLlmCall 记 token 不限速;无 per-request budget,无 per-customer rate limit,无 circuit breaker。v3 brain refine 卡住时(refineHealth penalty)会烧完预算才停。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-serious">△</div>
+      <div class="card-body">
+        <div class="card-title">Fleet 承诺的三柱只兑现了 Monitor,Manage(治理写操作)基本是空的 <span class="sev-chip sev-serious">SERIOUS</span></div>
+        <div class="card-evidence"><b>evidence</b> FleetContent.tsx:17-24 注释明确写三柱;但 Behavior 部署按钮指向 'contact RAAS' 占位;Manage 的暂停/回滚/RBAC/审批闸基本无代码;NotificationsContent.tsx:174-182 通知偏好按钮显式 disabled('尚未实现')。产品叙事和实现的 gap 已经到了用户能看出来的程度。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-serious">△</div>
+      <div class="card-body">
+        <div class="card-title">Factory 三个版本之间没有'谁是当前真相'的文档,新工程师无法导航 <span class="sev-chip sev-serious">SERIOUS</span></div>
+        <div class="card-evidence"><b>evidence</b> lib/agent-factory-v2(20 文件 15 测试)+ agent-factory-gen(6 文件 0 测试)+ agent-factory-v3(6 文件 1 测试)并存;v3 import v2 的 deploy + gen 的 persist;但没有一份图说明'v2 是不是死的、gen 是不是底层、v3 是不是主线'。git log 显示 3 天 4 个 phase commit,blame 几乎不可读。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-serious">△</div>
+      <div class="card-body">
+        <div class="card-title">RuleCheckAudit 表无 domain 列,招聘 rule-check LLM 基础设施不能跨域复用 <span class="sev-chip sev-serious">SERIOUS</span></div>
+        <div class="card-evidence"><b>evidence</b> lib/rule-check/domain-scope.ts:18-19 显式只允许 RECRUITMENT_DOMAIN_ID;能源用 deterministic 数值引擎,费控用 deterministic policy,没有任何域复用 LLM-based rule-check。RuleCheckAudit 表设计时假设单 agent;费控/能源 audit 进来会撞 schema。Factory v3 想跨域,但 rule-check 这个核心能力没跨。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-serious">△</div>
+      <div class="card-body">
+        <div class="card-title">FactoryV3Content 是 558 行 god component,P1_TOOLS 13 个工具 0 单元测试 <span class="sev-chip sev-serious">SERIOUS</span></div>
+        <div class="card-evidence"><b>evidence</b> components/behavior/factory-v3/FactoryV3Content.tsx 单文件 558 行 + 内联 158 行 CSS,SSE 解析+4 tab 渲染+图表全在一处;lib/agent-factory-v3/tools/index.ts 1700+ 行 13 个工具只有 graph.test.ts 一个测试。改一个 tool 参数没有任何安全网,UI 改一个 tab 要在巨文件里手术。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-serious">△</div>
+      <div class="card-body">
+        <div class="card-title">能源/费控域是 snapshot-driven 演示,Factory v3 的'生成任意域 agent'还没在非招聘域真跑过 <span class="sev-chip sev-serious">SERIOUS</span></div>
+        <div class="card-evidence"><b>evidence</b> ontology-source.ts 对 runnable 域强制 snapshot-first;招聘的 snapshot 反而是 post-facto 从真 agent 生成的(招聘-v1/workflow.json 只有 18 行 metadata,能源 1694 行)。意味着真生产 agent(6 个招聘)是手写的,Factory v3 还没有把'真域'交付过。这是叙事和证据之间最大的 gap。</div>
+      </div>
+    </div>
+    <div class="card weakness">
+      <div class="card-icon sev-moderate">·</div>
+      <div class="card-body">
+        <div class="card-title">HITL gate 检测靠硬编码 slug 片段列表,新人类决策点必须改代码 <span class="sev-chip sev-moderate">MODERATE</span></div>
+        <div class="card-evidence"><b>evidence</b> lib/monitor/health.ts:18-31 把 manual-confirm/handle-flood-control/handle-grid-security 等 slug 片段硬编进 health 监控的排除列表;step.waitForEvent 30 天超时是唯一兜底,无自动升级。新增 HITL 闸需要同时改 agent 代码 + monitor 排除列表 + 通知 dedup,容易漏。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="innovations">值得标注的创新模式 <span class="num">7 项可迁移 pattern</span></h2>
+  <p>这些不是「写了个 ReAct 循环」级别的基础能力。审计员把它们标记为<b>同行框架里少见、有迁移价值</b>的真创新。如果以后做 OSS 或对外分享，主打这些。</p>
+  <div class="grid">
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">FailureReflection 作为持久化的跨 run 课程,自动织进下次 system prompt</div>
+        <div class="card-body-text"><b>why novel:</b> 大多数 LLM agent 系统要么靠 chat history(每次重启清零),要么靠人手维护 prompt。AO 把'失败原因'结构化进 DB(kind/summary/rootCause/lesson),取最近 8 条注入 system prompt。这是数据库表当 episodic memory 用,且大脑必须写 reflection 才能 finish(兜底自动合成)——把'agent 学习'变成可审计的工程闭环。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何长生命周期的 autonomous agent 系统(coding agent、ops agent、research agent)。比 vector memory 更可解释,比 system prompt 手工迭代更自动。</div>
+      </div>
+    </div>
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">Write-through middleware + 轮询对账的耐久性双路径</div>
+        <div class="card-body-text"><b>why novel:</b> Inngest 默认是事件总线,持久化靠它自己。AO 用 middleware 在 send/run-start/run-complete 时直写 Postgres archive,30s 轮询是兜底对账。读端 live∪archive 合并,live 优先 archive 补全。这破解了'实时 vs 耐久'二选一,实时性来自 live,耐久性来自 write-through 不是 poller。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何'事件引擎(Inngest/Temporal/SQS)+ 自己想留审计'的项目。也适用 Stripe webhook、Kafka consumer 想做 exactly-once-ish 审计的场景。</div>
+      </div>
+    </div>
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">Reasoning 作为工具调用的一等公民参数</div>
+        <div class="card-body-text"><b>why novel:</b> P1_TOOLS 里每个工具(design_agent/refine_agent/sandbox_run...)都要求 reasoning 字符串(&gt;150 字符),会被 stream 给用户、存进 ledger、作为大脑'思考过程'展示。大多数 tool-use 系统只关心输入输出,AO 把'为什么调'变成强制 schema 字段,直接让 ReAct 的 thought 变成可审计的结构化数据。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何 high-stakes 的 agent 决策系统(医疗、金融、合规)。把思考过程从'LLM 自然语言'变成'工具 schema 的 required field',审计成本指数级下降。</div>
+      </div>
+    </div>
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">refine_agent 的 attemptHistory + 结构化 diff</div>
+        <div class="card-body-text"><b>why novel:</b> 大脑改自己写的 agent 时,旧 spec 保留在 attemptHistory[actionName],并 emit { systemPromptChanged, toolsAdded, toolsRemoved, decisionLogicChanged } 的结构化 diff,而不是 'LLM 自己说改了什么'。下次 refine 大脑可以 diff_spec 看自己上一轮做了什么。这是 AI agent 版本的 git log + diff。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何让 LLM 改代码/prompt/config 的产品(Cursor、Devin、Aider 风格)。把'改了什么'从自然语言变成结构化 patch,后续 agent 可以 grounded 推理。</div>
+      </div>
+    </div>
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">Sandbox 真部署到隔离 Inngest 域 + 多阶段流式进度</div>
+        <div class="card-body-text"><b>why novel:</b> Factory v3 的 sandbox_run 不是 dry-run mock,而是真把生成的 agent 部署到 agentic-operator-&lt;test-domain&gt; 隔离 Inngest 实例,fire 真事件,polling 真 run,5 阶段(deploying→deployed→firing→polling→settled)流式给用户。这是把 SWE-bench 风格的真执行验证嵌入 ReAct loop。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何'生成代码/agent 后想证明它真能跑'的系统。比 LLM 自己说'我写的对'强百倍,适合 codegen + autonomous repair 类产品。</div>
+      </div>
+    </div>
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">Blackboard 监控 + 域内自治分级(read_only/notify/act)</div>
+        <div class="card-body-text"><b>why novel:</b> Multi-Agent Monitor 设计明确反对'super-monitor'(15× token 成本);改用 sweeper fan-out 到独立确定性监控(health/sla/cost/error-rate),Postgres 是 blackboard。每个域有自己的 MonitorConfig(autonomy 三档),允许 staged rollout(read_only → notify → act)而不动 agent 代码。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何多 agent / 多服务的 SRE 系统。这是把 'AI ops' 从'让 LLM 看全部日志'拉回'确定性监控 + LLM 采样陪审'的清醒架构。</div>
+      </div>
+    </div>
+    <div class="card innovation">
+      <div class="card-icon innov-icon">★</div>
+      <div class="card-body">
+        <div class="card-title">Dual-write contract 显式标在工具 schema 的 sideEffect tag</div>
+        <div class="card-body-text"><b>why novel:</b> lib/tools/recruitment-tools.ts 每个工具都有 sideEffect: 'read' | 'write' | 'dual-write' 标签,把'这个工具会写两个系统'从隐式语义变成 schema 显式契约。生成 agent 的大脑能看到 sideEffect 选 tool,审计能据此过滤,validate 能据此预防。</div>
+        <div class="innov-transfer"><b>可迁移到:</b> 任何 multi-system 写场景(微服务 + 外部 SaaS、CRM + DB 双写)。把副作用元数据带在工具 schema 上是 agent 时代的合规基础设施。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="recommendations">具体建议 <span class="num">10 项，按 P0/P1/P2 排序</span></h2>
+  <p>每条都是具体行动（cite 改哪个文件 / 加哪个字段），不允许「improve」「enhance」这种空动词。Effort 标 small / medium / large。</p>
+  
+    <div class="card rec rec-P0">
+      <div class="rec-head">
+        <span class="pri-chip pri-P0">P0</span>
+        <span class="effort-chip effort-small">small</span>
+        <span class="rec-title">给 LLM 成本加 per-run 硬熔断 + per-customer rate limit</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>在 server/inngest/factory/agent-executor.ts 和 v3 conductor.ts 加 token-per-run 上限(建议 100k 招聘、200k factory),超出抛 NonRetriableError;在 lib/monitor/cost.ts 之外加请求级 rate limit(per domain + per clientId,Postgres counter + Redis 替代品);FactoryLlmCall 记录后立刻校验是否越界。</div>
+      <div class="rec-why"><b>为什么现在</b><br>现在只监控不限制,v3 brain refine 卡住能在 5 分钟内烧 600k token;一个被泄露的 FACTORY_ADMIN_TOKEN 加无限循环可以一夜花完云预算。这是落地中型客户前必须先关的洞,优先级超过任何新功能。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>可以真敢把 v3 brain 开给运营人员用,也是 multi-tenant 落地的前置。</div>
+    </div>
+    <div class="card rec rec-P0">
+      <div class="rec-head">
+        <span class="pri-chip pri-P0">P0</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">把 clientId 从 post-fetch 过滤改成 Prisma where 强制注入</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>在 lib/db 包一层 tenantScoped(prismaClient, clientId) 工厂,所有 model 的 findMany/findFirst/update/delete 自动注入 where: { clientId },原始 prisma 只允许在审计内部使用;同时给 Candidate/Resume/CandidateMatchResult/RuleCheckAudit 加 @@index([clientId]) 和考虑加 @@unique([clientId, businessKey])。</div>
+      <div class="rec-why"><b>为什么现在</b><br>app/api/monitor/overview/route.ts:52-67 和 rule-check-audits/route.ts:113,217 现在是把所有客户数据 load 进内存再 filter——一次 SQL 注入或一次代码改错,所有客户的候选人 PII 互相可见。招聘=GDPR 监管域,这是法务级 P0,不是技术债。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>真正的多租户能力 + 合规初稿,直接决定 AO 能不能卖给第二个客户。</div>
+    </div>
+    <div class="card rec rec-P0">
+      <div class="rec-head">
+        <span class="pri-chip pri-P0">P0</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">用 v3 brain 真生成一个非招聘域的真 agent(费控或能源),端到端跑通</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>选费控-v1 一个简单 action(比如'发票 OCR + 校验金额'),让 brain 从 read_ontology 一路生成→sandbox→真部署→handle 真事件。如果跑不通,把失败 root cause 落 FailureReflection,这是叙事和现实的真实差距。不要再优化招聘域。</div>
+      <div class="rec-why"><b>为什么现在</b><br>现在能源/费控是 snapshot-driven 演示,招聘 6 个 agent 是手写的——'v3 能跨域生成'还没有被证明过。这周不证就永远证不了,叙事会越来越虚。这一次跑通(或失败)决定 v3 是平台还是 demo。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>如果成功:有真凭据说 AO 是 vertical agent platform。如果失败:知道真正的瓶颈在 tool registry / ontology 表达力 / 还是 brain 的推理边界。</div>
+    </div>
+    <div class="card rec rec-P1">
+      <div class="rec-head">
+        <span class="pri-chip pri-P1">P1</span>
+        <span class="effort-chip effort-small">small</span>
+        <span class="rec-title">写一份 docs/agent-factory/README.md 说清 v2/gen/v3 的边界</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>一页图 + 一段话,回答:v2 是不是死的?gen 是不是底层?v3 是不是主线?import 关系图标出 v3→{v2.deploy, gen.persist}。同时 deprecate 不再活跃的 builder(planner/critic 如果 v3 不调就标 @deprecated)。</div>
+      <div class="rec-why"><b>为什么现在</b><br>新工程师(包括 6 个月后的你自己)读 lib/agent-factory-* 找不到入口。git log 显示 3 天 4 phase commit,blame 已经不可读。这一步是把'三周冲刺出来的 v3'变成可维护资产的最小投资。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>降低 bus factor + 给招聘对外宣讲一份不撒谎的架构图。</div>
+    </div>
+    <div class="card rec rec-P1">
+      <div class="rec-head">
+        <span class="pri-chip pri-P1">P1</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">把 RuleCheckAudit 加 domain 列 + 抽出 RuleCheckEngine 接口</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>schema.prisma 给 RuleCheckAudit 加 domain String,migrate 历史数据全填 'recruitment';lib/rule-check/ 提取 RuleCheckEngine interface { evaluate, audit, replay };招聘的 LLM 实现、能源的 deterministic 实现、费控的 policy 实现都 implement 它;按 domain dispatch。</div>
+      <div class="rec-why"><b>为什么现在</b><br>现在 rule-check 是 AO 最重的能力(prompt 2k 行 + 二次 verify + Reflexion),但被锁死在招聘域。Factory v3 想跨域,rule-check 不跟着跨,新域永远只能用 deterministic 玩具。这是技术债里最影响产品愿景的一条。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>其它域 agent 也能用 LLM rule-check + 二次 verify,Factory v3 的'跨域'才有内容支撑。</div>
+    </div>
+    <div class="card rec rec-P1">
+      <div class="rec-head">
+        <span class="pri-chip pri-P1">P1</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">把 FactoryV3Content 拆成 5 个子组件 + 给 P1_TOOLS 写 hermetic 测试</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>components/behavior/factory-v3/ 拆成 FactoryChat / RightPanelAgents / RightPanelTrace / RightPanelKnowledge / RightPanelEval;FV3_CSS 158 行进 .module.css。lib/agent-factory-v3/tools/index.ts 13 个工具每个写 vitest(mock ctx + 验证 emits/persist/state mutation),先覆盖 design_agent/refine_agent/sandbox_run 三个最重的。</div>
+      <div class="rec-why"><b>为什么现在</b><br>改 1 个 tab 现在要改 558 行单文件;改 1 个 tool 参数没有任何安全网。v3 刚上线还能改,再过 4 周就改不动了。这是把工程债从'年化 50%'降到'年化 10%'的窗口期。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>让你 6 周后还敢往 brain 里加新工具 / 新 tab。</div>
+    </div>
+    <div class="card rec rec-P1">
+      <div class="rec-head">
+        <span class="pri-chip pri-P1">P1</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">兑现 Manage 柱的 MVP:暂停 + 软回滚 + 审批闸</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>Fleet 上的 Behavior'+ Deploy' 现在指向'contact RAAS'占位,改成走 v3 brain;但 brain 产出的 spec 默认 status='draft',加一个 /api/agents/[slug]/promote 端点带 reason 字段、写 AuditLog。Agent detail drawer 加 'Rollback to v{n}' 按钮(AgentVersion 已经有历史)。</div>
+      <div class="rec-why"><b>为什么现在</b><br>Fleet 副标题宣示三柱已经一年了,Behavior 在 /tools 路径独立长,Manage 完全是空的。运营人员现在没法用 AO 真治理 agent——这正是把'招聘工具'拉成'agent fleet platform'最缺的那一截。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>真正能对外说'AO = Monitor + Manage + Behavior'。</div>
+    </div>
+    <div class="card rec rec-P2">
+      <div class="rec-head">
+        <span class="pri-chip pri-P2">P2</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">给 partner-pg 双写加 outbox + 重放队列</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>新增 PartnerPgOutbox 表(eventKey, payload, status: pending/sent/failed),所有 partner-pg 写先进 outbox,再异步刷;失败有自动重试 + DLQ;match-resume / rule-check 不再因为 partner-pg 慢就把 run 阻塞。</div>
+      <div class="rec-why"><b>为什么现在</b><br>现在 partner-pg 慢 → agent 卡 → Inngest 重试 → 雪崩。outbox 模式让本地决策不被 partner SLA 拖死,也给将来 RAAS 解耦留路。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>可以承诺 SLA 给招聘客户,partner-pg 故障 &lt; 5 分钟时业务无感。</div>
+    </div>
+    <div class="card rec rec-P2">
+      <div class="rec-head">
+        <span class="pri-chip pri-P2">P2</span>
+        <span class="effort-chip effort-small">small</span>
+        <span class="rec-title">把 reasoning + diff + reflection 做成一个'agent build report' PDF</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>v3 一次 brain 跑完后,从 BrainEvent ledger 渲染一份带 reasoning trace、refine diff、sandbox 结果、score_spec、final reflection 的 PDF/HTML 报告,发邮件给运营或挂在 /tools 历史。</div>
+      <div class="rec-why"><b>为什么现在</b><br>你已经把 reasoning 当一等公民、diff 结构化、reflection 持久化——这些数据现在只活在 SSE 流里,scroll 走就没了。变成可下载工件就是销售素材(展示给客户'看这是 AI 怎么造你的 agent'),零额外成本。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>把工程亮点变成 GTM 武器,Factory v3 三周冲刺的 ROI 才回来。</div>
+    </div>
+    <div class="card rec rec-P2">
+      <div class="rec-head">
+        <span class="pri-chip pri-P2">P2</span>
+        <span class="effort-chip effort-medium">medium</span>
+        <span class="rec-title">Prometheus /metrics endpoint + cost forecasting</span>
+      </div>
+      <div class="rec-what"><b>具体做什么</b><br>暴露 /api/metrics(Prometheus 格式)export agent run count / token spend / dependency error rate / queue lag;cost.ts 加 7 天趋势 + linear projection,在 budget 80% 时告警(不是 100% 越界才告警)。</div>
+      <div class="rec-why"><b>为什么现在</b><br>SRE 想接 AO 进 Grafana 现在只能 query Postgres;cost 现在只查越界、不查趋势——增长曲线 1% 也能 3 个月烧光。中型客户 ops team 第一个问的就是 metrics。</div>
+      <div class="rec-unlocks"><b>解锁什么</b><br>标准 SRE 工具链对接 + 财务可预测。</div>
+    </div>
+
+  <h2 id="strategy">3 个战略选项 <span class="num">互斥，要选</span></h2>
+  <p>这三个方向都被代码里的某些投入支撑着，但<b>不能同时做</b>。哪条最适合取决于你想让 AO 在 3 年后是什么。</p>
+  <div class="strats">
+    <div class="strat-card">
+      <div class="strat-name">深耕招聘 RPO,把 AO 做成中国最强的招聘 AI 控制台</div>
+      <div class="strat-section"><div class="strat-label">📌 你在赌</div><div class="strat-body">招聘域已有 6 个真 agent + 18 个手写工具 + dual-write 契约 + dependency-health,继续把 Manage 柱(RBAC、审批、回滚、合规审计)和招聘特有的 rule-check 体系(职级套差、归属锁定、冷冻期)做深;v3 brain 改造成'招聘专属顾问',Factory 不强求跨域。卖给中型 RPO + 中大型 HR 部门。</div></div>
+      <div class="strat-section"><div class="strat-label">⚠ 放弃什么</div><div class="strat-body">放弃'通用 agent fleet platform'叙事,不和 LangGraph/CrewAI 在抽象层竞争;能源/费控域作为研发资本而不是产品线;TAM 受限于招聘 RPO 市场。</div></div>
+      <div class="strat-section"><div class="strat-label">💡 为什么值得考虑</div><div class="strat-body">这是唯一已经被代码证明的事:6 个 agent 在生产、partner-pg 双写在跑、rule-check 复杂 prompt 反复迭代过。其它两个域全是 snapshot-driven 演示。商业上'第一个客户落地'永远是最难的,在已经接近落地的方向继续推阻力最小。</div></div>
+    </div>
+    <div class="strat-card">
+      <div class="strat-name">把 Agent Factory v3 拆出来做成独立的 agent-codegen 平台</div>
+      <div class="strat-section"><div class="strat-label">📌 你在赌</div><div class="strat-body">v3 brain 的 reasoning-as-first-class-param、refine_agent diff、sandbox 真部署、FailureReflection 跨 run 学习——这些 pattern 是真创新,且通用。把 v3 独立成 SaaS / 开源项目(给定 ontology 生成 Inngest agent),招聘 AO 变成 v3 的 reference customer。和 LangGraph + Inngest agent kit 直接对位。</div></div>
+      <div class="strat-section"><div class="strat-label">⚠ 放弃什么</div><div class="strat-body">放弃 vertical RPO 商业化的近期机会;需要做 ontology 抽象、tool registry SDK、多 runtime 适配(不只 Inngest);得和巨头(Anthropic、LangChain、OpenAI)在 agent dev 工具层正面竞争。</div></div>
+      <div class="strat-section"><div class="strat-label">💡 为什么值得考虑</div><div class="strat-body">v3 三周冲刺出来的几个 pattern(reasoning 参数、diff、reflection、sandbox 五阶段)在同行里真的新,有 dev mindshare 潜力。如果只用来生成招聘 agent 太亏。但承认:这是从'工程师做事'变成'平台公司',资源结构完全不同。</div></div>
+    </div>
+    <div class="strat-card">
+      <div class="strat-name">三柱合体,做成'本体驱动的领域 agent 运维平台'(vertical platform)</div>
+      <div class="strat-section"><div class="strat-label">📌 你在赌</div><div class="strat-body">Monitor 已经成熟、Behavior(v3 brain)正在长、Manage 是接下来 8 周的事。坚持三柱合体:用招聘域当锚证明可生产化,用能源/费控当跨域延展,Factory v3 是'本体 → 可运行 agent'的工厂,Monitor 是 fleet 运维,Manage 是治理闸。卖给有多业务域要 agent 化的中大型企业(集团 HR + 财务 + 运营)。</div></div>
+      <div class="strat-section"><div class="strat-label">⚠ 放弃什么</div><div class="strat-body">时间最长(Manage 几乎没开工、跨域 rule-check 没抽象、多租户基础还没做);风险最大(三柱要一起兑现);也最容易在'什么都做了但都不够好'里打转。</div></div>
+      <div class="strat-section"><div class="strat-label">💡 为什么值得考虑</div><div class="strat-body">代码里的 IA、ontology generator、per-domain Inngest 隔离、blackboard 监控——所有结构都是按这个方向铺的,不顺着走相当于扔掉 70% 的架构投入。也是唯一能讲'AI 时代企业级 ops platform'故事的方向。但要直面:你现在一个人(或小团队)做一个三柱产品。</div></div>
+    </div>
+  </div>
+
+  <h2 id="thisweek">这周该做什么</h2>
+  <div class="week-hero">
+    <div class="week-num">→</div>
+    <div>
+      <div class="week-title">如果我是你，这周只做一件事</div>
+      <div class="week-body">这周只做一件事:用 v3 brain 真生成一个费控域(或能源域)的真 agent,从 read_ontology 一路到 sandbox 跑通真事件链。不要修 UI、不要拆组件、不要写文档。理由:你最近 3 周已经把 v3 brain 做得很好(reasoning 参数、refine diff、score_spec、FailureReflection),但所有证据都来自招聘域(而招聘 agent 是手写的)和 recruit-gen-v1 测试域(0/6 candidate 的 dryRun)。'v3 能跨域生成 agent' 是 AO 整个三柱叙事的中心点,但这个点目前在代码里没有任何端到端证据。这周跑通(或失败但留下精确的 root cause 进 FailureReflection),你就知道 AO 接下来 3 个月是该深耕招聘、拆 Factory 独立、还是冲三柱合体——三个战略选项目前都靠猜,这次实验给出真信号。如果跑通了,后面再补成本熔断和多租户;如果跑不通,先别建生产化基建,集中算力修推理边界。</div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="meta">
+      <span><b>项目</b> Agentic Operator</span>
+      <span><b>路径</b> ~/Desktop/agenticOperator</span>
+      <span><b>审计方式</b> 12-agent ultracode workflow (wekeqjda8 · 13 agents · 1.13M tokens · 13 min)</span>
+      <span><b>对照基准</b> LangGraph / CrewAI / AutoGen / Inngest agent kit / Sema4 / dust.tt</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -25,6 +25,7 @@ import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
 import type { DepOutcome } from '@/lib/dependency-health/types';
 import { createAgentLogger, runWithLogger } from '@/lib/agent-logger';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
+import { recordNotification } from '@/server/notifications/ingest';
 import {
   inngest,
   type MatchEventData,
@@ -33,6 +34,10 @@ import {
 } from '@/server/inngest/client';
 import { skipIfRaasV1Paused } from '@/server/inngest/raas-v1';
 import { appendRuleCheckToJd } from '@/lib/rule-check/match-jd-augment';
+import {
+  extractCandidateExpectation,
+  formatCandidatePreferences,
+} from '@/lib/mappers/candidate-preferences';
 
 // Loose shape — the merged JR object from rule-check carries arbitrary
 // keys (path A flatten + path B agent-view item). Field-name probes below.
@@ -98,6 +103,17 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
         reason: ruleCheckGate.reason,
         detail: ruleCheckGate.detail,
       });
+      await recordNotification({
+        level: 'warn',
+        category: 'agent_error',
+        source: 'Matcher',
+        agent: 'Matcher',
+        runId: runId ?? null,
+        traceId: traceId ?? null,
+        message: `匹配前置校验阻断: ${ruleCheckGate.reason}${ruleCheckGate.detail ? ` (${ruleCheckGate.detail})` : ''}`,
+        anchors: { candidate_id: candidateId, job_requisition_id: data.job_requisition_id, upload_id: uploadId },
+        dedupeHint: `match_precondition.${ruleCheckGate.reason}`,
+      });
       return {
         ok: false,
         job_requisition_id: data.job_requisition_id,
@@ -110,6 +126,17 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
       logger.warn(
         `[${AGENT_NAME}] MATCH_RULE_CHECK_PASSED missing job_requisition or parsed_resume for JR=${data.job_requisition_id} — cannot match`,
       );
+      await recordNotification({
+        level: 'warn',
+        category: 'agent_error',
+        source: 'Matcher',
+        agent: 'Matcher',
+        runId: runId ?? null,
+        traceId: traceId ?? null,
+        message: `匹配输入缺失: JR=${data.job_requisition_id} 缺 job_requisition 或 parsed_resume`,
+        anchors: { candidate_id: candidateId, job_requisition_id: data.job_requisition_id, upload_id: uploadId },
+        dedupeHint: 'match_precondition.missing-input',
+      });
       return {
         ok: false,
         job_requisition_id: data.job_requisition_id,
@@ -141,6 +168,19 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
     process.env.MATCH_ATTACH_RULECHECK === '0'
       ? flattenRequirementForMatch(req)
       : appendRuleCheckToJd(flattenRequirementForMatch(req), data.rule_check_rules);
+
+  // 候选人求职期望 → RoboHire `candidatePreferences` 通道(接口一直支持,此前从未接线,
+  // 导致候选人的期望薪资/城市/职位/工作模式从不参与匹配)。优先用 ruleCheck 透传的
+  // 结构化 candidate_expectation;为空则从结构化简历 / rawText 现抽。抽不到 → 不传,
+  // 匹配退回纯 {resume, jd}(零回归)。
+  const candidateExpectation =
+    data.candidate_expectation && Object.keys(data.candidate_expectation).length > 0
+      ? data.candidate_expectation
+      : extractCandidateExpectation({
+          parsed: data.parsed_resume,
+          rawText: data.parsed_content,
+        });
+  const candidatePreferences = formatCandidatePreferences(candidateExpectation) || undefined;
 
   if (!resumeText.trim()) {
     throw new NonRetriableError(
@@ -174,11 +214,14 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
       resume_chars: resumeText.length,
       resume_src: resumeSource,
       jd_chars: jdText.length,
+      candidate_preferences_chars: candidatePreferences?.length ?? 0,
     });
     let r: Awaited<ReturnType<typeof matchResumeDirect>>;
     try {
       r = await matchResumeDirect(
-        { resume: resumeText, jd: jdText },
+        candidatePreferences
+          ? { resume: resumeText, jd: jdText, candidatePreferences }
+          : { resume: resumeText, jd: jdText },
         // 显式传 fileLogger → RoboHire match-resume 完整 in/out 进 per-run 审计
         // (Inngest step.run 内 ALS 不可靠,必须显式传闭包 logger).
         { traceId: traceId ?? undefined, logger: fileLogger },
@@ -215,6 +258,9 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
         upload_id: uploadId || null,
         overall_status: '不匹配',
         success: false,
+        execution_success: false,
+        business_outcome: 'blocked',
+        business_reason: matchResult.error,
         data: { error_kind: 'robohire-match-call-failed' },
         error: matchResult.error,
       };
@@ -266,7 +312,7 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
   // ── 写 Neo4j Candidate_Match_Result overall_* fields via allmeta ──
   // PK 复用 ruleCheckAgent 已建的 cmr_<candidate>_<jr>(allmeta upsert by PK)
   // 跟 ruleCheckAgent 那条 row 合并 — 覆盖 overall_* 不动 rule_check_*
-  await step.run(`write-cmr-neo4j-${stepKey}`, async () => {
+  const neo4jWrite = await step.run(`write-cmr-neo4j-${stepKey}`, async () => {
     const rd = matchResult.data as Record<string, unknown>;
     const cmrId = `cmr_${candidateId || 'unknown'}_${data.job_requisition_id}`;
     const r = await writeCandidateMatchResultInstance({
@@ -285,6 +331,28 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
     else logger.warn(`[${AGENT_NAME}] allmeta CMR write failed: ${r.error}`);
     return r;
   });
+  const technicalWarnings: string[] = [];
+  if (!neo4jWrite.ok) {
+    const warning = `Allmeta Candidate_Match_Result 写入失败: ${neo4jWrite.error}`;
+    technicalWarnings.push(warning);
+    fileLogger.event('persistence.failed', {
+      target: 'Allmeta.Candidate_Match_Result',
+      candidate_id: candidateId,
+      job_requisition_id: data.job_requisition_id,
+      error: neo4jWrite.error,
+    });
+    await recordNotification({
+      level: 'warn',
+      category: 'agent_error',
+      source: 'Matcher',
+      agent: 'Matcher',
+      runId: runId ?? null,
+      traceId: traceId ?? null,
+      message: `匹配结论已生成，但 ${warning}`,
+      anchors: { candidate_id: candidateId, job_requisition_id: data.job_requisition_id, upload_id: uploadId },
+      dedupeHint: 'match_persistence.allmeta_cmr',
+    });
+  }
 
   const payload: MatchEventData = {
     job_requisition_id: data.job_requisition_id,
@@ -298,6 +366,10 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
     candidate_match_result_id: saveResult.candidate_match_result_id,
     overall_status,
     success: true,
+    execution_success: true,
+    business_outcome: eventName === 'MATCH_FAILED' ? 'rejected' : 'passed',
+    business_reason: eventName === 'MATCH_FAILED' ? `匹配分 ${matching_score ?? '—'} 未达到面试阈值` : null,
+    technical_warnings: technicalWarnings,
     data: matchResult.data as unknown as Record<string, unknown>,
     requestId: matchResult.requestId,
     savedAs: matchResult.savedAs,
@@ -334,6 +406,9 @@ export async function matchResumeAgentHandler({ event, step, logger, runId }: an
     requestId: matchResult.requestId,
     eventName,
     matching_score,
+    execution_success: true,
+    business_outcome: eventName === 'MATCH_FAILED' ? 'rejected' : 'passed',
+    technical_warnings: technicalWarnings,
   };
   }); // runWithLogger
 }
@@ -495,7 +570,12 @@ export function verifyRuleCheckPassedForMatch(
     };
   }
 
-  const failed = rules.find((r) => normalizeRuleStatus(r.status) === 'fail');
+  const failed = rules.find(
+    (r) =>
+      normalizeRuleStatus(r.status) === 'fail' &&
+      r.blocking !== false &&
+      r.enforcement_level !== 'optional',
+  );
   if (failed) {
     return {
       ok: false,

@@ -65,13 +65,12 @@ describe('auditIdentityResolution — 一次判定 → 同一份结论落审计'
     expect(arg.check.evals.some((e: any) => String(e.ruleId).startsWith('IDENTITY-'))).toBe(true);
   });
 
-  it('persist 抛错 → 返回 null(soft-fail,绝不向解析主流程抛)', async () => {
+  it('persist 抛错 → 标记为 authoritative audit failure 并触发重试', async () => {
     const resolution = await resolveIdentityMatch(rec, repo, RULES, judgeYes);
     const persist = vi.fn(async () => { throw new Error('db down'); });
-    const out = await auditIdentityResolution({
+    await expect(auditIdentityResolution({
       resolution, candidateName: rec.name ?? null, rulesTotal: RULES.length,
       snapshotSource: 'snapshot', caseId: 'case_3', traceId: null, persist,
-    });
-    expect(out).toBeNull();
+    })).rejects.toThrow(/RULE_AUDIT_PERSISTENCE_FAILED.*db down/);
   });
 });

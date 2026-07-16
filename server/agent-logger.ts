@@ -25,6 +25,11 @@ import { prisma } from "./db";
 import { byWsId } from "@/lib/agent-mapping";
 import { recordNotification } from "./notifications/ingest";
 import { recordLogEvent } from "./log/log-event";
+import {
+  classifyFailure,
+  enrichPayloadJsonWithFailure,
+  messageWithFailureSummary,
+} from "./log/failure-classifier";
 
 export type AgentLogContext = {
   /** Agent short name (e.g. "createJD"). Used as agentName + fallback nodeId. */
@@ -123,40 +128,55 @@ async function safeWrite(
   narrative: string,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
+  const agentName = canonicalAgentName(ctx);
+  const rawPayloadJson = metadata ? safeStringify(metadata) : null;
+  const failure = classifyFailure({
+    type,
+    source: 'agent',
+    agent: agentName,
+    message: narrative,
+    payloadJson: rawPayloadJson,
+  });
+  const payloadJson = failure
+    ? enrichPayloadJsonWithFailure(rawPayloadJson, failure)
+    : rawPayloadJson;
+  const persistedNarrative = messageWithFailureSummary(narrative, type, failure);
   try {
     await prisma.agentActivity.create({
       data: {
         runId: ctx.runId ?? null,
         nodeId: ctx.nodeId ?? ctx.agent,
-        agentName: canonicalAgentName(ctx),
+        agentName,
         type,
-        narrative,
-        metadata: metadata ? safeStringify(metadata) : null,
+        narrative: persistedNarrative,
+        metadata: payloadJson,
       },
     });
     // Mirror every activity into the unified audit log (queryable via
-    // /api/log-events by run / agent / severity / time). Fire-and-forget.
-    void recordLogEvent({
+    // /api/log-events by run / agent / severity / time). Awaiting is safe:
+    // recordLogEvent swallows its own persistence errors, while a successful
+    // activity write can no longer outlive and lose its audit mirror during a
+    // fast process shutdown.
+    await recordLogEvent({
       type,
-      message: narrative,
-      agent: canonicalAgentName(ctx),
+      message: persistedNarrative,
+      agent: agentName,
       runId: ctx.runId ?? null,
-      payloadJson: metadata ? safeStringify(metadata) : null,
+      payloadJson,
     });
     // Mirror unrecoverable agent errors into the 消息通知 center (deduped per
     // agent so a storm collapses to one alert + count). Transient anomalies are
     // intentionally NOT surfaced here — they stay in the audit log only, per
     // "only important". Fire-and-forget: recordNotification never throws.
     if (type === "agent_error") {
-      const who = canonicalAgentName(ctx);
       void recordNotification({
         level: "error",
         category: "agent_error",
-        source: who,
-        agent: who,
+        source: agentName,
+        agent: agentName,
         runId: ctx.runId ?? null,
-        message: narrative,
-        dedupeHint: `agent_error.${who}`,
+        message: failure ? failure.summary : persistedNarrative,
+        dedupeHint: `agent_error.${agentName}`,
       }).catch(() => {});
     }
   } catch (e) {
@@ -278,6 +298,15 @@ export async function markRunComplete(
         lastActivityAt: new Date(),
       },
     });
+    if (status === "failed") {
+      void recordLogEvent({
+        type: "agent_error",
+        source: "workflow",
+        runId,
+        message: reason ? `run failed: ${reason}` : "run failed",
+        payloadJson: JSON.stringify({ status, reason: reason ?? null }),
+      });
+    }
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn(`[markRunComplete] failed for run ${runId}: ${(e as Error).message}`);

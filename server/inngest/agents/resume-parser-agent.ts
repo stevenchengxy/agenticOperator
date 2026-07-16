@@ -32,6 +32,7 @@ import {
   writeResumeInstance,
 } from '@/lib/allmeta-writers';
 import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
+import { extractCandidateExpectation } from '@/lib/mappers/candidate-preferences';
 import { detectResumeFormat, convertDocxBufferToPdf } from '@/lib/resume-convert/docx-to-pdf';
 import { classifyRobohire } from '@/lib/dependency-health/classify';
 import { reportDependencyDegraded } from '@/lib/dependency-health/report';
@@ -44,6 +45,7 @@ import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-l
 import { runLockCheck } from '@/lib/candidate-lock/run-lock-check';
 // 查重(invoke 模式):落库前同步调用独立的「候选人查重」函数,拿结论驱动挂老档/新建。
 import { candidateIdentityAgent } from '@/server/inngest/agents/candidate-identity-agent';
+import { isRuleAuditPersistenceFailure } from '@/lib/rule-check/ontology-audit-writer';
 
 // Local alias mirroring the RoboHire parse-resume `data` shape that we
 // historically imported from raas-api-client.ts. After the 2026-05-20
@@ -57,7 +59,11 @@ export const resumeParserAgent = inngest.createFunction(
   {
     id: 'resume-parser-agent',
     name: 'Resume Parser Agent',
-    retries: 0, // RAAS API 失败不自动重试，避免重复扣配额 / 重写 DB
+    // 可恢复依赖故障由 reportDependencyDegraded 抛普通 Error，交给 Inngest
+    // 自动重试；无效事件、文档不可解析等永久错误抛 NonRetriableError，仍然
+    // 立即终止，不会重复扣费。每个持久化阶段都在稳定 step.run 内，重试复用
+    // 已完成步骤，避免重复写 Partner PG / Allmeta。
+    retries: 3,
     triggers: [{ event: 'RESUME_DOWNLOADED' }],
   },
   async ({ event, step, logger, runId }) => {
@@ -367,6 +373,10 @@ export const resumeParserAgent = inngest.createFunction(
           error: identityVerdict?.error ?? null,
         });
       } catch (e) {
+        // A business lookup can degrade, but an authoritative rule decision may
+        // never advance without its durable audit row. Propagate this tagged
+        // failure so the parent Inngest run retries before candidate storage.
+        if (isRuleAuditPersistenceFailure(e)) throw e;
         // 查重函数被下线/超时 → 按新候选人降级,绝不阻塞入库。
         fileLogger.event('candidate-identity.invoke_failed', { upload_id, error: (e as Error).message });
         identityVerdict = null;
@@ -547,7 +557,16 @@ export const resumeParserAgent = inngest.createFunction(
       client_id: client_id ?? null,
       // 老的 4 对象嵌套字段保留为空 (RAAS 不再要求 agent 转结构)
       candidate: {} as ResumeProcessedData['candidate'],
-      candidate_expectation: {} as ResumeProcessedData['candidate_expectation'],
+      // 候选人求职期望:从解析出的简历文本(rawText)抽结构化期望,交给下游
+      // ruleCheck 透传 → matchResume 拼 candidatePreferences 发 RoboHire。抽不到
+      // 则为空对象(与旧行为一致,匹配退回纯 {resume, jd})。
+      candidate_expectation: extractCandidateExpectation({
+        parsed: parsed as Record<string, unknown>,
+        rawText:
+          typeof (parsed as Record<string, unknown>)?.rawText === 'string'
+            ? ((parsed as Record<string, unknown>).rawText as string)
+            : null,
+      }),
       resume: {} as ResumeProcessedData['resume'],
       runtime: {} as ResumeProcessedData['runtime'],
       parsedAt: new Date().toISOString(),

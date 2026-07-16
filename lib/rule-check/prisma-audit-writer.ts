@@ -3,11 +3,11 @@
 // Prisma audit writer — Q架构纠偏 (2026-05-12)
 //
 // 角色:
-//   - RuleCheckAudit / RuleCheckFlag(审计日志 + 大字段 + 时间序列)→ Prisma SQLite
+//   - RuleCheckAudit / RuleCheckFlag(审计日志 + 大字段 + 时间序列)→ Prisma/Postgres
 //   - 实体节点(Candidate / Resume / Job_Requisition + 关系)→ Neo4j(由 neo4j-instance-writer 写)
 //
 // 为什么分开:
-//   Neo4j 擅长存"实体 + 关系",不擅长存大字段日志。Prisma SQLite 关系 DB 有索引、
+//   Neo4j 擅长存"实体 + 关系",不擅长存大字段日志。Prisma/Postgres 有索引、
 //   事务、null check,适合 audit 这种"高频写、按 audit_id / created_at 查"的 case。
 //
 // 跟 neo4j-instance-writer 的对应:
@@ -158,16 +158,12 @@ function shortHash(s: string): string {
   return (h >>> 0).toString(36).padStart(7, '0').slice(0, 8);
 }
 
-function safeJsonStringify(v: unknown, maxBytes = 200_000): string | null {
+function safeJsonStringify(v: unknown): string | null {
   try {
     const s = JSON.stringify(v);
     if (!s) return null;
-    if (s.length > maxBytes) {
-      return s.slice(0, maxBytes) + `...[truncated ${s.length - maxBytes} chars]`;
-    }
     return s;
   } catch {
     return null;
   }
 }
-

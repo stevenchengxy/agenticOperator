@@ -14,6 +14,7 @@ import { useApp } from "@/lib/i18n";
 import { formatTime } from "./i18n-utils";
 import type { MonitorAgentDetail, MonitorNodeAgg } from "@/lib/monitor/types";
 import { AgentConfigEditor } from "./AgentConfigEditor";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 export function AgentDetailContent({ name }: { name: string }) {
   const { t, lang } = useApp();
@@ -98,20 +99,24 @@ export function AgentDetailContent({ name }: { name: string }) {
       </div>
 
       {/* ── Internal Flow ─────────────────────────────────────────── */}
-      <ClaudeSectionTitle>{t('monitor_internal_flow_title')}</ClaudeSectionTitle>
+      <ClaudeSectionTitle>
+        <span className="inline-flex items-center gap-2">
+          {t('monitor_internal_flow_title')}
+          <HelpTip tip={agentDesc?.description ?? '—'} />
+        </span>
+      </ClaudeSectionTitle>
       <ClaudeCard className="mb-6">
-        <p className="text-claude-ink-3 text-[12.5px] mb-3">
-          {agentDesc?.description ?? '—'}
-        </p>
         <InternalFlowDiagram desc={agentDesc} />
       </ClaudeCard>
 
       {/* ── Workflow Position ────────────────────────────────────── */}
-      <ClaudeSectionTitle>{t('monitor_workflow_position')}</ClaudeSectionTitle>
+      <ClaudeSectionTitle>
+        <span className="inline-flex items-center gap-2">
+          {t('monitor_workflow_position')}
+          <HelpTip tip={t('monitor_workflow_position_desc')} />
+        </span>
+      </ClaudeSectionTitle>
       <ClaudeCard className="mb-6">
-        <p className="text-claude-ink-3 text-[12.5px] mb-3">
-          {t('monitor_workflow_position_desc')}
-        </p>
         <MonitorGraph
           nodeAggs={workflowNodeAggs}
           selectedNodeId={node?.id}

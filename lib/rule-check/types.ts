@@ -94,6 +94,11 @@ export type RuleProvenance = {
   tier: 'general' | 'client' | 'department';
   included: boolean;
   reason: string;
+  /** Ontology governance snapshot at selection time. */
+  enforcement_level?: 'mandatory' | 'optional';
+  failure_policy?: 'block' | 'warn';
+  /** true means the rule is evaluated and persisted, but never affects the gate. */
+  reference_only?: boolean;
 };
 
 export type RuleResult = {
@@ -109,6 +114,12 @@ export type RuleResult = {
   reason?: string;
   /** 下一步动作；缺省时由 status 推导(fail→block, pass→continue, …)。 */
   next_action?: RuleNextAction;
+  /** Server-side governance metadata; never trusted from the LLM response. */
+  enforcement_level?: 'mandatory' | 'optional';
+  failure_policy?: 'block' | 'warn';
+  severity?: Severity;
+  /** false for optional/reference-only rules, even when their status is fail. */
+  blocking?: boolean;
 };
 
 export type RuleExplanation = {
@@ -118,6 +129,10 @@ export type RuleExplanation = {
   status: Exclude<RuleStatus, 'pass' | 'not_triggered'>;
   reason: string;
   next_action?: RuleNextAction;
+  enforcement_level?: 'mandatory' | 'optional';
+  failure_policy?: 'block' | 'warn';
+  severity?: Severity;
+  blocking?: boolean;
 };
 
 export type MatchResumeCheckStats = {
@@ -162,9 +177,11 @@ export type MatchResumeCheckResult = {
       | 'tool-use-loop-exceeded'
       | 'parse-error'
       | string;
-    /** Truncated raw LLM output. Populated when fail_reason='parse-error'
+    /** Full raw LLM output. Populated when fail_reason='parse-error'
      *  so callers can diagnose what the model actually emitted. */
     raw_llm_text?: string;
+    /** Parser failure detail persisted with parked audits. */
+    parse_error?: string;
     /** OpenAI-protocol finish_reason on the last LLM response. "length" =
      *  max_tokens cap hit (truncation); "stop" = model finished cleanly. */
     llm_finish_reason?: string;

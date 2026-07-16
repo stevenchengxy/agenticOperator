@@ -34,6 +34,7 @@ import type {
 } from '@/lib/partner-pg/types';
 import {
   generateJdDirect,
+  RobohireApiError,
   type RobohireGenerateJdData,
 } from '@/lib/robohire-client';
 import { classifyRobohire } from '@/lib/dependency-health/classify';
@@ -107,7 +108,11 @@ export const createJdAgent = inngest.createFunction(
   {
     id: AGENT_ID,
     name: 'Create JD Agent',
-    retries: 1,
+    // 3(此前 1):让"可恢复"退化名副其实。RoboHire 402/5xx/429/网络抖动经
+    // reportDependencyDegraded 抛的是 RETRIABLE Error,只重试 1 次就终态 FAILED,和真
+    // bug 无法区分。给瞬时厂商故障 3 次带退避的机会;真·终态(auth/empty/AO 侧
+    // bad-request)走 NonRetriableError → 依旧 0 重试、立刻失败,不受影响。
+    retries: 3,
     triggers: [
       { event: 'REQUIREMENT_LOGGED' },
       { event: 'CLARIFICATION_READY' },
@@ -250,6 +255,15 @@ export const createJdAgent = inngest.createFunction(
           { traceId, logger: fileLogger },
         );
       } catch (e) {
+        // AO 自己发的 4xx(400/422 — prompt 太长/格式非法)是我们的 bug,不是 RoboHire
+        // 健康问题:直接 NonRetriable 失败,不写 RoboHire dependency-degraded 信号
+        // (否则监控会把我们的输入 bug 当成"RoboHire 退化:auth"误报到厂商健康上)。
+        if (isAoSideBadRequest(e)) {
+          logger.error(
+            `[${AGENT_NAME}] generate-jd 拒绝了我们的请求(AO 侧入参问题)— 终态失败,不记 RoboHire 健康信号: ${(e as Error).message}`,
+          );
+          throw new NonRetriableError(`createJD bad request (AO-side): ${(e as Error).message}`);
+        }
         const oc = classifyRobohire('generateJd', e);
         if (!oc.ok) await reportDependencyDegraded(oc, depCtx);
         throw e; // an error always classifies as degraded; this also fails the run
@@ -687,6 +701,17 @@ export function proseToSkillArray(s: unknown): string[] {
     .split('\n')
     .map((line) => line.replace(/^\s*(?:[-*•·]|\d+\s*[.．、)）])\s*/, '').trim())
     .filter((line) => line.length > 0);
+}
+
+/**
+ * True when a thrown RoboHire error is an AO-side bad request (400/422) — our own
+ * prompt/input is malformed. Such failures should fail the run terminally but must
+ * NOT be recorded as a RoboHire dependency degradation (that would blame the vendor
+ * for our bug). 401/403 (auth), 429, 5xx and network faults return false and keep
+ * flowing through the normal dependency-health classifier + report path.
+ */
+export function isAoSideBadRequest(e: unknown): boolean {
+  return e instanceof RobohireApiError && e.isBadRequest;
 }
 
 function arrayOrUndefined(v: unknown): string[] | undefined {

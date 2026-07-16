@@ -355,6 +355,53 @@ function RunNotFound({ runId }: { runId: string }) {
   );
 }
 
+function FailureCauseCard({ data }: { data: MonitorRunDetail }) {
+  const { t, lang } = useApp();
+  const primary = data.failureSummary?.primary ?? null;
+  if (!primary) return null;
+  const failure = primary.failure;
+  const more = Math.max(0, (data.failureSummary?.failures.length ?? 0) - 1);
+  return (
+    <ClaudeCard className="mb-5 border-claude-err/30 bg-claude-err/5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <span className="text-[13px] font-medium text-claude-ink-1">
+              {t('monitor_run_failure_title')}
+            </span>
+            <ClaudeBadge tone={failure.retryable ? 'warn' : 'err'} size="xs">
+              {failure.retryable ? t('monitor_run_failure_retryable') : t('monitor_run_failure_action')}
+            </ClaudeBadge>
+            <ClaudeBadge tone="neutral" size="xs">
+              {failure.component}/{failure.reason}
+            </ClaudeBadge>
+            <span className="text-[11px] text-claude-ink-4 tabular-nums">
+              {formatTime(primary.ts, lang)}
+            </span>
+          </div>
+          <div className="text-[14px] text-claude-ink-1 leading-relaxed">
+            {failure.summary}
+          </div>
+          <div className="mt-1 text-[12px] text-claude-ink-3 break-words">
+            {failure.detail ?? primary.message}
+          </div>
+          {more > 0 && (
+            <div className="mt-2 text-[11.5px] text-claude-ink-4">
+              {t('monitor_run_failure_more').replace('{n}', String(more))}
+            </div>
+          )}
+        </div>
+        <Link
+          href={`/audit?tab=log&runId=${encodeURIComponent(data.run.id)}&failureOnly=1`}
+          className="text-claude-accent text-[12px] no-underline hover:underline shrink-0"
+        >
+          {t('monitor_run_failure_log_link')}
+        </Link>
+      </div>
+    </ClaudeCard>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────
 
 export function RunDetailContent({ runId }: { runId: string }) {
@@ -583,6 +630,8 @@ export function RunDetailContent({ runId }: { runId: string }) {
           value={data ? data.hitl.length : '—'}
         />
       </div>
+
+      {data && <FailureCauseCard data={data} />}
 
       {/* AI run summary — between KPI strip and trail graph */}
       {data && (

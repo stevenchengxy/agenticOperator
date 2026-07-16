@@ -17,11 +17,14 @@
 // or remove it.
 
 import { NextResponse } from "next/server";
-import { em } from "@/server/em";
+import { blockUnsafeDevRouteInProduction } from "@/lib/unsafe-route-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
+  const blocked = blockUnsafeDevRouteInProduction("/api/em/publish");
+  if (blocked) return blocked;
+
   let body: any;
   try {
     body = await req.json();
@@ -45,6 +48,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  const { em } = await import("@/server/em");
   const result = await em.publish(body.name, body.data, {
     source: typeof body.source === "string" ? body.source : "manual-test",
     externalEventId:

@@ -9,24 +9,27 @@ import type { NextRequest } from "next/server";
 import { getDomainServeHandler } from "@/server/inngest/domain-app";
 import { bootOnce } from "@/server/init";
 
-bootOnce();
-
 type RouteContext = { params: Promise<{ domain: string }> };
+
+async function pickDomainHandler(domain: string) {
+  bootOnce();
+  return getDomainServeHandler(domain);
+}
 
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const { domain } = await ctx.params;
-  const h = await getDomainServeHandler(domain);
+  const h = await pickDomainHandler(domain);
   return h.GET(req, ctx as never);
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const { domain } = await ctx.params;
-  const h = await getDomainServeHandler(domain);
+  const h = await pickDomainHandler(domain);
   return h.POST(req, ctx as never);
 }
 
 export async function PUT(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const { domain } = await ctx.params;
-  const h = await getDomainServeHandler(domain);
+  const h = await pickDomainHandler(domain);
   return h.PUT(req, ctx as never);
 }

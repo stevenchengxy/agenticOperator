@@ -405,6 +405,15 @@ function NotifCard({
               <span className="text-[10px] px-1.5 py-0.5 rounded border border-line text-ink-3">{t("ntf_ai_fallback")}</span>
             )}
             <span className="ml-auto text-[11px] flex items-center gap-2">
+              {n.href && (
+                <a
+                  href={n.href}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 text-accent hover:underline"
+                >
+                  <Ic.arrowR /> {t("ntf_detail_open")}
+                </a>
+              )}
               {n.disposition === "auto_handled" ? (
                 <span className="flex items-center gap-1 text-ok">
                   <Ic.sparkle />
@@ -443,8 +452,16 @@ function NotifCard({
     </div>
   );
   return (
-    <button type="button" onClick={onOpen} className="block w-full text-left">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onOpen();
+      }}
+      className="block w-full text-left"
+    >
       {inner}
-    </button>
+    </div>
   );
 }

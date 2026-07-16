@@ -60,9 +60,14 @@ vi.mock('@/lib/agent-logger', () => ({
 
 // 6) 业务里程碑通知 — 不 mock 会把"面试邀约已发送"写进真 Postgres
 //    (2026-06-11 审计:413 条 r1 测试残留的成因)。Pattern 同 rule-check-agent.test.ts。
-const notifyRecruitmentLifecycle = vi.fn(async () => {});
+const notifyRecruitmentLifecycle = vi.fn(async (_step: unknown, _signal: unknown, _ctx: unknown) => {});
 vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
-  notifyRecruitmentLifecycle: (...a: unknown[]) => notifyRecruitmentLifecycle(...a),
+  notifyRecruitmentLifecycle: (step: unknown, signal: unknown, ctx: unknown) =>
+    notifyRecruitmentLifecycle(step, signal, ctx),
+}));
+const recordNotification = vi.fn(async (_input: unknown) => ({ id: 'n1' }));
+vi.mock('@/server/notifications/ingest', () => ({
+  recordNotification: (input: unknown) => recordNotification(input),
 }));
 
 // 7) dependency-health — recordDependencySignal 直写真 LogEvent,测试跑出的

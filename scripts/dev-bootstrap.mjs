@@ -12,14 +12,18 @@
 //   4. Best-effort start the Inngest archiver in the background (dedup-guarded,
 //      soft-fail) so the durable mirror keeps filling while you develop.
 
-import { existsSync, copyFileSync, mkdirSync, openSync } from "node:fs";
-import { execSync, spawn } from "node:child_process";
+import { existsSync, copyFileSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const log = (m) => console.log(`[bootstrap] ${m}`);
 const warn = (m) => console.warn(`[bootstrap] ⚠ ${m}`);
+const childEnv = {
+  ...process.env,
+  PATH: `${dirname(process.execPath)}:${process.env.PATH || ""}`,
+};
 
 // 1. .env.local
 const envLocal = resolve(ROOT, ".env.local");
@@ -30,6 +34,31 @@ if (!existsSync(envLocal)) {
     log("created .env.local from .env.example — fill in API keys as needed");
   } else {
     warn(".env.example missing; cannot scaffold .env.local");
+  }
+}
+
+// Load .env.local for bootstrap itself. Next/tsx load it later, but this script
+// needs INNGEST_BASE_URL / INNGEST_SERVE_ORIGIN before it decides which helper
+// processes to start.
+if (existsSync(envLocal)) {
+  try {
+    const raw = readFileSync(envLocal, "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+      if (!m || process.env[m[1]] !== undefined) continue;
+      let v = m[2].trim();
+      if (
+        (v.startsWith('"') && v.endsWith('"')) ||
+        (v.startsWith("'") && v.endsWith("'"))
+      ) {
+        v = v.slice(1, -1);
+      }
+      process.env[m[1]] = v;
+    }
+  } catch (e) {
+    warn(`could not load .env.local for bootstrap: ${e.message}`);
   }
 }
 
@@ -74,32 +103,92 @@ if (dockerUp) {
 //    repeated `npm run dev` reuses the already-running server.
 const localInngestCli = resolve(ROOT, "node_modules/.bin/inngest-cli");
 const hasLocalCli = existsSync(localInngestCli);
+const localTsx = resolve(ROOT, "node_modules/.bin/tsx");
+const hasLocalTsx = existsSync(localTsx);
 
-let inngestRunning = false;
-try {
-  execSync("pgrep -f 'inngest-cli dev'", { cwd: ROOT, stdio: "ignore" });
-  inngestRunning = true;
-} catch {
-  inngestRunning = false; // pgrep exits non-zero when no match
+const DEFAULT_INNGEST_BASE_URL = "http://localhost:8288";
+
+function resolveInngestBaseUrl() {
+  const candidates = [
+    process.env.INNGEST_BASE_URL,
+    process.env.INNGEST_DEV,
+    process.env.INNGEST_LOCAL_URL,
+    process.env.INNGEST_ADMIN_URL,
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return new URL(candidate).toString().replace(/\/$/, "");
+    } catch {
+      // INNGEST_DEV=1 is a common SDK flag, not a URL. Keep looking.
+    }
+  }
+  return DEFAULT_INNGEST_BASE_URL;
 }
 
-if (inngestRunning) {
-  log("Inngest dev server already running (native) — leaving it.");
+const inngestBaseUrl = resolveInngestBaseUrl();
+
+function isLocalHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function inngestReachable(baseUrl) {
+  try {
+    const url = new URL("/v1/events?limit=1", baseUrl).toString();
+    execFileSync("curl", ["-fsS", "-m", "2", url], { cwd: ROOT, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasRunningScript(script) {
+  try {
+    const stdout = execFileSync("ps", ["-axo", "stat=,command="], {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .some((line) => {
+        const match = /^(\S+)\s+(.+)$/.exec(line);
+        if (!match) return false;
+        const [, stat, command] = match;
+        return !/[TZX]/.test(stat) && command.includes(ROOT) && command.includes(script);
+      });
+  } catch {
+    return false;
+  }
+}
+
+const inngestUrl = new URL(inngestBaseUrl);
+const inngestPort = inngestUrl.port || (inngestUrl.protocol === "https:" ? "443" : "80");
+const inngestIsLocal = isLocalHost(inngestUrl.hostname);
+
+if (inngestReachable(inngestBaseUrl)) {
+  log(`Inngest dev server reachable at ${inngestBaseUrl} — leaving it.`);
 } else if (!hasLocalCli) {
-  warn("no local inngest-cli — run `npm install`, then `npm run inngest:dev`");
+  warn(`Inngest is not reachable at ${inngestBaseUrl}, and no local inngest-cli was found.`);
+  warn("run `npm install`, then `npm run inngest:dev`");
   warn("UI will load; event stream / agent runs are inert until Inngest is up");
+} else if (!inngestIsLocal) {
+  warn(`configured Inngest (${inngestBaseUrl}) is not reachable; not starting a local CLI for a non-local URL.`);
+  warn("fix INNGEST_BASE_URL or start the shared Inngest server.");
 } else {
   try {
     mkdirSync(resolve(ROOT, "logs"), { recursive: true });
     const out = openSync(resolve(ROOT, "logs/inngest.log"), "a");
     const serveUrl = `${process.env.INNGEST_SERVE_ORIGIN || "http://localhost:3002"}/api/inngest`;
-    const child = spawn(localInngestCli, ["dev", "--host", "0.0.0.0", "-u", serveUrl], {
+    const child = spawn(localInngestCli, ["dev", "--host", "0.0.0.0", "-p", inngestPort, "-u", serveUrl], {
       cwd: ROOT,
       detached: true,
       stdio: ["ignore", out, out],
+      env: childEnv,
     });
     child.unref();
-    log(`started native Inngest dev server in background → logs/inngest.log (serve ${serveUrl})`);
+    log(`started native Inngest dev server at ${inngestBaseUrl} → logs/inngest.log (serve ${serveUrl})`);
   } catch (e) {
     warn(`could not start native Inngest: ${e.message}`);
     warn("manual: run `npm run inngest:dev` in another terminal");
@@ -108,23 +197,19 @@ if (inngestRunning) {
 
 // 4. Inngest archiver (durable mirror) — background, dedup-guarded, soft-fail.
 if (pgReady && process.env.ARCHIVE_ENABLED !== "0") {
-  let alreadyRunning = false;
-  try {
-    execSync("pgrep -f scripts/inngest-archiver", { cwd: ROOT, stdio: "ignore" });
-    alreadyRunning = true;
-  } catch {
-    alreadyRunning = false; // pgrep exits non-zero when no match
-  }
+  const alreadyRunning = hasRunningScript("scripts/inngest-archiver.ts");
   if (alreadyRunning) {
     log("archiver already running — leaving it.");
   } else {
     try {
       mkdirSync(resolve(ROOT, "logs"), { recursive: true });
       const out = openSync(resolve(ROOT, "logs/inngest-archiver.log"), "a");
-      const child = spawn("npm", ["run", "archive"], {
+      if (!hasLocalTsx) throw new Error("node_modules/.bin/tsx not found");
+      const child = spawn(localTsx, ["--env-file=.env.local", "scripts/inngest-archiver.ts"], {
         cwd: ROOT,
         detached: true,
         stdio: ["ignore", out, out],
+        env: childEnv,
       });
       child.unref();
       log("started Inngest archiver in background → logs/inngest-archiver.log");
@@ -140,23 +225,19 @@ if (pgReady && process.env.ARCHIVE_ENABLED !== "0") {
 // 5. Monitor sweeper (deterministic health/SLA/cost/error monitors) — background,
 //    dedup-guarded, soft-fail. Off-Inngest; reads the archive, writes Notification.
 if (pgReady && process.env.MONITOR_SWEEP !== "0") {
-  let alreadyRunning = false;
-  try {
-    execSync("pgrep -f scripts/monitor-sweeper", { cwd: ROOT, stdio: "ignore" });
-    alreadyRunning = true;
-  } catch {
-    alreadyRunning = false; // pgrep exits non-zero when no match
-  }
+  const alreadyRunning = hasRunningScript("scripts/monitor-sweeper.ts");
   if (alreadyRunning) {
     log("monitor sweeper already running — leaving it.");
   } else {
     try {
       mkdirSync(resolve(ROOT, "logs"), { recursive: true });
       const out = openSync(resolve(ROOT, "logs/monitor-sweeper.log"), "a");
-      const child = spawn("npm", ["run", "monitor:sweep"], {
+      if (!hasLocalTsx) throw new Error("node_modules/.bin/tsx not found");
+      const child = spawn(localTsx, ["--env-file=.env.local", "scripts/monitor-sweeper.ts"], {
         cwd: ROOT,
         detached: true,
         stdio: ["ignore", out, out],
+        env: childEnv,
       });
       child.unref();
       log("started monitor sweeper in background → logs/monitor-sweeper.log");

@@ -54,6 +54,9 @@ export type ComputeResult = {
 
 export type ComputeCtx<TData = unknown> = {
   caseId: string;
+  /** Inngest function-run id: stable for technical retries, new for each
+   * business re-execution of the same case/action. Used as the audit idempotency key. */
+  runId: string;
   /** Case label (energy 调度令 DS号 / 费控 案件 FK号) — drawn from dataset.dsNo. */
   dsNo: string;
   scenario: string;
@@ -67,6 +70,9 @@ export type ComputeCtx<TData = unknown> = {
 export type Behavior<TData = unknown> = {
   /** Override the action's Inngest triggers (bare event names). */
   triggerOverride?: string[];
+  /** Function-level retries for durable deterministic steps. Omitted keeps the
+   * existing no-retry behavior for LLM and human-gate functions. */
+  retries?: 0 | 1 | 2 | 3 | 4 | 5;
   compute: (ctx: ComputeCtx<TData>) => Promise<ComputeResult>;
 };
 

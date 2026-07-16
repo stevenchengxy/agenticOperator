@@ -12,6 +12,7 @@ import {
   subsystemStateLabel,
 } from "./i18n-utils";
 import type { MonitorSystemStatusResponse, SubsystemHealth } from "@/lib/monitor/types";
+import { useDeepLinkFocus } from "@/lib/hooks/useDeepLinkFocus";
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ function StatusCard({ sub, onActionComplete }: { sub: SubsystemHealth; onActionC
   }
 
   return (
-    <div className="relative">
+    <div className="relative" data-focus-key={`infra:${sub.id}`}>
       <ClaudeCard
         className="p-4 h-full min-w-0 overflow-hidden cursor-default"
         onMouseEnter={() => detail ? setShowTooltip(true) : undefined}
@@ -180,7 +181,7 @@ async function checkInfra(): Promise<void> {
 
 const LOCAL_STORAGE_KEY = "ao:monitor:infra-collapsed";
 
-export function SystemStatusCards({ paused = false }: { paused?: boolean }) {
+export function SystemStatusCards({ paused = false, focusId = null }: { paused?: boolean; focusId?: string | null }) {
   const { t, lang } = useApp();
 
   // Persist collapsed state
@@ -204,6 +205,12 @@ export function SystemStatusCards({ paused = false }: { paused?: boolean }) {
   );
 
   const subsystems = data?.subsystems ?? [];
+  const focusKey = focusId ? `infra:${focusId}` : null;
+  useDeepLinkFocus(focusKey, subsystems.some((sub) => sub.id === focusId));
+
+  React.useEffect(() => {
+    if (focusId) setCollapsed(false);
+  }, [focusId]);
 
   return (
     <div className="mb-4">

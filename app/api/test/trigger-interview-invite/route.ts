@@ -16,7 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { em } from "@/server/em";
+import { blockUnsafeDevRouteInProduction } from "@/lib/unsafe-route-guard";
 
 type Body = Partial<{
   // 必填(兜底默认值)
@@ -52,6 +52,9 @@ type Body = Partial<{
 }>;
 
 export async function POST(req: Request): Promise<Response> {
+  const blocked = blockUnsafeDevRouteInProduction("/api/test/trigger-interview-invite");
+  if (blocked) return blocked;
+
   let body: Body = {};
   try {
     body = await req.json();
@@ -140,6 +143,7 @@ export async function POST(req: Request): Promise<Response> {
   };
 
   try {
+    const { em } = await import("@/server/em");
     const result = await em.publish("INTERVIEW_INVITATION_REQUESTED", envelope, {
       source: "manual.test-trigger",
       externalEventId: envelope.event_id,

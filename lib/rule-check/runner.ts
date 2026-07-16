@@ -135,8 +135,12 @@ function failSafe(
       rule_source: base.rule_source ?? 'json-fallback',
       fail_reason: reason,
       raw_llm_text: base.raw_llm_text,
+      llm_raw_text: base.llm_raw_text ?? base.raw_llm_text,
       llm_finish_reason: base.llm_finish_reason,
       llm_error_detail: base.llm_error_detail,
+      parse_error: base.parse_error,
+      user_prompt: base.user_prompt,
+      system_prompt: base.system_prompt,
       // Carry the fetched-rules evidence through an infra failSafe so the
       // /rule-check page can still show WHICH rules were fetched even though
       // the LLM never produced a per-rule judgment (没钱 / 故障 / parse-error).
@@ -160,17 +164,70 @@ function stripCodeFence(text: string): string {
   return trimmed;
 }
 
+function extractFirstJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth++;
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function removeTrailingCommas(text: string): string {
+  return text.replace(/,\s*([}\]])/g, '$1');
+}
+
 function parseLlmJson(
   text: string,
 ): { decision?: unknown; stats?: unknown; rule_results?: unknown } | null {
   const cleaned = stripCodeFence(text);
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    return parsed as { decision?: unknown; stats?: unknown; rule_results?: unknown };
-  } catch {
-    return null;
+  const candidates = [cleaned];
+  const embedded = extractFirstJsonObject(cleaned);
+  if (embedded && embedded !== cleaned) candidates.push(embedded);
+  const repaired = removeTrailingCommas(embedded ?? cleaned);
+  if (repaired !== cleaned && repaired !== embedded) candidates.push(repaired);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      if (typeof parsed !== 'object' || parsed === null) continue;
+      const ruleResults =
+        parsed.rule_results ??
+        parsed.ruleResults ??
+        parsed.results ??
+        parsed.rules;
+      return {
+        decision: parsed.decision,
+        stats: parsed.stats,
+        rule_results: ruleResults,
+      };
+    } catch {
+      // Try the next tolerance layer.
+    }
   }
+  return null;
 }
 
 /** status → 下一步动作的默认映射(LLM 没给或给了非法值时兜底)。 */
@@ -197,10 +254,22 @@ export function coerceRuleResults(
   // than emitted by the LLM. This saves ~30 tokens per rule entry — critical
   // when the gateway clamps max_tokens aggressively and we're emitting one
   // entry per evaluated rule.
-  const lookup = new Map<string, { rule_name: string; step_id: string }>();
+  const lookup = new Map<string, {
+    rule_name: string;
+    step_id: string;
+    enforcement_level?: Rule['enforcementLevel'];
+    failure_policy?: Rule['failurePolicy'];
+    severity: Severity;
+  }>();
   for (const s of steps) {
     for (const r of s.rules) {
-      lookup.set(r.id, { rule_name: r.businessLogicRuleName, step_id: s.step_id });
+      lookup.set(r.id, {
+        rule_name: r.businessLogicRuleName,
+        step_id: s.step_id,
+        enforcement_level: r.enforcementLevel,
+        failure_policy: r.failurePolicy,
+        severity: severityOfRule(r),
+      });
     }
   }
 
@@ -230,9 +299,17 @@ export function coerceRuleResults(
     const reason = typeof r.reason === 'string' ? r.reason : undefined;
     const reasonRequired = status !== 'pass' && status !== 'not_triggered';
     if (reasonRequired && !reason) continue;
-    const next_action: RuleNextAction = NEXT_ACTIONS.has(r.next_action as RuleNextAction)
-      ? (r.next_action as RuleNextAction)
-      : defaultNextAction(status);
+    const referenceOnly = meta.severity === 'flag_only';
+    // Governance is server-owned. An LLM may honestly return status=fail for
+    // an optional rule, but it must never smuggle `next_action=block` into the
+    // persisted result. Optional findings are review/reference signals only.
+    const next_action: RuleNextAction = referenceOnly
+      ? status === 'pass' || status === 'not_triggered'
+        ? 'continue'
+        : 'review'
+      : NEXT_ACTIONS.has(r.next_action as RuleNextAction)
+        ? (r.next_action as RuleNextAction)
+        : defaultNextAction(status);
     out.push({
       rule_id: r.rule_id,
       rule_name: meta.rule_name,
@@ -240,6 +317,10 @@ export function coerceRuleResults(
       status,
       reason,
       next_action,
+      enforcement_level: meta.enforcement_level,
+      failure_policy: meta.failure_policy,
+      severity: meta.severity,
+      blocking: !referenceOnly,
     });
   }
   return out;
@@ -255,6 +336,10 @@ function deriveExplanations(rule_results: RuleResult[]): RuleExplanation[] {
       status: r.status as RuleExplanation['status'],
       reason: r.reason ?? '',
       next_action: r.next_action,
+      enforcement_level: r.enforcement_level,
+      failure_policy: r.failure_policy,
+      severity: r.severity,
+      blocking: r.blocking,
     }));
 }
 
@@ -279,12 +364,15 @@ const BLOCK_WHEN_UNCONFIRMABLE: ReadonlySet<RuleStatus> = new Set<RuleStatus>([
   'not_executed',
 ]);
 
-/** 取规则严重度:优先用 fetch 时算好的 severity,否则按 enforcement+failure 推导。
+/** 取规则严重度:优先用 ontology governance 推导,legacy severity 只作回退。
  *  未知(字段全缺)→ terminal 兜底(fail-closed:无法判定就当底线规则)。 */
 export function severityOfRule(r: Pick<Rule, 'severity' | 'enforcementLevel' | 'failurePolicy'>): Severity {
-  if (r.severity) return r.severity;
-  if (r.enforcementLevel === 'optional' && r.failurePolicy === 'warn') return 'flag_only';
+  // `optional` is an absolute non-blocking contract. This intentionally wins
+  // over a stale/contradictory legacy severity or failurePolicy value.
+  if (r.enforcementLevel === 'optional') return 'flag_only';
+  if (r.enforcementLevel === 'mandatory' && r.failurePolicy === 'block') return 'terminal';
   if (r.enforcementLevel === 'mandatory' && r.failurePolicy === 'warn') return 'needs_human';
+  if (r.severity) return r.severity;
   return 'terminal';
 }
 
@@ -293,17 +381,18 @@ export function foldDecision(
   severityByRuleId: Map<string, Severity>,
 ): MatchResumeCheckResult['decision'] {
   // 2026-06-01 fail-closed 政策(替代 2026-05-26 的全量折 PASS):
-  //   - status='fail'(确认违反,已引用具体字段+数值)→ 无条件 FAIL(与历史一致)。
+  //   - status='fail'(确认违反,已引用具体字段+数值)→ 仅 mandatory/底线规则 FAIL。
+  //     optional/flag_only 仍保留真实 fail 结果作为参考,但不影响总闸门。
   //   - insufficient_info / pending / not_executed(agent 无法自证达标)→ 只要落在
   //     底线规则(severity≠flag_only,即 terminal/needs_human)上就 FAIL。提示类
-  //     (flag_only,实际已被 fetcher 过滤出场)不阻断。rule_id 查不到 severity →
+  //     flag_only 不阻断。rule_id 查不到 severity →
   //     当 terminal 兜底(fail-closed)。
   //   - 只剩 pass / not_triggered / 命中 flag_only 的不确定状态 → PASS。
   // per-rule 真实 status 不在这里改(LLM 仍诚实分类),只改 server 端汇总。
   for (const r of ruleResults) {
-    if (r.status === 'fail') return 'FAIL';
+    const sev = severityByRuleId.get(r.rule_id) ?? r.severity ?? 'terminal';
+    if (r.status === 'fail' && sev !== 'flag_only') return 'FAIL';
     if (BLOCK_WHEN_UNCONFIRMABLE.has(r.status)) {
-      const sev = severityByRuleId.get(r.rule_id) ?? 'terminal';
       if (sev !== 'flag_only') return 'FAIL';
     }
   }
@@ -506,6 +595,8 @@ export async function runRuleCheck(
       graph_calls: graph.fetch_count,
       rule_source: sourceResult.source,
       llm_error_detail: msg,
+      user_prompt: userPrompt,
+      system_prompt: MATCH_RESUME_SYSTEM_PROMPT,
     });
   }
 
@@ -544,21 +635,51 @@ export async function runRuleCheck(
     llm_prompt_tokens: llmResult.usage?.promptTokens,
     llm_completion_tokens: llmResult.usage?.completionTokens,
     rule_source: sourceResult.source,
-    // Keep up to 50k so the test-suite report can show the full response.
-    raw_llm_text: llmResult.text?.slice(0, 50000),
+    // Postgres TEXT keeps the complete response so parse failures remain
+    // reproducible; slicing JSON here would corrupt the audit artifact.
+    raw_llm_text: llmResult.text,
+    llm_raw_text: llmResult.text,
+    user_prompt: userPrompt,
+    system_prompt: MATCH_RESUME_SYSTEM_PROMPT,
     llm_finish_reason: llmResult.finishReason,
   };
   if (!parsed) {
     ruleCheckLog.error('parse.failed', { reason: 'not-json' });
-    return failSafe('parse-error', auditOnError, graph);
+    return failSafe('parse-error', { ...auditOnError, parse_error: 'LLM response is not valid JSON' }, graph);
   }
 
   const ruleResults = coerceRuleResults(parsed.rule_results, filteredSteps);
-  if (ruleResults.length !== expectedRuleCount) {
-    ruleCheckLog.error('parse.count-mismatch', {
-      expected: expectedRuleCount, got: ruleResults.length,
+  const expectedRuleIds = filteredSteps.flatMap((step) => step.rules.map((rule) => rule.id));
+  const actualRuleIds = ruleResults.map((rule) => rule.rule_id);
+  const seenRuleIds = new Set<string>();
+  const duplicateRuleIds = [...new Set(actualRuleIds.filter((id) => {
+    if (seenRuleIds.has(id)) return true;
+    seenRuleIds.add(id);
+    return false;
+  }))];
+  const actualRuleIdSet = new Set(actualRuleIds);
+  const missingRuleIds = expectedRuleIds.filter((id) => !actualRuleIdSet.has(id));
+  if (
+    ruleResults.length !== expectedRuleCount ||
+    duplicateRuleIds.length > 0 ||
+    missingRuleIds.length > 0
+  ) {
+    ruleCheckLog.error('parse.rule-set-mismatch', {
+      expected: expectedRuleCount,
+      got: ruleResults.length,
+      duplicate_rule_ids: duplicateRuleIds,
+      missing_rule_ids: missingRuleIds,
     });
-    return failSafe('parse-error', auditOnError, graph);
+    const detail = [
+      `expected ${expectedRuleCount}, got ${ruleResults.length}`,
+      duplicateRuleIds.length > 0 ? `duplicates=${duplicateRuleIds.join(',')}` : '',
+      missingRuleIds.length > 0 ? `missing=${missingRuleIds.join(',')}` : '',
+    ].filter(Boolean).join('; ');
+    return failSafe(
+      'parse-error',
+      { ...auditOnError, parse_error: `rule_results set mismatch: ${detail}` },
+      graph,
+    );
   }
 
   const stats = statsFromResults(ruleResults);

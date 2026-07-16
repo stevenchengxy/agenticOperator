@@ -4,16 +4,36 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/i18n";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
+import { Pagination } from "@/components/shared/Pagination";
 import { fetchJson } from "@/lib/api/client";
+import { setPaginationParams } from "@/lib/api/pagination";
 import type { AuditResponse, AuditLogRow } from "@/app/api/audit/route";
 import type { RunAuditResponse, RunAuditSummary } from "@/app/api/audit/runs/route";
 import { describeLogKind } from "@/lib/monitor-step-descriptor";
 
 type Tab = "runs" | "events" | "ops" | "log" | "terminal";
 
+function isAuditTab(value: string | null): value is Tab {
+  return value === "runs" || value === "events" || value === "ops" || value === "log" || value === "terminal";
+}
+
 export function AuditContent() {
   const { t } = useApp();
-  const [tab, setTab] = React.useState<Tab>("runs");
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const initialTab: Tab =
+    isAuditTab(requestedTab)
+      ? requestedTab
+      : searchParams.get("runId") || searchParams.get("failureOnly")
+        ? "log"
+        : "runs";
+  const [tab, setTab] = React.useState<Tab>(initialTab);
+
+  React.useEffect(() => {
+    if (isAuditTab(requestedTab)) {
+      setTab(requestedTab);
+    }
+  }, [requestedTab]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -69,14 +89,21 @@ function OpsAuditTab() {
   const { t } = useApp();
   const [data, setData] = React.useState<AuditResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
 
-  React.useEffect(() => {
+  const load = React.useCallback(() => {
     setLoading(true);
-    // source=manage-api → 只看 AO 运维写操作(writeManageAudit 写的行)
-    fetchJson<AuditResponse>(`/api/audit?source=manage-api&limit=200`)
-      .then(setData)
+    const params = new URLSearchParams({ source: "manage-api" });
+    setPaginationParams(params, page, pageSize);
+    fetchJson<AuditResponse>(`/api/audit?${params.toString()}`)
+      .then((body) => { setData(body); setError(null); })
+      .catch((cause) => setError(cause && typeof cause === "object" && "message" in cause ? String((cause as { message: unknown }).message) : String(cause)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [page, pageSize]);
+
+  React.useEffect(() => { load(); }, [load]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -89,6 +116,8 @@ function OpsAuditTab() {
       <div className="flex-1 overflow-auto" style={{ padding: "16px 22px" }}>
         {loading && !data ? (
           <EmptyState title={t("adx_loading")} hint="" />
+        ) : error && !data ? (
+          <EmptyState title={t("adx_load_failed")} hint={error} variant="warn" action={<Btn size="sm" onClick={load}>{t("adx_retry")}</Btn>} />
         ) : !data || data.rows.length === 0 ? (
           <EmptyState
             icon={<Ic.book />}
@@ -104,6 +133,18 @@ function OpsAuditTab() {
           </div>
         )}
       </div>
+      {data && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          rowCount={data.rows.length}
+          total={data.total}
+          totalPages={data.totalPages}
+          loading={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        />
+      )}
     </div>
   );
 }
@@ -201,6 +242,9 @@ function RunAuditTab() {
   const [agent, setAgent] = React.useState("");
   const [candidateId, setCandidateId] = React.useState("");
   const [runId, setRunId] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
+  const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -208,11 +252,16 @@ function RunAuditTab() {
     if (agent) sp.set("agent", agent);
     if (candidateId) sp.set("candidate_id", candidateId);
     if (runId) sp.set("run_id", runId);
-    sp.set("days", "7");
+    // Audit is a durable history surface: do not hide older persisted runs
+    // behind an implicit rolling window. Callers can still filter explicitly
+    // through the API when they need a bounded export.
+    sp.set("days", "all");
+    setPaginationParams(sp, page, pageSize);
     fetchJson<RunAuditResponse>(`/api/audit/runs?${sp.toString()}`)
-      .then(setData)
+      .then((body) => { setData(body); setError(null); })
+      .catch((cause) => setError(cause && typeof cause === "object" && "message" in cause ? String((cause as { message: unknown }).message) : String(cause)))
       .finally(() => setLoading(false));
-  }, [agent, candidateId, runId]);
+  }, [agent, candidateId, page, pageSize, runId]);
 
   React.useEffect(() => {
     load();
@@ -224,9 +273,9 @@ function RunAuditTab() {
         className="border-b border-line bg-surface/60 flex items-center"
         style={{ padding: "10px 22px", gap: 14 }}
       >
-        <FilterInput label={t("adx_filter_agent")} value={agent} onChange={setAgent} placeholder="interviewInviter | resumeParser | ruleCheck" width={240} />
-        <FilterInput label={t("adx_filter_candidate")} value={candidateId} onChange={setCandidateId} placeholder="candidate_id" width={220} />
-        <FilterInput label="run_id" value={runId} onChange={setRunId} placeholder="01K..." width={180} />
+        <FilterInput label={t("adx_filter_agent")} value={agent} onChange={(value) => { setAgent(value); setPage(1); }} placeholder="interviewInviter | resumeParser | ruleCheck" width={240} />
+        <FilterInput label={t("adx_filter_candidate")} value={candidateId} onChange={(value) => { setCandidateId(value); setPage(1); }} placeholder="candidate_id" width={220} />
+        <FilterInput label="run_id" value={runId} onChange={(value) => { setRunId(value); setPage(1); }} placeholder="01K..." width={180} />
         <div className="flex-1" />
         <Btn size="sm" onClick={load} disabled={loading}>
           {t("adx_refresh")}
@@ -240,6 +289,8 @@ function RunAuditTab() {
       <div className="flex-1 overflow-auto" style={{ padding: "16px 22px" }}>
         {loading && !data ? (
           <EmptyState title={t("adx_loading")} hint="" />
+        ) : error && !data ? (
+          <EmptyState title={t("adx_load_failed")} hint={error} variant="warn" action={<Btn size="sm" onClick={load}>{t("adx_retry")}</Btn>} />
         ) : !data || data.rows.length === 0 ? (
           <EmptyState
             icon={<Ic.book />}
@@ -255,6 +306,18 @@ function RunAuditTab() {
           </div>
         )}
       </div>
+      {data && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          rowCount={data.rows.length}
+          total={data.total}
+          totalPages={data.totalPages}
+          loading={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        />
+      )}
     </div>
   );
 }
@@ -423,23 +486,31 @@ function EventAuditTab() {
 
   const [data, setData] = React.useState<AuditResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
 
-  React.useEffect(() => {
+  const load = React.useCallback(() => {
     setLoading(true);
     const sp = new URLSearchParams();
     if (eventName) sp.set("eventName", eventName);
     if (traceId) sp.set("traceId", traceId);
     if (source) sp.set("source", source);
+    setPaginationParams(sp, page, pageSize);
     const qs = sp.toString();
     fetchJson<AuditResponse>(`/api/audit${qs ? "?" + qs : ""}`)
-      .then(setData)
+      .then((body) => { setData(body); setError(null); })
+      .catch((cause) => setError(cause && typeof cause === "object" && "message" in cause ? String((cause as { message: unknown }).message) : String(cause)))
       .finally(() => setLoading(false));
-  }, [eventName, traceId, source]);
+  }, [eventName, page, pageSize, source, traceId]);
+
+  React.useEffect(() => { load(); }, [load]);
 
   const setFilter = (k: "eventName" | "traceId" | "source", v: string) => {
     const sp = new URLSearchParams(searchParams.toString());
     if (v) sp.set(k, v);
     else sp.delete(k);
+    setPage(1);
     router.replace(`/audit?${sp.toString()}`);
   };
 
@@ -457,6 +528,8 @@ function EventAuditTab() {
       <div className="flex-1 overflow-auto" style={{ padding: "16px 22px" }}>
         {loading && !data ? (
           <EmptyState title={t("adx_loading")} hint="" />
+        ) : error && !data ? (
+          <EmptyState title={t("adx_load_failed")} hint={error} variant="warn" action={<Btn size="sm" onClick={load}>{t("adx_retry")}</Btn>} />
         ) : !data || data.rows.length === 0 ? (
           <EmptyState
             icon={<Ic.book />}
@@ -483,6 +556,18 @@ function EventAuditTab() {
           </div>
         )}
       </div>
+      {data && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          rowCount={data.rows.length}
+          total={data.total}
+          totalPages={data.totalPages}
+          loading={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        />
+      )}
     </div>
   );
 }
@@ -578,10 +663,41 @@ type LogEventRow = {
   message: string;
   durationMs: number | null;
   payloadPreview: string | null;
+  failure: LogFailureInfo | null;
 };
-type LogEventsResponse = { logs: LogEventRow[]; nextCursor: string | null };
+type LogFailureInfo = {
+  component: string;
+  reason: string;
+  retryable: boolean;
+  summary: string;
+  detail: string | null;
+  code?: string | null;
+  status?: number | null;
+  provider?: string | null;
+  op?: string | null;
+};
+type LogEventsResponse = {
+  logs: LogEventRow[];
+  nextCursor: string | null;
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
+  hasMore?: boolean;
+};
 
-const LOG_LEVELS = ["error", "warn", "notice", "info"];
+const LOG_LEVELS = ["critical", "error", "warn", "notice", "info"];
+const LOG_CATEGORIES = [
+  "dependency",
+  "error",
+  "anomaly",
+  "tool",
+  "event",
+  "step",
+  "lifecycle",
+  "decision",
+  "manage",
+];
 const LEVEL_INK: Record<string, string> = {
   critical: "var(--c-err)",
   error: "var(--c-err)",
@@ -592,28 +708,43 @@ const LEVEL_INK: Record<string, string> = {
 
 function LogEventTab() {
   const { t } = useApp();
+  const searchParams = useSearchParams();
   const [data, setData] = React.useState<LogEventsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [level, setLevel] = React.useState<string>("");
+  const [category, setCategory] = React.useState<string>("");
   const [agent, setAgent] = React.useState("");
-  const [runId, setRunId] = React.useState("");
-  const [q, setQ] = React.useState("");
+  const [runId, setRunId] = React.useState(searchParams.get("runId") ?? "");
+  const [traceId, setTraceId] = React.useState(searchParams.get("traceId") ?? "");
+  const [q, setQ] = React.useState(searchParams.get("q") ?? "");
+  const [failureOnly, setFailureOnly] = React.useState(searchParams.get("failureOnly") === "1" || searchParams.get("failureOnly") === "true");
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
 
   const load = React.useCallback(async () => {
     const qs = new URLSearchParams();
     if (level) qs.set("level", level);
+    if (category) qs.set("category", category);
     if (agent.trim()) qs.set("agent", agent.trim());
     if (runId.trim()) qs.set("runId", runId.trim());
+    if (traceId.trim()) qs.set("traceId", traceId.trim());
     if (q.trim()) qs.set("q", q.trim());
-    qs.set("limit", "200");
+    if (failureOnly) qs.set("failureOnly", "1");
+    qs.set("page", String(page));
+    qs.set("pageSize", String(pageSize));
+    qs.set("payload", "full");
     try {
       setData(await fetchJson<LogEventsResponse>(`/api/log-events?${qs.toString()}`));
     } catch {
-      setData({ logs: [], nextCursor: null });
+      setData({ logs: [], nextCursor: null, page, pageSize, total: 0, totalPages: 1 });
     } finally {
       setLoading(false);
     }
-  }, [level, agent, runId, q]);
+  }, [level, category, agent, runId, traceId, q, failureOnly, page, pageSize]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [level, category, agent, runId, traceId, q, failureOnly, pageSize]);
 
   React.useEffect(() => {
     setLoading(true);
@@ -622,6 +753,10 @@ function LogEventTab() {
   }, [load]);
 
   const rows = data?.logs ?? [];
+  const total = data?.total ?? rows.length;
+  const totalPages = data?.totalPages ?? 1;
+  const first = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -634,6 +769,20 @@ function LogEventTab() {
             </FilterPill>
           ))}
         </div>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 h-7"
+          title={t("adx_log_category")}
+        >
+          <option value="">{t("adx_log_all_categories")}</option>
+          {LOG_CATEGORIES.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <FilterPill active={failureOnly} onClick={() => setFailureOnly((v) => !v)}>
+          {t("adx_log_failure_only")}
+        </FilterPill>
         <input
           value={agent}
           onChange={(e) => setAgent(e.target.value)}
@@ -647,12 +796,27 @@ function LogEventTab() {
           className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 w-[160px] mono"
         />
         <input
+          value={traceId}
+          onChange={(e) => setTraceId(e.target.value)}
+          placeholder="trace id"
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 w-[160px] mono"
+        />
+        <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={t("adx_log_search")}
           className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 flex-1 min-w-[160px]"
         />
-        <span className="text-[11px] text-ink-3">{rows.length}</span>
+        <select
+          value={pageSize}
+          onChange={(e) => setPageSize(Number(e.target.value))}
+          className="text-[12px] px-2 py-1 rounded-md border border-line bg-surface text-ink-1 h-7"
+          title={t("adx_log_page_size")}
+        >
+          {[25, 50, 100, 200].map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
       </div>
 
       <div className="flex-1 overflow-auto" style={{ padding: "8px 16px" }}>
@@ -667,6 +831,32 @@ function LogEventTab() {
             ))}
           </div>
         )}
+      </div>
+      <div className="border-t border-line bg-panel flex items-center gap-2 flex-wrap" style={{ padding: "9px 22px" }}>
+        <span className="text-[11.5px] text-ink-3 mono">
+          {t("adx_log_page_status")
+            .replace("{from}", String(first))
+            .replace("{to}", String(last))
+            .replace("{total}", String(total))}
+        </span>
+        <span className="text-[11.5px] text-ink-4 mono">
+          {t("adx_log_page_number")
+            .replace("{page}", String(page))
+            .replace("{pages}", String(totalPages))}
+        </span>
+        <span className="flex-1" />
+        <Btn size="sm" onClick={() => setPage(1)} disabled={page <= 1 || loading}>
+          {t("adx_log_first")}
+        </Btn>
+        <Btn size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
+          {t("adx_log_prev")}
+        </Btn>
+        <Btn size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading}>
+          {t("adx_log_next")}
+        </Btn>
+        <Btn size="sm" onClick={() => setPage(totalPages)} disabled={page >= totalPages || loading}>
+          {t("adx_log_last")}
+        </Btn>
       </div>
     </div>
   );
@@ -887,7 +1077,7 @@ function TerminalLine({ row }: { row: LogEventRow }) {
       </span>
       <span style={{ color: TERM_DIM }}>{row.category.padEnd(11)} </span>
       <span style={{ color: TERM_AGENT }}>{row.agent ? `[${row.agent}] ` : ""}</span>
-      <span style={{ color: ink }}>{row.message}</span>
+      <span style={{ color: ink }}>{row.failure?.summary ?? row.message}</span>
       {open && payloadPretty && (
         <div style={{ color: TERM_DIM, paddingLeft: 24, fontSize: 10.5 }}>{payloadPretty}</div>
       )}
@@ -898,20 +1088,38 @@ function TerminalLine({ row }: { row: LogEventRow }) {
 function LogEventRowView({ row }: { row: LogEventRow }) {
   const [open, setOpen] = React.useState(false);
   const ink = LEVEL_INK[row.level] ?? "var(--c-ink-3)";
-  const time = new Date(row.ts).toLocaleTimeString();
+  const time = new Date(row.ts).toLocaleString();
+  let payloadPretty: string | null = null;
+  if (row.payloadPreview) {
+    try {
+      payloadPretty = JSON.stringify(JSON.parse(row.payloadPreview), null, 2);
+    } catch {
+      payloadPretty = row.payloadPreview;
+    }
+  }
   return (
     <div className="border-b border-line">
       <button
         onClick={() => row.payloadPreview && setOpen((o) => !o)}
         className="w-full flex items-center gap-3 text-left py-1.5"
       >
-        <span className="text-[10.5px] text-ink-4 mono tabular-nums shrink-0 w-[72px]">{time}</span>
+        <span className="text-[10.5px] text-ink-4 mono tabular-nums shrink-0 w-[148px]">{time}</span>
         <span className="text-[10px] shrink-0 w-[44px] font-medium" style={{ color: ink }}>
           {row.level}
         </span>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-raised text-ink-3 shrink-0">{row.category}</span>
+        {row.failure && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-err/10 text-err shrink-0">
+            {row.failure.component}/{row.failure.reason}
+          </span>
+        )}
         <span className="text-[11px] text-ink-2 mono shrink-0 w-[90px] truncate">{row.agent ?? "—"}</span>
-        <span className="text-[12px] text-ink-1 truncate flex-1">{row.message}</span>
+        <span className="text-[12px] text-ink-1 truncate flex-1" title={row.message}>
+          {row.failure?.summary ?? row.message}
+        </span>
+        {row.durationMs != null ? (
+          <span className="text-[10px] text-ink-4 mono shrink-0">{row.durationMs}ms</span>
+        ) : null}
         {row.runId && (
           <a
             href={`/monitor/runs/${row.runId}`}
@@ -922,13 +1130,18 @@ function LogEventRowView({ row }: { row: LogEventRow }) {
             run
           </a>
         )}
+        {row.traceId ? (
+          <span className="text-[10px] text-ink-4 mono shrink-0" title={row.traceId}>
+            trace
+          </span>
+        ) : null}
       </button>
-      {open && row.payloadPreview && (
+      {open && payloadPretty && (
         <pre
           className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap break-words bg-bg"
-          style={{ margin: 0, padding: "6px 10px", maxHeight: 240, overflow: "auto" }}
+          style={{ margin: 0, padding: "8px 10px", maxHeight: 420, overflow: "auto" }}
         >
-          {row.payloadPreview}
+          {payloadPretty}
         </pre>
       )}
     </div>

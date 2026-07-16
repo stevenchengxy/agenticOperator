@@ -52,9 +52,14 @@ vi.mock('@/lib/dependency-health/report', async (importOriginal) => {
   };
 });
 
-const notifyRecruitmentLifecycle = vi.fn(async () => {});
+const notifyRecruitmentLifecycle = vi.fn(async (_step: unknown, _signal: unknown, _ctx: unknown) => {});
 vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
-  notifyRecruitmentLifecycle: (...args: unknown[]) => notifyRecruitmentLifecycle(...args),
+  notifyRecruitmentLifecycle: (step: unknown, signal: unknown, ctx: unknown) =>
+    notifyRecruitmentLifecycle(step, signal, ctx),
+}));
+const recordNotification = vi.fn(async (_input: unknown) => ({ id: 'n1' }));
+vi.mock('@/server/notifications/ingest', () => ({
+  recordNotification: (input: unknown) => recordNotification(input),
 }));
 
 import {
@@ -69,6 +74,7 @@ const mockMatchResumeDirect = matchResumeDirect as ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.clearAllMocks();
   notifyRecruitmentLifecycle.mockClear();
+  recordNotification.mockClear();
 });
 
 function fakeStep() {
@@ -168,6 +174,24 @@ describe('verifyRuleCheckPassedForMatch', () => {
       verifyRuleCheckPassedForMatch(passedData({ rule_check_rules: [] }) as any),
     ).toMatchObject({ ok: false, reason: 'rule-check-rules-missing' });
   });
+
+  it('allows an optional/reference-only fail to proceed', () => {
+    expect(
+      verifyRuleCheckPassedForMatch(
+        passedData({
+          rule_check_rules: [
+            {
+              rule_id: 'O-1',
+              rule_name: '参考提示',
+              status: 'fail',
+              enforcement_level: 'optional',
+              blocking: false,
+            },
+          ],
+        }) as any,
+      ),
+    ).toEqual({ ok: true });
+  });
 });
 
 describe('matchResumeAgentHandler — pre-RoboHire rule-check gate', () => {
@@ -187,6 +211,9 @@ describe('matchResumeAgentHandler — pre-RoboHire rule-check gate', () => {
     expect(result).toMatchObject({ ok: false, error: 'rule-check-bypassed' });
     expect(mockMatchResumeDirect).not.toHaveBeenCalled();
     expect(calls.runs).toHaveLength(0);
+    expect(recordNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeHint: 'match_precondition.rule-check-bypassed' }),
+    );
   });
 
   it('does not call RoboHire when the pass event lacks rule_check_rules evidence', async () => {
@@ -208,6 +235,54 @@ describe('matchResumeAgentHandler — pre-RoboHire rule-check gate', () => {
     expect(payload.jd).toContain('入岗前规则检查结论');
     expect(payload.jd).toContain('系统注入,非岗位 JD 原文');
     expect(payload.jd).toContain('10-25 学历底线:通过');
+  });
+});
+
+describe('matchResumeAgentHandler — 候选人期望接入 candidatePreferences', () => {
+  it('从简历文本抽到期望时,作为 candidatePreferences 传给 RoboHire', async () => {
+    await runHandler(
+      passedData({
+        parsed_resume: { name: '李四', skills: ['Go'] },
+        parsed_content: '李四 后端\n期望职位：后端工程师\n期望城市：深圳、广州\n期望薪资：15-20K',
+      }),
+    );
+    const [payload] = mockMatchResumeDirect.mock.calls[0] as [
+      { candidatePreferences?: string },
+    ];
+    expect(payload.candidatePreferences).toBeTruthy();
+    expect(payload.candidatePreferences).toContain('后端工程师');
+    expect(payload.candidatePreferences).toContain('深圳');
+    expect(payload.candidatePreferences).toContain('15000');
+  });
+
+  it('事件已带结构化 candidate_expectation 时优先用它', async () => {
+    await runHandler(
+      passedData({
+        candidate_expectation: {
+          expected_salary_monthly_min: 30000,
+          expected_salary_monthly_max: 40000,
+          expected_cities: ['北京'],
+          expected_industries: [],
+          expected_roles: ['架构师'],
+          expected_work_mode: '远程',
+        },
+        parsed_content: '与结构化期望无关的简历原文',
+      }),
+    );
+    const [payload] = mockMatchResumeDirect.mock.calls[0] as [
+      { candidatePreferences?: string },
+    ];
+    expect(payload.candidatePreferences).toContain('架构师');
+    expect(payload.candidatePreferences).toContain('北京');
+    expect(payload.candidatePreferences).toContain('远程');
+  });
+
+  it('抽不到任何期望时不传 candidatePreferences(与旧行为一致)', async () => {
+    await runHandler(passedData());
+    const [payload] = mockMatchResumeDirect.mock.calls[0] as [
+      { candidatePreferences?: string },
+    ];
+    expect(payload.candidatePreferences).toBeUndefined();
   });
 });
 

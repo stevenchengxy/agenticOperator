@@ -1,10 +1,15 @@
-import { describe, it, expect } from "vitest";
+import React from "react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   SYSTEM_FALLBACK_DOMAINS,
   DOMAINS,
   DEFAULT_DOMAIN,
+  DOMAIN_LIST_TIMEOUT_MS,
+  DomainProvider,
   isDomainId,
   getDomain,
+  useDomain,
 } from "./domains";
 import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID } from "./domain-ids";
 
@@ -12,6 +17,13 @@ import { RECRUITMENT_DOMAIN_ID, ENERGY_DOMAIN_ID } from "./domain-ids";
 // fallback (SYSTEM_FALLBACK_DOMAINS). Runtime list comes from /api/domains.
 // `DOMAINS` is kept as an alias for backwards-compat; tests cover the
 // fallback-shape invariants only.
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  if (typeof window !== "undefined") window.localStorage.clear();
+});
 
 describe("SYSTEM_FALLBACK_DOMAINS", () => {
   it("contains the recruitment domain as the first / default domain", () => {
@@ -62,5 +74,58 @@ describe("getDomain (legacy static lookup against fallback)", () => {
     // React-tree callers should use useDomain().getById() for accurate lookups;
     // getDomain() is kept stable for non-React callers.
     expect(getDomain("procurement").id).toBe(RECRUITMENT_DOMAIN_ID);
+  });
+});
+
+describe("DomainProvider", () => {
+  const wrapper = ({ children }: { children: React.ReactNode }) =>
+    React.createElement(DomainProvider, null, children);
+
+  it("keeps fallback domains and resolves reload when /api/domains fails", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDomain(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.all.map((d) => d.id)).toEqual(
+      SYSTEM_FALLBACK_DOMAINS.map((d) => d.id),
+    );
+    await expect(act(async () => result.current.reload())).resolves.toBeUndefined();
+  });
+
+  it("loads domains with a client timeout above the server Allmeta fallback budget", async () => {
+    const liveDomain = {
+      id: "custom-v1",
+      name: "custom",
+      color: "oklch(0.64 0.16 200)",
+      is_system: true,
+      created_at: new Date(0).toISOString(),
+      archived_at: null,
+      runnable: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          domains: [liveDomain],
+          recruitmentAnchor: {
+            configured: RECRUITMENT_DOMAIN_ID,
+            resolved: RECRUITMENT_DOMAIN_ID,
+            status: "exact",
+          },
+        }),
+      }),
+    );
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    const { result } = renderHook(() => useDomain(), { wrapper });
+
+    await waitFor(() => expect(result.current.all[0]?.id).toBe("custom-v1"));
+    expect(timeoutSpy).toHaveBeenCalledWith(DOMAIN_LIST_TIMEOUT_MS);
+    expect(DOMAIN_LIST_TIMEOUT_MS).toBeGreaterThan(8_000);
   });
 });

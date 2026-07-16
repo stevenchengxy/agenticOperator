@@ -26,8 +26,8 @@ describe("resolveRecruitmentDomainId", () => {
   });
 
   it("falls back to a known alias id when the canonical id is absent", () => {
-    expect(resolveRecruitmentDomainId(["RAAS-v1", "能源调度-v1"])).toEqual({
-      id: "RAAS-v1",
+    expect(resolveRecruitmentDomainId(["raas", "能源调度-v1"])).toEqual({
+      id: "raas",
       status: "alias",
     });
   });
@@ -47,16 +47,16 @@ describe("resolveRecruitmentDomainId", () => {
   });
 
   it("prefers the canonical id over an alias when both are live", () => {
-    expect(resolveRecruitmentDomainId(["RAAS-v1", RECRUITMENT_DOMAIN_ID])).toEqual({
+    expect(resolveRecruitmentDomainId(["raas", RECRUITMENT_DOMAIN_ID])).toEqual({
       id: RECRUITMENT_DOMAIN_ID,
       status: "exact",
     });
   });
 
-  it("picks aliases in declared precedence order when multiple are live", () => {
-    // RAAS-v1 is declared before raas in the default alias list
-    expect(resolveRecruitmentDomainId(["raas", "RAAS-v1"])).toEqual({
-      id: "RAAS-v1",
+  it("prefers a built-in alias over later environment aliases", () => {
+    process.env.RECRUITMENT_DOMAIN_ALIASES = "recruitment-prod";
+    expect(resolveRecruitmentDomainId(["recruitment-prod", "raas"])).toEqual({
+      id: "raas",
       status: "alias",
     });
   });

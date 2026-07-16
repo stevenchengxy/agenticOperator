@@ -38,14 +38,28 @@ vi.mock('@/lib/allmeta-writers', () => ({
   writeCandidateMatchResultInstance: vi.fn(async () => ({ ok: true })),
 }));
 
-const auditCreate = vi.fn<(...a: any[]) => Promise<unknown>>(async () => ({}));
-vi.mock('@/server/db', () => ({
-  prisma: {
-    ruleCheckAudit: { create: (...a: unknown[]) => auditCreate(...a), upsert: vi.fn(async () => ({})) },
-    ruleCheckFlag: { createMany: vi.fn(async () => ({ count: 0 })) },
-    notification: { upsert: vi.fn(async () => ({ id: 'n1' })), create: vi.fn(async () => ({ id: 'n1' })) },
-  },
-}));
+const auditUpsert = vi.fn<(...a: any[]) => Promise<unknown>>(async () => ({}));
+vi.mock('@/server/db', () => {
+  const tx = {
+    ruleCheckAudit: { upsert: (...a: unknown[]) => auditUpsert(...a) },
+    ruleCheckFlag: {
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
+  };
+  return {
+    prisma: {
+      ...tx,
+      $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
+      notification: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+        upsert: vi.fn(async () => ({ id: 'n1' })),
+        create: vi.fn(async () => ({ id: 'n1' })),
+      },
+    },
+  };
+});
 
 vi.mock('@/lib/partner-pg/client', () => ({ isPartnerPgConfigured: vi.fn(() => true) }));
 vi.mock('@/lib/partner-pg/requirements', () => ({ getRequirementDetail: vi.fn() }));
@@ -65,6 +79,7 @@ vi.mock('@/server/notifications/recruitment-lifecycle', () => ({
 
 import { ruleCheckAgentHandler } from './rule-check-agent';
 import { getRequirementDetail } from '@/lib/partner-pg/requirements';
+import { writeCandidateMatchResultInstance } from '@/lib/allmeta-writers';
 import {
   realResumeProcessedEvent,
   realJobRequisitionDetail,
@@ -72,6 +87,7 @@ import {
 } from './__fixtures__/real-run-chensiying';
 
 const mockGetRequirementDetail = vi.mocked(getRequirementDetail);
+const mockWriteCandidateMatchResult = vi.mocked(writeCandidateMatchResultInstance);
 
 // runRuleCheck 的真实返回形状(PASS):候选人陈思无腾讯经历 → CDG 冷冻规则抓取但
 // 不触发,整体 PASS。审计带真实解析的 client/bg + provenance(5 选中 / 6 排除)。
@@ -189,11 +205,61 @@ describe('真实 run · 事件流模拟(替代 RAAS 收发 events)', () => {
       step: step as never,
       logger: mockLogger as never,
     });
-    expect(auditCreate).toHaveBeenCalled();
-    const data = (auditCreate.mock.calls[0]?.[0] as unknown as { data: Record<string, unknown> }).data;
+    expect(auditUpsert).toHaveBeenCalled();
+    const data = (auditUpsert.mock.calls[0]?.[0] as unknown as {
+      create: Record<string, unknown>;
+    }).create;
     expect(data.client_display_name).toBe('腾讯');
     expect(data.business_group).toBe('CDG');
     const prov = JSON.parse(data.rule_provenance as string) as Array<{ rule_id: string; included: boolean }>;
     expect(prov.find((p) => p.rule_id === '10-42')?.included).toBe(true);
+  });
+
+  it('optional fail 不阻断 PASS，并作为参考写入 Neo4j Candidate_Match_Result', async () => {
+    const result = passResultForRealRun();
+    result.stats.fail = 1;
+    result.stats.total += 1;
+    result.rule_results.push({
+      rule_id: '10-OPTIONAL',
+      rule_name: '弱信号参考',
+      step_id: '10::reference',
+      status: 'fail',
+      reason: '命中弱信号，仅供招聘专员参考',
+      next_action: 'review',
+      enforcement_level: 'optional',
+      failure_policy: 'warn',
+      severity: 'flag_only',
+      blocking: false,
+    } as never);
+    result.explanations.push({
+      rule_id: '10-OPTIONAL',
+      rule_name: '弱信号参考',
+      step_id: '10::reference',
+      status: 'fail',
+      reason: '命中弱信号，仅供招聘专员参考',
+      next_action: 'review',
+      enforcement_level: 'optional',
+      failure_policy: 'warn',
+      severity: 'flag_only',
+      blocking: false,
+    } as never);
+    mockRunRuleCheck.mockResolvedValueOnce(result as never);
+
+    const step = mockStep();
+    await ruleCheckAgentHandler({
+      event: realResumeProcessedEvent() as never,
+      step: step as never,
+      logger: mockLogger as never,
+    });
+
+    expect(step.sent[0]?.name).toBe('MATCH_RULE_CHECK_PASSED');
+    expect(mockWriteCandidateMatchResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rule_check_result: '通过',
+        rule_check_reason: expect.stringContaining('10-OPTIONAL'),
+      }),
+    );
+    const neo4jPayload = mockWriteCandidateMatchResult.mock.calls.at(-1)?.[0];
+    expect(neo4jPayload?.rule_check_reason).toContain('不影响通过/未通过');
   });
 });

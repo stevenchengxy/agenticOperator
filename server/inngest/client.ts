@@ -148,6 +148,12 @@ export type MatchEventData = {
 
   // ── envelope 保留字段(RoboHire 风格,供 consumer cherry-pick)──
   success?: boolean;
+  /** Two-axis semantics: `success` is kept for backwards compatibility;
+   * these fields remove the ambiguity between execution and business result. */
+  execution_success?: boolean;
+  business_outcome?: 'passed' | 'rejected' | 'blocked';
+  business_reason?: string | null;
+  technical_warnings?: string[];
   /** 原始 RoboHire match 分析数据;FAIL 时塞 { rule_check_decision, failed_rules, audit }
    *  等结构化错误信息 */
   data?: Record<string, unknown>;
@@ -271,6 +277,9 @@ export type InterviewInvitationSentPayload = {
   interview_duration_minutes: number | null;
   /** RoboHire requestId — 跨系统 trace 用. */
   robohire_request_id: string | null;
+  execution_success?: true;
+  business_outcome?: 'passed';
+  technical_warnings?: string[];
   sent_at: string; // ISO
 };
 
@@ -278,6 +287,8 @@ export type InterviewInvitationFailedPayload = {
   candidate_id: string;
   job_requisition_id: string;
   application_id?: string | null;
+  execution_success?: false;
+  business_outcome?: 'rejected' | 'blocked';
   /**
    * 失败原因分类:
    *   MISSING_PAYLOAD     — payload anchors 不全
@@ -383,7 +394,7 @@ export type MatchRuleCheckPassedData = {
   client_id: string;
   /** Canonical: '通过'(2026-05-26 起 PASS 路径只剩 '通过';pending/REVIEW 已折成 PASS) */
   rule_check_result: '通过';
-  /** PASS 路径恒为空字符串 */
+  /** PASS 业务阻断原因恒为空；optional 参考结果通过 rule_check_rules 携带。 */
   rule_check_reason: string;
 
   // ── partner conv 字段(便利 + matchResumeAgent 用) ──
@@ -393,11 +404,25 @@ export type MatchRuleCheckPassedData = {
   /** 逐条规则判定结论(2026-06-12)— matchResume 把它追加进发给 RoboHire 的 jd
    *  文本做深度匹配(领导要求:rule check 结果进 jd;接口仍是 {resume, jd})。
    *  bypass 路径不带 → 匹配端不追加。 */
-  rule_check_rules?: Array<{ rule_id: string; rule_name: string; status: string; reason?: string }>;
+  rule_check_rules?: Array<{
+    rule_id: string;
+    rule_name: string;
+    status: string;
+    reason?: string;
+    enforcement_level?: 'mandatory' | 'optional';
+    failure_policy?: 'block' | 'warn';
+    blocking?: boolean;
+  }>;
   /** Full JR object — 第二段调 matchResumeDirect 时拼 jd text。 */
   job_requisition: Record<string, unknown>;
   /** Parsed resume(可能为 null,如果 RoboHire parse 之后没拿到)。 */
   parsed_resume: Record<string, unknown> | null;
+  /**
+   * 候选人求职期望(resumeParser 从简历文本抽出 → ruleCheck 透传)。matchResume
+   * 第二段据此拼 candidatePreferences 发给 RoboHire /match-resume(接口支持的候选人
+   * 偏好通道)。缺失或空对象 → 不传 candidatePreferences,匹配退回纯 {resume, jd}。
+   */
+  candidate_expectation?: CandidateExpectationNested | Record<string, never>;
   /**
    * RoboHire `/parse-resume` 抽出的 PDF 纯文本(`rawText`,落到 partner
    * `resume.parsed_content` 列)。matchResume 第二段用它作为

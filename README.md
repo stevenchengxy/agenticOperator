@@ -214,7 +214,13 @@ Use the language toggle (中文 / EN) and theme toggle (sun / moon) top-right. P
 
 ### Deployment — full step-by-step
 
-Follow in order. Skip optional steps only if you're sure you don't need that feature.
+For production or deployment onto another machine, use the single maintained
+[Docker Compose deployment and operations guide](docs/deployment.md). It includes
+durable Postgres/Inngest/log volumes, split archiver/sweeper services, health
+checks, backup/restore and a fail-fast environment preflight.
+
+The steps below are the local source-development workflow. Follow in order and
+skip optional steps only if you're sure you don't need that feature.
 
 #### Step 1 · Install AO + one-shot setup
 

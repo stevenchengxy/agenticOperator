@@ -31,7 +31,7 @@
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { em } from "@/server/em";
+import { blockUnsafeDevRouteInProduction } from "@/lib/unsafe-route-guard";
 
 type ReqBody = Partial<{
   client_job_title: string;
@@ -59,6 +59,9 @@ type ReqBody = Partial<{
 }>;
 
 export async function POST(req: Request): Promise<Response> {
+  const blocked = blockUnsafeDevRouteInProduction("/api/test/trigger-requirement");
+  if (blocked) return blocked;
+
   let body: ReqBody = {};
   try {
     body = await req.json();
@@ -144,6 +147,7 @@ export async function POST(req: Request): Promise<Response> {
   };
 
   try {
+    const { em } = await import("@/server/em");
     const result = await em.publish("REQUIREMENT_LOGGED", envelope, {
       source: "manual.test-trigger",
       externalEventId: eventId,

@@ -1,824 +1,313 @@
 "use client";
-import React from "react";
-import { useApp } from "@/lib/i18n";
-import { Ic, IcName } from "@/components/shared/Ic";
-import { Badge, Btn, Spark } from "@/components/shared/atoms";
-import { fetchJson } from "@/lib/api/client";
-import type { AlertsResponse } from "@/lib/api/types";
 
-type AlertRow = {
-  id: string;
-  title: string;
-  rule: string;
-  sev: "P1" | "P2" | "P3" | "P4";
-  state: "firing" | "ack" | "resolved" | "snoozed";
-  started: string;
-  duration: string;
-  source: string;
-  stage: string;
-  assignee: string;
-  channel: string;
-  affected: { runs: number; jobs: number; candidates: number };
-  spark: number[];
-  desc: string;
-  related: string[];
-  timeline: { t: string; k: string; by: string; text: string }[];
+import React from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useApp } from "@/lib/i18n";
+import type { Alert, AlertCategory, AlertSeverity } from "@/lib/api/types";
+import { fetchJson } from "@/lib/api/client";
+import { paginationFrom, readPage, readPageSize, setPaginationParams } from "@/lib/api/pagination";
+import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
+import { Ic } from "@/components/shared/Ic";
+import { Pagination } from "@/components/shared/Pagination";
+
+type PersistentAlert = Alert & {
+  status?: string | null;
+  description?: string | null;
+  source?: string | null;
+  resolvedAt?: string | null;
+  updatedAt?: string | null;
+  metadata?: unknown;
 };
 
-const ALERTS: AlertRow[] = [
-  {
-    id: "AL-1042",
-    title: "ANALYSIS_BLOCKED 速率突增",
-    rule: "rate(ANALYSIS_BLOCKED) > 3/min for 5m",
-    sev: "P1",
-    state: "firing",
-    started: "11:04:22",
-    duration: "12m 41s",
-    source: "ReqAnalyzer",
-    stage: "requirement",
-    assignee: "周航",
-    channel: "feishu · #ops-incident",
-    affected: { runs: 18, jobs: 6, candidates: 0 },
-    spark: [2, 1, 2, 2, 1, 3, 4, 6, 7, 5, 8, 9],
-    desc: "分析阶段连续阻塞，疑似客户 RMS 字段 schema 变更。",
-    related: ["SYNC_FAILED_ALERT", "ANALYSIS_BLOCKED", "REQUIREMENT_SYNCED"],
-    timeline: [
-      { t: "11:04:22", k: "fired", by: "rule-engine", text: "阈值触发：5 分钟内 23 次 BLOCKED" },
-      { t: "11:04:25", k: "notify", by: "feishu", text: "通知 #ops-incident · @周航 @值班" },
-      { t: "11:05:10", k: "ack", by: "周航", text: "已确认，开始排查 ReqAnalyzer 日志" },
-      { t: "11:08:46", k: "note", by: "周航", text: "定位：客户 ATS 端字段 `seniority_level` 改为 enum，未同步映射" },
-      { t: "11:12:01", k: "action", by: "周航", text: "降级该客户的 `ReqAnalyzer/v3.2` 到 `v3.1`，等待客户回复" },
-    ],
-  },
-  {
-    id: "AL-1041",
-    title: "JD 重复检测命中率下降",
-    rule: "p95(jd-dedupe.score) < 0.78 for 15m",
-    sev: "P2",
-    state: "firing",
-    started: "10:48:09",
-    duration: "28m 04s",
-    source: "JDDedupe",
-    stage: "jd",
-    assignee: "未指派",
-    channel: "feishu · #recruit-quality",
-    affected: { runs: 4, jobs: 4, candidates: 0 },
-    spark: [9, 9, 8, 8, 7, 7, 7, 6, 6, 5, 6, 5],
-    desc: "去重模型嵌入分数持续低于阈值，疑似客户提交了大量短描述需求。",
-    related: ["JD_GENERATED", "JD_REJECTED"],
-    timeline: [
-      { t: "10:48:09", k: "fired", by: "rule-engine", text: "P95 score 跌至 0.74" },
-      { t: "10:48:14", k: "notify", by: "feishu", text: "通知 #recruit-quality" },
-    ],
-  },
-  {
-    id: "AL-1039",
-    title: "事件引擎队列 backlog 偏高",
-    rule: "queue.depth > 500 for 10m",
-    sev: "P3",
-    state: "ack",
-    started: "10:21:55",
-    duration: "54m 18s",
-    source: "inngest.queue",
-    stage: "system",
-    assignee: "刘星",
-    channel: "feishu · #infra",
-    affected: { runs: 0, jobs: 0, candidates: 0 },
-    spark: [3, 4, 5, 6, 7, 8, 8, 7, 7, 6, 6, 6],
-    desc: "MatchScorer worker 副本数偏低，已自动扩容 +2。",
-    related: ["MATCH_SCORED"],
-    timeline: [
-      { t: "10:21:55", k: "fired", by: "rule-engine", text: "Backlog = 612" },
-      { t: "10:22:30", k: "auto", by: "autoscaler", text: "扩容 MatchScorer · 副本 4 → 6" },
-      { t: "10:34:11", k: "ack", by: "刘星", text: "确认，观察自动恢复" },
-    ],
-  },
-  {
-    id: "AL-1037",
-    title: "面试反馈 SLA 即将逾期",
-    rule: "feedback.pending_hours > 36",
-    sev: "P3",
-    state: "firing",
-    started: "09:15:02",
-    duration: "1h 41m",
-    source: "FeedbackTracker",
-    stage: "interview",
-    assignee: "陈璐",
-    channel: "feishu · #recruit-ops",
-    affected: { runs: 12, jobs: 9, candidates: 12 },
-    spark: [1, 2, 3, 3, 4, 5, 6, 7, 8, 8, 9, 9],
-    desc: "12 位候选人面试反馈超过 36 小时未收回。",
-    related: ["INTERVIEW_FEEDBACK_PENDING", "INTERVIEW_COMPLETED"],
-    timeline: [
-      { t: "09:15:02", k: "fired", by: "rule-engine", text: "12 个 pending feedback" },
-      { t: "09:15:08", k: "notify", by: "feishu", text: "通知 #recruit-ops · @陈璐" },
-      { t: "09:42:11", k: "ack", by: "陈璐", text: "已开始逐一催办" },
-    ],
-  },
-];
+type AlertsEnvelope = {
+  alerts?: unknown[];
+  items?: unknown[];
+  rows?: unknown[];
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
+  pagination?: { page?: number; pageSize?: number; total?: number; totalPages?: number };
+  meta?: {
+    partial?: string[];
+    generatedAt?: string;
+    page?: number;
+    pageSize?: number;
+    total?: number;
+    totalPages?: number;
+  };
+};
 
-const RULE_CHANNELS: { id: string; labelKey: string; n: number; ic: IcName }[] = [
-  { id: "all", labelKey: "alx_ch_all", n: 12, ic: "alert" },
-  { id: "event", labelKey: "alx_ch_event", n: 5, ic: "bolt" },
-  { id: "quality", labelKey: "alx_ch_quality", n: 3, ic: "spark" },
-  { id: "sla", labelKey: "alx_ch_sla", n: 2, ic: "clock" },
-  { id: "infra", labelKey: "alx_ch_infra", n: 1, ic: "cpu" },
-  { id: "security", labelKey: "alx_ch_security", n: 1, ic: "shield" },
+const CATEGORIES: Array<{ id: "all" | AlertCategory; labelKey: string }> = [
+  { id: "all", labelKey: "alx_ch_all" },
+  { id: "rate", labelKey: "alx_ch_event" },
+  { id: "quality", labelKey: "alx_ch_quality" },
+  { id: "sla", labelKey: "alx_ch_sla" },
+  { id: "infra", labelKey: "alx_ch_infra" },
+  { id: "dlq", labelKey: "alx_ch_dlq" },
 ];
-
-const SEV_FACETS: { sev: "P1" | "P2" | "P3" | "P4"; n: number; color: string }[] = [
-  { sev: "P1", n: 1, color: "var(--c-err)" },
-  { sev: "P2", n: 2, color: "oklch(0.6 0.16 35)" },
-  { sev: "P3", n: 3, color: "oklch(0.62 0.14 75)" },
-  { sev: "P4", n: 1, color: "var(--c-ink-3)" },
-];
-
-const ON_CALL = [
-  { name: "周航", role: "L2 · ReqOps", status: "primary", shift: "08:00–20:00" },
-  { name: "陈璐", role: "L2 · Recruit", status: "primary", shift: "08:00–20:00" },
-  { name: "刘星", role: "L3 · Platform", status: "secondary", shift: "今日 全天" },
-  { name: "李韵", role: "Commercial", status: "advisory", shift: "工作时间" },
-  { name: "Bei", role: "L2 · 夜班", status: "off", shift: "20:00 接班" },
-];
-
-const SILENCED = [
-  { id: "SIL-08", scope: "stage = jd · severity ≤ P3", until: "+2h", by: "陈璐", reason: "JD 模型 A/B 实验中" },
-  { id: "SIL-07", scope: "rule = inngest.queue.depth", until: "+30m", by: "刘星", reason: "扩容观察期" },
-];
-
 export function AlertsContent() {
-  const [selectedId, setSelectedId] = React.useState("AL-1042");
-  const [channel, setChannel] = React.useState("all");
-  const [sevFilter, setSevFilter] = React.useState<string | null>(null);
-  const [showResolved, setShowResolved] = React.useState(false);
-  const [apiAlertCount, setApiAlertCount] = React.useState<number | null>(null);
-  const [partial, setPartial] = React.useState(false);
+  const router = useRouter();
+  const sp = useSearchParams();
+  const { t } = useApp();
+  const category = (sp.get("category") ?? "all") as "all" | AlertCategory;
+  const includeResolved = sp.get("resolved") !== "0";
+  const selectedId = sp.get("alert");
+  const page = readPage(sp.get("page"));
+  const pageSize = readPageSize(sp.get("pageSize"), [20, 50, 100], 50);
 
-  // P1: fetch live alert count + partial-data state. Detailed rendering
-  // (per-alert rich timeline) deferred to P2 — current AlertRow mock has
-  // shape richer than /api/alerts can deliver.
+  const setUrl = React.useCallback((mutate: (params: URLSearchParams) => void) => {
+    const next = new URLSearchParams(sp.toString());
+    mutate(next);
+    router.replace(`/alerts${next.toString() ? `?${next.toString()}` : ""}`);
+  }, [router, sp]);
+
+  const [alerts, setAlerts] = React.useState<PersistentAlert[] | null>(null);
+  const [total, setTotal] = React.useState<number | null>(null);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [partial, setPartial] = React.useState<string[]>([]);
+  const [generatedAt, setGeneratedAt] = React.useState<string | null>(null);
+  const requestSeq = React.useRef(0);
+
+  const refresh = React.useCallback(async () => {
+    const request = ++requestSeq.current;
+    const params = new URLSearchParams();
+    setPaginationParams(params, page, pageSize);
+    if (category !== "all") params.set("category", category);
+    params.set("includeResolved", includeResolved ? "1" : "0");
+    setLoading(true);
+    try {
+      const body = await fetchJson<AlertsEnvelope>(`/api/alerts?${params.toString()}`, {
+        cache: "no-store",
+        timeoutMs: 10_000,
+      });
+      if (request !== requestSeq.current) return;
+      const rawRows = body.alerts ?? body.items ?? body.rows ?? [];
+      const rows = rawRows.map(normalizeAlert).filter((item): item is PersistentAlert => item != null);
+      const pagination = paginationFrom(body, { page, pageSize, rowCount: rows.length });
+      setAlerts(rows);
+      setTotal(pagination.total);
+      setTotalPages(pagination.totalPages);
+      setPartial(Array.isArray(body.meta?.partial) ? body.meta.partial : []);
+      setGeneratedAt(body.meta?.generatedAt ?? new Date().toISOString());
+      setError(null);
+    } catch (cause) {
+      if (request !== requestSeq.current) return;
+      setError(errorMessage(cause));
+      setAlerts((previous) => previous ?? []);
+    } finally {
+      if (request === requestSeq.current) setLoading(false);
+    }
+  }, [category, includeResolved, page, pageSize]);
+
   React.useEffect(() => {
-    fetchJson<AlertsResponse>("/api/alerts")
-      .then((res) => {
-        setApiAlertCount(res.alerts.length);
-        if (res.meta.partial?.length) setPartial(true);
-      })
-      .catch(() => setPartial(true));
-  }, []);
+    void refresh();
+    const timer = setInterval(refresh, page === 1 ? 10_000 : 30_000);
+    return () => { requestSeq.current += 1; clearInterval(timer); };
+  }, [page, refresh]);
 
-  const visible = ALERTS.filter((a) => {
-    if (!showResolved && a.state === "resolved") return false;
-    if (sevFilter && a.sev !== sevFilter) return false;
-    return true;
+  React.useEffect(() => {
+    if (totalPages != null && page > totalPages) {
+      setUrl((params) => {
+        if (totalPages <= 1) params.delete("page");
+        else params.set("page", String(totalPages));
+        params.delete("alert");
+      });
+    }
+  }, [page, setUrl, totalPages]);
+
+  const selected = alerts?.find((item) => item.id === selectedId) ?? alerts?.[0] ?? null;
+  const setFilter = (key: "category", value: string) => setUrl((params) => {
+    if (value === "all") params.delete(key); else params.set(key, value);
+    params.delete("page");
+    params.delete("alert");
   });
-  const selected = ALERTS.find((a) => a.id === selectedId) || visible[0] || ALERTS[0];
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <AlertsSubHeader showResolved={showResolved} setShowResolved={setShowResolved} apiAlertCount={apiAlertCount} partial={partial} />
-      <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: "232px 1fr 320px" }}>
-        <AlertsLeftRail channel={channel} setChannel={setChannel} sev={sevFilter} setSev={setSevFilter} />
-        <AlertsCenter alerts={visible} selectedId={selected.id} onSelect={setSelectedId} alert={selected} />
-        <AlertsRightRail />
-      </div>
-    </div>
-  );
-}
-
-function AlertsSubHeader({ showResolved, setShowResolved, apiAlertCount, partial }: { showResolved: boolean; setShowResolved: (b: boolean) => void; apiAlertCount: number | null; partial: boolean }) {
-  const { t } = useApp();
-  const stats = [
-    { l: "firing", v: "4", d: "+1 · 10m", tone: "down" },
-    { l: t("alx_kpi_ack"), v: "2", d: "MTTA 47s", tone: "up" },
-    { l: t("alx_kpi_resolved_today"), v: "9", d: "MTTR 18m", tone: "up" },
-    { l: t("alx_kpi_p1_last_month"), v: "3 → 1", d: "−66%", tone: "up" },
-    { l: "noise score", v: "0.12", d: t("alx_kpi_target_lt_02"), tone: "up" },
-    { l: t("alx_kpi_oncall_response"), v: "100%", d: t("alx_kpi_30d"), tone: "up" },
-  ];
-  return (
-    <div className="border-b border-line bg-surface flex items-center" style={{ padding: "14px 22px", gap: 18 }}>
-      <div>
-        <div className="text-[15px] font-semibold tracking-tight flex items-center gap-2">
-          {t("alx_title")}
-          {apiAlertCount != null && <Badge variant="info">{apiAlertCount}</Badge>}
-          {partial && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
-        </div>
-        <div className="text-ink-3 text-[12px] mt-px">{t("alx_subtitle")}</div>
-      </div>
-      <div
-        className="flex-1 grid border-l border-line"
-        style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 14, paddingLeft: 18 }}
-      >
-        {stats.map((s, i) => (
-          <div key={i}>
-            <div className="hint">{s.l}</div>
-            <div className="text-[16px] font-semibold tracking-tight tabular-nums">{s.v}</div>
-            <div
-              className="mono text-[10.5px]"
-              style={{
-                color: s.tone === "up" ? "var(--c-ok)" : s.tone === "down" ? "var(--c-err)" : "var(--c-ink-4)",
-              }}
-            >
-              {s.d}
-            </div>
+    <div className="flex-1 flex flex-col min-h-0 bg-bg">
+      <header className="border-b border-line bg-surface flex items-center gap-3" style={{ padding: "14px 22px" }}>
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold tracking-tight flex items-center gap-2">
+            {t("alx_title")}
+            {total != null && <Badge variant="info">{total}</Badge>}
+            {partial.length > 0 && <Badge variant="warn" dot>{t("ui_partial_data")}</Badge>}
           </div>
-        ))}
-      </div>
-      <label className="flex items-center gap-1.5 text-[12px] text-ink-2">
-        <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
-        {t("alx_include_resolved")}
-      </label>
-      <Btn size="sm"><Ic.bell /> {t("alx_silence_rules")}</Btn>
-      <Btn size="sm" variant="primary"><Ic.plus /> {t("alx_new_rule")}</Btn>
-    </div>
-  );
-}
-
-function AlertsLeftRail({
-  channel,
-  setChannel,
-  sev,
-  setSev,
-}: {
-  channel: string;
-  setChannel: (s: string) => void;
-  sev: string | null;
-  setSev: (s: string | null) => void;
-}) {
-  const { t } = useApp();
-  return (
-    <div className="border-r border-line bg-bg flex flex-col min-h-0">
-      <div style={{ padding: "12px 14px 6px" }}>
-        <div className="hint mb-1.5">{t("alx_rail_rule_channels")}</div>
-        {RULE_CHANNELS.map((c) => {
-          const Icon = Ic[c.ic] || Ic.alert;
-          const active = channel === c.id;
-          return (
-            <div
-              key={c.id}
-              onClick={() => setChannel(c.id)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer"
-              style={{
-                background: active ? "var(--c-accent-bg)" : "transparent",
-                color: active ? "var(--c-accent)" : "var(--c-ink-2)",
-              }}
-            >
-              <Icon />
-              <span className="flex-1">{t(c.labelKey)}</span>
-              <span className="mono text-[10.5px]" style={{ color: active ? "var(--c-accent)" : "var(--c-ink-4)" }}>{c.n}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="border-t border-line mt-1.5" style={{ padding: "10px 14px" }}>
-        <div className="hint mb-2">{t("alx_rail_severity")}</div>
-        <div className="flex flex-col gap-1.5">
-          {SEV_FACETS.map((s) => {
-            const active = sev === s.sev;
-            return (
-              <button
-                key={s.sev}
-                onClick={() => setSev(active ? null : s.sev)}
-                className="flex items-center gap-2 h-[26px] rounded-md cursor-pointer text-[11.5px] font-medium text-ink-1"
-                style={{
-                  padding: "0 8px",
-                  border: "1px solid " + (active ? s.color : "var(--c-line)"),
-                  background: active ? `color-mix(in oklab, ${s.color} 12%, transparent)` : "var(--c-surface)",
-                }}
-              >
-                <span className="w-2 h-2 rounded-sm" style={{ background: s.color }} />
-                <span className="flex-1 text-left">{s.sev}</span>
-                <span className="mono text-ink-3 text-[11px]">{s.n}</span>
-              </button>
-            );
-          })}
+          <div className="text-ink-3 text-[12px] mt-px">{t("alx_persistent_subtitle")}</div>
         </div>
-      </div>
-      <div className="border-t border-line mt-1.5" style={{ padding: "10px 14px" }}>
-        <div className="hint mb-2">{t("alx_rail_views")}</div>
-        {[
-          [t("alx_view_unassigned"), 1],
-          [t("alx_view_mine"), 0],
-          [t("alx_view_subscribed"), 4],
-          [t("alx_view_24h"), 11],
-        ].map(([label, n]) => (
-          <div key={label as string} className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-ink-2 hover:bg-panel">
-            <Ic.bookmark />
-            <span className="flex-1">{label}</span>
-            <span className="mono text-[10.5px] text-ink-4">{n}</span>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1" />
-      <div className="border-t border-line flex flex-col gap-1.5" style={{ padding: "12px 14px" }}>
-        <div className="hint">{t("alx_noise_per_min")}</div>
-        <Spark values={[0.12, 0.18, 0.10, 0.14, 0.08, 0.16, 0.12, 0.09, 0.11, 0.13, 0.10, 0.12]} h={28} />
-        <div className="mono text-[10.5px] text-ink-3">0.12 · {t("alx_target")} {"<"} 0.2</div>
-      </div>
-    </div>
-  );
-}
-
-function SevPill({ sev }: { sev: string }) {
-  const map: Record<string, { bg: string; fg: string; label: string }> = {
-    P1: { bg: "var(--c-err-bg)", fg: "var(--c-err)", label: "P1" },
-    P2: { bg: "color-mix(in oklab, oklch(0.6 0.16 35) 14%, transparent)", fg: "oklch(0.55 0.16 35)", label: "P2" },
-    P3: { bg: "var(--c-warn-bg)", fg: "oklch(0.5 0.14 75)", label: "P3" },
-    P4: { bg: "color-mix(in oklab, var(--c-ink-3) 14%, transparent)", fg: "var(--c-ink-3)", label: "P4" },
-  };
-  const m = map[sev] || map.P4;
-  return (
-    <span
-      className="inline-flex items-center h-5 px-[7px] rounded font-medium text-[10.5px] border"
-      style={{
-        background: m.bg,
-        color: m.fg,
-        borderColor: `color-mix(in oklab, ${m.fg} 30%, transparent)`,
-      }}
-    >
-      {m.label}
-    </span>
-  );
-}
-
-function StateBadge({ state }: { state: string }) {
-  const map: Record<string, { variant: "ok" | "warn" | "err" | "info" | "default"; label: string; pulse: boolean }> = {
-    firing: { variant: "err", label: "firing", pulse: true },
-    ack: { variant: "info", label: "ack", pulse: false },
-    snoozed: { variant: "warn", label: "snoozed", pulse: false },
-    resolved: { variant: "ok", label: "resolved", pulse: false },
-  };
-  const m = map[state] || map.firing;
-  return (
-    <Badge variant={m.variant} dot pulse={m.pulse}>
-      {m.label}
-    </Badge>
-  );
-}
-
-function AlertsCenter({
-  alerts,
-  selectedId,
-  onSelect,
-  alert,
-}: {
-  alerts: AlertRow[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-  alert: AlertRow;
-}) {
-  return (
-    <div className="grid min-h-0" style={{ gridTemplateRows: "minmax(220px, 0.95fr) 1fr" }}>
-      <AlertsTable alerts={alerts} selectedId={selectedId} onSelect={onSelect} />
-      <AlertDetail a={alert} />
-    </div>
-  );
-}
-
-function AlertsTable({
-  alerts,
-  selectedId,
-  onSelect,
-}: {
-  alerts: AlertRow[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-}) {
-  const { t } = useApp();
-  return (
-    <div className="border-b border-line bg-surface flex flex-col min-h-0">
-      <div className="flex items-center gap-2 border-b border-line" style={{ padding: "10px 14px" }}>
-        <div className="text-[13px] font-semibold">{t("alx_current_alerts")}</div>
-        <Badge variant="err" dot pulse className="ml-1">4 firing</Badge>
         <div className="flex-1" />
-        <div className="flex items-center gap-1.5 text-ink-3 text-[11.5px]">
-          <Ic.search />
-          <span>{t("alx_search_placeholder")}</span>
-          <kbd className="ml-1 mono text-[10px] bg-surface border border-line rounded-sm px-1.5 py-[1px] text-ink-3">/</kbd>
-        </div>
-      </div>
-      <div className="flex-1 overflow-auto min-h-0">
-        {/* minWidth floor: 8 fixed cols (~780px) + a readable title column.
-            Without it the flexible 告警 column collapses to ~1ch on normal
-            widths and CJK titles wrap one char per line (the vertical-text bug).
-            Container above is overflow-auto, so narrow viewports scroll. */}
-        <table className="tbl" style={{ tableLayout: "fixed", minWidth: 960 }}>
-          <colgroup>
-            <col style={{ width: 56 }} />
-            <col style={{ width: 86 }} />
-            <col />
-            <col style={{ width: 124 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 92 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 110 }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>sev</th><th>state</th><th>{t("alx_th_alert")}</th><th>{t("alx_th_rule_source")}</th>
-              <th>{t("alx_th_duration")}</th><th>{t("alx_th_impact")}</th><th>{t("alx_th_assignee")}</th><th>{t("alx_th_trend")}</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {alerts.map((a) => {
-              const active = a.id === selectedId;
-              return (
-                <tr
-                  key={a.id}
-                  onClick={() => onSelect(a.id)}
-                  style={{ cursor: "pointer", background: active ? "var(--c-accent-bg)" : undefined }}
-                >
-                  <td><SevPill sev={a.sev} /></td>
-                  <td><StateBadge state={a.state} /></td>
-                  <td>
-                    <div className="font-semibold text-[12.5px] text-ink-1 leading-tight line-clamp-2">{a.title}</div>
-                    <div className="mono text-[10.5px] text-ink-3 overflow-hidden text-ellipsis whitespace-nowrap">{a.id} · {a.rule}</div>
-                  </td>
-                  <td>
-                    <div className="mono text-[11px]">{a.source}</div>
-                    <div className="hint text-[10.5px]">{a.stage}</div>
-                  </td>
-                  <td>
-                    <div className="mono text-[11.5px] tabular-nums">{a.duration}</div>
-                    <div className="hint text-[10.5px]">{a.started}</div>
-                  </td>
-                  <td>
-                    <div className="text-[11.5px] text-ink-2">
-                      <span className="mono">{a.affected.runs}</span> runs · <span className="mono">{a.affected.jobs}</span> jobs
-                    </div>
-                    <div className="hint text-[10.5px]">candidates {a.affected.candidates}</div>
-                  </td>
-                  <td>
-                    {a.assignee === "未指派" ? (
-                      <Badge variant="warn">{t("alx_unassigned")}</Badge>
-                    ) : (
-                      <span className="text-[11.5px]">{a.assignee}</span>
-                    )}
-                  </td>
-                  <td>
-                    <Spark
-                      values={a.spark.length ? a.spark : [0, 0, 0, 0, 0, 0]}
-                      h={22}
-                      stroke={a.spark.length ? "var(--c-err)" : "var(--c-ink-4)"}
-                    />
-                  </td>
-                  <td>
-                    <div className="flex gap-1">
-                      <Btn size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>ack</Btn>
-                      <Btn size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>snooze</Btn>
-                    </div>
-                  </td>
-                </tr>
-              );
+        {generatedAt && <span className="mono text-[10.5px] text-ink-4">{t("alx_last_synced")} {formatDate(generatedAt)}</span>}
+        <label className="flex items-center gap-1.5 text-[12px] text-ink-2">
+          <input
+            type="checkbox"
+            checked={includeResolved}
+            onChange={(event) => setUrl((params) => {
+              if (event.target.checked) params.delete("resolved"); else params.set("resolved", "0");
+              params.delete("page"); params.delete("alert");
             })}
-          </tbody>
-        </table>
+          />
+          {t("alx_include_resolved")}
+        </label>
+        <Btn size="sm" onClick={() => void refresh()} disabled={loading}><Ic.bolt /> {t("evx_refresh")}</Btn>
+      </header>
+
+      <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: "220px minmax(0, 1fr) 340px" }}>
+        <aside className="border-r border-line bg-bg overflow-auto" style={{ padding: "14px 12px" }}>
+          <FilterSection label={t("alx_rail_rule_channels")}>
+            {CATEGORIES.map((item) => (
+              <FilterButton key={item.id} active={category === item.id} onClick={() => setFilter("category", item.id)}>
+                {t(item.labelKey)}
+              </FilterButton>
+            ))}
+          </FilterSection>
+          <div className="mt-5 text-[11px] leading-relaxed text-ink-4">{t("alx_persistence_hint")}</div>
+        </aside>
+
+        <main className="min-w-0 min-h-0 flex flex-col bg-surface">
+          {error && alerts && alerts.length > 0 && (
+            <div className="border-b border-line bg-warn-bg text-[11.5px] flex items-center gap-2" style={{ padding: "8px 12px", color: "oklch(0.5 0.14 75)" }}>
+              <Ic.alert /><span className="truncate flex-1">{t("alx_load_failed")}: {error}</span>
+              <button className="text-accent hover:underline" onClick={() => void refresh()}>{t("alx_retry")}</button>
+            </div>
+          )}
+          <div className="flex-1 overflow-auto min-h-0">
+            {loading && alerts == null && <div className="h-full grid place-items-center text-ink-3 text-[12px]">{t("evx_loading")}</div>}
+            {!loading && alerts?.length === 0 && !error && <EmptyState icon={<Ic.alert />} title={t("alx_empty")} hint={t("alx_empty_hint")} />}
+            {alerts?.length === 0 && error && (
+              <EmptyState icon={<Ic.alert />} title={t("alx_load_failed")} hint={error} variant="warn" action={<Btn size="sm" onClick={() => void refresh()}>{t("alx_retry")}</Btn>} />
+            )}
+            {alerts && alerts.length > 0 && <AlertsTable alerts={alerts} selectedId={selected?.id ?? null} onSelect={(id) => setUrl((params) => params.set("alert", id))} />}
+          </div>
+          <Pagination
+            page={page} pageSize={pageSize} rowCount={alerts?.length ?? 0} total={total} totalPages={totalPages} loading={loading}
+            onPageChange={(nextPage) => setUrl((params) => { if (nextPage <= 1) params.delete("page"); else params.set("page", String(nextPage)); params.delete("alert"); })}
+            onPageSizeChange={(nextSize) => setUrl((params) => { if (nextSize === 50) params.delete("pageSize"); else params.set("pageSize", String(nextSize)); params.delete("page"); params.delete("alert"); })}
+          />
+        </main>
+        <AlertDetail alert={selected} />
       </div>
     </div>
   );
 }
 
-function AlertDetail({ a }: { a: AlertRow }) {
-  const { t } = useApp();
-  const [tab, setTab] = React.useState("timeline");
-  const tabs = [
-    ["timeline", t("alx_tab_timeline")],
-    ["events", t("alx_tab_events")],
-    ["rule", t("alx_tab_rule")],
-    ["runbook", "Runbook"],
-  ];
+function FilterSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return <section className="mb-5"><div className="hint mb-2 px-2">{label}</div><div className="flex flex-col gap-1">{children}</div></section>;
+}
+
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <div className="bg-bg flex flex-col min-h-0">
-      <div className="border-b border-line bg-surface" style={{ padding: "12px 18px 10px" }}>
-        <div className="flex items-center gap-2.5">
-          <SevPill sev={a.sev} />
-          <StateBadge state={a.state} />
-          <div className="text-[14px] font-semibold tracking-tight">{a.title}</div>
-          <span className="mono text-ink-3 text-[11.5px]">{a.id}</span>
-          <div className="flex-1" />
-          <Btn size="sm"><Ic.bell />{t("alx_act_notify")}</Btn>
-          <Btn size="sm">{t("alx_act_assign")}</Btn>
-          <Btn size="sm">snooze</Btn>
-          <Btn size="sm" variant="primary">resolve</Btn>
-        </div>
-        <div className="mono text-[11px] text-ink-3 mt-1.5">{a.rule}</div>
-        <div className="flex gap-4.5 text-[11.5px] text-ink-2 mt-2" style={{ gap: 18 }}>
-          <span>{t("alx_meta_started")} <span className="mono">{a.started}</span></span>
-          <span>{t("alx_meta_duration")} <span className="mono">{a.duration}</span></span>
-          <span>{t("alx_meta_source")} <span className="mono">{a.source}</span></span>
-          <span>{t("alx_meta_channel")} <span className="mono">{a.channel}</span></span>
-          <span>{t("alx_meta_assignee")} <b>{a.assignee === "未指派" ? t("alx_unassigned") : a.assignee}</b></span>
-        </div>
-        <div className="flex mt-3 -mb-2.5" style={{ borderBottom: "1px solid transparent" }}>
-          {tabs.map(([id, label]) => (
-            <button
-              key={id as string}
-              onClick={() => setTab(id as string)}
-              className="cursor-pointer bg-transparent border-0 text-[12px]"
-              style={{
-                padding: "8px 12px",
-                borderBottom: "2px solid " + (tab === id ? "var(--c-ink-1)" : "transparent"),
-                color: tab === id ? "var(--c-ink-1)" : "var(--c-ink-3)",
-                fontWeight: tab === id ? 600 : 500,
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex-1 overflow-auto min-h-0" style={{ padding: "14px 18px" }}>
-        {tab === "timeline" && <AlertTimeline a={a} />}
-        {tab === "events" && <AlertEvents a={a} />}
-        {tab === "rule" && <AlertRule a={a} />}
-        {tab === "runbook" && <AlertRunbook a={a} />}
-      </div>
-    </div>
+    <button type="button" onClick={onClick} className="w-full text-left rounded-md text-[12px] transition-colors" style={{ padding: "6px 9px", color: active ? "var(--c-accent)" : "var(--c-ink-2)", background: active ? "var(--c-accent-bg)" : "transparent", fontWeight: active ? 600 : 400 }}>
+      {children}
+    </button>
   );
 }
 
-function AlertTimeline({ a }: { a: AlertRow }) {
+function AlertsTable({ alerts, selectedId, onSelect }: { alerts: PersistentAlert[]; selectedId: string | null; onSelect: (id: string) => void }) {
+  const { t, lang } = useApp();
+  return (
+    <table className="tbl" style={{ minWidth: 840, tableLayout: "fixed" }}>
+      <colgroup><col style={{ width: 68 }} /><col style={{ width: 92 }} /><col /><col style={{ width: 150 }} /><col style={{ width: 166 }} /></colgroup>
+      <thead><tr><th>{t("alx_col_severity")}</th><th>{t("alx_col_state")}</th><th>{t("alx_th_alert")}</th><th>{t("alx_th_impact")}</th><th>{t("alx_meta_started")}</th></tr></thead>
+      <tbody>
+        {alerts.map((alert) => (
+          <tr key={alert.id} onClick={() => onSelect(alert.id)} className="cursor-pointer" style={{ background: alert.id === selectedId ? "var(--c-accent-bg)" : undefined }}>
+            <td><SeverityBadge severity={alert.severity} /></td>
+            <td><StateBadge alert={alert} /></td>
+            <td><div className="font-semibold text-[12.5px] text-ink-1 truncate" title={alert.title}>{alert.title}</div><div className="mono text-[10.5px] text-ink-4 truncate">{alert.id} · {alert.category}</div></td>
+            <td className="text-[11.5px] text-ink-2 truncate" title={alert.affected}>{alert.affected || "—"}</td>
+            <td className="mono text-[11px] text-ink-3">{formatDate(alert.triggeredAt, lang)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function AlertDetail({ alert }: { alert: PersistentAlert | null }) {
+  const { t, lang } = useApp();
+  if (!alert) return <aside className="border-l border-line bg-bg grid place-items-center text-center px-6 text-ink-3 text-[12px]">{t("alx_pick_alert")}</aside>;
+  return (
+    <aside className="border-l border-line bg-bg overflow-auto" style={{ padding: "18px" }}>
+      <div className="flex items-center gap-2 mb-3"><SeverityBadge severity={alert.severity} /><StateBadge alert={alert} /></div>
+      <h2 className="m-0 text-[16px] leading-snug font-semibold text-ink-1">{alert.title}</h2>
+      <div className="mono text-[10.5px] text-ink-4 mt-1 break-all">{alert.id}</div>
+      {alert.description && <div className="mt-4 text-[12.5px] leading-relaxed text-ink-2">{alert.description}</div>}
+      <dl className="mt-5 grid gap-y-2 text-[11.5px]" style={{ gridTemplateColumns: "96px 1fr" }}>
+        <dt className="text-ink-3">{t("alx_detail_category")}</dt><dd className="m-0 text-ink-1">{alert.category}</dd>
+        <dt className="text-ink-3">{t("alx_meta_started")}</dt><dd className="m-0 mono text-ink-1">{formatDate(alert.triggeredAt, lang)}</dd>
+        <dt className="text-ink-3">{t("alx_th_impact")}</dt><dd className="m-0 text-ink-1 break-all">{alert.affected || "—"}</dd>
+        <dt className="text-ink-3">{t("alx_meta_source")}</dt><dd className="m-0 text-ink-1 break-all">{alert.source || alert.category}</dd>
+        <dt className="text-ink-3">{t("alx_meta_assignee")}</dt><dd className="m-0 text-ink-1">{alert.ackedBy || t("alx_unassigned")}</dd>
+        {alert.updatedAt && <><dt className="text-ink-3">{t("alx_last_updated")}</dt><dd className="m-0 mono text-ink-1">{formatDate(alert.updatedAt, lang)}</dd></>}
+        {alert.resolvedAt && <><dt className="text-ink-3">{t("alx_resolved_at")}</dt><dd className="m-0 mono text-ink-1">{formatDate(alert.resolvedAt, lang)}</dd></>}
+      </dl>
+      {alert.metadata != null && <div className="mt-5"><div className="hint mb-2">{t("alx_metadata")}</div><pre className="m-0 rounded-md border border-line bg-surface text-ink-2 whitespace-pre-wrap break-words overflow-auto" style={{ padding: 10, maxHeight: 320, fontFamily: "var(--f-mono)", fontSize: 10.5 }}>{safeStringify(alert.metadata)}</pre></div>}
+    </aside>
+  );
+}
+
+function SeverityBadge({ severity }: { severity: AlertSeverity }) {
+  const tone = severityTone(severity);
+  return <Badge variant={tone.variant}>{severityLabel(severity)}</Badge>;
+}
+
+function StateBadge({ alert }: { alert: PersistentAlert }) {
   const { t } = useApp();
-  const kindMap: Record<string, { color: string; ic: IcName }> = {
-    fired: { color: "var(--c-err)", ic: "alert" },
-    notify: { color: "var(--c-info)", ic: "bell" },
-    ack: { color: "var(--c-info)", ic: "check" },
-    note: { color: "var(--c-ink-3)", ic: "edit" },
-    action: { color: "var(--c-accent)", ic: "bolt" },
-    auto: { color: "var(--c-accent)", ic: "cpu" },
-    deploy: { color: "var(--c-accent)", ic: "play" },
-    snooze: { color: "oklch(0.62 0.14 75)", ic: "clock" },
-    resolved: { color: "var(--c-ok)", ic: "check" },
+  const state = alert.status?.toLowerCase() ?? (alert.resolvedAt ? "resolved" : alert.acked ? "ack" : "firing");
+  if (state === "resolved" || state === "closed") return <Badge variant="ok" dot>{t("alx_state_resolved")}</Badge>;
+  if (state === "ack" || state === "acknowledged") return <Badge variant="info" dot>{t("alx_state_ack")}</Badge>;
+  return <Badge variant="err" dot pulse>{t("alx_state_firing")}</Badge>;
+}
+
+function severityTone(severity: AlertSeverity): { color: string; variant: "err" | "warn" | "info" | "default" } {
+  if (severity === "critical") return { color: "var(--c-err)", variant: "err" };
+  if (severity === "high") return { color: "var(--c-warn)", variant: "warn" };
+  if (severity === "medium") return { color: "var(--c-info)", variant: "info" };
+  return { color: "var(--c-ink-3)", variant: "default" };
+}
+function severityLabel(severity: AlertSeverity): string { return severity === "critical" ? "P1" : severity === "high" ? "P2" : severity === "medium" ? "P3" : "P4"; }
+
+function normalizeAlert(value: unknown): PersistentAlert | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = stringValue(row.id);
+  const title = stringValue(row.title) || stringValue(row.message);
+  if (!id || !title) return null;
+  const status = stringValue(row.status) || null;
+  return {
+    id,
+    category: normalizeCategory(row.category),
+    severity: normalizeSeverity(row.severity),
+    title,
+    affected: stringValue(row.affected) || stringValue(row.source),
+    triggeredAt: stringValue(row.triggeredAt) || stringValue(row.createdAt) || stringValue(row.timestamp),
+    acked: Boolean(row.acked) || status === "ack" || status === "acknowledged",
+    ackedBy: stringValue(row.ackedBy) || null,
+    status,
+    description: stringValue(row.description) || stringValue(row.detail) || null,
+    source: stringValue(row.source) || null,
+    resolvedAt: stringValue(row.resolvedAt) || null,
+    updatedAt: stringValue(row.updatedAt) || null,
+    metadata: row.metadata ?? null,
   };
-  return (
-    <div>
-      <div className="flex gap-3.5 mb-3.5">
-        <div className="flex-1 p-3 border border-line rounded-lg bg-surface">
-          <div className="hint">{t("alx_impact_scope")}</div>
-          <div className="flex gap-[22px] mt-1.5">
-            <div><div className="mono text-[18px] font-semibold tabular-nums">{a.affected.runs}</div><div className="hint">runs</div></div>
-            <div><div className="mono text-[18px] font-semibold tabular-nums">{a.affected.jobs}</div><div className="hint">jobs</div></div>
-            <div><div className="mono text-[18px] font-semibold tabular-nums">{a.affected.candidates}</div><div className="hint">candidates</div></div>
-          </div>
-          <div className="mt-2 text-[11.5px] text-ink-2">{a.desc}</div>
-        </div>
-        <div className="w-[280px] p-3 border border-line rounded-lg bg-surface">
-          <div className="hint">{t("alx_trigger_freq_12m")}</div>
-          <Spark values={a.spark} h={48} stroke="var(--c-err)" />
-          <div className="mono text-[10.5px] text-ink-3 mt-1">peak 9 · last 12 buckets</div>
-        </div>
-      </div>
-      <div className="relative" style={{ paddingLeft: 22 }}>
-        <div className="absolute top-1 bottom-1 w-px bg-line" style={{ left: 9 }} />
-        {a.timeline.map((e, i) => {
-          const m = kindMap[e.k] || kindMap.note;
-          const Icon = Ic[m.ic] || Ic.alert;
-          return (
-            <div key={i} className="relative flex gap-3 mb-3.5">
-              <div
-                className="absolute grid place-items-center"
-                style={{
-                  left: -22,
-                  top: 0,
-                  width: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  background: "var(--c-bg)",
-                  border: "1.5px solid " + m.color,
-                  color: m.color,
-                }}
-              >
-                <Icon />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="mono text-[11px] font-semibold" style={{ color: m.color }}>{e.t}</span>
-                  <span className="text-[10.5px] text-ink-3 uppercase tracking-[0.06em]">{e.k}</span>
-                  <span className="hint">· {e.by}</span>
-                </div>
-                <div className="text-[12.5px] text-ink-1 mt-0.5">{e.text}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
-
-function AlertEvents({ a }: { a: AlertRow }) {
-  const { t } = useApp();
-  return (
-    <div>
-      <div className="hint mb-2">{t("alx_related_event_types")} ({a.related.length})</div>
-      <div className="flex flex-col gap-2">
-        {a.related.length === 0 && <div className="text-ink-3 text-[12px]">{t("alx_no_related_events")}</div>}
-        {a.related.map((name, i) => (
-          <div
-            key={i}
-            className="flex items-center gap-2.5 border border-line rounded-lg bg-surface"
-            style={{ padding: 10 }}
-          >
-            <Ic.bolt />
-            <span className="mono font-semibold text-[12px]">{name}</span>
-            <div className="flex-1" />
-            <Badge variant="info" dot>{t("alx_listening")}</Badge>
-            <Btn size="sm" variant="ghost">{t("alx_view")} →</Btn>
-          </div>
-        ))}
-      </div>
-      <div className="hint mt-4 mb-2">{t("alx_affected_recent_runs")}</div>
-      <table className="tbl">
-        <thead><tr><th>run</th><th>workflow</th><th>{t("alx_th_status")}</th><th>{t("alx_th_trigger_event")}</th><th>{t("alx_th_elapsed")}</th></tr></thead>
-        <tbody>
-          {[
-            ["run_8e21", "client→submit/v4.2", "failed", "REQUIREMENT_SYNCED", "2.4s"],
-            ["run_8e1f", "client→submit/v4.2", "failed", "REQUIREMENT_SYNCED", "2.1s"],
-            ["run_8e1c", "client→submit/v4.2", "failed", "REQUIREMENT_SYNCED", "1.9s"],
-            ["run_8e1a", "human-clarify/v1", "running", "ANALYSIS_BLOCKED", "31s"],
-          ].map((r, i) => (
-            <tr key={i}>
-              <td className="mono">{r[0]}</td>
-              <td className="mono">{r[1]}</td>
-              <td>
-                {r[2] === "failed" ? (
-                  <StateBadge state="firing" />
-                ) : (
-                  <Badge variant="info" dot>running</Badge>
-                )}
-              </td>
-              <td className="mono">{r[3]}</td>
-              <td className="mono">{r[4]}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+function normalizeCategory(value: unknown): AlertCategory {
+  const category = stringValue(value);
+  return category === "sla" || category === "rate" || category === "quality" || category === "infra" || category === "dlq" ? category : "infra";
 }
-
-function AlertRule({ a }: { a: AlertRow }) {
-  const { t } = useApp();
-  return (
-    <div>
-      <div className="hint mb-1.5">{t("alx_rule_promql")}</div>
-      <pre
-        className="m-0 rounded-lg mono text-[12px] text-ink-1 whitespace-pre-wrap bg-panel border border-line"
-        style={{ padding: 12 }}
-      >{`expr: ${a.rule}
-for:  5m
-labels:
-  severity: ${a.sev.toLowerCase()}
-  team: req-ops
-  source: ${a.source}
-annotations:
-  summary: "${a.title}"
-  runbook_url: https://wiki.internal/runbooks/${a.id.toLowerCase()}
-notifications:
-  - feishu: ${a.channel}
-  - escalate_after: 15m → on-call.secondary
-  - escalate_after: 45m → manager`}</pre>
-      <div className="grid grid-cols-2 gap-3 mt-3">
-        <div className="p-2.5 border border-line rounded-lg bg-surface">
-          <div className="hint">{t("alx_fired_7d")}</div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="mono text-[18px] font-semibold">14</span>
-            <span className="text-[color:var(--c-ok)] text-[11px]">−21%</span>
-          </div>
-          <Spark values={[3, 2, 4, 1, 2, 1, 1]} h={28} />
-        </div>
-        <div className="p-2.5 border border-line rounded-lg bg-surface">
-          <div className="hint">{t("alx_false_positive_rate")}</div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="mono text-[18px] font-semibold">4.3%</span>
-            <span className="text-[color:var(--c-ok)] text-[11px]">{t("alx_normal")}</span>
-          </div>
-          <div className="hint mt-1">3 / 70 · 30 {t("alx_days")}</div>
-        </div>
-      </div>
-    </div>
-  );
+function normalizeSeverity(value: unknown): AlertSeverity {
+  const severity = stringValue(value).toLowerCase();
+  if (severity === "critical" || severity === "p1") return "critical";
+  if (severity === "high" || severity === "p2") return "high";
+  if (severity === "medium" || severity === "p3") return "medium";
+  return "low";
 }
-
-function AlertRunbook({ a }: { a: AlertRow }) {
-  const { t } = useApp();
-  const steps = [
-    { done: true, text: "在 Inngest 控制台过滤 `event:ANALYSIS_BLOCKED`，确认错误集中类型。" },
-    { done: true, text: "若错误为 schema 不匹配 → 进入「数据源 → 客户 ATS」查看字段映射变更日志。" },
-    { done: false, text: "联系客户技术对接确认字段语义；必要时降级到 ReqAnalyzer/v3.1。" },
-    { done: false, text: "更新映射后重放最近 30 分钟的失败 runs。" },
-    { done: false, text: "回归绿色后关闭告警并归档 RCA。" },
-  ];
-  return (
-    <div>
-      <div className="flex flex-col gap-2">
-        {steps.map((s, i) => (
-          <div
-            key={i}
-            className="flex gap-2.5 p-2.5 border border-line rounded-lg"
-            style={{
-              background: s.done ? "color-mix(in oklab, var(--c-ok) 5%, var(--c-surface))" : "var(--c-surface)",
-            }}
-          >
-            <div
-              className="w-[18px] h-[18px] rounded-full grid place-items-center text-white flex-shrink-0"
-              style={{
-                border: "1.5px solid " + (s.done ? "var(--c-ok)" : "var(--c-line-strong)"),
-                background: s.done ? "var(--c-ok)" : "transparent",
-                fontSize: 10,
-              }}
-            >
-              {s.done ? "✓" : i + 1}
-            </div>
-            <div
-              className="flex-1 text-[12.5px] text-ink-1 leading-normal"
-              style={{ textDecoration: s.done ? "line-through" : "none" }}
-            >
-              {s.text}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3.5 p-2.5 border-dashed border border-line-strong rounded-lg text-[11.5px] text-ink-3">
-        Runbook · <span className="mono">runbooks/{a.id.toLowerCase()}.md</span> · {t("alx_maintainer")} 平台运营 · {t("alx_last_updated")} 3 {t("alx_days_ago")}
-      </div>
-    </div>
-  );
+function stringValue(value: unknown): string { return typeof value === "string" ? value : value == null ? "" : String(value); }
+function errorMessage(value: unknown): string { return value && typeof value === "object" && "message" in value ? String((value as { message: unknown }).message) : String(value); }
+function formatDate(value: string, lang?: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "—";
+  return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
 }
-
-function AlertsRightRail() {
-  const { t } = useApp();
-  return (
-    <div className="border-l border-line bg-bg flex flex-col min-h-0">
-      <div className="border-b border-line bg-surface" style={{ padding: "12px 14px" }}>
-        <div className="text-[13px] font-semibold">{t("alx_oncall_title")}</div>
-        <div className="hint mt-0.5">{t("alx_oncall_sub")}</div>
-      </div>
-      <div style={{ padding: "10px 12px" }}>
-        {ON_CALL.map((p, i) => {
-          const dot = p.status === "primary" ? "var(--c-ok)" : p.status === "secondary" ? "var(--c-info)" : p.status === "advisory" ? "oklch(0.62 0.14 75)" : "var(--c-ink-4)";
-          return (
-            <div
-              key={i}
-              className="flex items-center gap-2.5"
-              style={{
-                padding: "8px 6px",
-                borderBottom: i === ON_CALL.length - 1 ? "none" : "1px solid var(--c-line)",
-              }}
-            >
-              <div className="w-[30px] h-[30px] rounded-full bg-panel border border-line flex items-center justify-center text-[12px] font-semibold">
-                {p.name[0]}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[12.5px] font-semibold">{p.name}</div>
-                <div className="hint overflow-hidden text-ellipsis whitespace-nowrap">{p.role} · {p.shift}</div>
-              </div>
-              <span className="w-2 h-2 rounded-full" style={{ background: dot }} />
-            </div>
-          );
-        })}
-      </div>
-      <div className="border-t border-line bg-surface" style={{ padding: "10px 14px" }}>
-        <div className="text-[12.5px] font-semibold">{t("alx_escalation_policy")}</div>
-      </div>
-      <div className="flex flex-col gap-2" style={{ padding: "10px 14px" }}>
-        {[
-          ["0 min", "primary", `feishu · ${t("alx_chan_phone")}`],
-          ["+15 min", "secondary", "feishu"],
-          ["+45 min", "manager", `${t("alx_chan_sms")} · ${t("alx_chan_phone")}`],
-          ["+90 min", "org-wide", t("alx_chan_broadcast")],
-        ].map((r, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="mono text-[11px] text-ink-3" style={{ width: 56 }}>{r[0]}</span>
-            <Badge>{r[1]}</Badge>
-            <span className="text-[11.5px] text-ink-2">→ {r[2]}</span>
-          </div>
-        ))}
-      </div>
-      <div className="border-t border-line bg-surface" style={{ padding: "10px 14px" }}>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[12.5px] font-semibold">{t("alx_silenced_rules")}</span>
-          <Badge variant="warn" dot>{SILENCED.length}</Badge>
-        </div>
-      </div>
-      <div className="flex flex-col gap-2" style={{ padding: "10px 14px" }}>
-        {SILENCED.map((s) => (
-          <div key={s.id} className="flex items-start gap-2">
-            <span className="mono text-[11px] text-ink-3" style={{ width: 56 }}>{s.id}</span>
-            <div className="flex-1 min-w-0">
-              <div className="mono text-[11px]">{s.scope}</div>
-              <div className="hint">{s.by} · {s.reason}</div>
-            </div>
-            <Badge variant="info">{s.until}</Badge>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1" />
-      <div className="border-t border-line flex gap-2" style={{ padding: "10px 14px" }}>
-        <Btn size="sm" variant="ghost" style={{ flex: 1 }}><Ic.bell /> {t("alx_mute_all_1h")}</Btn>
-        <Btn size="sm" variant="ghost" style={{ flex: 1 }}>{t("alx_export_rca")}</Btn>
-      </div>
-    </div>
-  );
-}
+function safeStringify(value: unknown): string { try { return JSON.stringify(value, null, 2); } catch { return String(value); } }

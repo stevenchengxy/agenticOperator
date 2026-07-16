@@ -17,6 +17,7 @@
 
 import { NextResponse } from 'next/server';
 import { tlog } from '@/lib/terminal-log';
+import { blockUnsafeDevRouteInProduction } from '@/lib/unsafe-route-guard';
 
 const ROBOHIRE_BASE_URL = process.env.ROBOHIRE_BASE_URL ?? 'https://api.robohire.io';
 const ROBOHIRE_API_KEY = process.env.ROBOHIRE_API_KEY ?? '';
@@ -59,6 +60,9 @@ async function proxyToRoboHire(
 }
 
 async function handle(req: Request, params: Params, method: string) {
+  const blocked = blockUnsafeDevRouteInProduction('/api/mock-raas/*');
+  if (blocked) return blocked;
+
   const { path } = await params.params;
   const fullPath = '/' + path.join('/');
   const url = new URL(req.url);

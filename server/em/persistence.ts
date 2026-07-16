@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { prisma } from "../db";
+import { inferEventDomain } from "../../lib/events/domain-scope";
 
 const PAYLOAD_SUMMARY_MAX_CHARS = 1000;
 
@@ -57,6 +58,7 @@ export async function writeAcceptedInstance(w: AcceptedInstanceWrite): Promise<v
       causedByEventId: w.causedByEventId ?? null,
       causedByName: w.causedByName ?? null,
       payloadSummary: summarize(w.payloadForSummary),
+      domain: inferEventDomain({ name: w.name, data: w.payloadForSummary }),
     },
   });
 }
@@ -76,6 +78,7 @@ export async function writePassthroughInstance(w: PassthroughInstanceWrite): Pro
       schemaErrors: w.schemaErrors ? JSON.stringify(w.schemaErrors) : null,
       triedVersions: w.triedVersions ? JSON.stringify(w.triedVersions) : null,
       payloadSummary: summarize(w.payloadForSummary),
+      domain: inferEventDomain({ name: w.name, data: w.payloadForSummary }),
     },
   });
 }
@@ -93,6 +96,7 @@ export async function writeRejectedInstance(w: RejectedInstanceWrite): Promise<v
       schemaErrors: w.schemaErrors ? JSON.stringify(w.schemaErrors) : null,
       triedVersions: w.triedVersions ? JSON.stringify(w.triedVersions) : null,
       payloadSummary: summarize(w.payloadForSummary),
+      domain: inferEventDomain({ name: w.name, data: w.payloadForSummary }),
     },
   });
 }

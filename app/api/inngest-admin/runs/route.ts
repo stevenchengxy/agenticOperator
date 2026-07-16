@@ -4,6 +4,8 @@
 import { NextResponse } from 'next/server';
 import { listRecentRunsPage } from '@/lib/inngest-source';
 import { getRunTokenUsage } from '@/lib/monitor/run-token-usage';
+import { prisma } from '@/server/db';
+import { deriveRunOutcome } from '@/lib/monitor/run-outcome';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +21,7 @@ export async function GET(req: Request) {
     .map((s) => titleCase(s.trim()))
     .filter(Boolean);
   const eventName = url.searchParams.get('event')?.trim() || undefined;
+  const requestedRunId = url.searchParams.get('runId')?.trim() || undefined;
   const sinceHoursRaw = url.searchParams.get('sinceHours');
   const sinceHours =
     sinceHoursRaw && sinceHoursRaw !== 'all'
@@ -35,10 +38,65 @@ export async function GET(req: Request) {
       eventName,
       ...(Number.isFinite(sinceHours) && sinceHours! > 0 ? { sinceHours } : {}),
     });
-    const runs = result.items;
+    let runs = [...result.items];
+    // A notification may point at a run outside the current page/window. Pull
+    // that exact archived row into the response so the monitor can always
+    // scroll to and expand its evidence instead of opening an empty page.
+    if (requestedRunId && !runs.some((run) => run.id === requestedRunId)) {
+      const target = await prisma.inngestRunArchive.findUnique({ where: { runId: requestedRunId } });
+      if (target) {
+        runs.unshift({
+          id: target.runId,
+          status: target.status,
+          startedAt: target.startedAt?.toISOString() ?? '',
+          finishedAt: target.endedAt?.toISOString() ?? undefined,
+          function: {
+            name: target.functionName ?? target.functionSlug,
+            slug: target.functionSlug,
+            appID: target.appId ?? undefined,
+          },
+          eventName: target.eventName ?? undefined,
+          eventId: firstTriggerId(target.triggerEventIds),
+        });
+      }
+    }
     const tokenByRun = await getRunTokenUsage(runs.map((r) => r.id));
+    const runIds = runs.map((r) => r.id);
+    const [archives, dependencyLogs] = await Promise.all([
+      runIds.length
+        ? prisma.inngestRunArchive.findMany({
+            where: { runId: { in: runIds } },
+            select: { runId: true, output: true, functionSlug: true, eventName: true },
+          })
+        : [],
+      runIds.length
+        ? prisma.logEvent.findMany({
+            where: { runId: { in: runIds }, category: 'dependency' },
+            orderBy: { ts: 'desc' },
+            select: { runId: true, payloadJson: true, message: true, source: true },
+          })
+        : [],
+    ]);
+    const archiveByRun = new Map(archives.map((row) => [row.runId, row]));
+    const dependencyByRun = new Map<string, { reason?: string | null; detail?: string | null; provider?: string | null }>();
+    for (const log of dependencyLogs) {
+      if (!log.runId || dependencyByRun.has(log.runId)) continue;
+      const parsed = safeObject(log.payloadJson);
+      dependencyByRun.set(log.runId, {
+        reason: typeof parsed?.reason === 'string' ? parsed.reason : null,
+        detail: typeof parsed?.detail === 'string' ? parsed.detail : log.message,
+        provider: typeof parsed?.provider === 'string' ? parsed.provider : log.source,
+      });
+    }
     return NextResponse.json({
       runs: runs.map((r) => ({
+        outcome: deriveRunOutcome({
+          status: r.status,
+          functionSlug: archiveByRun.get(r.id)?.functionSlug ?? r.function?.slug,
+          triggerEvent: archiveByRun.get(r.id)?.eventName ?? r.eventName,
+          output: safeJson(archiveByRun.get(r.id)?.output ?? null),
+          dependencyFailure: dependencyByRun.get(r.id) ?? null,
+        }),
         id: r.id,
         status: r.status,
         startedAt: r.startedAt,
@@ -70,6 +128,27 @@ export async function GET(req: Request) {
       { status: 502 },
     );
   }
+}
+
+function safeJson(value: string | null): unknown {
+  if (value == null) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function safeObject(value: string | null): Record<string, unknown> | null {
+  const parsed = safeJson(value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null;
+}
+
+function firstTriggerId(value: string | null): string | undefined {
+  const parsed = safeJson(value);
+  return Array.isArray(parsed) && parsed.length > 0 ? String(parsed[0]) : undefined;
 }
 
 function positiveInt(raw: string | null, fallback: number, max: number): number {

@@ -5,6 +5,7 @@ import { buildScenarioData, type Scenario, type ScenarioData } from "./sim-data"
 function ctx(scenario: Scenario, upstream: Record<string, unknown> = {}): ComputeCtx<ScenarioData> {
   return {
     caseId: "case-x",
+    runId: "run-x",
     dsNo: "DS2026053000123",
     scenario,
     dataset: buildScenarioData(scenario),
@@ -13,6 +14,16 @@ function ctx(scenario: Scenario, upstream: Record<string, unknown> = {}): Comput
     step: { run: async (_id, fn) => fn() },
   };
 }
+
+describe("rule-check persistence retry policy", () => {
+  it("retries only the four durable energy rule-check behaviors", () => {
+    for (const name of ["validateConstraints", "triageScheme", "forecastOutput", "generateSuggestion"]) {
+      expect(ENERGY_BEHAVIORS[name].retries).toBe(3);
+    }
+    expect(ENERGY_BEHAVIORS.manualConfirm.retries).toBeUndefined();
+    expect(ENERGY_BEHAVIORS.finalizePlan.retries).toBeUndefined();
+  });
+});
 
 describe("manualConfirm behavior (人工确认闸口①)", () => {
   const b = ENERGY_BEHAVIORS.manualConfirm;

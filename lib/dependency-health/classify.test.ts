@@ -63,6 +63,14 @@ describe('classifyRobohire — empty-200 predicates', () => {
     expect(classifyRobohire('generateJd', { data: {} })).toMatchObject({ ok: false, reason: 'empty' });
     expect(classifyRobohire('generateJd', { data: { description: 'We are hiring…' } })).toEqual({ ok: true });
   });
+  it('generateJd: 仅 benefits / interviewRequirements 有内容 → ok(判空口径必须与 assembleJdContent 一致)', () => {
+    // Regression: assembleJdContent 消费 benefits + interviewRequirements,但旧
+    // 判空白名单只认 5 个字段,导致这类"薄但可用"的 JD 被误判空 → false FAILED。
+    expect(classifyRobohire('generateJd', { data: { benefits: '五险一金 + 年度期权' } })).toEqual({ ok: true });
+    expect(
+      classifyRobohire('generateJd', { data: { interviewRequirements: '两轮技术面 + 一轮 HR 面' } }),
+    ).toEqual({ ok: true });
+  });
   it('generateJd: placeholder title "Untitled" with empty content → empty (title is "Untitled" on success too, so it is never a content signal)', () => {
     // Real RoboHire failure payload (meta.stages.generate="failed"): every content
     // field is "" yet title is the placeholder "Untitled". The old check keyed on

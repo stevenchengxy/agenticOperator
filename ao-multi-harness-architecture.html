@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Agentic Operator · 多 Harness 协同智能系统</title>
+<style>
+  :root{
+    --bg:#0a0e14; --bg2:#0f1620; --panel:#111a26; --panel2:#16212f;
+    --line:#1f2c3d; --soft:#2a3a4f;
+    --ink:#e8eef6; --ink2:#9fb2c8; --ink3:#6b7f96;
+    --accent:#5bb8ff; --accent2:#8b7dff; --ok:#43d39e; --warn:#f5b556; --gen:#ff8db0; --sel:#7ad6ff; --exec:#9be38a; --meta:#b79bff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#13203010,transparent),var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  a{color:var(--accent);text-decoration:none}
+  code{font-family:var(--mono);font-size:.86em;background:#0c1622;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#c9dcf0}
+
+  header{padding:74px 0 48px;border-bottom:1px solid var(--line);
+    background:radial-gradient(800px 360px at 20% 0%,#5bb8ff14,transparent)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin-bottom:18px}
+  h1{font-size:46px;line-height:1.1;margin:0 0 18px;letter-spacing:-.02em;font-weight:760}
+  h1 .grad{background:linear-gradient(100deg,var(--meta),var(--accent) 45%,var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:19px;color:var(--ink2);max-width:760px;margin:0}
+  .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
+  .pill{font-size:12.5px;font-family:var(--mono);border:1px solid var(--soft);border-radius:999px;padding:6px 13px;color:var(--ink2);background:#0d1622}
+  .pill b{color:var(--ink)}
+
+  section{padding:58px 0;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink3);margin-bottom:12px}
+  h2{font-size:30px;margin:0 0 14px;letter-spacing:-.015em;font-weight:720}
+  h3{font-size:19px;margin:30px 0 10px;font-weight:660}
+  p{color:var(--ink2)}
+  p strong,li strong{color:var(--ink)}
+  .muted{color:var(--ink3)}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+  .card h4{margin:0 0 8px;font-size:16.5px;display:flex;align-items:center;gap:9px}
+  .card p{margin:0;font-size:14.5px;color:var(--ink2)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--soft);color:var(--ink2)}
+  .tag.have{color:var(--ok);border-color:#1e4a3a;background:#0d201a}
+  .tag.new{color:var(--meta);border-color:#352a55;background:#15102a}
+
+  figure{margin:30px 0 8px;background:var(--panel2);border:1px solid var(--line);border-radius:18px;padding:22px;overflow:hidden}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{color:var(--ink3);font-size:13px;margin-top:14px;text-align:center}
+  .lbl{font-family:var(--mono);font-size:12px}
+  text{font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif}
+
+  .ladder{display:flex;flex-direction:column;gap:14px;margin-top:24px}
+  .rung{display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:linear-gradient(180deg,var(--panel),var(--bg2))}
+  .rung .ph{font-family:var(--mono);font-size:13px;color:var(--ink3)}
+  .rung .ph b{display:block;font-size:22px;color:var(--ink);font-family:inherit}
+  .rung .body b{color:var(--ink)}
+  @media(max-width:640px){.rung{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14.5px}
+  th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink3);font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase}
+  td b{color:var(--ink)}
+
+  .callout{border-left:3px solid var(--accent);background:#0c1826;border-radius:0 12px 12px 0;padding:16px 20px;margin:22px 0;color:var(--ink2)}
+  .callout.warn{border-color:var(--warn);background:#1d160a}
+  .callout b{color:var(--ink)}
+
+  footer{padding:48px 0 80px;color:var(--ink3);font-size:13.5px}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin:18px 0 2px;font-size:13px;color:var(--ink2)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .ti{font-family:var(--mono);font-size:11.5px;color:var(--ink3)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Agentic Operator · Macro Architecture</div>
+    <h1>不是一套 Harness，<br/>而是<span class="grad">一群会协作的 Harness</span></h1>
+    <p class="lede">一个顶层「元编排大脑」统一调度若干专精 Harness：一套<b style="color:var(--gen)">动态生成</b>新智能体、一套<b style="color:var(--sel)">管理与挑选</b>预先写好的智能体、一套<b style="color:var(--exec)">真实执行</b>事件链。它们说同一种「本体事件」语言，产出的每个智能体都是可互换的节点 —— 让系统既能即兴造人，又能复用老兵，由一个大脑统一编排成军。</p>
+    <div class="pillrow">
+      <span class="pill"><b>3 层</b> 元编排 / 专精 Harness / 共享基座</span>
+      <span class="pill"><b>4 套</b> Harness：生成 · 选择 · 执行 · 验收</span>
+      <span class="pill"><b>1 个</b> 统一节点契约（本体事件）</span>
+      <span class="pill"><b>核心智能</b> Build-vs-Reuse</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">01 · 核心洞察</div>
+    <h2>把「Harness」本身当成可组合的单元</h2>
+    <p>今天我们有一套很强的<b>生成 Harness</b>（Agent 工厂 v3 大脑）：它读业务本体、自己设计 → 写代码 → 沙箱验证 → 交付智能体。但一套 Harness 再强，也只擅长一件事。真正的跃迁是把 Harness 本身变成<b>可被更高层调度的积木</b>：</p>
+    <div class="grid g3" style="margin-top:22px">
+      <div class="card">
+        <h4><span class="dot" style="background:var(--gen)"></span>动态生成</h4>
+        <p>没有现成的智能体？<b>生成 Harness</b> 临场造一个 —— 从本体动作派生、AI 亲写 prompt 与代码、沙箱跑通才交付。</p>
+      </div>
+      <div class="card">
+        <h4><span class="dot" style="background:var(--sel)"></span>预设选择</h4>
+        <p>已经有写好/造好的智能体？<b>选择 Harness</b> 从智能体注册表里按能力与事件签名挑出最合适的来复用。</p>
+      </div>
+      <div class="card">
+        <h4><span class="dot" style="background:var(--meta)"></span>统一编排</h4>
+        <p><b>元编排大脑</b> 把目标拆成子目标，逐个决定「造还是用」，再把所有节点（无论谁产出）编成一张可执行的事件链 DAG。</p>
+      </div>
+    </div>
+    <div class="callout">
+      <b>关键统一点：</b>无论一个智能体是 AI <b>临场生成</b>的、还是人<b>提前手写</b>的，它对元编排大脑都<b>长得一模一样</b> —— 都是一个绑定本体事件（trigger→emit）的 Inngest 函数节点。正因为节点契约统一，不同 Harness 的产物才能拼成一条链。这就是整套架构能成立的地基。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">02 · 三层架构</div>
+    <h2>元编排 → 专精 Harness → 共享基座</h2>
+    <p>顶层一个大脑负责「想清楚要什么、谁来做」；中层是各司其职的 Harness；底层是所有 Harness 共享的本体、工具库、注册表、事件网格与审计。控制流自上而下派发，数据流自下而上回灌。</p>
+
+    <figure>
+      <svg viewBox="0 0 980 560" xmlns="http://www.w3.org/2000/svg" aria-label="三层架构图">
+        <defs>
+          <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#5b6b80"/></marker>
+          <marker id="arrUp" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#3a5a4a"/></marker>
+          <linearGradient id="metaG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1a1330"/><stop offset="1" stop-color="#241a40"/></linearGradient>
+        </defs>
+
+        <!-- TIER 2 meta -->
+        <rect x="170" y="24" width="640" height="92" rx="16" fill="url(#metaG)" stroke="#3a2d5e"/>
+        <text x="490" y="55" text-anchor="middle" fill="#cbb8ff" font-size="17" font-weight="700">元编排大脑 · Meta-Orchestrator</text>
+        <text x="490" y="80" text-anchor="middle" fill="#9c8fc9" font-size="12.5">拆解目标 · Build-vs-Reuse 决策 · 组装节点 DAG · 调度执行 · 失败重规划 · 人在环路</text>
+        <text x="490" y="100" text-anchor="middle" fill="#6f6796" font-size="11" font-family="ui-monospace,monospace">◆ 新增层 —— 所有 Harness 的总指挥</text>
+
+        <!-- TIER 1 harnesses -->
+        <g>
+          <rect x="40" y="172" width="210" height="120" rx="14" fill="#171022" stroke="#4a2c40"/>
+          <text x="145" y="200" text-anchor="middle" fill="#ff9fbd" font-size="15" font-weight="700">生成 Harness</text>
+          <text x="145" y="220" text-anchor="middle" fill="#c98fa6" font-size="11.5">Agent 工厂 v3 大脑</text>
+          <text x="145" y="245" text-anchor="middle" fill="#9a7d8a" font-size="11">本体→设计→AI写码</text>
+          <text x="145" y="262" text-anchor="middle" fill="#9a7d8a" font-size="11">→沙箱验证→交付</text>
+          <text x="145" y="282" text-anchor="middle" fill="#5db98a" font-size="10.5" font-family="ui-monospace,monospace">✓ 已有</text>
+
+          <rect x="270" y="172" width="210" height="120" rx="14" fill="#0e1b22" stroke="#27506a"/>
+          <text x="375" y="200" text-anchor="middle" fill="#7ad6ff" font-size="15" font-weight="700">选择 Harness</text>
+          <text x="375" y="220" text-anchor="middle" fill="#8fbcd0" font-size="11.5">预设智能体路由器</text>
+          <text x="375" y="245" text-anchor="middle" fill="#7d949a" font-size="11">按能力/事件签名</text>
+          <text x="375" y="262" text-anchor="middle" fill="#7d949a" font-size="11">从注册表挑选复用</text>
+          <text x="375" y="282" text-anchor="middle" fill="#b79bff" font-size="10.5" font-family="ui-monospace,monospace">◆ 新增</text>
+
+          <rect x="500" y="172" width="210" height="120" rx="14" fill="#0f1d12" stroke="#2a5230"/>
+          <text x="605" y="200" text-anchor="middle" fill="#9be38a" font-size="15" font-weight="700">执行 Harness</text>
+          <text x="605" y="220" text-anchor="middle" fill="#9ac79a" font-size="11.5">Inngest 事件运行时</text>
+          <text x="605" y="245" text-anchor="middle" fill="#849784" font-size="11">事件驱动编排</text>
+          <text x="605" y="262" text-anchor="middle" fill="#849784" font-size="11">节点真实跑起来</text>
+          <text x="605" y="282" text-anchor="middle" fill="#5db98a" font-size="10.5" font-family="ui-monospace,monospace">✓ 已有</text>
+
+          <rect x="730" y="172" width="210" height="120" rx="14" fill="#1c160a" stroke="#5a4520"/>
+          <text x="835" y="200" text-anchor="middle" fill="#f5c574" font-size="15" font-weight="700">验收 Harness</text>
+          <text x="835" y="220" text-anchor="middle" fill="#cbab78" font-size="11.5">行为级 verifier</text>
+          <text x="835" y="245" text-anchor="middle" fill="#988a6a" font-size="11">沙箱端到端跑通</text>
+          <text x="835" y="262" text-anchor="middle" fill="#988a6a" font-size="11">全 N 节点+无降级</text>
+          <text x="835" y="282" text-anchor="middle" fill="#5db98a" font-size="10.5" font-family="ui-monospace,monospace">✓ 已有</text>
+        </g>
+
+        <!-- TIER 0 substrate -->
+        <rect x="40" y="356" width="900" height="150" rx="16" fill="#0c1420" stroke="var(--line)"/>
+        <text x="490" y="382" text-anchor="middle" fill="#9fb2c8" font-size="14" font-weight="700">共享基座 · 所有 Harness 说同一种语言</text>
+        <g font-size="12" fill="#c9dcf0">
+          <rect x="70" y="400" width="180" height="86" rx="11" fill="#0e1826" stroke="#23344a"/>
+          <text x="160" y="428" text-anchor="middle" font-weight="600" fill="#dce8f5">本体 Ontology</text>
+          <text x="160" y="448" text-anchor="middle" fill="#7f93a8" font-size="11">Allmeta→Neo4j</text>
+          <text x="160" y="466" text-anchor="middle" fill="#7f93a8" font-size="11">事件/动作/规则契约</text>
+
+          <rect x="262" y="400" width="180" height="86" rx="11" fill="#0e1826" stroke="#23344a"/>
+          <text x="352" y="428" text-anchor="middle" font-weight="600" fill="#dce8f5">智能体注册表</text>
+          <text x="352" y="448" text-anchor="middle" fill="#7f93a8" font-size="11">预写+生成 统一编目</text>
+          <text x="352" y="466" text-anchor="middle" fill="#b79bff" font-size="10.5" font-family="ui-monospace,monospace">◆ 新增（核心）</text>
+
+          <rect x="454" y="400" width="155" height="86" rx="11" fill="#0e1826" stroke="#23344a"/>
+          <text x="531" y="428" text-anchor="middle" font-weight="600" fill="#dce8f5">工具库 + 技能库</text>
+          <text x="531" y="448" text-anchor="middle" fill="#7f93a8" font-size="11">人手写的真工具</text>
+          <text x="531" y="466" text-anchor="middle" fill="#7f93a8" font-size="11">可复用 SKILLS</text>
+
+          <rect x="621" y="400" width="146" height="86" rx="11" fill="#0e1826" stroke="#23344a"/>
+          <text x="694" y="428" text-anchor="middle" font-weight="600" fill="#dce8f5">事件网格</text>
+          <text x="694" y="448" text-anchor="middle" fill="#7f93a8" font-size="11">Inngest 总线</text>
+          <text x="694" y="466" text-anchor="middle" fill="#7f93a8" font-size="11">节点间编织</text>
+
+          <rect x="779" y="400" width="131" height="86" rx="11" fill="#0e1826" stroke="#23344a"/>
+          <text x="844" y="428" text-anchor="middle" font-weight="600" fill="#dce8f5">审计/观测</text>
+          <text x="844" y="448" text-anchor="middle" fill="#7f93a8" font-size="11">Postgres 归档</text>
+          <text x="844" y="466" text-anchor="middle" fill="#7f93a8" font-size="11">trace · 成本 · 回放</text>
+        </g>
+
+        <!-- control flow down -->
+        <line x1="300" y1="116" x2="180" y2="168" stroke="#5b6b80" stroke-width="1.6" marker-end="url(#arr)"/>
+        <line x1="430" y1="116" x2="395" y2="168" stroke="#5b6b80" stroke-width="1.6" marker-end="url(#arr)"/>
+        <line x1="560" y1="116" x2="595" y2="168" stroke="#5b6b80" stroke-width="1.6" marker-end="url(#arr)"/>
+        <line x1="690" y1="116" x2="820" y2="168" stroke="#5b6b80" stroke-width="1.6" marker-end="url(#arr)"/>
+        <!-- harness to substrate -->
+        <line x1="145" y1="292" x2="160" y2="396" stroke="#3a4658" stroke-width="1.3" stroke-dasharray="4 3"/>
+        <line x1="375" y1="292" x2="352" y2="396" stroke="#3a4658" stroke-width="1.3" stroke-dasharray="4 3"/>
+        <line x1="605" y1="292" x2="694" y2="396" stroke="#3a4658" stroke-width="1.3" stroke-dasharray="4 3"/>
+        <!-- data flow up (registry/archive feed orchestrator) -->
+        <path d="M352 400 C352 340, 880 330, 880 116" fill="none" stroke="#2f5a44" stroke-width="1.5" stroke-dasharray="2 5" marker-end="url(#arrUp)"/>
+        <text x="892" y="250" fill="#3f7a5e" font-size="10.5" font-family="ui-monospace,monospace" transform="rotate(90 892 250)">注册表/审计 回灌决策</text>
+      </svg>
+      <figcaption>控制流自上而下派发（元编排→各 Harness→基座）；数据流自下而上回灌（注册表+审计→元编排，喂养 Build-vs-Reuse 决策）。</figcaption>
+    </figure>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--ok)"></span>✓ 已有 —— 当前代码里就在跑</span>
+      <span><span class="dot" style="background:var(--meta)"></span>◆ 新增 —— 这套愿景要补的关键件</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">03 · 统一节点契约</div>
+    <h2>一个节点，长一个样 —— 不管谁造的</h2>
+    <p>能让多套 Harness 拼成一条链的唯一原因：它们的产物都遵守<b>同一个节点契约</b>。每个智能体都是一个绑定本体事件的执行单元 —— 消费某些 <code>trigger</code> 事件、产出某些 <code>emit</code> 事件，中间用自己的 prompt + 工具 + 决策逻辑。对编排者来说，「AI 临场生成的」和「人提前手写的」<b>无差别</b>，都只是一个有事件签名的盒子。</p>
+
+    <figure>
+      <svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg" aria-label="统一节点契约">
+        <defs><marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#7a8aa0"/></marker></defs>
+        <!-- in events -->
+        <g font-family="ui-monospace,monospace" font-size="12.5">
+          <rect x="40" y="80" width="200" height="40" rx="10" fill="#0e1b22" stroke="#27506a"/>
+          <text x="140" y="105" text-anchor="middle" fill="#7ad6ff">trigger: RESUME_PROCESSED</text>
+          <rect x="40" y="150" width="200" height="40" rx="10" fill="#0e1b22" stroke="#27506a"/>
+          <text x="140" y="175" text-anchor="middle" fill="#7ad6ff">input schema (本体 DataObject)</text>
+        </g>
+        <line x1="240" y1="100" x2="345" y2="130" stroke="#7a8aa0" stroke-width="1.6" marker-end="url(#a2)"/>
+        <line x1="240" y1="170" x2="345" y2="140" stroke="#7a8aa0" stroke-width="1.6" marker-end="url(#a2)"/>
+
+        <!-- node -->
+        <rect x="350" y="56" width="280" height="190" rx="18" fill="linear" style="fill:#111c2a" stroke="#36506e" stroke-width="1.6"/>
+        <text x="490" y="86" text-anchor="middle" fill="#e8eef6" font-size="16" font-weight="700">智能体节点 (Inngest fn)</text>
+        <line x1="372" y1="100" x2="608" y2="100" stroke="#22344a"/>
+        <text x="490" y="124" text-anchor="middle" fill="#aebfd2" font-size="12.5">① SYSTEM_PROMPT（AI 亲写，零规则）</text>
+        <text x="490" y="148" text-anchor="middle" fill="#aebfd2" font-size="12.5">② 绑定的真实工具（含动态抓规则）</text>
+        <text x="490" y="172" text-anchor="middle" fill="#aebfd2" font-size="12.5">③ 决策：选一个结果事件发出</text>
+        <text x="490" y="208" text-anchor="middle" fill="#6b7f96" font-size="11.5">来源徽章：</text>
+        <rect x="392" y="218" width="86" height="22" rx="6" fill="#171022" stroke="#4a2c40"/><text x="435" y="233" text-anchor="middle" fill="#ff9fbd" font-size="11">生成</text>
+        <rect x="502" y="218" width="86" height="22" rx="6" fill="#0e1b22" stroke="#27506a"/><text x="545" y="233" text-anchor="middle" fill="#7ad6ff">预写</text>
+
+        <!-- out events -->
+        <line x1="630" y1="120" x2="735" y2="100" stroke="#7a8aa0" stroke-width="1.6" marker-end="url(#a2)"/>
+        <line x1="630" y1="160" x2="735" y2="180" stroke="#7a8aa0" stroke-width="1.6" marker-end="url(#a2)"/>
+        <g font-family="ui-monospace,monospace" font-size="12">
+          <rect x="740" y="80" width="210" height="40" rx="10" fill="#0f1d12" stroke="#2a5230"/>
+          <text x="845" y="105" text-anchor="middle" fill="#9be38a">emit: MATCH_PASSED</text>
+          <rect x="740" y="160" width="210" height="40" rx="10" fill="#1c160a" stroke="#5a4520"/>
+          <text x="845" y="185" text-anchor="middle" fill="#f5c574">emit: MATCH_FAILED</text>
+        </g>
+      </svg>
+      <figcaption>统一契约 = 本体事件签名（trigger/emit）+ 输入输出 schema（源自 DataObject）。来源（生成/预写）只是一个徽章，不影响编排。</figcaption>
+    </figure>
+
+    <div class="callout">
+      <b>这正是当前已成立的部分：</b>工厂生成的智能体、和 <code>server/inngest/agents/*.ts</code> 里人手写的智能体，<b>都是 Inngest 函数、都用本体事件名 trigger/emit</b>。所以它们本来就能在同一条事件链里接力 —— 缺的只是上面那个「注册表 + 元编排」把它们当成同质节点统一调度。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">04 · 核心智能</div>
+    <h2>Build-vs-Reuse：造一个，还是用现成的？</h2>
+    <p>元编排大脑最核心的判断：面对一个子目标，<b>先问注册表有没有现成能干这活的智能体</b>。有 → 选择 Harness 直接绑定复用（快、稳、省）；没有或不够好 → 派生成 Harness 临场造一个，造完<b>必须过验收 Harness</b>，再回写注册表沉淀下来。下次同样的活就能复用了 —— 系统越用越聪明。</p>
+
+    <figure>
+      <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" aria-label="Build vs Reuse 决策">
+        <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L8,4.5 L0,9 Z" fill="#6b7f96"/></marker></defs>
+        <rect x="30" y="150" width="150" height="58" rx="12" fill="url(#metaG)" stroke="#3a2d5e"/>
+        <text x="105" y="175" text-anchor="middle" fill="#cbb8ff" font-size="13" font-weight="600">子目标</text>
+        <text x="105" y="194" text-anchor="middle" fill="#9c8fc9" font-size="11">需要的事件签名</text>
+        <line x1="180" y1="179" x2="250" y2="179" stroke="#6b7f96" stroke-width="1.6" marker-end="url(#a3)"/>
+
+        <!-- diamond -->
+        <path d="M340 130 L430 179 L340 228 L250 179 Z" fill="#0e1826" stroke="#3a5a4a" stroke-width="1.6"/>
+        <text x="340" y="174" text-anchor="middle" fill="#dce8f5" font-size="12.5" font-weight="600">注册表里</text>
+        <text x="340" y="192" text-anchor="middle" fill="#dce8f5" font-size="12.5">有匹配的吗?</text>
+
+        <!-- yes -> reuse -->
+        <line x1="430" y1="179" x2="520" y2="110" stroke="#6b7f96" stroke-width="1.6" marker-end="url(#a3)"/>
+        <text x="470" y="128" fill="#7ad6ff" font-size="12" font-family="ui-monospace,monospace">有</text>
+        <rect x="525" y="78" width="200" height="64" rx="12" fill="#0e1b22" stroke="#27506a"/>
+        <text x="625" y="104" text-anchor="middle" fill="#7ad6ff" font-size="13.5" font-weight="700">选择 Harness · 复用</text>
+        <text x="625" y="124" text-anchor="middle" fill="#8fbcd0" font-size="11">绑定现成智能体，零造价</text>
+
+        <!-- no -> generate -->
+        <line x1="430" y1="179" x2="520" y2="248" stroke="#6b7f96" stroke-width="1.6" marker-end="url(#a3)"/>
+        <text x="470" y="245" fill="#ff9fbd" font-size="12" font-family="ui-monospace,monospace">没有/不够好</text>
+        <rect x="525" y="216" width="200" height="64" rx="12" fill="#171022" stroke="#4a2c40"/>
+        <text x="625" y="242" text-anchor="middle" fill="#ff9fbd" font-size="13.5" font-weight="700">生成 Harness · 造</text>
+        <text x="625" y="262" text-anchor="middle" fill="#c98fa6" font-size="11">本体派生→AI写码→…</text>
+
+        <!-- generate -> verify -->
+        <line x1="725" y1="248" x2="800" y2="248" stroke="#6b7f96" stroke-width="1.6" marker-end="url(#a3)"/>
+        <rect x="805" y="216" width="150" height="64" rx="12" fill="#1c160a" stroke="#5a4520"/>
+        <text x="880" y="242" text-anchor="middle" fill="#f5c574" font-size="13" font-weight="700">验收 Harness</text>
+        <text x="880" y="262" text-anchor="middle" fill="#cbab78" font-size="11">沙箱跑通才算数</text>
+
+        <!-- verify -> registry (sediment) -->
+        <path d="M880 216 C880 60, 360 70, 340 128" fill="none" stroke="#2f5a44" stroke-width="1.5" stroke-dasharray="3 4" marker-end="url(#a3)"/>
+        <text x="600" y="56" text-anchor="middle" fill="#3f7a5e" font-size="11" font-family="ui-monospace,monospace">验收通过 → 回写注册表，下次可复用（越用越聪明）</text>
+
+        <!-- both -> compose -->
+        <line x1="725" y1="110" x2="760" y2="150" stroke="#3a4658" stroke-width="1.3" stroke-dasharray="4 3"/>
+        <rect x="525" y="300" width="430" height="44" rx="11" fill="#0c1420" stroke="var(--line)"/>
+        <text x="740" y="327" text-anchor="middle" fill="#9fb2c8" font-size="12.5">两条路最终汇入同一张节点 DAG → 执行 Harness 真跑</text>
+      </svg>
+      <figcaption>「先查注册表，再决定造或用」是元编排的核心循环。生成出来的好节点会沉淀回注册表，把一次性的「造」变成长期的「用」。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">05 · 一次任务的全生命周期</div>
+    <h2>从一句目标，到一支真跑通的智能体编队</h2>
+    <figure>
+      <svg viewBox="0 0 980 200" xmlns="http://www.w3.org/2000/svg" aria-label="生命周期流水线">
+        <defs><marker id="a4" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path d="M0,0 L7,4 L0,8 Z" fill="#5b6b80"/></marker></defs>
+        <g font-size="12.5">
+          <g><rect x="20" y="70" width="120" height="60" rx="11" fill="url(#metaG)" stroke="#3a2d5e"/><text x="80" y="95" text-anchor="middle" fill="#cbb8ff" font-weight="600">①拆解目标</text><text x="80" y="114" text-anchor="middle" fill="#9c8fc9" font-size="11">→子目标/能力</text></g>
+          <line x1="140" y1="100" x2="166" y2="100" stroke="#5b6b80" stroke-width="1.5" marker-end="url(#a4)"/>
+          <g><rect x="170" y="70" width="120" height="60" rx="11" fill="#0e1826" stroke="#23344a"/><text x="230" y="95" text-anchor="middle" fill="#dce8f5" font-weight="600">②造/用决策</text><text x="230" y="114" text-anchor="middle" fill="#7f93a8" font-size="11">逐子目标</text></g>
+          <line x1="290" y1="100" x2="316" y2="100" stroke="#5b6b80" stroke-width="1.5" marker-end="url(#a4)"/>
+          <g><rect x="320" y="70" width="120" height="60" rx="11" fill="#0e1826" stroke="#23344a"/><text x="380" y="95" text-anchor="middle" fill="#dce8f5" font-weight="600">③组装 DAG</text><text x="380" y="114" text-anchor="middle" fill="#7f93a8" font-size="11">节点按事件接</text></g>
+          <line x1="440" y1="100" x2="466" y2="100" stroke="#5b6b80" stroke-width="1.5" marker-end="url(#a4)"/>
+          <g><rect x="470" y="70" width="120" height="60" rx="11" fill="#1c160a" stroke="#5a4520"/><text x="530" y="95" text-anchor="middle" fill="#f5c574" font-weight="600">④验收</text><text x="530" y="114" text-anchor="middle" fill="#cbab78" font-size="11">沙箱全跑通</text></g>
+          <line x1="590" y1="100" x2="616" y2="100" stroke="#5b6b80" stroke-width="1.5" marker-end="url(#a4)"/>
+          <g><rect x="620" y="70" width="120" height="60" rx="11" fill="#0f1d12" stroke="#2a5230"/><text x="680" y="95" text-anchor="middle" fill="#9be38a" font-weight="600">⑤执行</text><text x="680" y="114" text-anchor="middle" fill="#849784" font-size="11">事件网格真跑</text></g>
+          <line x1="740" y1="100" x2="766" y2="100" stroke="#5b6b80" stroke-width="1.5" marker-end="url(#a4)"/>
+          <g><rect x="770" y="70" width="120" height="60" rx="11" fill="#0e1826" stroke="#23344a"/><text x="830" y="95" text-anchor="middle" fill="#dce8f5" font-weight="600">⑥监控</text><text x="830" y="114" text-anchor="middle" fill="#7f93a8" font-size="11">审计/成本</text></g>
+        </g>
+        <!-- feedback loop -->
+        <path d="M830 130 C830 180, 230 180, 230 132" fill="none" stroke="#5a4a2a" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#a4)"/>
+        <text x="530" y="178" text-anchor="middle" fill="#9a8550" font-size="11" font-family="ui-monospace,monospace">失败/不达标 → 重规划（换节点 · 重造 · 求人）loop until green</text>
+      </svg>
+      <figcaption>整条流水线由元编排大脑驱动，验收不过就回到「造/用决策」重来 —— loop-until-green，且关键点可人工介入。</figcaption>
+    </figure>
+    <p class="muted" style="margin-top:18px">注意 ④⑤⑥ 已经在跑（行为级验收门 + Inngest 执行 + Postgres 审计）；这套愿景主要补的是 ①②③ —— 把「单域造 6 个 agent」升级成「跨 Harness 拆解 + 造/用 + 组装」。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">06 · 四套 Harness 的分工</div>
+    <h2>各自精专，合起来成军</h2>
+    <table>
+      <thead><tr><th>Harness</th><th>它擅长的一件事</th><th>输入 → 输出</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td><b style="color:var(--gen)">生成</b><br/><span class="ti">工厂 v3 大脑</span></td><td>没有现成节点时，临场造一个高质量、沙箱验证过的智能体</td><td>本体动作 / 子目标 → 一个新节点（含 AI 亲写 prompt+代码）</td><td><span class="tag have">已有</span></td></tr>
+        <tr><td><b style="color:var(--sel)">选择</b><br/><span class="ti">预设路由器</span></td><td>从注册表里按能力 + 事件签名挑出最合适的现成节点来复用</td><td>子目标 + 注册表 → 选中的节点 + 绑定</td><td><span class="tag new">新增</span></td></tr>
+        <tr><td><b style="color:var(--exec)">执行</b><br/><span class="ti">Inngest 运行时</span></td><td>把一组节点按事件真正跑起来，节点间用事件接力（编排+编织）</td><td>节点集 + 种子事件 → 真实运行的事件链</td><td><span class="tag have">已有</span></td></tr>
+        <tr><td><b style="color:var(--warn)">验收</b><br/><span class="ti">行为级 verifier</span></td><td>证明一组节点是否真能端到端跑通（全节点 + 到终态 + 无降级）</td><td>节点集 → 通过 / 拒绝（带断点定位）</td><td><span class="tag have">已有</span></td></tr>
+        <tr><td><b style="color:var(--meta)">元编排</b><br/><span class="ti">总指挥</span></td><td>拆目标、做造/用决策、组装节点 DAG、调度、失败重规划、接人</td><td>一句目标 → 一支编排好、验证过、可上线的智能体编队</td><td><span class="tag new">新增</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">07 · 演进路线</div>
+    <h2>从「一套会造的」到「一群会协作的」</h2>
+    <p>不需要推倒重来 —— 现有的工厂、Inngest、本体、验收门都是这套架构的合法零件。按四步增量演进：</p>
+    <div class="ladder">
+      <div class="rung"><div class="ph"><b>P0</b>现状</div><div class="body"><b>一套生成 Harness。</b>工厂 v3 能从本体造出一支域内智能体并沙箱验证。预写智能体散落在 <code>server/inngest/agents</code>，未被统一编目。<span class="muted">— 已在跑。</span></div></div>
+      <div class="rung"><div class="ph"><b>P1</b>统一注册表</div><div class="body"><b>建「智能体注册表」</b>：把预写 + 生成的智能体统一编目（能力、域、trigger/emit 签名、状态）。这是后面一切的地基 —— 让节点对编排者同质化。</div></div>
+      <div class="rung"><div class="ph"><b>P2</b>选择 Harness</div><div class="body"><b>加路由器</b>：给定子目标的事件签名，从注册表检索最匹配的现成节点。先做确定性匹配（事件签名 + 域），再叠 LLM 语义排序。</div></div>
+      <div class="rung"><div class="ph"><b>P3</b>元编排大脑</div><div class="body"><b>顶层 conductor</b>：拆目标 → 逐子目标 Build-vs-Reuse → 组装跨 Harness 的节点 DAG → 调执行+验收 → 失败重规划。复用现有 ReAct 循环 + 行为门作骨架。</div></div>
+      <div class="rung"><div class="ph"><b>P4</b>自我增强</div><div class="body"><b>闭环沉淀</b>：生成出来的好节点回写注册表、跨域复用；跨次反思喂养造/用决策；人在环路贯穿全层。系统越用越聪明。</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">08 · 为什么这样设计</div>
+    <h2>站在成熟范式的肩膀上</h2>
+    <div class="grid g2">
+      <div class="card"><h4>Orchestrator–Workers</h4><p>顶层大脑拆解目标、派发给专精 worker（这里 worker 是「一整套 Harness」）—— 和多智能体研究系统的「主管+子代理」同构。</p></div>
+      <div class="card"><h4>Supervisor / Router</h4><p>选择 Harness 就是一个 agent 路由器：按能力把活路由给最合适的现成节点，而非每次从零生成。</p></div>
+      <div class="card"><h4>动态技能合成 (Voyager 式)</h4><p>生成 Harness + 注册表沉淀 = 把一次性产物变成可复用技能库，自我扩充能力边界。</p></div>
+      <div class="card"><h4>编排 × 编织 (Orchestration × Choreography)</h4><p>元编排大脑负责「想清楚顺序」，事件网格负责「自治地接力」—— 计划集中、执行去中心，兼得可控与弹性。</p></div>
+      <div class="card"><h4>Verifier-in-the-loop</h4><p>任何被组装的节点集都要过行为级验收（真跑通才算数），把「过编译/图闭合」与「逻辑正确」分开。</p></div>
+      <div class="card"><h4>Human-in-the-loop</h4><p>人可在任一层注入消息，大脑自由分析/重规划/调工具 —— 机器拦不达标，人拦方向错，双保险。</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">09 · 诚实的边界</div>
+    <h2>这套愿景里，还没闭合的几道缝</h2>
+    <div class="callout warn">
+      <b>① 运行物 ≠ 验收物。</b>当前沙箱跑的是通用执行器（读 spec），AI 亲写的 <code>.ts</code> 不直接执行。要真把「Agent-as-code」做实，得让运行时在隔离 worker 里执行那段代码（连带需要 Firecracker/gVisor 级沙箱）。
+    </div>
+    <div class="callout warn"><b>② 注册表是新地基，得先建对。</b>能力描述、事件签名、版本、域、状态要规范化；选择 Harness 的匹配质量完全取决于它。</div>
+    <div class="callout warn"><b>③ 成本与隔离。</b>多层 Harness + 子代理会放大 token 与延迟；递归编排需要预算计量、深度上限、可中断。</div>
+    <div class="callout warn"><b>④ 验收要更硬。</b>除了「全链路跑通」，还需分支覆盖、N 次重跑方差、降级硬失败 —— 才能证明一支编队是稳的，不只是「跑过一次」。</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="color:var(--ink2);font-size:15px;margin-bottom:6px">一句话总括</p>
+    <p style="max-width:780px">把每套 Harness 当成会一件事的专家，给它们一个共同的母语（本体事件）和一本共同的花名册（注册表），再派一个总指挥（元编排大脑）按「造还是用」临场点将、编队、验收、上阵 —— 这就是从「一个会造 agent 的工厂」长成「一支会自己组织、自己造人、自己打仗的智能军团」的路径。</p>
+    <p style="margin-top:26px" class="muted">Agentic Operator · 多 Harness 协同架构 · 宏观蓝图 v1 · 本文档为架构愿景，标注 ✓ 者已在代码中运行，标注 ◆ 者为待补关键件。</p>
+  </div>
+</footer>
+
+</body>
+</html>

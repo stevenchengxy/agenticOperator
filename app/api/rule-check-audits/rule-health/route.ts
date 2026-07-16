@@ -119,10 +119,10 @@ async function loadDomainRuleCatalog(
       const rule = normalizeOntologyRule(raw as Record<string, unknown>);
       if (!rule.id) continue;
       const severity =
-        rule.enforcementLevel === 'mandatory' && rule.failurePolicy === 'block'
-          ? 'terminal'
-          : rule.enforcementLevel === 'optional' && rule.failurePolicy === 'warn'
-            ? 'flag_only'
+        rule.enforcementLevel === 'optional'
+          ? 'flag_only'
+          : rule.enforcementLevel === 'mandatory' && rule.failurePolicy === 'block'
+            ? 'terminal'
             : 'needs_human';
       ruleMeta.set(rule.id, {
         name: rule.businessLogicRuleName || rule.id,
@@ -148,7 +148,7 @@ export async function GET(req: Request) {
   if (!isRuleCheckDomain(domain)) {
     try {
       if (!(await hasOntologyRuleChecks(domain))) return NextResponse.json(empty(window, 'none'));
-      const days = WINDOW_DAYS[window] ?? 36500; // 'all' → effectively unbounded
+      const days = WINDOW_DAYS[window];
       const m = await ontologyMatrix(domain!.trim(), days);
       const matrixById = new Map(m.rules.map((r) => [r.rule_id, r]));
       // 取**当前 domain** 的全量目录(带 stage)→ 总览展示该域全阶段、可按阶段筛选。

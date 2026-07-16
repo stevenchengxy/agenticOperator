@@ -62,11 +62,11 @@ describe('ruleSurvivesFilter — client + department filtering', () => {
     expect(ruleSurvivesFilter(cdgRule, '字节', 'CDG')).toBe(false);
   });
 
-  it('excludes Human-executor and non-mandatory rules', () => {
+  it('excludes Human rules but keeps Agent optional rules for reference checks', () => {
     expect(ruleSurvivesFilter({ ...clientWideRule, executor: 'Human' }, '腾讯', null)).toBe(false);
     expect(
       ruleSurvivesFilter({ ...clientWideRule, enforcementLevel: 'optional' }, '腾讯', null),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 
@@ -108,5 +108,17 @@ describe('ruleProvenance — 三层 + 为何纳入/排除', () => {
     const p = ruleProvenance(cdgRule, '字节', 'CDG');
     expect(p.included).toBe(false);
     expect(p.reason).toContain('客户');
+  });
+
+  it('optional Agent rule is included and marked reference-only', () => {
+    const p = ruleProvenance(
+      { ...clientWideRule, enforcementLevel: 'optional', failurePolicy: 'warn' },
+      '腾讯',
+      'IEG',
+    );
+    expect(p.included).toBe(true);
+    expect(p.enforcement_level).toBe('optional');
+    expect(p.reference_only).toBe(true);
+    expect(p.reason).toContain('参与检查但不阻断');
   });
 });

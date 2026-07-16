@@ -4,6 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
+import { inferEventDomain } from "@/lib/events/domain-scope";
 import type { EventInstanceRow } from "../route";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,7 @@ export async function GET(_req: Request, ctx: RouteCtx): Promise<Response> {
 }
 
 function toRow(r: any): EventInstanceRow {
+  const payload = r.payloadSummary ? safeParse(r.payloadSummary) : null;
   return {
     id: r.id,
     externalEventId: r.externalEventId,
@@ -64,6 +66,7 @@ function toRow(r: any): EventInstanceRow {
     causedByEventId: r.causedByEventId,
     causedByName: r.causedByName,
     payloadSummary: r.payloadSummary,
+    domain: inferEventDomain({ name: r.name, data: payload }),
     ts: r.ts.toISOString(),
   };
 }

@@ -15,6 +15,7 @@ type Options = {
   forcePoll?: boolean;
   /** When stream errors > N times, fall back to polling. Default 3. */
   errorFallbackThreshold?: number;
+  domain?: string;
 };
 
 export function useInngestEventsStream(opts: Options = {}): {
@@ -36,6 +37,7 @@ export function useInngestEventsStream(opts: Options = {}): {
     intervalMs: 2000,
     limit: 200,
     paused: !shouldFallback,
+    domain: opts.domain,
   });
 
   useEffect(() => {
@@ -45,7 +47,10 @@ export function useInngestEventsStream(opts: Options = {}): {
       return;
     }
 
-    const es = new EventSource("/api/events/stream");
+    const params = new URLSearchParams();
+    if (opts.domain) params.set("domain", opts.domain);
+    const qs = params.toString();
+    const es = new EventSource(`/api/events/stream${qs ? `?${qs}` : ""}`);
     const threshold = opts.errorFallbackThreshold ?? 3;
 
     es.onopen = () => {
@@ -99,7 +104,7 @@ export function useInngestEventsStream(opts: Options = {}): {
       es.close();
       setConnected(false);
     };
-  }, [shouldFallback, opts.errorFallbackThreshold]);
+  }, [shouldFallback, opts.errorFallbackThreshold, opts.domain]);
 
   if (shouldFallback) {
     return {

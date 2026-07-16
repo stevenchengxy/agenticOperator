@@ -15,7 +15,7 @@ describe('instance-client', () => {
   });
 
   describe('getInstance', () => {
-    it('GETs /instances/{label}/{value}?domain=招聘-v1 with Bearer auth', async () => {
+    it('GETs /instances/{label}/{value}?domain=RAAS-v1 with Bearer auth', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -23,7 +23,7 @@ describe('instance-client', () => {
       });
       const out = await getInstance('Candidate', 'C-100023');
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3500/api/v1/ontology/instances/Candidate/C-100023?domain=招聘-v1',
+        'http://localhost:3500/api/v1/ontology/instances/Candidate/C-100023?domain=RAAS-v1',
         { headers: { Authorization: 'Bearer test-token' } },
       );
       expect(out).toEqual({ candidate_id: 'C-100023', name: '张三' });
@@ -46,7 +46,7 @@ describe('instance-client', () => {
   });
 
   describe('listInstances', () => {
-    it('GETs /instances/{label}?domain=招聘-v1&<filters> and returns items array', async () => {
+    it('GETs /instances/{label}?domain=RAAS-v1&<filters> and returns items array', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -57,7 +57,7 @@ describe('instance-client', () => {
       });
       const out = await listInstances('Application', { candidate_id: 'C-100023' });
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3500/api/v1/ontology/instances/Application?domain=招聘-v1&candidate_id=C-100023',
+        'http://localhost:3500/api/v1/ontology/instances/Application?domain=RAAS-v1&candidate_id=C-100023',
         { headers: { Authorization: 'Bearer test-token' } },
       );
       expect(out).toEqual([{ id: 'A-1' }, { id: 'A-2' }]);
@@ -81,7 +81,7 @@ describe('instance-client', () => {
   });
 
   describe('listLinks', () => {
-    it('GETs /links?domain=招聘-v1&<filters> and returns items array', async () => {
+    it('GETs /links?domain=RAAS-v1&<filters> and returns items array', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -93,7 +93,7 @@ describe('instance-client', () => {
       });
       const out = await listLinks({ from: 'C-1', type: 'EMPLOYED_BY' });
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3500/api/v1/ontology/links?domain=招聘-v1&from=C-1&type=EMPLOYED_BY',
+        'http://localhost:3500/api/v1/ontology/links?domain=RAAS-v1&from=C-1&type=EMPLOYED_BY',
         { headers: { Authorization: 'Bearer test-token' } },
       );
       expect(out).toHaveLength(1);

@@ -14,12 +14,14 @@
 //   eventName= operation label   ('RoboHire.parseResume', 'pg.INSERT candidate')
 //   agent / runId / traceId      attribution from the entry (caller-resolved)
 //
-// Full request/response bodies stay in the file logs; the DB row keeps a
-// 4000-char preview (same policy as mirrorAgentFileLog). Fire-and-forget —
+// Full request/response bodies are persisted in Postgres as well as the local
+// JSONL compatibility sink, so audit history survives a host replacement.
+// Fire-and-forget —
 // a mirror failure must never break the business call it observes.
 
 import { prisma } from '@/server/db';
 import type { ApiLogEntry } from '@/lib/external-api-log';
+import { classifyFailure, messageWithFailureSummary, stringifyPayloadForLog } from './failure-classifier';
 
 export interface ApiCallLogEventRow {
   level: string;
@@ -38,25 +40,33 @@ export interface ApiCallLogEventRow {
 export function apiLogToLogEvent(entry: ApiLogEntry): ApiCallLogEventRow {
   const failed = !!entry.error || (entry.status != null && entry.status >= 400);
   const statusPart = entry.error ? `ERROR ${entry.error}` : `${entry.status ?? '-'}`;
-  const message =
+  const baseMessage =
     `${entry.label}${entry.method ? ` ${entry.method}` : ''}${entry.url ? ` ${entry.url}` : ''} → ${statusPart}`.slice(
       0,
       2000,
     );
-  let payloadJson: string | null = null;
-  try {
-    payloadJson = JSON.stringify({
-      url: entry.url,
-      method: entry.method,
-      status: entry.status,
-      error: entry.error,
-      request: entry.request,
-      response: entry.response,
-      meta: entry.meta,
-    }).slice(0, 4000);
-  } catch {
-    payloadJson = null;
-  }
+  const payload = {
+    url: entry.url,
+    method: entry.method,
+    status: entry.status,
+    error: entry.error,
+    request: entry.request,
+    response: entry.response,
+    meta: entry.meta,
+  };
+  const failure = classifyFailure({
+    type: failed ? 'agent_error' : 'tool',
+    level: failed ? 'error' : 'info',
+    category: 'api',
+    source: entry.category,
+    agent: entry.agent ?? null,
+    eventName: entry.label,
+    message: baseMessage,
+    payload,
+    status: entry.status ?? null,
+  });
+  const payloadJson = stringifyPayloadForLog(payload, failure, Number.MAX_SAFE_INTEGER);
+  const message = messageWithFailureSummary(baseMessage, failed ? 'agent_error' : 'tool', failure).slice(0, 2000);
   return {
     level: failed ? 'error' : 'info',
     category: 'api',

@@ -16,6 +16,8 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
+import { eventMatchesDomain, inferEventDomain } from "@/lib/events/domain-scope";
+import { ensureEventInstanceDomains } from "@/lib/persistence/domain-backfill";
 
 export const dynamic = "force-dynamic";
 
@@ -33,12 +35,16 @@ export type EventInstanceRow = {
   causedByEventId: string | null;
   causedByName: string | null;
   payloadSummary: string | null;
+  domain: string;
   ts: string;
 };
 
 export type EventInstancesResponse = {
   rows: EventInstanceRow[];
   total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
   nextCursor: string | null;
   meta: { generatedAt: string };
 };
@@ -52,8 +58,12 @@ export async function GET(req: Request): Promise<Response> {
   const externalEventId = url.searchParams.get("externalEventId") ?? undefined;
   const causedByEventId = url.searchParams.get("causedByEventId") ?? undefined;
   const q = url.searchParams.get("q")?.trim() ?? "";
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 100), 1), 500);
+  const limit = positiveInt(url.searchParams.get("limit"), 100, 500);
+  const pageMode = url.searchParams.has("page") || url.searchParams.has("pageSize");
+  const page = positiveInt(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positiveInt(url.searchParams.get("pageSize"), limit, 500);
   const cursor = url.searchParams.get("cursor") ?? undefined;
+  const domain = url.searchParams.get("domain") ?? undefined;
 
   const where: Record<string, unknown> = {};
   if (statusInRaw) {
@@ -74,27 +84,46 @@ export async function GET(req: Request): Promise<Response> {
       { externalEventId: { contains: q } },
     ];
   }
+  if (domain) {
+    where.domain = inferEventDomain({ domain });
+  }
 
   let rows: EventInstanceRow[] = [];
   let total = 0;
   try {
+    if (domain) {
+      // Complete the one-time legacy backfill before count/skip so domain
+      // totals are exact; new writes already persist this value.
+      await ensureEventInstanceDomains();
+    }
     const [items, count] = await Promise.all([
       prisma.eventInstance.findMany({
         where,
         orderBy: [{ ts: "desc" }, { id: "desc" }],
-        take: limit + 1, // +1 to detect more
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        take: pageMode ? pageSize : limit + 1,
+        ...(pageMode
+          ? { skip: (page - 1) * pageSize }
+          : cursor
+            ? { cursor: { id: cursor }, skip: 1 }
+            : {}),
       }),
       prisma.eventInstance.count({ where }),
     ]);
-    const hasMore = items.length > limit;
-    const sliced = hasMore ? items.slice(0, limit) : items;
-    rows = sliced.map(toRow);
+    const mapped = items.map(toRow);
+    // `domain` is already filtered in SQL. eventMatchesDomain is retained as
+    // a defensive assertion for rows written by an older process during a
+    // rolling upgrade, but it no longer changes count/page boundaries.
+    const scoped = domain ? mapped.filter((r) => eventMatchesDomain(r, domain)) : mapped;
+    const hasMore = pageMode ? page * pageSize < count : scoped.length > limit;
+    rows = pageMode ? scoped : scoped.slice(0, limit);
     total = count;
-    const nextCursor = hasMore ? sliced[sliced.length - 1]!.id : null;
+    const nextCursor = hasMore ? rows[rows.length - 1]!.id : null;
     const body: EventInstancesResponse = {
       rows,
       total,
+      page,
+      pageSize: pageMode ? pageSize : limit,
+      totalPages: Math.max(1, Math.ceil(total / (pageMode ? pageSize : limit))),
       nextCursor,
       meta: { generatedAt: new Date().toISOString() },
     };
@@ -124,8 +153,10 @@ function toRow(r: {
   causedByEventId: string | null;
   causedByName: string | null;
   payloadSummary: string | null;
+  domain: string | null;
   ts: Date;
 }): EventInstanceRow {
+  const payload = parseJson(r.payloadSummary);
   return {
     id: r.id,
     externalEventId: r.externalEventId,
@@ -140,8 +171,15 @@ function toRow(r: {
     causedByEventId: r.causedByEventId,
     causedByName: r.causedByName,
     payloadSummary: r.payloadSummary,
+    domain: r.domain ?? inferEventDomain({ name: r.name, data: payload }),
     ts: r.ts.toISOString(),
   };
+}
+
+function positiveInt(raw: string | null, fallback: number, max: number): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(max, Math.max(1, Math.floor(n))) : fallback;
 }
 
 function parseJson(s: string | null): unknown {

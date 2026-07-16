@@ -34,6 +34,26 @@ export function FailureDetailContent({ runId }: { runId: string }) {
       {error && <p className="text-claude-err">{error}</p>}
       {data && (
         <>
+          {data.primaryFailure && (
+            <ClaudeCard className="mb-3 border-claude-err/30 bg-claude-err/5">
+              <ClaudeSectionTitle>{t('monitor_failure_primary_cause')}</ClaudeSectionTitle>
+              <div className="flex items-center gap-2 mb-2 flex-wrap text-[12px]">
+                <ClaudeBadge tone={data.primaryFailure.failure.retryable ? 'warn' : 'err'} size="xs">
+                  {data.primaryFailure.failure.retryable ? t('monitor_run_failure_retryable') : t('monitor_run_failure_action')}
+                </ClaudeBadge>
+                <ClaudeBadge tone="neutral" size="xs">
+                  {data.primaryFailure.failure.component}/{data.primaryFailure.failure.reason}
+                </ClaudeBadge>
+                <span className="text-claude-ink-4 tabular-nums">
+                  {formatTime(data.primaryFailure.ts, lang)}
+                </span>
+              </div>
+              <div className="text-[14px] text-claude-ink-1">{data.primaryFailure.failure.summary}</div>
+              <div className="text-[12px] text-claude-ink-3 mt-1 break-words">
+                {data.primaryFailure.failure.detail ?? data.primaryFailure.message}
+              </div>
+            </ClaudeCard>
+          )}
           <ClaudeCard className="mb-3">
             <ClaudeSectionTitle>{t('monitor_failure_failed_steps')}</ClaudeSectionTitle>
             {data.steps.length === 0 ? (
@@ -54,7 +74,7 @@ export function FailureDetailContent({ runId }: { runId: string }) {
               </ul>
             )}
           </ClaudeCard>
-          <ClaudeCard>
+          <ClaudeCard className="mb-3">
             <ClaudeSectionTitle>{t('monitor_failure_retry_history')}</ClaudeSectionTitle>
             {data.retries.length === 0 ? (
               <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_failure_no_retries')}</div>
@@ -65,6 +85,27 @@ export function FailureDetailContent({ runId }: { runId: string }) {
                     <span className="text-claude-ink-4 tabular-nums mr-2">{formatTime(a.createdAt, lang)}</span>
                     <span className="text-claude-ink-1">{a.agentName}</span>
                     <span className="text-claude-ink-3 ml-1">{a.type}: {a.narrative}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </ClaudeCard>
+          <ClaudeCard>
+            <ClaudeSectionTitle>{t('monitor_failure_log_failures')}</ClaudeSectionTitle>
+            {data.logFailures.length === 0 ? (
+              <div className="text-claude-ink-4 text-[12.5px]">{t('monitor_failure_no_log_failures')}</div>
+            ) : (
+              <ul className="flex flex-col divide-y divide-claude-line">
+                {data.logFailures.map((f) => (
+                  <li key={f.id} className="py-2 text-[12.5px]">
+                    <div className="flex items-center gap-2">
+                      <ClaudeBadge tone={f.level === 'error' || f.level === 'critical' ? 'err' : 'warn'} size="xs">
+                        {f.level}
+                      </ClaudeBadge>
+                      <span className="text-claude-ink-1 font-medium">{f.failure.summary}</span>
+                      <span className="text-claude-ink-4 ml-auto tabular-nums">{formatTime(f.ts, lang)}</span>
+                    </div>
+                    <div className="text-claude-ink-3 mt-1 break-words">{f.failure.detail ?? f.message}</div>
                   </li>
                 ))}
               </ul>

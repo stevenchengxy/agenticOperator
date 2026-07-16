@@ -14,7 +14,8 @@ vi.mock('@/server/inngest/client', () => ({
   },
 }));
 
-import { proseToSkillArray } from './create-jd-agent';
+import { proseToSkillArray, isAoSideBadRequest } from './create-jd-agent';
+import { RobohireApiError } from '@/lib/robohire-client';
 
 describe('proseToSkillArray', () => {
   it('splits numbered hardRequirements prose into discrete items', () => {
@@ -57,5 +58,26 @@ describe('proseToSkillArray', () => {
     expect(proseToSkillArray(null)).toEqual([]);
     expect(proseToSkillArray(123)).toEqual([]);
     expect(proseToSkillArray('   ')).toEqual([]);
+  });
+});
+
+describe('isAoSideBadRequest — AO 自己的 4xx 不该记成 RoboHire 健康退化', () => {
+  it('400/422(我们发的 prompt 有问题)→ true(失败但不写 RoboHire dependency 信号)', () => {
+    expect(isAoSideBadRequest(new RobohireApiError(400, 'CLIENT', 'prompt invalid'))).toBe(true);
+    expect(isAoSideBadRequest(new RobohireApiError(422, 'CLIENT', 'unprocessable'))).toBe(true);
+  });
+
+  it('401/403(密钥/凭证)/429/5xx/network → false(仍走厂商健康分类)', () => {
+    expect(isAoSideBadRequest(new RobohireApiError(401, 'CLIENT', 'unauthorized'))).toBe(false);
+    expect(isAoSideBadRequest(new RobohireApiError(403, 'CLIENT', 'forbidden'))).toBe(false);
+    expect(isAoSideBadRequest(new RobohireApiError(429, 'RATE_LIMITED', 'slow'))).toBe(false);
+    expect(isAoSideBadRequest(new RobohireApiError(503, 'SERVER', 'down'))).toBe(false);
+    expect(isAoSideBadRequest(new RobohireApiError(0, 'NETWORK', 'econnreset'))).toBe(false);
+  });
+
+  it('非 RobohireApiError(普通 Error / 其它)→ false', () => {
+    expect(isAoSideBadRequest(new Error('boom'))).toBe(false);
+    expect(isAoSideBadRequest(null)).toBe(false);
+    expect(isAoSideBadRequest('nope')).toBe(false);
   });
 });

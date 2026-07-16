@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import { summarizePendingAlerts } from '@/server/notifications/summarize';
 import { RECRUITMENT_DOMAIN_ID } from '@/lib/domain-ids';
+import { notificationHref } from '@/lib/notifications/deep-link';
 
 /** Build the domain-scope where-fragment: system always shows; otherwise scope
  *  to the active domain (recruitment default also absorbs null-domain rows). */
@@ -25,31 +26,6 @@ function domainScopeWhere(domain: string | null): Record<string, unknown> {
   const or: Record<string, unknown>[] = [{ category: 'system' }, { domain }];
   if (isRecruitmentDefault) or.push({ domain: null });
   return { OR: or };
-}
-
-/** Resolve a notification's deep-link target (the run/event single process). */
-function hrefFor(linkKind: string | null, linkId: string | null): string | null {
-  if (!linkId) return null;
-  switch (linkKind) {
-    case 'rule_check':
-      return `/rule-check/audits/${linkId}`;
-    case 'run':
-      // /monitor/runs/[id] 只解析 WorkflowRun cuid;监控骨干产的告警带的是
-      // Inngest ULID(26 位 Crockford)→ 之前 96% 深链 404(2026-06-11 审计)。
-      // ULID 形状的 id 走 /monitor?run= 过滤视图(MonitorContent 认这个参数)。
-      if (/^[0-9A-HJKMNP-TV-Z]{26}$/.test(linkId)) {
-        return `/monitor?run=${encodeURIComponent(linkId)}`;
-      }
-      return `/monitor/runs/${linkId}`;
-    case 'trace':
-      return `/correlations/${linkId}`;
-    case 'event':
-      return `/events?eventInstanceId=${encodeURIComponent(linkId)}`;
-    case 'infra':
-      return `/monitor?infra=${encodeURIComponent(linkId)}`;
-    default:
-      return null;
-  }
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -129,28 +105,36 @@ export async function GET(req: Request): Promise<Response> {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
 
-    const notifications = page.map((n) => ({
-      id: n.id,
-      ts: n.ts,
-      kind: n.kind,
-      severity: n.severity,
-      category: n.category,
-      domain: n.domain,
-      source: n.source,
-      title: n.title,
-      body: n.aiSummary ?? n.body,
-      aiSource: n.aiSource,
-      count: n.count,
-      disposition: n.disposition,
-      managerAction: n.managerAction,
-      status: n.status,
-      readAt: n.readAt,
-      lastSeenAt: n.lastSeenAt,
-      anchors: n.anchorsJson ? safeJson(n.anchorsJson) : null,
-      href: hrefFor(n.linkKind, n.linkId),
-      runId: n.runId,
-      traceId: n.traceId,
-    }));
+    const notifications = page.map((n) => {
+      // A re-fired deduped alert updates title/body/lastSeenAt immediately. Do
+      // not keep showing an AI summary generated for an older occurrence.
+      const aiFresh =
+        n.aiSummary != null &&
+        n.aiGeneratedAt != null &&
+        n.aiGeneratedAt.getTime() >= n.lastSeenAt.getTime();
+      return {
+        id: n.id,
+        ts: n.ts,
+        kind: n.kind,
+        severity: n.severity,
+        category: n.category,
+        domain: n.domain,
+        source: n.source,
+        title: n.title,
+        body: aiFresh ? n.aiSummary : n.body,
+        aiSource: aiFresh ? n.aiSource : null,
+        count: n.count,
+        disposition: n.disposition,
+        managerAction: n.managerAction,
+        status: n.status,
+        readAt: n.readAt,
+        lastSeenAt: n.lastSeenAt,
+        anchors: n.anchorsJson ? safeJson(n.anchorsJson) : null,
+        href: notificationHref(n.linkKind, n.linkId),
+        runId: n.runId,
+        traceId: n.traceId,
+      };
+    });
 
     return NextResponse.json({
       notifications,

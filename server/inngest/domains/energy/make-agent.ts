@@ -106,8 +106,8 @@ export function makeOntologyAgent<TData = unknown>(
   const triggers = triggerNames ? triggerNames.map((e) => ({ event: `${eventNs}/${e}` })) : [{ event: seedEvent }];
 
   return client.createFunction(
-    { id: spec.slug, name: `${spec.nameZh} · ${spec.short}`, retries: 0, triggers },
-    async ({ event, step }: any) => {
+    { id: spec.slug, name: `${spec.nameZh} · ${spec.short}`, retries: behavior?.retries ?? 0, triggers },
+    async ({ event, step, runId }: any) => {
       const data = unwrap<TData>(event.data);
       const caseId = data.caseId ?? `case-${spec.actionName}`;
       const depth = typeof data._depth === "number" ? data._depth : 0;
@@ -154,7 +154,16 @@ export function makeOntologyAgent<TData = unknown>(
 
         // ── deterministic behavior (rule-check / gate) ───────────────────────
         if (behavior) {
-          const result = await behavior.compute({ caseId, dsNo, scenario, dataset, upstream, logger, step });
+          const result = await behavior.compute({
+            caseId,
+            runId: String(runId || event.id || `${caseId}:${spec.actionName}`),
+            dsNo,
+            scenario,
+            dataset,
+            upstream,
+            logger,
+            step,
+          });
 
           if (result.skip) {
             logger.event("skip", { reason: result.skipReason ?? "behavior-skip", action: spec.actionName });

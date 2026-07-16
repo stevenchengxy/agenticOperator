@@ -10,6 +10,8 @@ import {
   recordRunFinish,
   captureRunTrace,
 } from "../../lib/inngest-archive/write-through";
+import { recordLogEvent } from "../log/log-event";
+import { recordNotification } from "../notifications/ingest";
 
 function warn(where: string, e: unknown): void {
   console.warn(`[write-through] ${where}:`, e instanceof Error ? e.message : e);
@@ -81,13 +83,43 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
   }
 
   async onRunError({ ctx, fn, error, isFinalAttempt }: Middleware.OnRunErrorArgs): Promise<void> {
-    if (!isFinalAttempt) return; // will retry — not terminal yet
+    const event = this.event(ctx);
+    const functionId = fn.id();
+    const nonRetriable = error?.name === "NonRetriableError";
+    const payloadJson = JSON.stringify({
+      error: { name: error?.name, message: error?.message, stack: error?.stack },
+      final_attempt: isFinalAttempt,
+      function_id: functionId,
+      function_slug: this.slug(fn),
+      event_name: event?.name ?? null,
+      event_id: event?.id ?? null,
+    });
+
+    // Non-final failures are not alerts yet: Inngest still owns recovery. Keep a
+    // structured retry row in the unified audit log so operators can prove that
+    // automatic retry happened instead of seeing an unexplained time gap.
+    if (!isFinalAttempt) {
+      try {
+        await recordLogEvent({
+          type: "step.retrying",
+          source: "inngest",
+          agent: functionId,
+          runId: ctx.runId,
+          eventName: event?.name,
+          message: `${fn.name} 执行失败，Inngest 将自动重试: ${error?.message ?? "unknown error"}`,
+          payloadJson,
+        });
+      } catch (e) {
+        warn("onRunError.retry-log", e);
+      }
+      return;
+    }
+
     const finishedAtIso = new Date().toISOString();
     const output = {
       error: { name: error?.name, message: error?.message, stack: error?.stack },
     };
     try {
-      const event = this.event(ctx);
       await recordRunFinish({
         runId: ctx.runId,
         functionSlug: this.slug(fn),
@@ -106,6 +138,35 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
     void captureRunTrace({ runId: ctx.runId, status: "Failed", output, finishedAtIso }).catch((e) =>
       warn("captureRunTrace", e),
     );
+
+    // Every terminal Inngest failure gets both a queryable error row and one
+    // deduped in-app alert linked to the run. Agent-local loggers remain useful
+    // for richer context, but notification coverage no longer depends on each
+    // handler remembering to emit `handler.error`.
+    try {
+      await recordLogEvent({
+        type: "agent_error",
+        source: "inngest",
+        agent: functionId,
+        runId: ctx.runId,
+        eventName: event?.name,
+        message: `${fn.name} 终态失败: ${error?.message ?? "unknown error"}`,
+        payloadJson,
+      });
+      await recordNotification({
+        level: "error",
+        category: "agent_error",
+        source: fn.name || functionId,
+        agent: functionId,
+        runId: ctx.runId,
+        message: `${fn.name || functionId} ${
+          nonRetriable ? "永久错误（无需重试）" : "自动重试耗尽后失败"
+        }: ${error?.message ?? "unknown error"}`,
+        dedupeHint: `inngest_run_failed.${this.slug(fn)}`,
+      });
+    } catch (e) {
+      warn("onRunError.terminal-observability", e);
+    }
   }
 
   async wrapSendEvent({

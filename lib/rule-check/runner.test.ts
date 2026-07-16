@@ -79,8 +79,8 @@ function mockRulesFourRules(): void {
     businessBackgroundReason: '',
     ruleSource: '',
     executor: 'Agent' as const,
-    enforcementLevel: 'optional' as const,
-    failurePolicy: 'warn' as const,
+    enforcementLevel: 'mandatory' as const,
+    failurePolicy: 'block' as const,
     severity: 'terminal' as const,
   });
   const rules = ['10-1', '10-2', '10-3', '10-4'].map(ruleShape);
@@ -113,8 +113,8 @@ function mockRulesFiveRules(): void {
     businessBackgroundReason: '',
     ruleSource: '',
     executor: 'Agent' as const,
-    enforcementLevel: 'optional' as const,
-    failurePolicy: 'warn' as const,
+    enforcementLevel: 'mandatory' as const,
+    failurePolicy: 'block' as const,
     severity: 'terminal' as const,
   });
   const rules = ['10-1', '10-2', '10-3', '10-4', '10-5'].map(ruleShape);
@@ -149,8 +149,8 @@ function mockRulesOneStepOneRule(): void {
         businessBackgroundReason: '',
         ruleSource: '',
         executor: 'Agent',
-        enforcementLevel: 'optional',
-        failurePolicy: 'warn',
+        enforcementLevel: 'mandatory',
+        failurePolicy: 'block',
         severity: 'terminal',
       },
     ],
@@ -175,6 +175,8 @@ function mockRulesOneStepOneRule(): void {
             businessBackgroundReason: '',
             ruleSource: '',
             executor: 'Agent',
+            enforcementLevel: 'mandatory',
+            failurePolicy: 'block',
             severity: 'terminal',
           },
         ],
@@ -227,6 +229,87 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(out.stats.pass).toBe(1);
     expect(out.rule_results).toHaveLength(1);
     expect(out.explanations).toHaveLength(0);
+  });
+
+  it('checks optional rules, retains fail as reference, and does not block', async () => {
+    const mandatory = {
+      id: 'M-1',
+      specificScenarioStage: '',
+      businessLogicRuleName: 'mandatory gate',
+      applicableClient: '通用',
+      applicableDepartment: 'N/A',
+      submissionCriteria: 'sc',
+      standardizedLogicRule: 'logic',
+      relatedEntities: [],
+      businessBackgroundReason: '',
+      ruleSource: '',
+      executor: 'Agent' as const,
+      enforcementLevel: 'mandatory' as const,
+      failurePolicy: 'block' as const,
+      severity: 'terminal' as const,
+    };
+    const optional = {
+      ...mandatory,
+      id: 'O-1',
+      businessLogicRuleName: 'optional signal',
+      enforcementLevel: 'optional' as const,
+      failurePolicy: 'warn' as const,
+      severity: 'flag_only' as const,
+    };
+    mFetchRules.mockResolvedValueOnce({
+      rules: [mandatory, optional],
+      source: 'ontology-api',
+      steps: [{
+        step_id: 's1',
+        order: 1,
+        name: 'check-all',
+        description: '',
+        condition: '',
+        rules: [mandatory, optional],
+      }],
+      provenance: [
+        { rule_id: 'M-1', tier: 'general', included: true, reason: 'included' },
+        {
+          rule_id: 'O-1',
+          tier: 'general',
+          included: true,
+          reason: 'optional reference',
+          enforcement_level: 'optional',
+          reference_only: true,
+        },
+      ],
+      client_name_resolved: '腾讯',
+      business_group_resolved: null,
+      api_rule_count: 2,
+      filtered_rule_count: 2,
+    });
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        rule_results: [
+          { rule_id: 'M-1', status: 'pass', reason: 'mandatory passed', next_action: 'continue' },
+          // Even if the model asks to block, server governance must override it.
+          { rule_id: 'O-1', status: 'fail', reason: 'weak signal hit', next_action: 'block' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 10,
+      toolUseIterations: 0,
+    });
+
+    const out = await runRuleCheck(fakeInput());
+    expect(out.decision).toBe('PASS');
+    expect(out.stats.fail).toBe(1);
+    expect(out.rule_results).toHaveLength(2);
+    expect(out.rule_results[1]).toMatchObject({
+      rule_id: 'O-1',
+      status: 'fail',
+      enforcement_level: 'optional',
+      severity: 'flag_only',
+      blocking: false,
+      next_action: 'review',
+    });
+    expect(out.explanations[0]).toMatchObject({ rule_id: 'O-1', blocking: false });
   });
 
   it('FAIL: pending on a 底线规则 fails-closed (policy 2026-06-01 — agent 无法自证达标)', async () => {
@@ -289,6 +372,39 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     expect(out.audit.fail_reason).toBe('parse-error');
     expect(out.rule_results).toEqual([]);
     expect(out.explanations).toEqual([]);
+  });
+
+  it('parses JSON object embedded in prose/fence instead of fail-safing', async () => {
+    mockRulesOneStepOneRule();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: '好的,以下是结果:\n```json\n{\n  "rule_results": [\n    { "rule_id": "10-25", "status": "pass", }\n  ],\n}\n```',
+      modelUsed: 'm',
+      durationMs: 5,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.audit.fail_reason).toBeUndefined();
+    expect(out.decision).toBe('PASS');
+    expect(out.rule_results).toHaveLength(1);
+  });
+
+  it('accepts common rule_results aliases from the LLM', async () => {
+    mockRulesOneStepOneRule();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        ruleResults: [
+          { rule_id: '10-25', status: 'pass' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 5,
+      toolUseIterations: 0,
+    });
+    const out = await runRuleCheck(fakeInput());
+    expect(out.audit.fail_reason).toBeUndefined();
+    expect(out.rule_results).toHaveLength(1);
   });
 
   it('fail-safe FAIL when chatComplete rejects (gateway/network)', async () => {
@@ -415,6 +531,32 @@ describe('runRuleCheck — new MatchResumeCheckResult shape', () => {
     const out = await runRuleCheck(fakeInput());
     expect(out.decision).toBe('FAIL');
     expect(out.audit.fail_reason).toBe('parse-error');
+  });
+
+  it('parse-error fail-safe when rule ids are duplicated and another expected rule is missing', async () => {
+    mockRulesFourRules();
+    mockGraphEmpty();
+    mChat.mockResolvedValueOnce({
+      text: JSON.stringify({
+        rule_results: [
+          { rule_id: '10-1', status: 'pass' },
+          { rule_id: '10-1', status: 'pass' },
+          { rule_id: '10-3', status: 'pass' },
+          { rule_id: '10-4', status: 'pass' },
+        ],
+      }),
+      modelUsed: 'm',
+      durationMs: 1,
+      toolUseIterations: 0,
+    });
+
+    const out = await runRuleCheck(fakeInput());
+
+    expect(out.decision).toBe('FAIL');
+    expect(out.audit.fail_reason).toBe('parse-error');
+    expect(out.audit.parse_error).toContain('duplicates=10-1');
+    expect(out.audit.parse_error).toContain('missing=10-2');
+    expect(out.rule_results).toEqual([]);
   });
 
   it('treats not_executed as requiring a reason; includes it in explanations', async () => {

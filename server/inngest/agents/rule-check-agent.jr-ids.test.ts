@@ -15,10 +15,23 @@ vi.mock('@/server/inngest/client', () => ({
 }));
 // @/server/db 在 import 时即构造真实 PrismaClient(本地无 PG),必须 mock 掉。
 vi.mock('@/server/db', () => ({
-  prisma: {
-    ruleCheckAudit: { create: vi.fn(async () => ({})) },
-    ruleCheckFlag: { createMany: vi.fn(async () => ({})) },
-  },
+  prisma: (() => {
+    const tx = {
+      ruleCheckAudit: { upsert: vi.fn(async () => ({})) },
+      ruleCheckFlag: {
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        createMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    return {
+      ...tx,
+      $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
+      notification: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+  })(),
 }));
 vi.mock('@/lib/agent-logger', () => ({
   createAgentLogger: vi.fn(() => ({ event: vi.fn() })),
@@ -27,10 +40,14 @@ vi.mock('@/lib/agent-logger', () => ({
 }));
 vi.mock('@/lib/rule-check', () => ({
   buildRuleCheckInput: vi.fn((x: unknown) => x),
+  formatExplanation: vi.fn((e: { rule_id: string; reason?: string }) =>
+    `[${e.rule_id}] ${e.reason ?? ''}`,
+  ),
   runRuleCheck: vi.fn(),
 }));
 vi.mock('@/lib/rule-check/ontology', () => ({
   extractDims: vi.fn(() => ({ client_id: 'C', business_group: null, studio: null })),
+  loadAllRules: vi.fn(() => []),
   severityForRuleId: vi.fn(() => 'low'),
 }));
 vi.mock('@/lib/partner-pg/client', () => ({ isPartnerPgConfigured: vi.fn(() => true) }));

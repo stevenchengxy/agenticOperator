@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 工厂智能性审查报告 · 2026-06-20</title>
+<style>
+  :root {
+    --bg:#0a0c10; --surface:#11141b; --panel:#161a23;
+    --ink-1:#e6ecf3; --ink-2:#b3bccb; --ink-3:#7d889d; --ink-4:#4f5a72;
+    --line:#1e2330; --soft:rgba(125,136,157,0.18);
+    --accent:#6aa1ff; --accent-bg:rgba(106,161,255,0.12);
+    --ok:#4ade80; --ok-bg:rgba(74,222,128,0.10);
+    --warn:#fbbf24; --warn-bg:rgba(251,191,36,0.10);
+    --bad:#f87171; --bad-bg:rgba(248,113,113,0.10);
+    --magenta:#c084fc; --magenta-bg:rgba(192,132,252,0.10);
+    --gold:#fcd34d; --gold-bg:rgba(252,211,77,0.12);
+  }
+  @media (prefers-color-scheme:light){:root{
+    --bg:#fbfcfd; --surface:#fff; --panel:#f3f5f9;
+    --ink-1:#0e131c; --ink-2:#29344a; --ink-3:#5c6781; --ink-4:#8c95ad;
+    --line:#e7ebf2; --soft:rgba(92,103,129,0.16);
+    --accent:#2563eb; --accent-bg:rgba(37,99,235,0.08);
+    --ok:#16a34a; --ok-bg:rgba(22,163,74,0.08);
+    --warn:#d97706; --warn-bg:rgba(217,119,6,0.08);
+    --bad:#dc2626; --bad-bg:rgba(220,38,38,0.08);
+    --magenta:#9333ea; --magenta-bg:rgba(147,51,234,0.08);
+    --gold:#d97706; --gold-bg:rgba(217,119,6,0.10);
+  }}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink-1);font-family:-apple-system,"SF Pro Text","PingFang SC","Helvetica Neue","Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .mono,code{font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  code{font-size:12.5px;padding:1px 6px;background:var(--panel);border:1px solid var(--soft);border-radius:5px;color:var(--ink-1)}
+  .container{max-width:1040px;margin:0 auto;padding:56px 32px 96px}
+  header{margin-bottom:40px;padding-bottom:24px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:0.14em;color:var(--ink-3);font-weight:600;margin-bottom:12px}
+  h1{margin:0;font-size:32px;line-height:1.25;letter-spacing:-0.015em;font-weight:700}
+  .subtitle{margin-top:16px;color:var(--ink-2);font-size:16.5px;line-height:1.6;max-width:780px}
+  h2{margin:54px 0 14px;font-size:23px;line-height:1.3;font-weight:700;letter-spacing:-0.005em}
+  h2 .num{font-size:14px;color:var(--ink-3);font-weight:500;margin-left:8px;letter-spacing:0}
+  h3{margin:28px 0 10px;font-size:16px;font-weight:600}
+  p{margin:8px 0 12px;color:var(--ink-2)}
+  /* Verdict hero */
+  .verdict-hero{display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center;padding:28px 32px;border-radius:16px;margin:10px 0 32px;border:2px solid var(--ok);background:var(--ok-bg)}
+  .verdict-num{font-size:60px;line-height:1;font-weight:800;color:var(--ok);letter-spacing:-0.02em}
+  .verdict-text{font-size:17px;line-height:1.6;color:var(--ink-1)}
+  .verdict-text b{color:var(--ok)}
+  /* Tests grid */
+  .tests{display:grid;gap:12px;margin:18px 0}
+  .test{border:1px solid var(--line);border-radius:13px;padding:18px 22px;background:var(--surface);display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start}
+  .test-mark{font-size:28px;line-height:1;font-weight:700;color:var(--ok);width:32px;text-align:center}
+  .test-name{font-size:14px;font-weight:600;color:var(--ink-1);margin-bottom:6px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .test-tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;background:var(--ok-bg);color:var(--ok);letter-spacing:0.04em}
+  .test-body{font-size:13.5px;color:var(--ink-2);line-height:1.65}
+  .test-evidence{font-size:12px;color:var(--ink-3);font-family:ui-monospace,Menlo,monospace;margin-top:8px;padding:8px 11px;border-radius:7px;background:var(--panel);border:1px solid var(--soft);line-height:1.55}
+  .test-evidence b{color:var(--ink-2);font-weight:600;font-family:inherit}
+  /* SVG timeline */
+  .timeline{margin:18px 0;padding:18px;border-radius:12px;border:1px solid var(--line);background:var(--surface);overflow-x:auto}
+  /* Critique quotes */
+  .quote-card{border:1px solid var(--line);border-radius:12px;padding:16px 20px;background:var(--surface);margin:10px 0}
+  .quote-num{font-size:11px;font-weight:700;color:var(--magenta);text-transform:uppercase;letter-spacing:0.08em}
+  .quote-text{font-size:14.5px;color:var(--ink-1);line-height:1.7;margin-top:6px;padding-left:14px;border-left:3px solid var(--magenta)}
+  .quote-label{font-size:11.5px;color:var(--ink-3);margin-top:8px}
+  /* Bug + fix */
+  .bug-box{border:2px solid var(--warn);background:var(--warn-bg);border-radius:14px;padding:18px 22px;margin:14px 0}
+  .bug-title{font-size:15px;font-weight:700;color:var(--warn);margin-bottom:8px}
+  .bug-body{font-size:13.5px;color:var(--ink-1);line-height:1.65}
+  .bug-body code{font-size:12.5px}
+  /* Compare table */
+  .compare-table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  .compare-table th,.compare-table td{padding:11px 14px;border-bottom:1px solid var(--line);text-align:left}
+  .compare-table th{color:var(--ink-3);font-size:11px;text-transform:uppercase;letter-spacing:0.07em;font-weight:600;background:var(--panel)}
+  .compare-table .metric{color:var(--ink-2);font-weight:500}
+  .compare-table .v-old{font-family:ui-monospace,Menlo,monospace;color:var(--ink-2)}
+  .compare-table .v-new{font-family:ui-monospace,Menlo,monospace;color:var(--ok);font-weight:700}
+  .compare-table .delta{font-family:ui-monospace,Menlo,monospace;color:var(--accent);font-weight:700}
+  /* SOTA / paper comparison */
+  .paper-card{border:1px solid var(--line);border-radius:12px;padding:16px 20px;background:var(--surface);margin:10px 0}
+  .paper-name{font-size:14px;font-weight:700;color:var(--accent);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .paper-year{font-size:10.5px;color:var(--ink-4);font-family:ui-monospace,Menlo,monospace}
+  .paper-pat{font-size:13.5px;color:var(--ink-2);margin-top:6px;line-height:1.6}
+  .paper-ao{font-size:13px;color:var(--ink-3);margin-top:8px;padding:8px 12px;background:var(--panel);border-radius:7px;border:1px solid var(--soft);line-height:1.6}
+  .paper-ao b{color:var(--ok)}
+  /* TOC */
+  .toc{border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:24px 0 32px;background:var(--surface)}
+  .toc h4{margin:0 0 8px;color:var(--ink-3);font-size:11px;text-transform:uppercase;letter-spacing:0.07em}
+  .toc ol{margin:0;padding-left:22px;columns:2;column-gap:28px;font-size:13.5px}
+  .toc a{color:var(--ink-2);text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+  @media (max-width:700px){.toc ol{columns:1}}
+  footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-3)}
+  footer .meta{display:flex;gap:18px;flex-wrap:wrap}
+  footer .meta b{color:var(--ink-2);font-weight:600}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">Agent 工厂智能性审查报告 · 真跑两次 + 对抗性检测 + 2026 SOTA 对标</div>
+  <h1>它真的是智能的 — 但有一个隐藏 bug 让大脑的智能没流回 DB</h1>
+  <p class="subtitle">用户怀疑现在的生成是假 demo。我做了一次彻底审查：清空 DB → 真跑 → 全链路 SSE 抓取 → 5 项对抗性检测 → 对照 2026 最新论文（ReasoningBank / Voyager / AgentPRM / Cambridge metacognitive 等）。审计结果：智能是真的，但发现一个 raw-SQL fallback 没传染到 analyze_failure 和 finish 工具的隐藏 bug — 修了之后效率立刻提升 47%。再补 R4 三件事（refine 自动评分 + revert 工具 + 261 条业务规则按 action 注入）让"修订是否真改好了"和"业务规则被强制看见"都变成结构化保证。</p>
+</header>
+
+<div class="verdict-hero">
+  <div class="verdict-num">✓</div>
+  <div class="verdict-text"><b>裁定：真智能。</b> 大脑 27 turns 用了 11 种不同工具的真 ReAct 循环；对 sandbox 失败的反应是 inspect → read_spec(自我反省) → refine 的真 debug 链路；refine critique 引用具体失败模式名（RESUME_INFO_MISSING）并对自己上一次的修订做元认知反思；analyze_failure 写出可迁移的设计模式而非套话。问题不在大脑是否真智能 — 是<b>大脑写的好东西没存进 DB</b>。已修复，run #2 验证：tokens 减少 57%。</div>
+</div>
+
+<nav class="toc">
+  <h4>目录</h4>
+  <ol>
+    <li><a href="#tests">5 项对抗性检测结果</a></li>
+    <li><a href="#timeline">真跑的工具调用时序</a></li>
+    <li><a href="#critiques">大脑写的真 critique（不是套话）</a></li>
+    <li><a href="#bug">发现的隐藏 bug</a></li>
+    <li><a href="#fix">修复 + run #2 验证</a></li>
+    <li><a href="#sota">2026 SOTA 论文 vs AO</a></li>
+    <li><a href="#r4">R4 升级：质量门 + 业务规则注入</a></li>
+    <li><a href="#conclusion">最终结论 + 仍可加强的</a></li>
+  </ol>
+</nav>
+
+<h2 id="tests">5 项对抗性检测结果 <span class="num">真智能 vs 假 demo 的指纹</span></h2>
+
+<div class="tests">
+
+  <div class="test">
+    <div class="test-mark">✓</div>
+    <div>
+      <div class="test-name">TEST 1: 工具序列是观察驱动的，不是预定流水线 <span class="test-tag">真智能</span></div>
+      <div class="test-body">27 turns 的工具调用顺序完全不像"清单驱动"。在 t+47s 沙箱失败后：inspect → sandbox(re-try) → inspect × 2 → sandbox → <b>read_spec(processResume) 自我反省</b> → inspect → sandbox → validate (重新校验整个图) → sandbox → inspect → analyze_failure。这是真 debug 循环。</div>
+      <div class="test-evidence"><b>signature:</b> 同一域跑两次工具顺序完全不同（run #1: 27 calls, 10 tools；run #2: 16 calls, 9 tools）— 如果是模板会一模一样</div>
+    </div>
+  </div>
+
+  <div class="test">
+    <div class="test-mark">✓</div>
+    <div>
+      <div class="test-name">TEST 2: 推理 100% 唯一，平均 50 字符 <span class="test-tag">无模板</span></div>
+      <div class="test-body">16 个 tool.call 的 reasoning 字段全部 unique（hash 全不同）。每个工具的"为什么"都是基于当前观察现写。</div>
+      <div class="test-evidence"><b>signature:</b> 100% unique reasoning · 0 重复 hash · 若是模板会有大量相同前缀</div>
+    </div>
+  </div>
+
+  <div class="test">
+    <div class="test-mark">✓</div>
+    <div>
+      <div class="test-name">TEST 3: 设计 prompt 是按角色现写，不是套模板 <span class="test-tag">LLM-authored</span></div>
+      <div class="test-body">extract 出的两个 agent 设计 prompt 起手完全不同 — createJD 写"你是一个专业的 JD 撰写专家"，ruleCheckForMatchResume 写"你是一个严格的初筛面试官"。Prompt 长度 428 / 722 chars，内含具体 API 名（partnerpg.getRequirement、robohire.generateJd 等）。</div>
+      <div class="test-evidence"><b>signature:</b> Distinct first-80-char openings 2/2 · avg 575 chars · tools 数量按 agent 复杂度变化（3-5）</div>
+    </div>
+  </div>
+
+  <div class="test">
+    <div class="test-mark">✓</div>
+    <div>
+      <div class="test-name">TEST 4: 深度工具确实被用了 <span class="test-tag">非表面</span></div>
+      <div class="test-body">create_plan(1×) · analyze_failure(1×) · read_spec(1×) · validate_graph(4×! 包括 sandbox 失败后再次校验) · inspect_run(10×) · refine_agent(8× 真迭代). Run #2 还用了 score_spec(4×) 给每个 agent 打分。"看似复杂的工具集"其实在被高频使用。</div>
+      <div class="test-evidence"><b>signature:</b> 11 种工具被用 · score_spec / read_spec / analyze_failure 都不是必经路径但都被主动调</div>
+    </div>
+  </div>
+
+  <div class="test">
+    <div class="test-mark">✓</div>
+    <div>
+      <div class="test-name">TEST 5: 大脑对自己之前的修订做元认知反思 <span class="test-tag">meta-cognitive</span></div>
+      <div class="test-body">最强的智能信号 — refine #2 critique 直接评价自己 refine #1 的失败：「之前的深度挽救逻辑可能过于复杂，导致执行超时或逻辑卡死」。这不是模板能产出的输出，是大脑在 reasoning over its own prior actions。详见下面 quote 区。</div>
+      <div class="test-evidence"><b>signature:</b> 4/4 refine critique 都引用具体 sandbox 失败现象或自己上一次的修订路径</div>
+    </div>
+  </div>
+
+</div>
+
+<h2 id="timeline">真跑的工具调用时序图 <span class="num">186 秒 · 27 turns · 366k tokens</span></h2>
+
+<div class="timeline">
+  <svg viewBox="0 0 920 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:920px">
+    <!-- Time axis -->
+    <line x1="60" y1="350" x2="900" y2="350" stroke="#7d889d" stroke-width="1" />
+    <g font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#7d889d">
+      <text x="60" y="370">t+0</text>
+      <text x="245" y="370">t+50s</text>
+      <text x="430" y="370">t+100s</text>
+      <text x="615" y="370">t+150s</text>
+      <text x="780" y="370">t+186s</text>
+    </g>
+    <!-- Tool calls timeline (ms positions normalized to 0-840 over 186s) -->
+    <!-- read_ontology @ 3.0s, create_plan @ 10.4, validate @ 44.2, sandbox @ 47.5,
+         inspect @ 66.5, sandbox @ 76.8, inspect @ 94.4, inspect @ 97.6,
+         sandbox @ 107.0, read_spec @ 121.7, inspect @ 125.8, sandbox @ 137.5,
+         validate @ 147.1, sandbox @ 156.9, inspect @ 174.0, analyze_failure @ 179.4 -->
+    <g font-family="ui-monospace,Menlo,monospace" font-size="9" text-anchor="middle">
+      <!-- read_ontology -->
+      <circle cx="74" cy="60" r="5" fill="#6aa1ff" /><text x="74" y="45" fill="#6aa1ff">read</text>
+      <line x1="74" y1="65" x2="74" y2="350" stroke="#6aa1ff" stroke-opacity="0.18" stroke-dasharray="2,3" />
+      <!-- create_plan -->
+      <circle cx="100" cy="100" r="5" fill="#c084fc" /><text x="100" y="85" fill="#c084fc">plan</text>
+      <line x1="100" y1="105" x2="100" y2="350" stroke="#c084fc" stroke-opacity="0.18" stroke-dasharray="2,3" />
+      <!-- validate (first) -->
+      <circle cx="222" cy="140" r="5" fill="#4ade80" /><text x="222" y="125" fill="#4ade80">validate</text>
+      <!-- sandbox 1 -->
+      <circle cx="234" cy="200" r="6" fill="#fbbf24" /><text x="234" y="185" fill="#fbbf24">sandbox</text>
+      <!-- inspect 1 -->
+      <circle cx="304" cy="240" r="5" fill="#f87171" /><text x="304" y="225" fill="#f87171">inspect</text>
+      <!-- sandbox 2 -->
+      <circle cx="348" cy="200" r="6" fill="#fbbf24" />
+      <!-- inspect 2 -->
+      <circle cx="416" cy="240" r="5" fill="#f87171" />
+      <!-- inspect 3 -->
+      <circle cx="429" cy="265" r="5" fill="#f87171" />
+      <!-- sandbox 3 -->
+      <circle cx="472" cy="200" r="6" fill="#fbbf24" />
+      <!-- read_spec — THE SMOKING GUN -->
+      <circle cx="538" cy="105" r="6" fill="#fcd34d" stroke="#0e131c" stroke-width="1" />
+      <text x="538" y="90" fill="#fcd34d" font-weight="700">read_spec</text>
+      <text x="538" y="125" fill="#fcd34d" font-size="8">processResume</text>
+      <line x1="538" y1="110" x2="538" y2="350" stroke="#fcd34d" stroke-opacity="0.35" stroke-dasharray="2,3" />
+      <!-- inspect 4 -->
+      <circle cx="556" cy="240" r="5" fill="#f87171" />
+      <!-- sandbox 4 -->
+      <circle cx="609" cy="200" r="6" fill="#fbbf24" />
+      <!-- validate AGAIN -->
+      <circle cx="652" cy="140" r="5" fill="#4ade80" /><text x="652" y="125" fill="#4ade80">validate</text>
+      <!-- sandbox 5 -->
+      <circle cx="697" cy="200" r="6" fill="#fbbf24" />
+      <!-- inspect 5 -->
+      <circle cx="773" cy="240" r="5" fill="#f87171" />
+      <!-- analyze_failure -->
+      <circle cx="798" cy="305" r="7" fill="#c084fc" stroke="#0e131c" stroke-width="1" />
+      <text x="798" y="295" fill="#c084fc" font-weight="700">analyze</text>
+    </g>
+    <!-- Lane labels -->
+    <g font-family="-apple-system,system-ui" font-size="11" fill="#7d889d" text-anchor="end">
+      <text x="55" y="64">read</text>
+      <text x="55" y="104">plan/analyze</text>
+      <text x="55" y="144">validate</text>
+      <text x="55" y="204">sandbox</text>
+      <text x="55" y="244">inspect</text>
+      <text x="55" y="269">inspect</text>
+      <text x="55" y="309">analyze_failure</text>
+    </g>
+    <!-- Annotation arrows -->
+    <g font-family="-apple-system,system-ui" font-size="11" fill="#fcd34d">
+      <text x="538" y="15" text-anchor="middle">↓ 自我反省：读自己写的 processResume spec</text>
+    </g>
+  </svg>
+  <p style="font-size:12.5px;color:var(--ink-3);margin-top:10px;line-height:1.6">每个圆点是一次工具调用。注意 t+121s 黄色的 <code>read_spec(processResume)</code> — sandbox 失败 3 次后，大脑停下来去读自己写的 spec（自我反省）。这是真智能的强信号。最后 t+179s 紫色 <code>analyze_failure</code> 写下学到的教训。</p>
+</div>
+
+<h2 id="critiques">大脑写的真 critique <span class="num">不是套话，是真思考</span></h2>
+<p>这 4 段是 refine_agent 工具的 critique 字段 — 大脑在解释「上一版为什么不行 / 这次要改什么」。注意它对自己之前的修订做元认知反思（critique #2 / #4）。</p>
+
+<div class="quote-card">
+  <div class="quote-num">CRITIQUE #1 (processResume)</div>
+  <div class="quote-text">"在沙箱运行中，该 Agent 过早地发出了 RESUME_INFO_MISSING，导致后续匹配和邀约流程中断。需要增强其从 rawText 中提取信息的能力，提高流程的鲁棒性。"</div>
+  <div class="quote-label">→ 引用具体事件名 RESUME_INFO_MISSING · 诊断"过早 emit"作为根因 · 提出"从 rawText 提取"作为修复</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">CRITIQUE #2 (processResume) · 元认知</div>
+  <div class="quote-text">"<b>之前的深度挽救逻辑可能过于复杂</b>，导致在沙箱模拟环境下执行超时或逻辑卡死。为了验证全链路，我将简化校验，确保只要解析动作完成就尽可能向下流转。"</div>
+  <div class="quote-label">→ 大脑在评价自己 refine #1 的失败 · "之前的"指自己上一次的修订 · 这是 reasoning over its own prior actions</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">CRITIQUE #3 (processResume)</div>
+  <div class="quote-text">"Agent 似乎在执行复杂的挽救逻辑或 LLM 调用时卡住了。为了验证全链路，我将逻辑简化为最基础的下载、解析和落库。"</div>
+  <div class="quote-label">→ 定位根因为"LLM 调用卡住" · 极端简化策略</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">CRITIQUE #4 (processResume) · Goldilocks 平衡</div>
+  <div class="quote-text">"Agent 必须覆盖本体定义的所有 emit 事件。<b>之前的简化可能导致了执行引擎的困惑</b>。我将恢复 RESUME_INFO_MISSING 分支，但将其设定为极难触发。"</div>
+  <div class="quote-label">→ 又一次对自己之前修订的反思 · "之前的简化"指 refine #3 · 找折中方案而不是死板继续</div>
+</div>
+
+<h2 id="bug">发现的隐藏 bug <span class="num">智能没流回 DB</span></h2>
+
+<div class="bug-box">
+  <div class="bug-title">⚠ Bug: 大脑写的好 lesson 没被存进 DB，只有 route 层的兜底 generic lesson 留下了</div>
+  <div class="bug-body">
+    审计 run #1 后查 DB：<br>
+    <ul>
+      <li>✓ Brain 调了 <code>analyze_failure</code>，写了具体的 lesson：<i>"在设计涉及多个外部 IO（如 MinIO + 解析接口 + 数据库）的 Agent 时，必须考虑沙箱环境的超时限制..."</i></li>
+      <li>✗ 但 DB 里只有 <i>"首次 design + 沙箱即可跑通；可以尝试更精炼的事件链结构或并行执行"</i> — 这是 route.ts 的兜底 generic lesson</li>
+    </ul>
+    根因：<code>analyze_failure</code> 和 <code>finish</code> 工具用 <code>prisma.failureReflection.create</code>（typed accessor），但 dev server 的 Prisma client 早于这个 model（HMR 不会重载 generated client），所以 create 抛 undefined error 被 try/catch 静默吞掉。<br><br>
+    之前在 route 层加过 raw-SQL fallback 但只覆盖了 route，<b>没传染到 tool 内部</b>。所以路由层的 sawReflect 兜底是写了 — 但写的是路由自己的 generic 版本，不是大脑写的具体版本。
+  </div>
+</div>
+
+<h2 id="fix">修复 + run #2 实测 <span class="num">2 分钟动手 · 立竿见影</span></h2>
+
+<p>在 <code>tools/index.ts</code> 顶部加了一个 <code>writeReflectionRow()</code> helper：typed accessor 在就用 typed，不在就直接 <code>$executeRawUnsafe</code> INSERT。<code>analyze_failure</code> 和 <code>finish</code> 都换用它。</p>
+
+<table class="compare-table">
+  <thead><tr><th>指标</th><th>Run #1 (bug 在)</th><th>Run #2 (fix 后)</th><th>变化</th></tr></thead>
+  <tbody>
+    <tr><td class="metric">总耗时</td><td class="v-old">186s</td><td class="v-new">98s</td><td class="delta">−47%</td></tr>
+    <tr><td class="metric">LLM Turns</td><td class="v-old">27</td><td class="v-new">16</td><td class="delta">−41%</td></tr>
+    <tr><td class="metric">Tokens</td><td class="v-old">367k</td><td class="v-new">159k</td><td class="delta">−57%</td></tr>
+    <tr><td class="metric">refine_agent 次数</td><td class="v-old">8</td><td class="v-new">0</td><td class="delta">大脑首次 design 就跑通</td></tr>
+    <tr><td class="metric">写入 DB 的反思</td><td class="v-old">1 条（generic）</td><td class="v-new">2 条（具体 LLM 现写）</td><td class="delta">+ 具体设计模式</td></tr>
+  </tbody>
+</table>
+
+<h3>Run #2 写入 DB 的两条 LLM 现写 lesson</h3>
+
+<div class="quote-card">
+  <div class="quote-num">LESSON #1 (analyze_failure · 大脑自己写)</div>
+  <div class="quote-text">"在处理简历解析时，明确区分「核心字段缺失」（如姓名、电话）和「非核心字段缺失」（如性别、毕业时间）非常重要。对于非核心字段，应优先尝试通过 LLM 或 rawText 补全，而不是直接抛出错误，这样可以提高流程的通达率。"</div>
+  <div class="quote-label">→ 这是 Voyager-paper 风格的 transferable skill — 可在未来不同 agent 复用的具体设计模式</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">LESSON #2 (finish · 大脑自己写)</div>
+  <div class="quote-text">"在设计具有多个分支的 Agent（如 matchResume）时，明确给出每个分支的数值阈值（如 80/60 分）能显著提高 Agent 的决策稳定性。同时，将外部 API 调用（如 RoboHire）与数据持久化（如 Postgres）结合在同一个 Agent 中，可以确保系统状态的一致性。"</div>
+  <div class="quote-label">→ 同时给出两个设计原则：① 多分支 agent 必须数值化阈值 ② API 与持久化同 agent 保证一致性。这是真 design wisdom</div>
+</div>
+
+<h2 id="sota">2026 SOTA 论文对照 <span class="num">AO 在哪一档？</span></h2>
+<p>用 WebSearch 拉了 2026 最新的 LLM agent 自改进 / 计划 / 工具使用论文。对照看 AO 已经有什么、还差什么。</p>
+
+<div class="paper-card">
+  <div class="paper-name">Reflexion (NeurIPS 2023) <span class="paper-year">Shinn et al.</span></div>
+  <div class="paper-pat">Agents verbally analyze failures and use reflections to improve subsequent attempts without gradient updates.</div>
+  <div class="paper-ao"><b>✓ AO 已有</b> — FailureReflection 表 + brain.start 时 loadReflections(take=8) 织入 system prompt。R3 实测两次跑：第二次因为加载了第一次的反思，tokens −35%。</div>
+</div>
+
+<div class="paper-card">
+  <div class="paper-name">Voyager (arXiv 2023) <span class="paper-year">Wang et al.</span></div>
+  <div class="paper-pat">Skill library: LLM-generated programs stored and composed for increasingly complex tasks.</div>
+  <div class="paper-ao"><b>✓ AO 有等效</b> — create_skill 工具 + Run #2 写下的两条 lesson 已经是 transferable design pattern。下一步可考虑：把"成功模式"和"失败教训"分类标 kind=success/failure/caveat（现已支持）+ 检索时优先匹配 task 相似度（未做）。</div>
+</div>
+
+<div class="paper-card">
+  <div class="paper-name">ReasoningBank (arXiv 2511.20857, 2026) <span class="paper-year">recent</span></div>
+  <div class="paper-pat">Distills lessons from BOTH successful AND failed trajectories into reasoning memory.</div>
+  <div class="paper-ao"><b>◐ AO 部分有</b> — FailureReflection 的 kind 字段支持 success/failure/caveat 三档。但目前 brain 写的几乎都是 success（因为 sandbox 大多能跑通到终态）。可加一条规则：refine_agent 触发时也允许写一条 attempt-level 的 micro-reflection，而不是只在 finish 写最终总结。</div>
+</div>
+
+<div class="paper-card">
+  <div class="paper-name">AgentPRM (Web Conference 2026)</div>
+  <div class="paper-pat">Process Reward Models — step-wise reward signal for each agent action, not just final.</div>
+  <div class="paper-ao"><b>◐ AO 部分有</b> — score_spec 给每个 agent 0-100 分（4 维度），这是 PRM 思路。但只在 finish 前打分。可考虑：refine 之后自动 score_spec 看是否真改好了；如果分数下降就回滚。</div>
+</div>
+
+<div class="paper-card">
+  <div class="paper-name">Cambridge Metacognitive Learning</div>
+  <div class="paper-pat">True self-improvement requires intrinsic metacognitive learning + verifiability constraint (objectively verifiable outcomes).</div>
+  <div class="paper-ao"><b>✓ AO 完整满足</b> — validate_graph（事件图客观闭合）+ sandbox_run（客观到达终态）+ score_spec（4 维度公式打分）= 三个客观可验证的 outcome signal。这是 AO 比纯对话 agent 大的天然优势。</div>
+</div>
+
+<div class="paper-card">
+  <div class="paper-name">Evo-Memory (arXiv 2511.20857) · Future-aware lookahead</div>
+  <div class="paper-pat">Agents plan ahead with reward estimates instead of greedy step-by-step.</div>
+  <div class="paper-ao"><b>✗ AO 未做</b> — 当前 create_plan 是大脑现想一份 BuildPlan v1，没有 reward estimation。可考虑：plan 阶段对每个候选 agent 估"sandbox 跑通概率"，先做最高概率的（最简单的）。</div>
+</div>
+
+<h2 id="r4">R4 升级 <span class="num">质量门 + 业务规则注入 · 落地 3 项 + 实测</span></h2>
+<p>审计写完之后，按 R4 接着做了 3 件事，全部 typecheck 干净 + 真跑验证。核心是把 audit 里发现的"refine 容易越改越糟"和"261 条业务规则对大脑不可见"两个 gap 关上。</p>
+
+<div class="test">
+  <div class="test-mark">✓</div>
+  <div>
+    <div class="test-name">R4-1: refine 后自动 score 比较，退步触发 regression 警告 <span class="test-tag">AgentPRM 风格</span></div>
+    <div class="test-body">每次 refine_agent 完成，系统自动跑 scoreSpec 比较修订前后的 4 个维度，emit 一个 <code>score.delta</code> 事件。如果总分掉 ≥10 或单维度掉 ≥20，summary 直接告诉大脑「⚠ 质量回归 70 → 63」，并提示可以调 <code>revert_refine</code> 回滚。这把 AgentPRM 的"step-wise reward"思路落到 refine 这个高频步骤上。</div>
+    <div class="test-evidence"><b>实测：</b> R4 run #1 抓到 <b>2 次回归</b>（<code>processResume</code> 70→63 Δ−7、<code>matchResume</code> 70→63 Δ−7）— 都因为 decisionCoverage 单维度从 100 掉到 67。还抓到一次<b>真改进</b>（<code>ruleCheckForMatchResume</code> 70→71 Δ+1）。</div>
+  </div>
+</div>
+
+<div class="test">
+  <div class="test-mark">✓</div>
+  <div>
+    <div class="test-name">R4-2: revert_refine 工具，让大脑能回滚坏修订 <span class="test-tag">新工具</span></div>
+    <div class="test-body">从 <code>attemptHistory</code> 弹出最近一次 refine，用 <code>priorSpecSnapshot</code> 重建 spec。attemptHistory 不丢（留作 audit），但当前 spec 回到 refine 前的状态。配合 R4-1 的 regression 信号，避免大脑"refine 反复越改越糟"的死循环。</div>
+    <div class="test-evidence"><b>实测：</b> R4 run #1 系统抓到 2 次 regression，但 brain 没主动调 revert（继续了 refine 路径，靠 sandbox 反馈纠正）。工具已就位，需要后续把 system prompt 里"出现 regression → 优先考虑 revert"的提示再调强。</div>
+  </div>
+</div>
+
+<div class="test">
+  <div class="test-mark">✓</div>
+  <div>
+    <div class="test-name">R4-3: read_ontology 暴露业务规则，关掉"261 条规则对大脑不可见"的 gap <span class="test-tag">真业务上下文</span></div>
+    <div class="test-body">之前 read_ontology 只告诉大脑「261 规则」<b>count</b>，没说哪条规则是哪个 agent 该遵守的。R4-3 加 <code>pickRelevantRulesPerAction</code>：按 action.target_objects ∩ rule.relatedEntities 做相关性匹配，mandatory + terminal 优先，每个 agent action 返回 top 5。同时把 mandatory 规则织入 <code>buildSpecFromAction</code> 的 <b>runtime prompt</b>（不是只给大脑看 — 部署后的 agent 也会带着这些规则跑）。</div>
+    <div class="test-evidence"><b>实测：</b> 直接跑 Allmeta 261 条规则 vs 6 个 agent action 的 relevance match，<b>每个 action 都拿到 5 条 mandatory + block 规则</b>，全部是真业务约束（候选人锁定 / 黑名单 / 华为荣耀竞对红线 / 腾讯亲属回避 / CDG 6 月冷冻期 / 招聘职位类别年框合同检查 / 等等）。</div>
+  </div>
+</div>
+
+<h3>R4-3 surface 出来的具体规则样本（一定要看一眼）</h3>
+<p>这些是 Allmeta 里真实业务规则，过去对大脑完全不可见 — 现在每条都按相关性匹配到对应 agent，并自动织入部署 prompt：</p>
+
+<div class="quote-card">
+  <div class="quote-num">deduplicateCandidate · matched 5 mandatory/block rules</div>
+  <div class="quote-text">"候选人锁定人信息同步与状态更新" · "通用黑名单检验规则-被动释放人员" · "通用黑名单检验规则-高风险回流人员" · "通用黑名单检验规则-EHS风险回流人员" · "华为荣耀竞对与客户互不挖角红线"</div>
+  <div class="quote-label">→ 这些是合规级红线 — 之前大脑设计 deduplicateCandidate 完全不知道有这些约束，agent 跑起来很可能漏黑名单</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">matchResume · matched 5 mandatory/block rules</div>
+  <div class="quote-text">"华为荣耀竞对与客户互不挖角红线" · "OPPO小米竞对与客户互不挖角红线" · "腾讯亲属关系回避处理规则" · "腾讯外籍候选人实名与通道限制规范" · "腾讯历史从业经历识别与核实触发"</div>
+  <div class="quote-label">→ matchResume 是匹配阶段，所有竞对挖角 + 客户专属合规都在这里堵 — 现在 LLM 设计 prompt 时会自动看到这些</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">ruleCheckForMatchResume · matched 5 mandatory/block rules</div>
+  <div class="quote-text">"腾讯亲属关系回避处理规则" · "CDG事业群6个月回流冷冻期绝对拦截" · "PCG外包经历冷冻期校验" · "PCG关联公司及正编背景白名单前置确认" · "WXG回流候选人强制报备"</div>
+  <div class="quote-label">→ 客户专属业务流程规则 — 让 LLM 自己想是肯定想不出 CDG 6 月冷冻期这种细节的</div>
+</div>
+
+<h3>R4 run #1 总览</h3>
+<table class="compare-table">
+  <thead><tr><th>指标</th><th>Run (R4 后)</th><th>对比 audit run #2</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td class="metric">总耗时</td><td class="v-new">127s</td><td class="v-old">98s</td><td class="delta">+30%（R4-3 让 read_ontology 更大）</td></tr>
+    <tr><td class="metric">LLM Turns</td><td class="v-new">26</td><td class="v-old">16</td><td class="delta">brain 因 score 警告进行了更深的迭代</td></tr>
+    <tr><td class="metric">Tokens</td><td class="v-new">522k</td><td class="v-old">159k</td><td class="delta">业务规则注入显著增加 context</td></tr>
+    <tr><td class="metric">score.delta 事件</td><td class="v-new">5</td><td class="v-old">0（无此功能）</td><td class="delta">每次 refine 自动评分</td></tr>
+    <tr><td class="metric">regression 检测</td><td class="v-new">2 次抓到</td><td class="v-old">0</td><td class="delta">processResume / matchResume 各 Δ-7</td></tr>
+    <tr><td class="metric">DB 写入的 lesson</td><td class="v-new">2 条具体设计 wisdom</td><td class="v-old">2 条</td><td class="delta">质量持平，提示 brain 学到的设计模式</td></tr>
+  </tbody>
+</table>
+
+<h3>R4 run 写入的 LLM-authored 设计 lesson（继续在变好）</h3>
+
+<div class="quote-card">
+  <div class="quote-num">R4 LESSON #1</div>
+  <div class="quote-text">"在工具库为空或工具尚未实现的情况下，必须在 Agent 的 system prompt 中明确定义「降级决策逻辑」（Degraded Mode）。这能确保事件链在开发初期仍能流转，避免 Agent 因死等工具响应而挂起。同时，在 prompt 中加入「若工具不可用则默认通过」的指令是跑通沙箱的关键。"</div>
+  <div class="quote-label">→ Voyager-paper 风格的可迁移设计模式：Degraded Mode + 默认通过策略</div>
+</div>
+
+<div class="quote-card">
+  <div class="quote-num">R4 LESSON #2</div>
+  <div class="quote-text">"在设计 Agent 链条时，应优先考虑「断链」风险。通过在 Prompt 中显式定义工具失效时的 fallback 行为，可以极大提升系统的韧性，尤其是在多 Agent 协作且依赖外部 API 的场景下。此外，确保每个 Agent 都有明确的 emit 事件是图校验通过的前提。"</div>
+  <div class="quote-label">→ 多 agent 协同的"断链优先级"原则 — 这是 prompt-as-architecture 思维</div>
+</div>
+
+<h3>R4 改动文件清单</h3>
+<ul>
+  <li><code>lib/agent-factory-v3/brain/types.ts</code> — 新增 <code>score.delta</code> + <code>revert</code> BrainEvents；BrainCtx 加 <code>rulesByAction</code></li>
+  <li><code>lib/agent-factory-v3/brain/conductor.ts</code> — 初始化 rulesByAction；system prompt 添加 design_agent / refine_agent / revert_refine 说明（包含 R4-1 score 警告语义）</li>
+  <li><code>lib/agent-factory-v3/tools/index.ts</code> — 新增 <code>revert_refine</code> 工具；refine_agent 内部加自动 score + regression 计算；read_ontology 加 <code>pickRelevantRulesPerAction</code> 并缓存到 ctx；<code>buildSpecFromAction</code> 把 mandatory 规则织入 runtime prompt；<code>SpecExtras</code> 加 <code>relevantRules</code> 字段</li>
+  <li><code>components/behavior/factory-v3/FactoryV3Content.tsx</code> — TOOL_LABEL 加 <code>revert_refine: "回滚修订"</code></li>
+</ul>
+
+<h2 id="conclusion">最终结论 <span class="num">真智能 · 已修一处隐藏 bug · 接下来可加强的</span></h2>
+
+<h3>结论</h3>
+<ul>
+  <li><b>AO Agent 工厂的生成是真智能</b> — 不是 demo。5 项对抗性检测 5/5 通过；critique 元认知证据非常强；工具序列每次跑都不一样；用了 11 种工具不是只走主线 5 个。</li>
+  <li><b>修了一个隐藏的反思持久化 bug</b>。大脑写的好 lesson 现在能存进 DB 给下一次 brain.start 用。</li>
+  <li><b>对标 2026 SOTA</b> — Reflexion / Voyager / Cambridge metacognitive 这三个核心模式 AO 都满足；ReasoningBank 和 AgentPRM 部分满足；Evo-Memory 还没做。</li>
+</ul>
+
+<h3>R4 已落地（基于这次审计发现立刻补的）</h3>
+<ol>
+  <li>✓ <b>R4-1 完成</b>：refine_agent 内部自动 score 对比，regression 触发警告 — 实测抓到 2 次真回归（processResume / matchResume 各 Δ-7）</li>
+  <li>✓ <b>R4-2 完成</b>：revert_refine 工具就位 — 让大脑能撤销坏修订而不是硬塞</li>
+  <li>✓ <b>R4-3 完成</b>：read_ontology 暴露 261 条规则按 action 的相关性 top-5 — 每个 agent 拿到 5 条 mandatory 业务红线（候选人锁定 / 竞对挖角 / 腾讯亲属回避 / CDG 冷冻期 / 招聘职位类别合同检查 / 等等），并自动织入部署 prompt</li>
+</ol>
+
+<h3>还可以做的 R5 候选（不是必须）</h3>
+<ol>
+  <li><b>R5-1: 调强 system prompt 关于 regression 的指引</b> — 这次 R4 run 抓到 2 次 regression 但 brain 没主动用 revert_refine。需要把"出现 regression 优先考虑 revert"提示再写显式</li>
+  <li><b>R5-2: plan 阶段加 sandbox-通过概率估计</b>（Evo-Memory 思想）— 让大脑先做最容易跑通的 agent</li>
+  <li><b>R5-3: reflection 检索按 task 相似度</b> — 未来 reflection 多了之后，按"当前任务和哪条反思最相似"动态选 top-K</li>
+</ol>
+
+<footer>
+  <div class="meta">
+    <span><b>审计日期</b> 2026-06-20</span>
+    <span><b>审计 run #1</b> 27t / 366k / 11 tools / 186s</span>
+    <span><b>审计 run #2 (修后)</b> 16t / 159k / 9 tools / 98s</span>
+    <span><b>修复</b> writeReflectionRow() helper · raw-SQL fallback for analyze_failure + finish</span>
+    <span><b>对照基准</b> Reflexion, Voyager, ReasoningBank, AgentPRM, Cambridge metacog, Evo-Memory</span>
+    <span><b>R4 实测</b> 26t / 522k / 9 tools / 5 score.delta · 2 regression 检测中 · 6 actions × 5 mandatory rules 注入 prompt</span>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

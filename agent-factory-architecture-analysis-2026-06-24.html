@@ -1,0 +1,3522 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agentic Operator Agent 工厂深度架构分析报告</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --paper: #ffffff;
+      --ink: #111827;
+      --muted: #667085;
+      --line: #d9dee7;
+      --line-strong: #b9c2d0;
+      --accent: #1463ff;
+      --accent-soft: #e9f0ff;
+      --ok: #157f3b;
+      --ok-soft: #e8f6ee;
+      --warn: #a05a00;
+      --warn-soft: #fff2db;
+      --bad: #b42318;
+      --bad-soft: #fff0ed;
+      --violet: #6d3de8;
+      --violet-soft: #f0ebff;
+      --teal: #08737a;
+      --teal-soft: #e5f5f6;
+      --shadow: 0 18px 60px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(20, 99, 255, 0.07), rgba(20, 99, 255, 0) 320px),
+        var(--bg);
+      font-family: var(--sans);
+      line-height: 1.58;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      background: #f1f4f9;
+      border: 1px solid #e0e6ef;
+      border-radius: 5px;
+      padding: 0.08rem 0.28rem;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 42px 0 72px;
+    }
+
+    .hero {
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(185, 194, 208, 0.8);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 38px 42px 34px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-weight: 760;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+
+    h1, h2, h3 { line-height: 1.18; letter-spacing: 0; }
+    h1 {
+      margin: 12px 0 14px;
+      font-size: clamp(34px, 5vw, 64px);
+      max-width: 920px;
+    }
+    h2 {
+      margin: 0 0 16px;
+      font-size: 28px;
+    }
+    h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+    p { margin: 0 0 14px; }
+
+    .lead {
+      font-size: 19px;
+      color: #344054;
+      max-width: 930px;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: #fff;
+      color: #344054;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .nav {
+      margin: 22px 0 26px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .nav a {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      color: #243044;
+      padding: 11px 12px;
+      font-weight: 720;
+      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.04);
+    }
+
+    section {
+      margin-top: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 28px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .three-col {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 17px;
+      background: #fff;
+    }
+
+    .card.ok { background: var(--ok-soft); border-color: #b6e2c6; }
+    .card.warn { background: var(--warn-soft); border-color: #ffd999; }
+    .card.bad { background: var(--bad-soft); border-color: #ffc8c1; }
+    .card.blue { background: var(--accent-soft); border-color: #cbdcff; }
+    .card.violet { background: var(--violet-soft); border-color: #d9cfff; }
+    .card.teal { background: var(--teal-soft); border-color: #bce2e5; }
+
+    .stat {
+      display: grid;
+      gap: 4px;
+    }
+    .stat b { font-size: 22px; }
+    .stat span { color: var(--muted); font-size: 13px; }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #f7faff;
+      padding: 14px 16px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin: 14px 0;
+    }
+
+    .callout strong { color: #0b47bd; }
+
+    .diagram {
+      margin: 16px 0 4px;
+      border: 1px solid var(--line);
+      background: #fbfcff;
+      border-radius: var(--radius);
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      min-width: 920px;
+      height: auto;
+      font-family: var(--sans);
+    }
+
+    .svg-title { font-size: 20px; font-weight: 780; fill: #111827; }
+    .svg-sub { font-size: 13px; fill: #667085; }
+    .svg-label { font-size: 14px; font-weight: 760; fill: #182230; }
+    .svg-small { font-size: 12px; fill: #475467; }
+    .svg-mono { font-family: var(--mono); font-size: 11px; fill: #344054; }
+    .box { rx: 8; ry: 8; stroke-width: 1.2; }
+    .arrow { stroke: #667085; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .arrow-blue { stroke: #1463ff; stroke-width: 2; fill: none; marker-end: url(#arrow-blue); }
+    .arrow-warn { stroke: #a05a00; stroke-width: 1.8; fill: none; marker-end: url(#arrow-warn); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 4px;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #f6f8fb;
+      color: #344054;
+      font-weight: 760;
+    }
+    tr:last-child td { border-bottom: 0; }
+
+    .priority {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 38px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .p0 { background: var(--bad); }
+    .p1 { background: var(--warn); }
+    .p2 { background: var(--accent); }
+    .p3 { background: var(--ok); }
+
+    .refs li { margin-bottom: 9px; }
+    .small { color: var(--muted); font-size: 13px; }
+    .kbd {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-bottom-color: var(--line-strong);
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-family: var(--mono);
+      font-size: 12px;
+      background: #fff;
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .roadmap .card {
+      min-height: 210px;
+    }
+
+    ul, ol { margin: 10px 0 0 20px; padding: 0; }
+    li { margin: 6px 0; }
+
+    @media (max-width: 900px) {
+      .page { width: min(100vw - 24px, 1180px); padding-top: 20px; }
+      .hero { padding: 26px 22px; }
+      .nav { grid-template-columns: repeat(2, 1fr); }
+      .two-col, .three-col, .roadmap { grid-template-columns: 1fr; }
+      section { padding: 20px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="eyebrow">Architecture Research Report · 2026-06-24</div>
+      <h1>Agentic Operator Agent 工厂深度架构分析</h1>
+      <p class="lead">
+        这份报告把当前仓库里的 Agent Factory v3、v2 deploy/sandbox、Inngest runtime、Postgres archive、
+        AgentVersion 版本体系和前端 cockpit 串成一张完整地图，并结合 Harness Engineering、ReAct、
+        Reflexion、AutoGen、MetaGPT、AlphaCodium、CodeAct、上下文压缩与长程 agent 论文，给出适合
+        Agentic Operator 的优化路线。
+      </p>
+      <div class="meta-row">
+        <span class="pill">范围：架构分析，不改应用代码</span>
+        <span class="pill">对象：Agent 工厂 / Harness / Multi-agent / Agent loop</span>
+        <span class="pill">结论：v3 已是强 Harness；runtime 应走契约统一的混合路线</span>
+      </div>
+    </header>
+
+    <nav class="nav">
+      <a href="#summary">01 结论摘要</a>
+      <a href="#delta-2026-06-25">02 最新变更</a>
+      <a href="#agent-planes">03 双平面</a>
+      <a href="#intelligence-deep-dive">04 智能化</a>
+      <a href="#codeact-correction">05 CodeAct校正</a>
+      <a href="#delta-2026-06-26">06 06-26复核</a>
+      <a href="#current">02 当前架构</a>
+      <a href="#deep-dive">03 技术细节</a>
+      <a href="#chatops-builder">04 改造蓝图</a>
+      <a href="#gaps">05 不足与风险</a>
+      <a href="#research">06 论文启发</a>
+      <a href="#target">07 推荐架构</a>
+      <a href="#roadmap">08 路线图</a>
+      <a href="#anchors">09 代码锚点</a>
+      <a href="#refs">10 参考资料</a>
+    </nav>
+
+    <section id="summary">
+      <h2>01 · 结论摘要</h2>
+      <div class="two-col">
+        <div>
+          <p>
+            当前 Agentic Operator 的 Agent 工厂 v3，本质上已经从“提示词生成器”进化成了一个
+            <strong>Harness-first 的自治生成系统</strong>：一个 ReAct 风格的 Brain 在 SSE 中流式运行，
+            通过受控工具读取 live ontology、规划 agent、设计 spec、生成可审阅代码、做静态验证、
+            部署到 sandbox domain、观察 Inngest run/archive，再根据失败原因 refine，最后只有在满足严格 finish
+            gate 时才把草稿同步到 <code>AgentVersion</code>。
+          </p>
+          <p>
+            但它现在还不等价于“所有 agent 都必须由 AI 生成代码并直接执行”的工厂。更准确的判断是：
+            <strong>v3 会要求 LLM 生成完整 TypeScript agent 代码作为可审阅产物，但当前通用生成域的实际运行路径仍然是
+            <code>AgentVersion</code> spec + generic executor</strong>，并不是直接执行这段 AI 生成的
+            <code>.ts</code>。对简单事件路由型 agent，这条 spec-runtime 路径是安全和确定性的特性；真正需要补齐的是
+            “什么时候继续用 spec executor，什么时候升级到 Behavior.compute / CodeAct-style code action”的显式选择器。
+          </p>
+          <div class="callout">
+            <strong>一句话判断：</strong>
+            现在的系统是“可观察、可沙箱验收的 Agent 生成 Harness”。下一步不该把路线写成 A/B 二选一，而应以
+            <strong>AgentContract/EventContract</strong> 统一三类 runtime：
+            简单 agent 走 <strong>spec executor</strong>，复杂业务逻辑走 <strong>Behavior.compute</strong>，
+            需要多工具控制流/数据流的少数 agent 才进入 <strong>out-of-process CodeAct-style sandbox</strong>。
+          </div>
+        </div>
+        <div class="three-col" style="grid-template-columns:1fr;">
+          <div class="card ok stat">
+            <b>强项</b>
+            <span>ReAct brain + deterministic tools + sandbox evidence + finish gate，方向非常正确。</span>
+          </div>
+          <div class="card warn stat">
+            <b>最大短板</b>
+            <span>runtime selector 未显式化、成本治理未产品化、trace 未规范化、gold-standard 还没接入 finish。</span>
+          </div>
+          <div class="card blue stat">
+            <b>最优路线</b>
+            <span>先用 AgentContract 统一 A/B/CodeAct，再按复杂度混合 runtime，谨慎引入直接代码执行。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="delta-2026-06-25">
+      <h2>2026-06-25 增量分析：Agent 工厂已经进入 Multi-Harness 阶段</h2>
+      <p>
+        相比上一版分析，当前仓库已经发生了一组关键升级：Agent 工厂不再只是 v3 单 brain 生成链路，
+        而是在向 <strong>ChatOps + Tool-Smith + Agent Registry + Meta-Orchestrator + Gold Standard</strong>
+        的多 harness 系统演进。很多我们昨天标成 gap 的点已经部分落地，但核心分叉仍然存在：
+        <strong>最终运行的通用生成域 agent 仍主要通过 spec + generic executor 执行，而不是直接执行 AI 写出的 TypeScript。</strong>
+        这不必被视为缺陷本身；真正需要补的是 <strong>runtime selector</strong>：按 agent 复杂度决定 spec executor、Behavior.compute
+        或 CodeAct-style sandbox，并让它们都实现同一个 Agent/Event 合同。
+      </p>
+      <p>
+        进一步核验后，<code>lib/agent-factory-v3/contract.ts</code> 已经把 <code>inputSchema</code> /
+        <code>outputSchema</code> 组装成一等 <code>AgentContract</code> / <code>EventContract</code>，并接入
+        <code>validate_graph</code> 做 payload 对账。也就是说，原报告里的 “Contract Graph 缺位” 已经变成
+        “P0-1 基础能力已落地，下一步要扩展到 runtime selector、finish gate 和部署治理”。
+      </p>
+
+      <div class="diagram" aria-label="2026-06-25 Agent 工厂新增架构层">
+        <svg viewBox="0 0 1180 780" role="img">
+          <defs>
+            <marker id="arrow-delta" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-delta-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">新增能力地图：从单一 Factory Brain 到 Multi-Harness</text>
+          <text x="28" y="60" class="svg-sub">新的代码已经把“聊天式生成器”推进到“可复用、可造工具、可编排、可对标”的架构</text>
+
+          <rect class="box" x="45" y="105" width="235" height="125" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="70" y="137" class="svg-label">Chat Continuity</text>
+          <text x="70" y="164" class="svg-small">conversation-store</text>
+          <text x="70" y="187" class="svg-small">convId resume</text>
+          <text x="70" y="210" class="svg-mono">同一 ctx 跨用户回合延续</text>
+
+          <rect class="box" x="345" y="105" width="235" height="125" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="370" y="137" class="svg-label">Durable HITL</text>
+          <text x="370" y="164" class="svg-small">Postgres mailbox</text>
+          <text x="370" y="187" class="svg-small">pending msg interrupt</text>
+          <text x="370" y="210" class="svg-mono">人工介入不再只靠进程内 Map</text>
+
+          <rect class="box" x="645" y="105" width="235" height="125" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="670" y="137" class="svg-label">Tool-Smith</text>
+          <text x="670" y="164" class="svg-small">fetch_doc + create_tool</text>
+          <text x="670" y="187" class="svg-small">declarative HTTP tools</text>
+          <text x="670" y="210" class="svg-mono">无 AI code eval</text>
+
+          <rect class="box" x="945" y="105" width="190" height="125" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="970" y="137" class="svg-label">Tool Library UI</text>
+          <text x="970" y="164" class="svg-small">/tools</text>
+          <text x="970" y="187" class="svg-small">params / returns</text>
+          <text x="970" y="210" class="svg-mono">工具 I/O 可见</text>
+
+          <rect class="box" x="85" y="335" width="245" height="135" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="110" y="367" class="svg-label">Unified Agent Registry</text>
+          <text x="110" y="394" class="svg-small">handwritten + generated</text>
+          <text x="110" y="417" class="svg-small">real signatures from AGENT_MAP</text>
+          <text x="110" y="440" class="svg-mono">reuse candidate catalog</text>
+
+          <rect class="box" x="460" y="335" width="245" height="135" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="485" y="367" class="svg-label">Meta-Orchestrator</text>
+          <text x="485" y="394" class="svg-small">inspect / plan / generate</text>
+          <text x="485" y="417" class="svg-small">resolve_gap / validate_chain</text>
+          <text x="485" y="440" class="svg-mono">build-vs-reuse conductor</text>
+
+          <rect class="box" x="830" y="335" width="245" height="135" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="855" y="367" class="svg-label">Gold Standard</text>
+          <text x="855" y="394" class="svg-small">real recruitment agents</text>
+          <text x="855" y="417" class="svg-small">signature / branch / tools score</text>
+          <text x="855" y="440" class="svg-mono">重造结果有标尺</text>
+
+          <rect class="box" x="210" y="585" width="260" height="105" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="235" y="617" class="svg-label">Tighter Sandbox Gate</text>
+          <text x="235" y="644" class="svg-small">fullChainRan required</text>
+          <text x="235" y="667" class="svg-small">missed/degraded surfaced</text>
+
+          <rect class="box" x="560" y="585" width="260" height="105" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="585" y="617" class="svg-label">Uniform Runner</text>
+          <text x="585" y="644" class="svg-small">tool / in-process / inngest</text>
+          <text x="585" y="667" class="svg-small">one invoke event stream</text>
+
+          <path d="M280 168 L340 168" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M580 168 L640 168" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M880 168 L940 168" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M1035 230 C 1015 285, 770 300, 660 330" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M330 402 L455 402" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M705 402 L825 402" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M582 470 C 550 530, 420 542, 350 580" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+          <path d="M582 470 C 610 530, 655 545, 690 580" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-delta)"></path>
+
+          <rect x="110" y="720" width="960" height="35" rx="8" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="135" y="743" class="svg-small">仍需注意：新增 contract layer 已经改善“怎么通信”，下一步要把“按复杂度选择 runtime”显式产品化。</text>
+        </svg>
+      </div>
+
+      <h3>1. 已经显著改善的架构点</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>新增/改动</th>
+            <th>代码锚点</th>
+            <th>架构意义</th>
+            <th>剩余风险</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Agent/Event Contract Graph</strong></td>
+            <td><code>contract.ts</code>, <code>validate_graph</code>, <code>FactoryV3Content</code></td>
+            <td>把 AI 已写出的 input/output schema 变成机器可查的合同，并检查下游要的 payload 字段是否由上游产出。</td>
+            <td>已能发现 payload gap；下一步要把合同绑定到所有 runtime target，并成为 finish/deploy 的统一门。</td>
+          </tr>
+          <tr>
+            <td><strong>聊天连续会话</strong></td>
+            <td><code>conversation-store.ts</code>, <code>brain/stream?convId=...</code></td>
+            <td>用户可以像 Claude Code/Codex 一样追问，brain 复用同一个 <code>BrainCtx</code>、messages、specs、plan，而不是每次从 read_ontology 重来。</td>
+            <td>06-26 已有 raw SQL <code>factory_conversation</code> 持久镜像；下一步是把它正式模型化为 Conversation/Turn/Checkpoint。</td>
+          </tr>
+          <tr>
+            <td><strong>人工介入持久化</strong></td>
+            <td><code>brain/mailbox.ts</code></td>
+            <td>HITL 从进程内 Map 升级为 Postgres raw table；sandbox 长轮询会 peek pending message，中途让出控制权。</td>
+            <td>还不是完整 <code>HumanDirective</code> 模型；缺 scope、status、consumedTurn、author、UI 审计。</td>
+          </tr>
+          <tr>
+            <td><strong>Tool-Smith / Doc-Fetcher</strong></td>
+            <td><code>tools/tool-smith.ts</code>, <code>persisted-tools.ts</code></td>
+            <td>AI 可以根据开发者文档创建工具，但工具是声明式 HTTP contract，不是任意代码，安全边界比直接 code eval 好得多。</td>
+            <td>需要审批 UI/API、egress allowlist、schema validation、secret readiness 和工具效果评测。</td>
+          </tr>
+          <tr>
+            <td><strong>工具 I/O 合同显性化</strong></td>
+            <td><code>read_ontology</code>, <code>registry.ts</code>, <code>/api/tools</code>, <code>/tools</code></td>
+            <td>availableTools 不再只有 signature，还暴露 parameters/returns/import；brain 能把外部平台返回字段映射到业务 DataObjects。</td>
+            <td>agent event payload 对账已开始落地；仍需把 ToolContract 返回字段与 EventContract payload 做端到端 schema test。</td>
+          </tr>
+          <tr>
+            <td><strong>Multi-Harness 元编排</strong></td>
+            <td><code>lib/agent-harness/*</code>, <code>/api/harness</code></td>
+            <td>出现了统一 Agent Registry、Selection Harness、Meta-Orchestrator、Factory Dispatch、Runner。系统开始能“先复用，缺口再生成”。</td>
+            <td>还像实验 harness：需要接入主 UI、持久化 orchestrator run、把 remap adapter 真正部署进 Inngest。</td>
+          </tr>
+          <tr>
+            <td><strong>Gold Standard 对标</strong></td>
+            <td><code>gold-standard.ts</code></td>
+            <td>用真实招聘生产 agents 反推签名/分支/工具，给重造结果评分。这让“生成质量”有了可量化标尺。</td>
+            <td>目前主要适合招聘域；其他域需要自己的 standard 或 golden fixtures。</td>
+          </tr>
+          <tr>
+            <td><strong>Sandbox gate 更严格</strong></td>
+            <td><code>sandbox_run</code>, <code>finish</code>, <code>deploy.ts</code></td>
+            <td>finish 现在要求 <code>fullChainRan</code>，而不是只看每个 agent 是否被 coverage-pass 触发过；missed/degraded agent 会暴露给 UI。</td>
+            <td>coverage-pass 仍可能混淆“自然链路跑通”和“逐个喂触发事件”；报告需要分开呈现 happy path 与 coverage path。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2. 当前真实架构的新判断</h3>
+      <div class="two-col">
+        <div class="card ok">
+          <h3>系统已经更像简化版 Codex/Claude Code</h3>
+          <p>
+            现在有连续聊天、持久 HITL、工具调用 trace、计划 artifact、sandbox 进度、可回看 run history。
+            这意味着产品形态已经从“一次性 agent 生成表单”转向“人机协同构建环境”。
+          </p>
+        </div>
+        <div class="card warn">
+          <h3>但 runtime selector 还未产品化</h3>
+          <p>
+            <code>codegen_agent</code> 生成的 TypeScript 通过了语法、import allowlist 和事件接地校验，
+            但通用生成域实际运行仍由 <code>executeGeneratedAgent(spec)</code> 决策并发事件。AI 代码目前仍偏审阅/证明 artifact；
+            需要把每个 agent 的 runtimeDecision 记录成一等 artifact。
+          </p>
+        </div>
+        <div class="card blue">
+          <h3>“先复用再生成”是正确方向</h3>
+          <p>
+            <code>Agent Registry</code> 把真实 handwritten agents 和 generated agents 放进同一选择空间，
+            Meta-Orchestrator 可以只为缺口动作调生成 harness。这样比每次全量重造更省、更稳。
+          </p>
+        </div>
+        <div class="card violet">
+          <h3>Tool-Smith 是关键能力，但要治理</h3>
+          <p>
+            让 AI 从文档生成声明式 HTTP 工具，是扩展外部平台能力的好路径。下一步重点不是“让它更自由”，而是审批、版本、测试、回滚和运行审计。
+          </p>
+        </div>
+      </div>
+
+      <h3>3. 更新后的优先级路线</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>优先级</th>
+            <th>现在应该做什么</th>
+            <th>为什么</th>
+            <th>验收信号</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>巩固已落地的 AgentContract/EventContract</strong></td>
+            <td><code>contract.ts</code> 已经能组装合同并发现 payload gap；这是统一 A/B/CodeAct runtime 的地基。</td>
+            <td>finish gate 输出 contract report；每个 runtime target 都声明自己实现哪个 AgentContract；ToolContract 与 EventContract 做样例对账。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>实现混合 runtime selector</strong></td>
+            <td>简单事件路由 agent 用 spec executor 更安全；复杂多工具控制流才需要 Behavior.compute 或 CodeAct-style code action。</td>
+            <td>每个 agent 生成时显示 runtimeDecision：spec-executor / behavior-code / codeact-sandbox，以及选择理由和安全要求。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>把 BrainCheckpoint v0 正式模型化</strong></td>
+            <td>raw SQL <code>factory_conversation</code> 已能跨重启恢复，但还不是受迁移、索引、retention 管理的一等模型。</td>
+            <td>新增 Conversation/Turn/Checkpoint 表；重启后可继续同一 convId，且每个 turn/run 都可审计。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>Meta-Orchestrator 接入 FactoryV3 UI</strong></td>
+            <td>现在 /api/harness 能计划/编排，但主 cockpit 仍以 v3 brain 为中心。应让用户选择“全量生成”或“复用+生成缺口”。</td>
+            <td>UI 能显示 reuse/generate/remap 计划，点击进入每个 slot 的证据。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>Tool-Smith 审批与测试闭环</strong></td>
+            <td>工具是 agent 能力边界。未批准工具当前仅本轮可用，已批准工具会进 runtime registry；这需要强治理。</td>
+            <td>有 approve/revoke UI，工具有 dry-run test、schema sample、required env 检查和调用审计。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>拆分 happy-path sandbox 与 coverage-pass sandbox</strong></td>
+            <td>coverage-pass 对验证每个 agent 很有用，但 fullChainRan 应以自然事件链为主，coverage 证据作为补充分支测试。</td>
+            <td>sandbox report 显示 naturalChain、coverageRuns、missed、degraded、terminal separately。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p2">P2</span></td>
+            <td><strong>FactoryTraceEvent normalized ledger</strong></td>
+            <td>FactoryBrainRun transcript 仍是 JSON blob；多 harness 后更需要可查询 trace。</td>
+            <td>可按 run/turn/tool/agent/subagent 查询输入输出、token、cost、parentId。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="codeact-correction">
+      <h2>CodeAct 校正：不是 A/B 二选一，而是契约统一的混合 Runtime</h2>
+      <p>
+        Claude 对这一点的批评是成立的：<a href="https://arxiv.org/abs/2402.01030">CodeAct</a> 论文的核心洞见不是
+        “最终交付的业务 agent 一定要变成 TypeScript 源码”，而是 <strong>runtime agent 的动作空间</strong> 可以从 JSON/tool-call
+        扩展为可执行代码。代码 action 原生支持变量、循环、条件和多工具组合，复杂任务下可以减少 action hop，并让报错成为自我 debug 的观察信号。
+      </p>
+      <p>
+        因此，对 Agentic Operator 更准确的路线不是“spec executor 或 Agent-as-code 选一个”，而是：
+        <strong>统一 AgentContract/EventContract，按 agent 复杂度选择 runtime substrate</strong>。
+        简单业务节点继续走声明式 spec executor；需要可维护业务逻辑的节点生成 <code>Behavior.compute</code>；
+        少数需要多工具组合、循环试错、数据流编排的节点才进入 CodeAct-style out-of-process sandbox。
+      </p>
+
+      <div class="diagram" aria-label="Hybrid runtime selector">
+        <svg viewBox="0 0 1180 760" role="img">
+          <defs>
+            <marker id="arrow-codeact" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-codeact-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Hybrid Runtime: one contract, multiple substrates</text>
+          <text x="28" y="60" class="svg-sub">CodeAct 改变的是复杂 agent 的动作空间，不是所有业务节点的部署形态</text>
+
+          <rect class="box" x="75" y="105" width="280" height="120" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="100" y="138" class="svg-label">AgentContract</text>
+          <text x="100" y="165" class="svg-small">trigger / input payload</text>
+          <text x="100" y="188" class="svg-small">allowed tools / emits</text>
+          <text x="100" y="211" class="svg-mono">contract.ts 已落地基础</text>
+
+          <rect class="box" x="450" y="105" width="280" height="120" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="475" y="138" class="svg-label">Runtime Selector</text>
+          <text x="475" y="165" class="svg-small">complexity / loops / tool fanout</text>
+          <text x="475" y="188" class="svg-small">determinism / safety / audit need</text>
+          <text x="475" y="211" class="svg-mono">new P0 decision artifact</text>
+
+          <rect class="box" x="825" y="105" width="280" height="120" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="850" y="138" class="svg-label">EventContract</text>
+          <text x="850" y="165" class="svg-small">output payload schema</text>
+          <text x="850" y="188" class="svg-small">payload gap reconciliation</text>
+          <text x="850" y="211" class="svg-mono">统一验收口径</text>
+
+          <path d="M355 165 L445 165" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+          <path d="M730 165 L820 165" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+
+          <rect class="box" x="60" y="345" width="290" height="145" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="85" y="378" class="svg-label">Lane A · Spec Executor</text>
+          <text x="85" y="405" class="svg-small">GeneratedAgentSpec</text>
+          <text x="85" y="428" class="svg-small">generic decide + allowed emits</text>
+          <text x="85" y="451" class="svg-small">安全、快、可控</text>
+          <text x="85" y="474" class="svg-mono">default for simple event agents</text>
+
+          <rect class="box" x="445" y="345" width="290" height="145" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="470" y="378" class="svg-label">Lane B · Behavior.compute</text>
+          <text x="470" y="405" class="svg-small">typed TypeScript logic</text>
+          <text x="470" y="428" class="svg-small">unit / contract / typecheck</text>
+          <text x="470" y="451" class="svg-small">可 PR review、可维护</text>
+          <text x="470" y="474" class="svg-mono">for complex deterministic logic</text>
+
+          <rect class="box" x="830" y="345" width="290" height="145" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="855" y="378" class="svg-label">Lane C · CodeAct Sandbox</text>
+          <text x="855" y="405" class="svg-small">executable code actions</text>
+          <text x="855" y="428" class="svg-small">loops / variables / self-debug</text>
+          <text x="855" y="451" class="svg-small">must be out-of-process</text>
+          <text x="855" y="474" class="svg-mono">for rare high-composition agents</text>
+
+          <path d="M590 225 C 490 285, 300 285, 205 340" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+          <path d="M590 225 L590 340" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+          <path d="M590 225 C 700 285, 880 285, 975 340" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+
+          <rect class="box" x="265" y="600" width="650" height="80" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="295" y="632" class="svg-label">Inngest Deployment Boundary</text>
+          <text x="295" y="658" class="svg-small">无论走哪个 lane，最终都必须 validate input payload、emit 合同内事件、保存 trace/evidence。</text>
+
+          <path d="M205 490 C 300 560, 400 580, 520 595" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+          <path d="M590 490 L590 595" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-codeact)"></path>
+          <path d="M975 490 C 885 560, 780 580, 660 595" stroke="#a05a00" stroke-width="2" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-codeact-warn)"></path>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Runtime lane</th>
+            <th>选择条件</th>
+            <th>优势</th>
+            <th>硬性边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>A · Spec Executor</strong></td>
+            <td>触发事件明确、输出事件枚举明确、工具少、无需复杂循环/状态机。</td>
+            <td>最安全、最容易审计；适合大多数事件路由和简单业务判断 agent。</td>
+            <td>必须通过 AgentContract/EventContract payload 对账；degraded policy 要显式。</td>
+          </tr>
+          <tr>
+            <td><strong>B · Behavior.compute</strong></td>
+            <td>有较复杂业务规则、需要可读可测代码、需要团队 review 和长期维护。</td>
+            <td>工程资产清晰；可运行 typecheck、unit tests、contract tests。</td>
+            <td>仍不能同进程执行未审计 AI 代码；需要 isolated compile、依赖白名单和 PR-style review。</td>
+          </tr>
+          <tr>
+            <td><strong>C · CodeAct-style Sandbox</strong></td>
+            <td>需要多工具组合、循环、变量复用、错误驱动自我修复；JSON action hop 明显太多。</td>
+            <td>表达力最强，最符合 CodeAct 对复杂 action space 的发现。</td>
+            <td>必须 out-of-process / microVM，限制网络、文件系统、依赖、secret、wall time 和 action budget。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="two-col">
+        <div class="card ok">
+          <h3>对原报告的修正</h3>
+          <p>
+            “AI 写的 .ts 不是当前运行代码”不是天然头号缺陷。对简单业务 agent，声明式 spec runtime 反而是可控特性。
+            缺口在于 runtime 类型没有被明确记录、解释、验证和展示。
+          </p>
+        </div>
+        <div class="card bad">
+          <h3>CodeAct 强化的安全结论</h3>
+          <p>
+            如果引入可执行代码 action，绝不能同进程 import 或 eval。CodeAct 论文也把 sandbox breakout 列为需要更强安全机制的风险。
+            因此 Lane C 必须比现在的 codegen gate 更强。
+          </p>
+        </div>
+      </div>
+
+      <h3>对 gold-standard 的新增指标</h3>
+      <p>
+        CodeAct 的 M3 ToolEval 思路提醒我们：复杂 agent 不只看“最后有没有跑通”，还要看 <strong>action 效率</strong>。
+        建议给 <code>gold-standard.ts</code> 增加以下维度：
+      </p>
+      <ul>
+        <li><code>actionsToTerminal</code>：从入口事件到终态用了多少 agent/tool/code action。</li>
+        <li><code>toolHopCount</code>：为了完成同一业务目标调用了多少外部工具。</li>
+        <li><code>selfDebugTurns</code>：失败后自我修复多少轮才收敛。</li>
+        <li><code>naturalChainEfficiency</code>：自然链路证据与 coverage-pass 证据分开计分。</li>
+      </ul>
+    </section>
+
+    <section id="delta-2026-06-26">
+      <h2>2026-06-26 复核：Agent 工厂正在从生成器变成 ChatOps 控制平面</h2>
+      <p>
+        这次代码变化很大，架构判断需要再更新一次。当前系统已经不只是“输入目标 → 生成 agents → 沙箱跑一遍”的生成器，
+        而是在变成一个 <strong>聊天式 Agent 工厂控制平面</strong>：它能先判断用户意图，回答信息性问题，继续同一场对话，
+        运行中接受人工介入，把 brain run 和 conversation checkpoint 持久化，展示成本计量、工具库、事件合同、沙箱证据和历史回放。
+      </p>
+      <p>
+        同时，安全边界也明显加强：Tool-Smith 和 persisted HTTP tools 共用 <code>safeFetch</code>，拒绝内网、本机、metadata
+        和重定向绕过；sandbox domain 强制 dry-run；写工具需要 <code>LIVE_WRITE_DOMAINS</code> 显式允许。
+        这说明系统正在从“让 AI 能做更多”转向“让 AI 在可审计的边界里做正确的事”。
+      </p>
+
+      <div class="diagram" aria-label="2026-06-26 control plane map">
+        <svg viewBox="0 0 1180 820" role="img">
+          <defs>
+            <marker id="arrow-0626" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-0626-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">2026-06-26 Architecture Delta: ChatOps Control Plane</text>
+          <text x="28" y="60" class="svg-sub">Front Desk · Durable Conversation · HITL · Tool Security · Evidence Gate</text>
+
+          <rect class="box" x="70" y="105" width="220" height="105" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="95" y="137" class="svg-label">User Chat</text>
+          <text x="95" y="164" class="svg-small">goal / follow-up / inject</text>
+          <text x="95" y="187" class="svg-mono">FactoryV3 cockpit</text>
+
+          <rect class="box" x="380" y="105" width="240" height="105" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="405" y="137" class="svg-label">Front Desk Router</text>
+          <text x="405" y="164" class="svg-small">list_domains / describe_domain</text>
+          <text x="405" y="187" class="svg-mono">answer vs build</text>
+
+          <rect class="box" x="720" y="105" width="360" height="105" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="745" y="137" class="svg-label">Factory Brain</text>
+          <text x="745" y="164" class="svg-small">ReAct + compact + cost meter + HITL drain</text>
+          <text x="745" y="187" class="svg-mono">runBrain(conversationId)</text>
+
+          <path d="M290 157 L375 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+          <path d="M620 157 L715 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+
+          <rect class="box" x="70" y="315" width="240" height="120" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="95" y="348" class="svg-label">Answer Lane</text>
+          <text x="95" y="375" class="svg-small">信息性问题直接回答</text>
+          <text x="95" y="398" class="svg-small">避免重跑生成流水线</text>
+          <text x="95" y="421" class="svg-mono">front-desk.ts</text>
+
+          <rect class="box" x="365" y="315" width="240" height="120" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="390" y="348" class="svg-label">Build Lane</text>
+          <text x="390" y="375" class="svg-small">read ontology -> plan -> design</text>
+          <text x="390" y="398" class="svg-small">codegen -> contract -> sandbox</text>
+          <text x="390" y="421" class="svg-mono">P1/P2/P3 tools</text>
+
+          <rect class="box" x="660" y="315" width="240" height="120" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="685" y="348" class="svg-label">Steering Lane</text>
+          <text x="685" y="375" class="svg-small">运行中人工介入</text>
+          <text x="685" y="398" class="svg-small">turn boundary drain</text>
+          <text x="685" y="421" class="svg-mono">factory_human_msg</text>
+
+          <rect class="box" x="955" y="315" width="170" height="120" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="980" y="348" class="svg-label">Replay Lane</text>
+          <text x="980" y="375" class="svg-small">历史运行回放</text>
+          <text x="980" y="398" class="svg-small">transcript restore</text>
+          <text x="980" y="421" class="svg-mono">FactoryBrainRun</text>
+
+          <path d="M830 210 C 780 270, 260 270, 190 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+          <path d="M870 210 C 790 275, 525 275, 485 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+          <path d="M920 210 C 905 275, 785 282, 780 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+          <path d="M970 210 C 1035 270, 1040 285, 1040 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+
+          <rect class="box" x="115" y="565" width="230" height="115" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="140" y="598" class="svg-label">Tool Security</text>
+          <text x="140" y="625" class="svg-small">safeFetch / SSRF guard</text>
+          <text x="140" y="648" class="svg-small">approval-gated tools</text>
+          <text x="140" y="671" class="svg-mono">egress-guard.ts</text>
+
+          <rect class="box" x="475" y="565" width="230" height="115" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="500" y="598" class="svg-label">Evidence Gate</text>
+          <text x="500" y="625" class="svg-small">contract + verify_chain</text>
+          <text x="500" y="648" class="svg-small">success terminal + no degraded</text>
+          <text x="500" y="671" class="svg-mono">finish refuses stale evidence</text>
+
+          <rect class="box" x="835" y="565" width="230" height="115" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="860" y="598" class="svg-label">Memory / Learning</text>
+          <text x="860" y="625" class="svg-small">conversation checkpoint</text>
+          <text x="860" y="648" class="svg-small">FailureReflection + Skills eval</text>
+          <text x="860" y="671" class="svg-mono">durable, but not yet modeled</text>
+
+          <path d="M485 435 C 420 500, 305 520, 240 560" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+          <path d="M485 435 L590 560" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-0626)"></path>
+          <path d="M780 435 C 785 500, 890 520, 950 560" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-0626-warn)"></path>
+        </svg>
+      </div>
+
+      <h3>1. 最新落地能力与架构意义</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>能力</th>
+            <th>代码锚点</th>
+            <th>架构意义</th>
+            <th>仍需补强</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Front Desk 意图路由</strong></td>
+            <td><code>tools/front-desk.ts</code>, <code>brain/conductor.ts</code></td>
+            <td>信息性问题直接回答，不再把“有几个域”误当成 agent 生成任务；这是 Difficulty-Aware Orchestration 的入口层。</td>
+            <td>目前主要靠 prompt + 两个工具；建议沉淀显式 <code>TaskIntent</code> event，进入 trace 和 eval。</td>
+          </tr>
+          <tr>
+            <td><strong>Durable BrainCheckpoint v0</strong></td>
+            <td><code>conversation-store.ts</code></td>
+            <td>conversation 从 in-memory LRU 升级为 Postgres mirror，HMR/重启后可 rehydrate ctx、messages、ontology/specs/plan。</td>
+            <td>现在是 raw SQL <code>factory_conversation</code>，未进 Prisma schema；缺 TTL、版本、迁移、压缩/引用化存储。</td>
+          </tr>
+          <tr>
+            <td><strong>DB-backed HITL mailbox</strong></td>
+            <td><code>brain/mailbox.ts</code>, <code>brain/inject/route.ts</code></td>
+            <td>运行中用户可介入，长工具会 peek pending message 后让出控制权；跨 worker 不丢消息。</td>
+            <td>结束时删除 mailbox，审计主要靠 transcript；应升级成 <code>HumanDirective</code> 模型，保留 author/scope/status/consumedTurn。</td>
+          </tr>
+          <tr>
+            <td><strong>FactoryBrainRun 历史</strong></td>
+            <td><code>FactoryBrainRun</code>, <code>/api/factory-v3/runs</code></td>
+            <td>brain run 可列表、回放、刷新后恢复，UI 从一次性流变成可审计历史。</td>
+            <td><code>convId</code> 与 <code>runId</code> 目前混用；follow-up 可能覆盖同一 run transcript。建议引入 Conversation/Turn/Run 三层模型。</td>
+          </tr>
+          <tr>
+            <td><strong>成本计量软阈值</strong></td>
+            <td><code>BrainEvent.t="budget"</code>, FactoryV3 成本面板</td>
+            <td>符合你们“不设 token 硬上限”的选择：用可见成本、软提醒、沙箱次数上限引导收敛。</td>
+            <td>还没有用户确认门、按工具/doc-fetch/subagent 归因成本、实际金额估算和预算策略 artifact。</td>
+          </tr>
+          <tr>
+            <td><strong>Tool-Smith 安全出口</strong></td>
+            <td><code>egress-guard.ts</code>, <code>tool-smith.ts</code>, <code>persisted-tools.ts</code></td>
+            <td>AI 创建的工具仍是声明式 HTTP contract；fetch_doc 和 runHttpTool 都走 SSRF guard，重定向逐跳复检。</td>
+            <td>仍需 DNS 解析到私网 IP 的防护、审批 UI/API、required env readiness、preconditions/effects/risk/cost。</td>
+          </tr>
+          <tr>
+            <td><strong>live-write fail-closed</strong></td>
+            <td><code>resolve-registry.ts</code>, <code>agent-executor.ts</code></td>
+            <td>写/双写工具只有在 <code>LIVE_WRITE_DOMAINS</code> 允许名单中才真写；sandbox domain 永远 dry-run。</td>
+            <td>需要在 UI 中显示当前域 live-write 状态，并在 deploy/promotion gate 中要求人工确认。</td>
+          </tr>
+          <tr>
+            <td><strong>自然链路验收门</strong></td>
+            <td><code>sandbox_run</code>, <code>verify_chain</code>, <code>finish</code></td>
+            <td>finish 拒绝 stale sandbox、degraded、只到失败终态、coverage-pass 掩盖断链等假阳性。</td>
+            <td>还需要把 naturalChain / coverageRuns / branchFixtures 结构化落库，而不是主要放在 transient event 中。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2. Memory / HITL / History 的新分层</h3>
+      <div class="diagram" aria-label="Durable Memory and HITL diagram">
+        <svg viewBox="0 0 1180 700" role="img">
+          <defs>
+            <marker id="arrow-memory-0626" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Durable Conversational Agent Factory</text>
+          <text x="28" y="60" class="svg-sub">现在已经有 hot cache + durable mirror + run history + reflection，但还缺统一 memory schema</text>
+
+          <rect class="box" x="65" y="105" width="230" height="105" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="90" y="138" class="svg-label">UI Local Cache</text>
+          <text x="90" y="165" class="svg-small">localStorage transcript</text>
+          <text x="90" y="188" class="svg-mono">fv3:last:&lt;domain&gt;</text>
+
+          <rect class="box" x="360" y="105" width="230" height="105" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="385" y="138" class="svg-label">Hot Conversation</text>
+          <text x="385" y="165" class="svg-small">messages + BrainCtx</text>
+          <text x="385" y="188" class="svg-mono">in-memory LRU</text>
+
+          <rect class="box" x="655" y="105" width="230" height="105" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="680" y="138" class="svg-label">BrainCheckpoint v0</text>
+          <text x="680" y="165" class="svg-small">messages_json + ctx_json</text>
+          <text x="680" y="188" class="svg-mono">factory_conversation</text>
+
+          <rect class="box" x="950" y="105" width="170" height="105" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="975" y="138" class="svg-label">Run History</text>
+          <text x="975" y="165" class="svg-small">status / transcript</text>
+          <text x="975" y="188" class="svg-mono">FactoryBrainRun</text>
+
+          <path d="M295 157 L355 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory-0626)"></path>
+          <path d="M590 157 L650 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory-0626)"></path>
+          <path d="M885 157 L945 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory-0626)"></path>
+
+          <rect class="box" x="140" y="330" width="230" height="105" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="165" y="363" class="svg-label">HITL Mailbox</text>
+          <text x="165" y="390" class="svg-small">pending human steering</text>
+          <text x="165" y="413" class="svg-mono">factory_human_msg</text>
+
+          <rect class="box" x="475" y="330" width="230" height="105" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="500" y="363" class="svg-label">FailureReflection</text>
+          <text x="500" y="390" class="svg-small">cross-run lessons</text>
+          <text x="500" y="413" class="svg-mono">domain-scoped memory</text>
+
+          <rect class="box" x="810" y="330" width="230" height="105" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="835" y="363" class="svg-label">Skills Eval</text>
+          <text x="835" y="390" class="svg-small">used skill -> sandbox verdict</text>
+          <text x="835" y="413" class="svg-mono">effectiveness starts here</text>
+
+          <path d="M255 210 C 240 260, 245 285, 255 325" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory-0626)"></path>
+          <path d="M590 210 L590 325" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory-0626)"></path>
+          <path d="M765 210 C 805 270, 875 285, 925 325" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory-0626)"></path>
+
+          <rect x="215" y="545" width="750" height="82" rx="9" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="245" y="576" class="svg-label">下一步：把 raw SQL memory 升级成正式 Agent Factory Memory Schema</text>
+          <text x="245" y="602" class="svg-small">Conversation、Turn、TraceEvent、HumanDirective、BrainCheckpoint、Reflection、SkillEval 应有独立生命周期、retention、索引和审计语义。</text>
+        </svg>
+      </div>
+
+      <h3>3. Tool-Smith 安全边界已经成型，但还不是 ToolContract 2.0</h3>
+      <div class="diagram" aria-label="Tool security boundary diagram">
+        <svg viewBox="0 0 1180 680" role="img">
+          <defs>
+            <marker id="arrow-tool-0626" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-tool-warn-0626" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Tool-Smith Safety Boundary</text>
+
+          <rect class="box" x="60" y="105" width="220" height="105" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="85" y="138" class="svg-label">fetch_doc</text>
+          <text x="85" y="165" class="svg-small">developer docs only</text>
+          <text x="85" y="188" class="svg-mono">safeFetch</text>
+
+          <rect class="box" x="350" y="105" width="220" height="105" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="375" y="138" class="svg-label">create_tool</text>
+          <text x="375" y="165" class="svg-small">declarative HTTP spec</text>
+          <text x="375" y="188" class="svg-mono">no code eval</text>
+
+          <rect class="box" x="640" y="105" width="220" height="105" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="665" y="138" class="svg-label">tools-library</text>
+          <text x="665" y="165" class="svg-small">TOOL.json</text>
+          <text x="665" y="188" class="svg-mono">approved=false by default</text>
+
+          <rect class="box" x="930" y="105" width="190" height="105" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="955" y="138" class="svg-label">Runtime Registry</text>
+          <text x="955" y="165" class="svg-small">approved persisted tools</text>
+          <text x="955" y="188" class="svg-mono">registerPersistedInto</text>
+
+          <path d="M280 157 L345 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-tool-0626)"></path>
+          <path d="M570 157 L635 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-tool-0626)"></path>
+          <path d="M860 157 L925 157" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-tool-0626)"></path>
+
+          <rect class="box" x="205" y="330" width="255" height="120" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="230" y="363" class="svg-label">Egress Guard</text>
+          <text x="230" y="390" class="svg-small">block localhost/private/metadata</text>
+          <text x="230" y="413" class="svg-small">manual redirect re-check</text>
+          <text x="230" y="436" class="svg-mono">EGRESS_ALLOW_HOSTS escape hatch</text>
+
+          <rect class="box" x="720" y="330" width="255" height="120" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="745" y="363" class="svg-label">Side-effect Gate</text>
+          <text x="745" y="390" class="svg-small">sandbox => forceDryRun</text>
+          <text x="745" y="413" class="svg-small">write requires allowlist</text>
+          <text x="745" y="436" class="svg-mono">LIVE_WRITE_DOMAINS</text>
+
+          <path d="M170 210 C 180 280, 260 300, 332 325" stroke="#a05a00" stroke-width="2" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-tool-warn-0626)"></path>
+          <path d="M1025 210 C 1020 285, 930 300, 850 325" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-tool-0626)"></path>
+
+          <rect x="185" y="545" width="810" height="76" rx="9" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="215" y="576" class="svg-label">ToolContract 2.0 尚未完成</text>
+          <text x="215" y="602" class="svg-small">需要在 TOOL.json 中补 requires / produces / risk / cost / sideEffectApproval / sample tests / env readiness / owner / version policy。</text>
+        </svg>
+      </div>
+
+      <h3>4. 最新不足与优化优先级</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>优先级</th>
+            <th>问题</th>
+            <th>为什么重要</th>
+            <th>建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>runtimeDecision 仍未成为 artifact</strong></td>
+            <td>系统已经有 spec executor、AI-authored code、handwritten Behavior.compute、CodeAct 讨论，但每个 agent 没有明确记录自己属于哪个 runtime lane。</td>
+            <td>在 <code>GeneratedAgentSpec</code>/<code>AgentContract</code> 加 <code>runtimeDecision</code> 和 rationale；UI/Fleet/finish 都展示并验证。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>Conversation 与 Run 模型混在一起</strong></td>
+            <td><code>convId</code> 复用 runId，follow-up 继续同一行 <code>FactoryBrainRun</code>，对“多轮对话”和“每次执行”的审计语义不够清晰。</td>
+            <td>拆成 <code>FactoryConversation</code>、<code>FactoryTurn</code>、<code>FactoryBrainRun</code>；run 是一次执行，conversation 是长期会话。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>ToolContract 仍停在 schema + HTTP</strong></td>
+            <td>Contract2Tool 类论文强调 preconditions/effects；当前工具知道怎么调用，但不知道何时该暴露、调用后会改变什么状态。</td>
+            <td>扩展 <code>PersistedToolSpec</code>：requires、produces、risk、cost、idempotency proof、sample tests、owner、approval status。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>raw SQL 表应正式模型化</strong></td>
+            <td><code>factory_conversation</code>、<code>factory_human_msg</code> 动态建表能快速落地，但迁移、索引、保留策略和审计不够正规。</td>
+            <td>纳入 Prisma schema，并加 retention、domain/run index、payload size cap、PII/secret scrub。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>safeFetch 还缺 DNS/IP 级校验</strong></td>
+            <td>当前基于 hostname/IP 字符串和 redirect 重检，已挡住常见 SSRF；但 public hostname 解析到私网 IP 或 DNS rebinding 仍需考虑。</td>
+            <td>加入 DNS resolve -> IP range check、连接 IP pinning、deny-by-default egress profile、审计日志。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>成本计量还不是预算策略</strong></td>
+            <td>UI 能看到 soft threshold，但没有用户确认门，也没有按 subagent/tool/doc-fetch 归因。</td>
+            <td>新增 <code>BudgetPolicy</code>：soft limit、confirmation threshold、per-tool/doc/subagent attribution、stop reason。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>Tool approval UI/API 仍缺</strong></td>
+            <td><code>approved=false</code> 和 <code>approveTool</code> 已有，但独立 Tools UI 目前偏只读 catalogue，审批闭环还没产品化。</td>
+            <td>加 approve/revoke/test endpoints 和 UI；审批前必须跑 sample tests 与 env readiness。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p2">P2</span></td>
+            <td><strong>反思/Skill eval 可能污染长期记忆</strong></td>
+            <td>FailureReflection 和 Skills effectiveness 已起步，但仍需要适用范围、负例、过期、冲突检测。</td>
+            <td>给 Reflection/Skill 增加 domain version、ontology hash、confidence、lastValidatedAt、negative evidence。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>新的架构判断：</strong>
+        你们当前最值得继续推进的不是“让 agent 更会写代码”，而是把已经出现的控制平面元素正式建模：
+        <code>TaskIntent</code>、<code>RuntimeDecision</code>、<code>Conversation/Turn/Run</code>、
+        <code>HumanDirective</code>、<code>ToolContract 2.0</code>、<code>BudgetPolicy</code> 和
+        <code>EvidenceBundle</code>。这些 artifact 一旦稳定，spec executor、Behavior.compute、CodeAct sandbox 三条 runtime lane 才能真正统一治理。
+      </div>
+    </section>
+
+    <section id="agent-planes">
+      <h2>Agent 双平面架构：Harness Agents 与 Product Agents 必须分治</h2>
+      <p>
+        这里需要先把“agent”这个词拆开。当前系统里至少存在两类性质完全不同的 agent：
+        <strong>构建/运行过程中的 Harness Agents</strong>，以及 <strong>最终交付的业务流程 Product Agents</strong>。
+        它们都可以“思考、调用工具、甚至派生 sub-agents”，但它们的目标、权限、记忆、验收和部署生命周期完全不同。
+        如果不分治，系统会很快变成：构建工具、业务 agent、subagent、Inngest function、tool wrapper 混成一个概念，后续很难治理。
+      </p>
+
+      <div class="callout">
+        <strong>核心原则：</strong>
+        Harness Agents 可以创造、修改、验证 artifact；Product Agents 只执行业务流程合同。
+        Product Agents 即使拥有自己的小 harness，也必须被 <code>AgentContract</code> 约束在单次业务运行、预算、工具权限和输出事件内。
+      </div>
+
+      <div class="diagram" aria-label="Agent 双平面架构">
+        <svg viewBox="0 0 1180 780" role="img">
+          <defs>
+            <marker id="arrow-plane" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-plane-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Two Agent Planes</text>
+          <text x="28" y="60" class="svg-sub">同样叫 agent，但一个是构建系统，一个是交付产物</text>
+
+          <rect class="box" x="55" y="105" width="500" height="240" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="85" y="140" class="svg-label">Plane A · Harness / Builder Agents</text>
+          <text x="85" y="170" class="svg-small">例：Factory Brain、Meta-Orchestrator、Tool-Smith、Doc-Fetcher、Verifier、Critic、Sub-brain</text>
+          <text x="85" y="198" class="svg-small">目标：理解需求、规划、生成 contracts/code/tests/tools、部署 sandbox、观察失败、修复</text>
+          <text x="85" y="226" class="svg-small">运行：in-process ReAct loop / tool substrate / headless orchestration</text>
+          <text x="85" y="254" class="svg-small">记忆：BrainCtx、conversation、skills、reflections、trace、docs</text>
+          <text x="85" y="282" class="svg-small">权限：可写 artifact，但必须受 workspace policy、人审 gate、预算与 trace 约束</text>
+          <text x="85" y="310" class="svg-mono">产出不是业务事件，而是可验证 artifact bundle</text>
+
+          <rect class="box" x="625" y="105" width="500" height="240" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="655" y="140" class="svg-label">Plane B · Product / Workflow Agents</text>
+          <text x="655" y="170" class="svg-small">例：parseResume、ruleCheck、matchResume、inviteCandidate、energy/cost-control domain agents</text>
+          <text x="655" y="198" class="svg-small">目标：收到业务事件，执行合同内的业务判断，发出下一业务事件</text>
+          <text x="655" y="226" class="svg-small">运行：Inngest function / generic executor / Behavior.compute / domain pack</text>
+          <text x="655" y="254" class="svg-small">记忆：event payload、step state、业务数据库、run archive</text>
+          <text x="655" y="282" class="svg-small">权限：只能调用合同允许的工具，只能发合同允许的事件</text>
+          <text x="655" y="310" class="svg-mono">产出是业务流程事件与业务状态变更</text>
+
+          <rect class="box" x="265" y="430" width="650" height="135" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="295" y="465" class="svg-label">Artifact Boundary</text>
+          <text x="295" y="493" class="svg-small">AgentContract / EventContract / ToolContract / generatedCode / tests / sandbox evidence / AgentVersion</text>
+          <text x="295" y="521" class="svg-small">Harness Agents 只能通过这个边界交付 Product Agents；Product Agents 不能反向随意改写边界。</text>
+          <text x="295" y="549" class="svg-mono">这是治理、审计、回滚、部署批准的分水岭</text>
+
+          <rect class="box" x="95" y="630" width="255" height="95" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="120" y="662" class="svg-label">Unified Runner</text>
+          <text x="120" y="688" class="svg-small">invoke(node,input)</text>
+          <text x="120" y="711" class="svg-mono">tool / in-process / inngest</text>
+
+          <rect class="box" x="462" y="630" width="255" height="95" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="487" y="662" class="svg-label">Policy Engine</text>
+          <text x="487" y="688" class="svg-small">plane / permissions / budget</text>
+          <text x="487" y="711" class="svg-mono">spawn depth / tool scope</text>
+
+          <rect class="box" x="830" y="630" width="255" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="855" y="662" class="svg-label">Trace &amp; Evidence</text>
+          <text x="855" y="688" class="svg-small">builder trace vs product run trace</text>
+          <text x="855" y="711" class="svg-mono">separate but linkable</text>
+
+          <path d="M305 345 L465 425" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-plane)"></path>
+          <path d="M875 345 L715 425" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-plane)"></path>
+          <path d="M590 565 L590 625" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-plane)"></path>
+          <path d="M462 677 L355 677" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-plane)"></path>
+          <path d="M717 677 L825 677" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-plane)"></path>
+          <path d="M625 225 C 590 250, 570 285, 555 315" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-plane-warn)"></path>
+          <text x="520" y="248" class="svg-small">只能经 artifact boundary</text>
+        </svg>
+      </div>
+
+      <h3>1. 两类 agents 的职责边界</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>Harness / Builder Agents</th>
+            <th>Product / Workflow Agents</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>生命周期</strong></td>
+            <td>一次 build/run/session 内活跃，可跨聊天回合延续，但不是业务交付物。</td>
+            <td>版本化、可部署、可回滚，作为 Inngest function 长期运行。</td>
+          </tr>
+          <tr>
+            <td><strong>目标</strong></td>
+            <td>生成、评审、修复、编排、测试、沉淀工具和技能。</td>
+            <td>处理业务事件，调用允许工具，发出下一个业务事件。</td>
+          </tr>
+          <tr>
+            <td><strong>自主性</strong></td>
+            <td>可以长程规划、调用多个工具、派生 subagents、修改 artifacts。</td>
+            <td>可以在单次事件处理内推理和调用工具；是否能派生 subagents 必须由合同显式允许。</td>
+          </tr>
+          <tr>
+            <td><strong>可写权限</strong></td>
+            <td>可写 <code>AgentContract</code>、<code>generatedCode</code>、<code>skills-library</code>、<code>tools-library</code>、sandbox evidence。</td>
+            <td>默认不能写工厂 artifact；只能写业务数据库或发业务事件，且受 tool sideEffect/live-write allowlist 限制。</td>
+          </tr>
+          <tr>
+            <td><strong>记忆</strong></td>
+            <td><code>BrainCtx</code>、conversation history、FailureReflection、skills、tool docs、trace。</td>
+            <td>Inngest step state、event payload、业务 DB、AgentActivity、run archive。</td>
+          </tr>
+          <tr>
+            <td><strong>验收</strong></td>
+            <td>artifact 是否完整、contract 是否闭合、代码/测试/sandbox 是否通过。</td>
+            <td>SLA、事件正确性、payload schema、业务结果、幂等、重试与 side effect 安全。</td>
+          </tr>
+          <tr>
+            <td><strong>失败处理</strong></td>
+            <td>inspect -> diagnose -> refine/replan；失败可写 reflection。</td>
+            <td>retry、dead-letter、human gate、补偿事件、业务告警。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2. Product Agent 也可以有 harness，但必须分级</h3>
+      <p>
+        你提到“每一个 agent 有可能具备自己独立的一套 harness 思考/调用工具系统，并根据任务生成 sub-agents”。
+        这是合理的，但必须分级，否则每个业务 agent 都会变成一个不受控的小工厂。
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>级别</th>
+            <th>Product Agent 内部能力</th>
+            <th>适用场景</th>
+            <th>必须加的限制</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>L0 · Function Agent</strong></td>
+            <td>固定逻辑或一次 LLM decision；不使用工具或只读少量上下文。</td>
+            <td>格式转换、简单分支、状态同步。</td>
+            <td>输入/输出 schema、幂等键、重试策略。</td>
+          </tr>
+          <tr>
+            <td><strong>L1 · Tool-Using Agent</strong></td>
+            <td>单 agent 内 ReAct，小步调用允许工具，最后 emit 一个合同事件。</td>
+            <td>简历解析、候选人查重、规则校验。</td>
+            <td>maxIterations、allowedTools、dry-run/live-write policy、degraded policy。</td>
+          </tr>
+          <tr>
+            <td><strong>L2 · Delegating Product Harness</strong></td>
+            <td>可派生 sub-agents 辅助研究、检索、评分或并行判断，但最终仍由父 agent 负责一个业务输出。</td>
+            <td>复杂匹配、跨系统调查、需要多视角评审的业务节点。</td>
+            <td>maxSubagents、maxDepth、subagent tool scope、预算、trace、禁止修改工厂 artifacts。</td>
+          </tr>
+          <tr>
+            <td><strong>L3 · Builder Harness</strong></td>
+            <td>可生成/修改 agent、tools、skills、contracts、tests。</td>
+            <td>Agent 工厂、Tool-Smith、Meta-Orchestrator、Verifier。</td>
+            <td>只能在构建平面运行；写入 artifact 必须 trace + gate + human approval。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>建议：</strong>
+        Product Agents 默认只能到 L1。只有当某个业务节点确实需要“运行时派生 sub-agents”时，才在 <code>AgentContract</code>
+        中显式声明 <code>harnessLevel: "L2"</code>、<code>maxSubagents</code>、<code>maxDepth</code>、<code>allowedSubagentTools</code>。
+        L3 永远属于构建平面，不应混进交付流程。
+      </div>
+
+      <h3>3. 对当前代码抽象的建议修正</h3>
+      <p>
+        当前 <code>lib/agent-harness/types.ts</code> 已经有 <code>AgentKind = "builder" | "product" | "harness"</code>、
+        <code>AgentExec</code> 和统一 <code>Runner</code>。这个方向很好，但建议进一步把“平面”和“是否能 spawn”拆开：
+        <code>harness</code> 更像能力等级，不应与 <code>builder/product</code> 并列成第三种实体。
+      </p>
+
+      <pre style="white-space: pre-wrap; background:#0f172a; color:#e5e7eb; border-radius:8px; padding:16px; overflow:auto;"><code>type AgentPlane = "builder" | "product";
+type AgentSubstrate = "in-process" | "inngest" | "tool";
+type HarnessLevel = "L0" | "L1" | "L2" | "L3";
+
+type AgentNodeContract = {
+  id: string;
+  plane: AgentPlane;
+  substrate: AgentSubstrate;
+  harnessLevel: HarnessLevel;
+  triggerEvents: EventRef[];
+  outputEvents: EventRef[];
+  allowedTools: string[];
+  canWriteArtifacts: boolean;      // true only for builder plane
+  canSpawnSubagents: boolean;
+  maxSubagents?: number;
+  maxSpawnDepth?: number;
+  memoryScopes: Array<"conversation" | "artifact" | "event" | "business-db" | "run-archive">;
+  budget: { maxTurns?: number; maxTokens?: number; maxToolCalls?: number; maxWallMs?: number };
+};</code></pre>
+
+      <h3>4. 运行时桥接：统一 Runner 可以保留，但 Policy 必须先判定</h3>
+      <p>
+        统一 <code>invoke(node,input)</code> 是好抽象，因为 UI 和编排器不需要关心底层是 tool、in-process sub-brain 还是 Inngest。
+        但在真正执行前，Runner 应先做 policy resolution：
+      </p>
+      <ul>
+        <li>如果 <code>plane="builder"</code>，允许访问 artifact workspace，但高风险写入需要 gate。</li>
+        <li>如果 <code>plane="product"</code>，只能访问 event payload、业务 DB、允许工具和 run-local memory。</li>
+        <li>如果 product agent 要 spawn subagent，subagent 继承父 runId、budget、traceId，且不能写工厂 artifact。</li>
+        <li>如果 agent substrate 是 Inngest，必须通过 EventContract parse/validate 输入输出。</li>
+        <li>如果 agent substrate 是 in-process，必须有 wall-clock、turn、token、spawn depth 限制。</li>
+      </ul>
+
+      <h3>5. 报告级结论</h3>
+      <div class="two-col">
+        <div class="card blue">
+          <h3>可以统一描述，但不要统一权限</h3>
+          <p>
+            所有 agents 都可以进入 <code>Agent Registry</code> 和 <code>Runner</code>，但必须带上 <code>plane</code>、
+            <code>substrate</code>、<code>harnessLevel</code> 和 policy。统一调用不代表统一治理。
+          </p>
+        </div>
+        <div class="card warn">
+          <h3>Product Agents 不能偷偷变成工厂</h3>
+          <p>
+            业务流程 agent 可以思考和派生 helper，但不能在业务运行中随意生成新的生产 agent、改 tools-library 或改 EventContract。
+            如果业务需要动态生成流程，那应该是一个明确的 Builder workflow，并有人审。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="intelligence-deep-dive">
+      <h2>智能化机制深潜：它为什么不是固定流水线</h2>
+      <p>
+        Agent 工厂的“智能化”不应该被理解成“LLM 输出了一段长推理”。真正的智能化来自一个闭环：
+        <strong>任务理解 → 上下文装载 → 计划 artifact → 工具/子脑/技能选择 → 观察真实反馈 → 修改计划或 artifact → 沙箱验证 → 反思沉淀</strong>。
+        当前代码已经把这套机制分布在 Factory Brain、Meta-Orchestrator、Selection Harness、Tool-Smith、Skills Library、Sandbox 和 Trace UI 里。
+      </p>
+
+      <div class="diagram" aria-label="智能化闭环总览">
+        <svg viewBox="0 0 1180 760" role="img">
+          <defs>
+            <marker id="arrow-intel" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-intel-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Intelligence Loop: observe → plan → act → verify → learn</text>
+          <text x="28" y="60" class="svg-sub">LLM 不是单独决策者；它被上下文、工具、验证器和证据约束</text>
+
+          <rect class="box" x="70" y="110" width="220" height="95" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="95" y="142" class="svg-label">1. Intent</text>
+          <text x="95" y="168" class="svg-small">用户目标 / follow-up</text>
+          <text x="95" y="191" class="svg-mono">goal + convId</text>
+
+          <rect class="box" x="360" y="110" width="220" height="95" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="385" y="142" class="svg-label">2. Context</text>
+          <text x="385" y="168" class="svg-small">ontology / registry / skills</text>
+          <text x="385" y="191" class="svg-mono">BrainCtx + reflections</text>
+
+          <rect class="box" x="650" y="110" width="220" height="95" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="675" y="142" class="svg-label">3. Plan</text>
+          <text x="675" y="168" class="svg-small">BuildPlan / slots</text>
+          <text x="675" y="191" class="svg-mono">create_plan / plan_orchestration</text>
+
+          <rect class="box" x="930" y="110" width="190" height="95" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="955" y="142" class="svg-label">4. Act</text>
+          <text x="955" y="168" class="svg-small">tools / subagents</text>
+          <text x="955" y="191" class="svg-mono">tool calls</text>
+
+          <rect class="box" x="930" y="315" width="190" height="95" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="955" y="347" class="svg-label">5. Observe</text>
+          <text x="955" y="373" class="svg-small">validation / sandbox</text>
+          <text x="955" y="396" class="svg-mono">Inngest archive</text>
+
+          <rect class="box" x="650" y="315" width="220" height="95" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="675" y="347" class="svg-label">6. Repair</text>
+          <text x="675" y="373" class="svg-small">refine / revert / remap</text>
+          <text x="675" y="396" class="svg-mono">targeted patch</text>
+
+          <rect class="box" x="360" y="315" width="220" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="385" y="347" class="svg-label">7. Gate</text>
+          <text x="385" y="373" class="svg-small">finish refuses if not proven</text>
+          <text x="385" y="396" class="svg-mono">fullChainRan + code + coverage</text>
+
+          <rect class="box" x="70" y="315" width="220" height="95" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="95" y="347" class="svg-label">8. Learn</text>
+          <text x="95" y="373" class="svg-small">FailureReflection / Skills</text>
+          <text x="95" y="396" class="svg-mono">next run starts wiser</text>
+
+          <path d="M290 158 L355 158" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M580 158 L645 158" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M870 158 L925 158" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M1025 205 L1025 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M930 362 L875 362" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M650 362 L585 362" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M360 362 L295 362" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-intel)"></path>
+          <path d="M180 315 C 150 250, 160 220, 175 205" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-intel-warn)"></path>
+
+          <rect x="245" y="555" width="690" height="85" rx="9" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="275" y="588" class="svg-label">智能化的关键不是自由，而是可观察的自适应</text>
+          <text x="275" y="615" class="svg-small">同一目标下，brain 会根据 ontology、已有 agents、失败原因、人工介入和预算选择不同工具路径；finish gate 负责拒绝没有证据的完成声明。</text>
+        </svg>
+      </div>
+
+      <h3>1. 内部 agents 如何根据任务类型路由</h3>
+      <p>
+        当前 system prompt 已经明确告诉 brain：这是持续对话，不是一次性流水线。用户追问、要求修改、继续补全、全部重来、缺工具、需要研究、
+        需要复用已有 agents，这些任务应该走不同路径。下面是建议把隐含行为产品化后的路由图。
+      </p>
+
+      <div class="diagram" aria-label="任务类型路由图">
+        <svg viewBox="0 0 1180 700" role="img">
+          <defs>
+            <marker id="arrow-route" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Task Router: 不同任务触发不同 harness 路径</text>
+
+          <rect class="box" x="55" y="85" width="210" height="80" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="80" y="118" class="svg-label">用户消息</text>
+          <text x="80" y="142" class="svg-small">goal / follow-up / directive</text>
+
+          <rect class="box" x="345" y="85" width="230" height="80" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="370" y="118" class="svg-label">Conversation Classifier</text>
+          <text x="370" y="142" class="svg-small">隐式在 brain prompt 中执行</text>
+
+          <path d="M265 125 L340 125" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+
+          <rect class="box" x="675" y="55" width="210" height="70" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="700" y="85" class="svg-label">问解释</text>
+          <text x="700" y="108" class="svg-small">直接答 / read_spec</text>
+
+          <rect class="box" x="925" y="55" width="210" height="70" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="950" y="85" class="svg-label">改单个 agent</text>
+          <text x="950" y="108" class="svg-small">read_spec -> refine -> codegen</text>
+
+          <rect class="box" x="675" y="175" width="210" height="70" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="700" y="205" class="svg-label">继续补全</text>
+          <text x="700" y="228" class="svg-small">list_agents -> fill gaps</text>
+
+          <rect class="box" x="925" y="175" width="210" height="70" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="950" y="205" class="svg-label">全部重来</text>
+          <text x="950" y="228" class="svg-small">new plan / regenerate</text>
+
+          <rect class="box" x="675" y="295" width="210" height="70" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="700" y="325" class="svg-label">缺业务工具</text>
+          <text x="700" y="348" class="svg-small">fetch_doc -> create_tool</text>
+
+          <rect class="box" x="925" y="295" width="210" height="70" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="950" y="325" class="svg-label">需要领域研究</text>
+          <text x="950" y="348" class="svg-small">web_search / spawn_subagent</text>
+
+          <rect class="box" x="675" y="415" width="210" height="70" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="700" y="445" class="svg-label">可复用 agent</text>
+          <text x="700" y="468" class="svg-small">Selection Harness</text>
+
+          <rect class="box" x="925" y="415" width="210" height="70" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="950" y="445" class="svg-label">流程组装</text>
+          <text x="950" y="468" class="svg-small">Meta-Orchestrator</text>
+
+          <path d="M575 125 C 625 95, 640 90, 670 90" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 700 125, 825 90, 920 90" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 625 180, 640 210, 670 210" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 700 170, 825 210, 920 210" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 620 250, 630 325, 670 330" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 720 250, 850 325, 920 330" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 620 330, 630 445, 670 450" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+          <path d="M575 125 C 720 335, 850 445, 920 450" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-route)"></path>
+
+          <rect x="230" y="565" width="720" height="64" rx="8" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="255" y="592" class="svg-label">待产品化的点</text>
+          <text x="255" y="617" class="svg-small">现在分类主要写在 system prompt 中；建议落成显式 <code>TaskIntent</code> 与可视化 plan，让用户知道 AI 为什么选择这条路径。</text>
+        </svg>
+      </div>
+
+      <h3>2. 内部 agents / harness 生态图</h3>
+      <p>
+        当前不是一个 agent 在孤军奋战，而是多个 harness 角色协作。它们不是都以 Inngest function 的形式存在；
+        有的是 in-process brain，有的是 deterministic tool，有的是可复用 registry 节点，有的是最终部署产物。
+      </p>
+
+      <div class="diagram" aria-label="内部 agents 和 harness 生态图">
+        <svg viewBox="0 0 1180 820" role="img">
+          <defs>
+            <marker id="arrow-eco" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Internal Agent Ecosystem</text>
+          <text x="28" y="60" class="svg-sub">Builder plane 内部的智能角色和它们产出的 artifact</text>
+
+          <rect class="box" x="460" y="95" width="260" height="105" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="485" y="128" class="svg-label">Factory Brain</text>
+          <text x="485" y="154" class="svg-small">ReAct conductor</text>
+          <text x="485" y="177" class="svg-mono">design/codegen/refine/sandbox</text>
+
+          <rect class="box" x="95" y="280" width="230" height="95" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="120" y="312" class="svg-label">Meta-Orchestrator</text>
+          <text x="120" y="338" class="svg-small">build-vs-reuse</text>
+          <text x="120" y="361" class="svg-mono">plan_orchestration</text>
+
+          <rect class="box" x="365" y="280" width="210" height="95" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="390" y="312" class="svg-label">Selection Harness</text>
+          <text x="390" y="338" class="svg-small">event signature score</text>
+          <text x="390" y="361" class="svg-mono">reuse or generate</text>
+
+          <rect class="box" x="625" y="280" width="210" height="95" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="650" y="312" class="svg-label">Tool-Smith</text>
+          <text x="650" y="338" class="svg-small">fetch docs / create tools</text>
+          <text x="650" y="361" class="svg-mono">declarative HTTP</text>
+
+          <rect class="box" x="885" y="280" width="210" height="95" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="910" y="312" class="svg-label">Subagent</text>
+          <text x="910" y="338" class="svg-small">isolated research brain</text>
+          <text x="910" y="361" class="svg-mono">read-only tools</text>
+
+          <rect class="box" x="95" y="475" width="230" height="95" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="120" y="507" class="svg-label">Verifier / Reviewer</text>
+          <text x="120" y="533" class="svg-small">validate_graph / review</text>
+          <text x="120" y="556" class="svg-mono">agentIssueMap</text>
+
+          <rect class="box" x="365" y="475" width="210" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="390" y="507" class="svg-label">Sandbox Harness</text>
+          <text x="390" y="533" class="svg-small">deploy + fire + observe</text>
+          <text x="390" y="556" class="svg-mono">fullChainRan</text>
+
+          <rect class="box" x="625" y="475" width="210" height="95" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="650" y="507" class="svg-label">Skills Library</text>
+          <text x="650" y="533" class="svg-small">create/use skill</text>
+          <text x="650" y="556" class="svg-mono">promptFragment</text>
+
+          <rect class="box" x="885" y="475" width="210" height="95" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="910" y="507" class="svg-label">Agent Registry</text>
+          <text x="910" y="533" class="svg-small">handwritten + generated</text>
+          <text x="910" y="556" class="svg-mono">reusable nodes</text>
+
+          <rect class="box" x="300" y="665" width="580" height="75" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="330" y="696" class="svg-label">Artifacts</text>
+          <text x="330" y="722" class="svg-small">Agent specs · generatedCode · skills · tools · contracts · tests · sandbox evidence · reflections</text>
+
+          <path d="M530 200 L250 275" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M565 200 L485 275" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M610 200 L710 275" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M650 200 L960 275" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M210 375 L210 470" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M470 375 L470 470" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M730 375 L730 470" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M990 375 L990 470" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M210 570 L430 660" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M470 570 L520 660" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M730 570 L660 660" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+          <path d="M990 570 L760 660" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-eco)"></path>
+        </svg>
+      </div>
+
+      <h3>3. 动态生成了什么：Subagents、Skills、Tools、Agents</h3>
+      <p>
+        当前系统的动态扩展不是单一维度。它可以临时派生研究子脑，可以沉淀技能，可以创建声明式工具，也可以生成最终业务 agent。
+        它们的持久化和权限边界不同，不能混为一谈。
+      </p>
+
+      <div class="diagram" aria-label="动态生成能力矩阵">
+        <svg viewBox="0 0 1180 720" role="img">
+          <defs>
+            <marker id="arrow-dyn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Dynamic Generation Matrix</text>
+
+          <rect class="box" x="70" y="95" width="230" height="120" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="95" y="127" class="svg-label">Subagent</text>
+          <text x="95" y="154" class="svg-small">spawn_subagent</text>
+          <text x="95" y="177" class="svg-small">own history + ctx</text>
+          <text x="95" y="200" class="svg-mono">ephemeral summary</text>
+
+          <rect class="box" x="345" y="95" width="230" height="120" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="370" y="127" class="svg-label">Skill</text>
+          <text x="370" y="154" class="svg-small">create_skill / use_skill</text>
+          <text x="370" y="177" class="svg-small">promptFragment + decisionRule</text>
+          <text x="370" y="200" class="svg-mono">skills-library/SKILL.md</text>
+
+          <rect class="box" x="620" y="95" width="230" height="120" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="645" y="127" class="svg-label">Tool</text>
+          <text x="645" y="154" class="svg-small">fetch_doc + create_tool</text>
+          <text x="645" y="177" class="svg-small">HTTP contract only</text>
+          <text x="645" y="200" class="svg-mono">tools-library/TOOL.json</text>
+
+          <rect class="box" x="895" y="95" width="230" height="120" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="920" y="127" class="svg-label">Product Agent</text>
+          <text x="920" y="154" class="svg-small">design/codegen/sandbox</text>
+          <text x="920" y="177" class="svg-small">AgentVersion draft</text>
+          <text x="920" y="200" class="svg-mono">Inngest deploy target</text>
+
+          <rect class="box" x="70" y="315" width="230" height="120" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="95" y="347" class="svg-label">触发条件</text>
+          <text x="95" y="374" class="svg-small">复杂子问题、研究阈值</text>
+          <text x="95" y="397" class="svg-small">不想污染主 ctx</text>
+
+          <rect class="box" x="345" y="315" width="230" height="120" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="370" y="347" class="svg-label">触发条件</text>
+          <text x="370" y="374" class="svg-small">发现可复用模式</text>
+          <text x="370" y="397" class="svg-small">多 agent 都需要同一规则</text>
+
+          <rect class="box" x="620" y="315" width="230" height="120" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="645" y="347" class="svg-label">触发条件</text>
+          <text x="645" y="374" class="svg-small">工具库缺外部 API</text>
+          <text x="645" y="397" class="svg-small">用户给开发文档</text>
+
+          <rect class="box" x="895" y="315" width="230" height="120" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="920" y="347" class="svg-label">触发条件</text>
+          <text x="920" y="374" class="svg-small">ontology action 未覆盖</text>
+          <text x="920" y="397" class="svg-small">Selection 决定 generate</text>
+
+          <rect class="box" x="70" y="535" width="230" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="95" y="567" class="svg-label">边界</text>
+          <text x="95" y="593" class="svg-small">只读工具、无部署、可中断</text>
+
+          <rect class="box" x="345" y="535" width="230" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="370" y="567" class="svg-label">边界</text>
+          <text x="370" y="593" class="svg-small">需要 skill lint/eval</text>
+
+          <rect class="box" x="620" y="535" width="230" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="645" y="567" class="svg-label">边界</text>
+          <text x="645" y="593" class="svg-small">待人工批准后全局可用</text>
+
+          <rect class="box" x="895" y="535" width="230" height="95" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="920" y="567" class="svg-label">边界</text>
+          <text x="920" y="593" class="svg-small">finish gate + sandbox evidence</text>
+
+          <path d="M185 215 L185 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M460 215 L460 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M735 215 L735 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M1010 215 L1010 310" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M185 435 L185 530" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M460 435 L460 530" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M735 435 L735 530" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+          <path d="M1010 435 L1010 530" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-dyn)"></path>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>动态能力</th>
+            <th>当前实现</th>
+            <th>它带来的智能化</th>
+            <th>需要补强</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Subagent</strong></td>
+            <td><code>spawn_subagent</code> 调隔离 <code>runBrain</code>，只给 read-only tools + web_search，回传 summary。</td>
+            <td>主 brain 可以把不确定子问题外包给独立上下文，减少主上下文污染。</td>
+            <td>保存 subagent trace；限制 token/wall time；summary 必须带 evidence refs。</td>
+          </tr>
+          <tr>
+            <td><strong>Skill</strong></td>
+            <td><code>create_skill</code> 写 <code>skills-library/&lt;slug&gt;/SKILL.md</code>，<code>use_skill</code> 复用并 bump useCount。</td>
+            <td>把一次失败/成功模式沉淀成程序性记忆，后续 agent 设计自动带上经验。</td>
+            <td>Skill lint、版本、适用条件、负例和 sandbox effectiveness score。</td>
+          </tr>
+          <tr>
+            <td><strong>Tool</strong></td>
+            <td><code>fetch_doc</code> 抓外部文档，<code>create_tool</code> 写声明式 HTTP contract，已批准后注册进 runtime。</td>
+            <td>当缺少外部 API 能力时，AI 能扩展工具面，但不写可执行代码。</td>
+            <td>审批 UI、egress allowlist、schema sample tests、secret/env readiness。</td>
+          </tr>
+          <tr>
+            <td><strong>Product Agent</strong></td>
+            <td><code>design_agent</code> + <code>codegen_agent</code> + <code>sandbox_run</code> + <code>finish</code> 后写 <code>AgentVersion</code>。</td>
+            <td>从 ontology action 动态生成可部署业务节点，并用真实 Inngest sandbox 验证。</td>
+            <td>Agent/Event 合同基础已补；下一步是记录 runtimeDecision，并按复杂度选择 spec executor / Behavior.compute / CodeAct sandbox。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4. Product Agent 内部的小 harness 怎么执行</h3>
+      <p>
+        最终交付的 Product Agent 也可以是智能的，但它的智能必须局限在业务事件处理边界内。
+        当前通用生成域的 runtime 是 <code>executeGeneratedAgent(spec)</code>：它读取 event payload，绑定 registry tools，
+        用 <code>decide</code> tool 从允许的 emit enum 中选一个结果事件。未来如果升级到 <code>Behavior.compute</code>，
+        仍建议保留同样的合同约束。
+      </p>
+
+      <div class="diagram" aria-label="Product Agent runtime harness">
+        <svg viewBox="0 0 1180 620" role="img">
+          <defs>
+            <marker id="arrow-prod-intel" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Product Agent Runtime Harness</text>
+
+          <rect class="box" x="60" y="110" width="220" height="100" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="85" y="143" class="svg-label">Inngest Trigger</text>
+          <text x="85" y="169" class="svg-small">domain/EventContract</text>
+          <text x="85" y="192" class="svg-mono">payload schema</text>
+
+          <rect class="box" x="360" y="110" width="220" height="100" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="385" y="143" class="svg-label">Agent Local Harness</text>
+          <text x="385" y="169" class="svg-small">reason + tool calls</text>
+          <text x="385" y="192" class="svg-mono">maxIterations / budget</text>
+
+          <rect class="box" x="660" y="80" width="220" height="90" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="685" y="112" class="svg-label">Allowed Tools</text>
+          <text x="685" y="138" class="svg-small">read/write/dry-run policy</text>
+          <text x="685" y="161" class="svg-mono">registry scoped</text>
+
+          <rect class="box" x="660" y="215" width="220" height="90" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="685" y="247" class="svg-label">Optional Subagents</text>
+          <text x="685" y="273" class="svg-small">only if contract allows</text>
+          <text x="685" y="296" class="svg-mono">L2 product harness</text>
+
+          <rect class="box" x="950" y="110" width="170" height="100" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="975" y="143" class="svg-label">Decision</text>
+          <text x="975" y="169" class="svg-small">emit enum</text>
+          <text x="975" y="192" class="svg-mono">payload validated</text>
+
+          <rect class="box" x="360" y="405" width="460" height="90" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="390" y="438" class="svg-label">Forbidden in Product Plane</text>
+          <text x="390" y="464" class="svg-small">不能修改 AgentContract / tools-library / skills-library / AgentVersion；不能生成生产 agent。</text>
+          <text x="390" y="487" class="svg-mono">需要这些动作时，转交 Builder Plane + human gate</text>
+
+          <path d="M280 160 L355 160" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-prod-intel)"></path>
+          <path d="M580 160 L655 125" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-prod-intel)"></path>
+          <path d="M580 175 L655 260" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-prod-intel)"></path>
+          <path d="M880 125 L945 160" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-prod-intel)"></path>
+          <path d="M880 260 C 915 250, 940 215, 950 190" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-prod-intel)"></path>
+        </svg>
+      </div>
+
+      <h3>5. 智能化机制与当前缺口</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>智能化机制</th>
+            <th>当前成熟度</th>
+            <th>还缺什么</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>观察驱动工具选择</strong></td>
+            <td>强。system prompt 明确要求每步根据 observation 决定，不走固定序列；tool result 会回填上下文。</td>
+            <td>把隐式 task intent 分类显式化，记录“为什么选择这条路径”。</td>
+          </tr>
+          <tr>
+            <td><strong>计划 artifact</strong></td>
+            <td>中强。Factory Brain 有 <code>BuildPlan</code>，Meta-Brain 有 orchestration plan。</td>
+            <td>计划需要可编辑、可 diff、可批准；每步应绑定 expected evidence。</td>
+          </tr>
+          <tr>
+            <td><strong>多 harness 路由</strong></td>
+            <td>中强。Selection/Meta-Orchestrator 已有 deterministic core，能 reuse/generate。</td>
+            <td>接入主 cockpit；把 remap adapter 从计划变成可部署 artifact。</td>
+          </tr>
+          <tr>
+            <td><strong>Subagent delegation</strong></td>
+            <td>中。子脑隔离、只读、安全；可辅助研究。</td>
+            <td>缺持久 trace、预算、引用证据、结果质量评估。</td>
+          </tr>
+          <tr>
+            <td><strong>Skills 沉淀</strong></td>
+            <td>中。可创建/复用，文件化保存。</td>
+            <td>缺 skill review、lint、效果评分、过期与冲突处理。</td>
+          </tr>
+          <tr>
+            <td><strong>Tool-Smith 扩展</strong></td>
+            <td>中。声明式工具安全边界正确。</td>
+            <td>缺审批 UI、测试、secret readiness、调用审计、egress 安全策略。</td>
+          </tr>
+          <tr>
+            <td><strong>真实行为验证</strong></td>
+            <td>强。sandbox deploy、archive inspect、fullChain gate 都已经比较硬。</td>
+            <td>需要区分 natural chain 与 coverage pass；增加 golden scenarios 和 payload schema tests。</td>
+          </tr>
+          <tr>
+            <td><strong>长期学习</strong></td>
+            <td>中。FailureReflection 和 skills 已经能跨 run。</td>
+            <td>缺 retrieval ranking、冲突检测、domain/version 适用性、学习效果指标。</td>
+          </tr>
+          <tr>
+            <td><strong>运行时 Product Agent 智能</strong></td>
+            <td>中。generic executor 有 tool + decide loop。</td>
+            <td>需要 Product Harness levels、runtime selector、subagent policy、degraded policy；EventContract payload 对账已开始落地。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>6. 还没有完善、最需要优化的地方</h3>
+      <div class="three-col">
+        <div class="card ok">
+          <h3>Contract Graph 已起步</h3>
+          <p><code>contract.ts</code> 已经把 input/output schema 组装成 <code>AgentContract/EventContract</code> 并做 payload gap 对账；下一步要接入 runtime selector、finish report 和部署治理。</p>
+        </div>
+        <div class="card bad">
+          <h3>Builder/Product 权限需硬隔离</h3>
+          <p>报告已提出双平面。下一步要在代码中把 plane、harnessLevel、spawn policy、artifact write policy 做成 runtime enforcement。</p>
+        </div>
+        <div class="card warn">
+          <h3>Subagent 仍是摘要黑箱</h3>
+          <p>子脑返回 summary，但用户和主 brain 很难追溯它看了什么、调用了什么、依据是什么。需要 subagent trace refs。</p>
+        </div>
+        <div class="card warn">
+          <h3>Skills 需要治理</h3>
+          <p>技能会变成长期 prompt memory，如果没有 lint/eval/version，会把错误经验稳定注入后续 agents。</p>
+        </div>
+        <div class="card blue">
+          <h3>Tool-Smith 需要审批台</h3>
+          <p>声明式工具设计很好，但从“本轮可绑定”到“全局 runtime 可用”之间，需要人工审核、dry-run test 和 env 检查。</p>
+        </div>
+        <div class="card blue">
+          <h3>Trace 要规范化</h3>
+          <p>多 harness、多 subagent、多 toolsmith 后，JSON transcript 不够。需要统一 trace event ledger 支持查询和回放。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="current">
+      <h2>02 · 当前架构：七层地图</h2>
+      <p>
+        下面这张图是我对当前实现的抽象。它不是一个单纯的“LLM 调一个生成接口”，而是由 UI、Brain、工具、知识源、
+        验证/沙箱、运行时和持久化观察层共同构成的控制平面。
+      </p>
+
+      <div class="diagram" aria-label="Agent 工厂七层架构图">
+        <svg viewBox="0 0 1180 760" role="img">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#667085"></path>
+            </marker>
+            <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+
+          <text x="28" y="38" class="svg-title">Agentic Operator · Agent Factory v3 分层架构</text>
+          <text x="28" y="60" class="svg-sub">从用户意图到 sandbox 运行证据，再到 AgentVersion 草稿的闭环</text>
+
+          <rect class="box" x="30" y="92" width="1120" height="76" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="52" y="122" class="svg-label">1. 产品控制台</text>
+          <text x="52" y="146" class="svg-small">FactoryV3Content：domain 选择、SSE transcript、agents / event graph / trace / knowledge / eval tabs</text>
+          <rect x="845" y="108" width="280" height="42" rx="7" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="865" y="134" class="svg-mono">localStorage + FactoryBrainRun history</text>
+
+          <rect class="box" x="30" y="210" width="350" height="150" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="52" y="240" class="svg-label">2. Brain loop</text>
+          <text x="52" y="265" class="svg-small">runBrain：streaming ReAct loop</text>
+          <text x="52" y="288" class="svg-small">tool calls / observations / DB-backed HITL mailbox</text>
+          <text x="52" y="311" class="svg-small">context compaction / failure reflection</text>
+          <text x="52" y="334" class="svg-mono">MAX_TURNS=200, MAX_TOKENS=null</text>
+
+          <rect class="box" x="420" y="210" width="330" height="150" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="442" y="240" class="svg-label">3. Toolbelt</text>
+          <text x="442" y="265" class="svg-small">P1：read_ontology / create_plan / design_agent</text>
+          <text x="442" y="288" class="svg-small">codegen_agent / validate_graph / sandbox_run</text>
+          <text x="442" y="311" class="svg-small">inspect_run / refine_agent / review_agent / finish</text>
+          <text x="442" y="334" class="svg-small">P2/P3：search / skill / subagent</text>
+
+          <rect class="box" x="790" y="210" width="360" height="150" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="812" y="240" class="svg-label">4. Knowledge &amp; policy</text>
+          <text x="812" y="265" class="svg-small">Allmeta live ontology / event flow / registry tools</text>
+          <text x="812" y="288" class="svg-small">skills-library / FailureReflection</text>
+          <text x="812" y="311" class="svg-small">schema-grounding：把 event/tool enum 注入 tool schema</text>
+          <text x="812" y="334" class="svg-small">fail-closed：ontology 失败时不使用陈旧快照部署</text>
+
+          <rect class="box" x="30" y="405" width="350" height="154" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="52" y="435" class="svg-label">5. Verification harness</text>
+          <text x="52" y="460" class="svg-small">static graph validation：coverage / grounding / terminal</text>
+          <text x="52" y="483" class="svg-small">AI + deterministic review：branch/tool/schema warnings</text>
+          <text x="52" y="506" class="svg-small">sandbox fingerprint：防止旧 sandbox 被 finish 复用</text>
+          <text x="52" y="529" class="svg-small">repair loop：inspect -> analyze_failure -> refine</text>
+
+          <rect class="box" x="420" y="405" width="330" height="154" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="442" y="435" class="svg-label">6. Runtime plane</text>
+          <text x="442" y="460" class="svg-small">shipAgents：写 AgentVersion，注册 per-domain Inngest app</text>
+          <text x="442" y="483" class="svg-small">domain-app：为生成域创建 shell function</text>
+          <text x="442" y="506" class="svg-small">executeGeneratedAgent：LLM 决策 + tools + event emit</text>
+          <text x="442" y="529" class="svg-small">sandbox domain：sandbox-&lt;domain&gt;，dry-run 降污染</text>
+
+          <rect class="box" x="790" y="405" width="360" height="154" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="812" y="435" class="svg-label">7. Observability &amp; persistence</text>
+          <text x="812" y="460" class="svg-small">FactoryBrainRun：v3 transcript JSON / status / turns</text>
+          <text x="812" y="483" class="svg-small">InngestEvent/Run/StepArchive：真实运行证据</text>
+          <text x="812" y="506" class="svg-small">AgentActivity：runtime agent 决策记录</text>
+          <text x="812" y="529" class="svg-small">FactoryBuildRun/Event/LlmCall：v2 ledger 遗产</text>
+
+          <path class="arrow-blue" d="M 590 168 L 590 205"></path>
+          <path class="arrow-blue" d="M 380 285 L 415 285"></path>
+          <path class="arrow-blue" d="M 750 285 L 785 285"></path>
+          <path class="arrow-blue" d="M 585 360 L 585 400"></path>
+          <path class="arrow-blue" d="M 380 482 L 415 482"></path>
+          <path class="arrow-blue" d="M 750 482 L 785 482"></path>
+          <path class="arrow-warn" d="M 835 405 C 780 372, 690 372, 632 404"></path>
+          <path class="arrow" d="M 205 405 C 210 372, 250 370, 295 360"></path>
+
+          <rect x="120" y="615" width="940" height="86" rx="9" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="145" y="645" class="svg-label">核心闭环</text>
+          <text x="145" y="671" class="svg-small">Brain 不直接“相信自己写好了”：必须通过 ontology grounding、static graph、review、sandbox run 和 inspect 证据，finish 才能同步草稿。</text>
+        </svg>
+      </div>
+
+      <div class="callout">
+        <strong>最重要的架构认知：</strong>
+        Agent 工厂的价值不在“让 LLM 一口气写更多代码”，而在围绕 LLM 建立一套可回放、可验证、可修复、可拒绝的 Harness。
+        这与 OpenAI 和 Martin Fowler 对 Harness Engineering 的定义高度一致：模型只是内核，真正的工程复杂度在外层环境、反馈、工具和控制回路。
+      </div>
+    </section>
+
+    <section>
+      <h2>03 · 一次 v3 生成运行的生命周期</h2>
+      <p>
+        v3 的生命周期可以理解为“计划-生成-验证-运行-修复-验收”的闭环。下面是按实际实现抽象后的时序。
+      </p>
+      <div class="diagram" aria-label="v3 运行时序图">
+        <svg viewBox="0 0 1180 640" role="img">
+          <defs>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#667085"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Agent Factory v3 · 生成闭环</text>
+
+          <g>
+            <rect class="box" x="40" y="80" width="170" height="70" fill="#ffffff" stroke="#b9c2d0"></rect>
+            <text x="62" y="109" class="svg-label">用户目标</text>
+            <text x="62" y="132" class="svg-small">domain + prompt</text>
+          </g>
+          <g>
+            <rect class="box" x="255" y="80" width="170" height="70" fill="#e9f0ff" stroke="#cbdcff"></rect>
+            <text x="277" y="109" class="svg-label">SSE route</text>
+            <text x="277" y="132" class="svg-small">FactoryBrainRun</text>
+          </g>
+          <g>
+            <rect class="box" x="470" y="80" width="190" height="70" fill="#f0ebff" stroke="#d9cfff"></rect>
+            <text x="492" y="109" class="svg-label">runBrain</text>
+            <text x="492" y="132" class="svg-small">LLM tool loop</text>
+          </g>
+          <g>
+            <rect class="box" x="705" y="80" width="190" height="70" fill="#e5f5f6" stroke="#bce2e5"></rect>
+            <text x="727" y="109" class="svg-label">read_ontology</text>
+            <text x="727" y="132" class="svg-small">live Allmeta + tools</text>
+          </g>
+          <g>
+            <rect class="box" x="940" y="80" width="190" height="70" fill="#fff2db" stroke="#ffd999"></rect>
+            <text x="962" y="109" class="svg-label">create_plan</text>
+            <text x="962" y="132" class="svg-small">coverage strategy</text>
+          </g>
+
+          <path d="M210 115 L250 115" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M425 115 L465 115" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M660 115 L700 115" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M895 115 L935 115" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+
+          <g>
+            <rect class="box" x="95" y="240" width="190" height="78" fill="#e9f0ff" stroke="#cbdcff"></rect>
+            <text x="117" y="269" class="svg-label">design_agent</text>
+            <text x="117" y="292" class="svg-small">spec / prompts / schemas</text>
+          </g>
+          <g>
+            <rect class="box" x="335" y="240" width="190" height="78" fill="#ffffff" stroke="#b9c2d0"></rect>
+            <text x="357" y="269" class="svg-label">codegen_agent</text>
+            <text x="357" y="292" class="svg-small">AI-authored .ts artifact</text>
+          </g>
+          <g>
+            <rect class="box" x="575" y="240" width="190" height="78" fill="#fff2db" stroke="#ffd999"></rect>
+            <text x="597" y="269" class="svg-label">validate / review</text>
+            <text x="597" y="292" class="svg-small">graph + branch + tool checks</text>
+          </g>
+          <g>
+            <rect class="box" x="815" y="240" width="190" height="78" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+            <text x="837" y="269" class="svg-label">sandbox_run</text>
+            <text x="837" y="292" class="svg-small">deploy + fire + observe</text>
+          </g>
+
+          <path d="M1035 150 C 1010 205, 275 195, 190 235" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M285 279 L330 279" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M525 279 L570 279" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M765 279 L810 279" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+
+          <g>
+            <rect class="box" x="175" y="410" width="190" height="78" fill="#fff0ed" stroke="#ffc8c1"></rect>
+            <text x="197" y="439" class="svg-label">inspect_run</text>
+            <text x="197" y="462" class="svg-small">archive + AgentActivity</text>
+          </g>
+          <g>
+            <rect class="box" x="455" y="410" width="190" height="78" fill="#f0ebff" stroke="#d9cfff"></rect>
+            <text x="477" y="439" class="svg-label">refine_agent</text>
+            <text x="477" y="462" class="svg-small">attempt history + score</text>
+          </g>
+          <g>
+            <rect class="box" x="735" y="410" width="220" height="78" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+            <text x="757" y="439" class="svg-label">finish</text>
+            <text x="757" y="462" class="svg-small">strict gate -> syncDomainDrafts</text>
+          </g>
+
+          <path d="M910 318 C 900 365, 345 365, 270 405" stroke="#a05a00" stroke-width="1.8" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M365 449 L450 449" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M645 449 L730 449" stroke="#667085" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"></path>
+          <path d="M550 410 C 520 370, 685 352, 835 318" stroke="#a05a00" stroke-width="1.8" fill="none" marker-end="url(#arrow2)"></path>
+
+          <rect x="275" y="548" width="630" height="46" rx="8" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="300" y="577" class="svg-small">失败不是终点：失败 run 会写 FailureReflection，后续 run 会把历史 lesson 注入 brain context。</text>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>04 · 三代 Agent Factory 的演进</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>核心能力</th>
+            <th>现在的位置</th>
+            <th>架构含义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Gen / 早期工厂</strong></td>
+            <td>基于 ontology 生成 <code>GeneratedAgentSpec</code>，可 fallback 到 deterministic template，并通过 <code>syncDomainDrafts</code> 写入草稿。</td>
+            <td>仍是 spec / draft / persistence 的重要基础。</td>
+            <td>证明了“ontology -> agent spec -> AgentVersion”的主数据路径。</td>
+          </tr>
+          <tr>
+            <td><strong>v2 固定流水线</strong></td>
+            <td>conductor 以固定步骤执行：comprehend、planner、ToolSmith、PromptWriter、Critic、validate、smoke simulation、repair、deploy。</td>
+            <td>deploy/sandbox、validation、ledger 很多仍被 v3 复用或借鉴。</td>
+            <td>是可控工程流水线，但自主性较弱；适合稳定 batch build。</td>
+          </tr>
+          <tr>
+            <td><strong>v3 Brain Harness</strong></td>
+            <td>ReAct 风格 brain 自主选择工具，流式输出思考与 tool observation，支持 HITL、reflection、skills、subagent、sandbox inspect/refine。</td>
+            <td>当前主方向。</td>
+            <td>更像“可操作环境中的生成式工程师”，关键挑战转向预算、trace、评测、隔离与运行时目标一致性。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>05 · 运行时真相：AI 代码与实际执行路径并不相同</h2>
+      <p>
+        这是目前最值得产品和工程团队对齐的一点。v3 finish gate 要求每个 spec 都有 <code>codeSource="ai"</code>
+        和 <code>generatedCode</code>，但对于通用生成域，sandbox 和真实 shell function 运行的是 <code>executeGeneratedAgent</code>
+        解释 spec 后调用 LLM 做分支决策。AI 生成的 TypeScript 更像“可审阅的目标代码/设计证明”，不是当前被执行的生产 artifact。
+        这对简单 agent 并不坏；它提供了更可控的默认运行时。真正需要补的是把这个事实显性化，并允许复杂 agent 升级到其他 runtime lane。
+      </p>
+
+      <div class="diagram" aria-label="运行时真相图">
+        <svg viewBox="0 0 1180 520" role="img">
+          <defs>
+            <marker id="arrow3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Spec、AI 代码与 Runtime 的分叉</text>
+
+          <rect class="box" x="70" y="90" width="250" height="110" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="95" y="122" class="svg-label">GeneratedAgentSpec</text>
+          <text x="95" y="148" class="svg-small">events / actions / prompt</text>
+          <text x="95" y="171" class="svg-small">schemas / tools / graph</text>
+
+          <rect class="box" x="465" y="55" width="260" height="110" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="490" y="87" class="svg-label">AI-authored TypeScript</text>
+          <text x="490" y="113" class="svg-small">codegen_agent 产物</text>
+          <text x="490" y="136" class="svg-small">当前主要用于审阅与 gate</text>
+
+          <rect class="box" x="465" y="235" width="260" height="110" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="490" y="267" class="svg-label">Generic executor</text>
+          <text x="490" y="293" class="svg-small">executeGeneratedAgent(spec)</text>
+          <text x="490" y="316" class="svg-small">LLM decide -> emit event</text>
+
+          <rect class="box" x="860" y="235" width="250" height="110" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="885" y="267" class="svg-label">Inngest shell function</text>
+          <text x="885" y="293" class="svg-small">domain-app per domain</text>
+          <text x="885" y="316" class="svg-small">sandbox / active AgentVersion</text>
+
+          <rect class="box" x="860" y="55" width="250" height="110" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="885" y="87" class="svg-label">makeOntologyAgent</text>
+          <text x="885" y="113" class="svg-small">Behavior.compute style</text>
+          <text x="885" y="136" class="svg-small">energy / feikong 等真实 pack</text>
+
+          <path d="M320 145 L460 110" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow3)"></path>
+          <path d="M320 155 L460 290" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow3)"></path>
+          <path d="M725 290 L855 290" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow3)"></path>
+          <path d="M725 110 L855 110" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow4)"></path>
+
+          <text x="395" y="208" class="svg-small">当前实际运行主路径</text>
+          <text x="743" y="96" class="svg-small">理想 Agent-as-code 方向</text>
+          <text x="160" y="424" class="svg-label">架构决策点</text>
+          <text x="160" y="450" class="svg-small">不是 A/B 二选一：默认产品化 spec runtime，同时允许复杂节点升级到 Behavior.compute。</text>
+          <text x="160" y="475" class="svg-small">若采用 CodeAct-style code action，只能在 out-of-process sandbox 内运行，并仍受 EventContract 约束。</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="deep-dive">
+      <h2>技术细节深潜：Memory、Skills、通信与运行闭环</h2>
+      <p>
+        这一节把 Agent 工厂拆到更细的工程机制。重点结论是：当前系统已经有多层“记忆”和通信介质，
+        但它们分散在 message history、<code>BrainCtx</code>、文件系统技能库、数据库反思、Inngest archive 和 AgentActivity 中；
+        下一步应该把这些能力产品化为可查询、可恢复、可评测的工程资产。
+      </p>
+
+      <h3>1. Memory 管理：热上下文、结构化状态与长期沉淀</h3>
+      <div class="diagram" aria-label="Memory 管理分层图">
+        <svg viewBox="0 0 1180 720" role="img">
+          <defs>
+            <marker id="arrow-memory" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Agent Factory Memory Stack</text>
+          <text x="28" y="60" class="svg-sub">不是单一 memory 模块，而是多层状态共同构成“可继续工作的记忆”</text>
+
+          <rect class="box" x="70" y="105" width="260" height="115" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="95" y="137" class="svg-label">Hot context</text>
+          <text x="95" y="164" class="svg-small">messages[] 每轮重发</text>
+          <text x="95" y="187" class="svg-small">system + goal + recent tool turns</text>
+          <text x="95" y="210" class="svg-mono">阈值约 120k chars</text>
+
+          <rect class="box" x="460" y="85" width="290" height="160" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="485" y="117" class="svg-label">Working state: BrainCtx</text>
+          <text x="485" y="144" class="svg-small">specs / ontology / registry</text>
+          <text x="485" y="167" class="svg-small">currentPlan / attemptHistory</text>
+          <text x="485" y="190" class="svg-small">lastValidation / lastSandbox</text>
+          <text x="485" y="213" class="svg-small">humanDirectives / rules / tools</text>
+          <text x="485" y="236" class="svg-mono">权威状态，不依赖 LLM 记忆</text>
+
+          <rect class="box" x="860" y="105" width="250" height="115" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="885" y="137" class="svg-label">Compaction</text>
+          <text x="885" y="164" class="svg-small">deterministic state summary</text>
+          <text x="885" y="187" class="svg-small">+ LLM narrative summary</text>
+          <text x="885" y="210" class="svg-mono">保留最近 6 个 tool-call turns</text>
+
+          <path d="M330 163 L455 163" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+          <path d="M750 163 L855 163" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+          <path d="M985 220 C 960 310, 310 310, 205 220" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+
+          <rect class="box" x="70" y="350" width="230" height="145" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="95" y="382" class="svg-label">Episodic memory</text>
+          <text x="95" y="409" class="svg-small">FactoryBrainRun transcript</text>
+          <text x="95" y="432" class="svg-small">Inngest run / step archive</text>
+          <text x="95" y="455" class="svg-small">AgentActivity decisions</text>
+          <text x="95" y="478" class="svg-mono">可审计，但 v3 仍偏 JSON blob</text>
+
+          <rect class="box" x="365" y="350" width="230" height="145" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="390" y="382" class="svg-label">Semantic memory</text>
+          <text x="390" y="409" class="svg-small">FailureReflection</text>
+          <text x="390" y="432" class="svg-small">domain lessons / caveats</text>
+          <text x="390" y="455" class="svg-small">system prompt 注入前 8 条</text>
+          <text x="390" y="478" class="svg-mono">跨 run 学习</text>
+
+          <rect class="box" x="660" y="350" width="230" height="145" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="685" y="382" class="svg-label">Procedural memory</text>
+          <text x="685" y="409" class="svg-small">skills-library/&lt;slug&gt;/SKILL.md</text>
+          <text x="685" y="432" class="svg-small">promptFragment + tools</text>
+          <text x="685" y="455" class="svg-small">decisionRule + useCount</text>
+          <text x="685" y="478" class="svg-mono">人可读、可 git 管理</text>
+
+          <rect class="box" x="955" y="350" width="155" height="145" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="980" y="382" class="svg-label">Artifacts</text>
+          <text x="980" y="409" class="svg-small">AgentVersion</text>
+          <text x="980" y="432" class="svg-small">generatedCode</text>
+          <text x="980" y="455" class="svg-small">sandbox evidence</text>
+          <text x="980" y="478" class="svg-mono">发布候选</text>
+
+          <path d="M605 245 L605 310 L185 345" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+          <path d="M620 245 L620 310 L480 345" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+          <path d="M635 245 L635 310 L775 345" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+          <path d="M650 245 L650 310 L1032 345" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-memory)"></path>
+
+          <rect x="150" y="565" width="880" height="82" rx="9" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="175" y="596" class="svg-label">当前缺口</text>
+          <text x="175" y="622" class="svg-small">memory 还没有统一的检索/回放层：v3 transcript 难查询、HITL 不持久、compaction 摘要没有 loss audit、skills 没有自动评测。</text>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Memory 层</th>
+            <th>当前实现</th>
+            <th>优势</th>
+            <th>不足与优化</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>热上下文</strong></td>
+            <td><code>messages[]</code> 持有 system、goal、assistant tool calls、tool results；每轮发给 gateway。</td>
+            <td>简单直接，ReAct loop 可连续推理。</td>
+            <td>成本随轮次增长；应把 token/cost 做成可观测指标、软阈值和确认门，并把每轮输入输出落到 normalized trace。</td>
+          </tr>
+          <tr>
+            <td><strong>结构化工作记忆</strong></td>
+            <td><code>BrainCtx</code> 保存 specs、plan、attemptHistory、lastSandbox、lastValidation、humanDirectives、rules/tools。</td>
+            <td>这是最可靠的“权威状态”，不靠 LLM 自己记。</td>
+            <td>应把它序列化为 run checkpoint，支持 route 重启后恢复。</td>
+          </tr>
+          <tr>
+            <td><strong>自动压缩</strong></td>
+            <td>超过约 120k chars 后，保留 system/goal、最近 6 个 tool-call turns，中间替换成 deterministic summary + LLM 摘要。</td>
+            <td>很接近 ReSum/AgentFold/ACON 的思想，且 deterministic summary 防止关键状态丢失。</td>
+            <td>需要 summary loss audit：校验 coverage gap、last failure、run ids、human directives、sandbox fingerprint 是否都保留。</td>
+          </tr>
+          <tr>
+            <td><strong>跨 run 反思</strong></td>
+            <td><code>FailureReflection</code> 写入 kind/summary/rootCause/lesson，后续同域 run 前 8 条注入 system prompt。</td>
+            <td>低成本实现 Reflexion 风格 verbal memory。</td>
+            <td>应加适用条件、过期策略、冲突检测和效果评估，避免旧 lesson 污染新 ontology。</td>
+          </tr>
+          <tr>
+            <td><strong>程序性记忆</strong></td>
+            <td><code>skills-library</code> 用文件系统保存可复用 promptFragment、tools、decisionRule、useCount。</td>
+            <td>人可读、可 git diff、可跨域复用。</td>
+            <td>需要 skill lint/test/versioning，不然技能会从经验沉淀变成隐性 prompt debt。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2. Skills 生成与复用：从一次经验到可沉淀能力</h3>
+      <p>
+        Skills 当前不是 Codex 外层技能系统，而是 Agent Factory 自己的“agent 设计 know-how”：由 brain 在运行中调用
+        <code>create_skill</code> 写出，再在后续 <code>use_skill</code> 调入本轮，最终由 <code>design_agent</code>
+        织入生成 agent 的 system prompt。
+      </p>
+
+      <div class="diagram" aria-label="Skills 生成与复用图">
+        <svg viewBox="0 0 1180 560" role="img">
+          <defs>
+            <marker id="arrow-skill" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Skill Lifecycle</text>
+
+          <rect class="box" x="55" y="90" width="190" height="100" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="80" y="122" class="svg-label">发现模式</text>
+          <text x="80" y="148" class="svg-small">sandbox failure</text>
+          <text x="80" y="171" class="svg-small">domain rule insight</text>
+
+          <rect class="box" x="315" y="90" width="210" height="100" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="340" y="122" class="svg-label">create_skill</text>
+          <text x="340" y="148" class="svg-small">name / purpose</text>
+          <text x="340" y="171" class="svg-small">promptFragment / tools / rule</text>
+
+          <rect class="box" x="595" y="90" width="235" height="100" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="620" y="122" class="svg-label">skills-library</text>
+          <text x="620" y="148" class="svg-mono">skills-library/&lt;slug&gt;/SKILL.md</text>
+          <text x="620" y="171" class="svg-small">domain 或 * 通用</text>
+
+          <rect class="box" x="900" y="90" width="220" height="100" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="925" y="122" class="svg-label">use_skill</text>
+          <text x="925" y="148" class="svg-small">按 domain + * 列出</text>
+          <text x="925" y="171" class="svg-small">bump useCount</text>
+
+          <rect class="box" x="300" y="300" width="260" height="115" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="325" y="332" class="svg-label">design_agent</text>
+          <text x="325" y="358" class="svg-small">ctx.createdSkills 注入 spec</text>
+          <text x="325" y="381" class="svg-small">skillTools 只保留 registry 中真实工具</text>
+          <text x="325" y="404" class="svg-mono">prompt 中出现“可复用技能”块</text>
+
+          <rect class="box" x="665" y="300" width="250" height="115" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="690" y="332" class="svg-label">Generated Agent</text>
+          <text x="690" y="358" class="svg-small">systemPrompt 带经验片段</text>
+          <text x="690" y="381" class="svg-small">tools 被真实 registry 约束</text>
+          <text x="690" y="404" class="svg-small">后续 sandbox 验证效果</text>
+
+          <path d="M245 140 L310 140" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-skill)"></path>
+          <path d="M525 140 L590 140" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-skill)"></path>
+          <path d="M830 140 L895 140" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-skill)"></path>
+          <path d="M1010 190 C 970 265, 605 260, 475 295" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-skill)"></path>
+          <path d="M560 357 L660 357" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-skill)"></path>
+
+          <rect x="190" y="470" width="800" height="46" rx="8" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="215" y="499" class="svg-small">建议升级：每个 skill 加适用条件、负例、最小 golden test、ontology version hash、review 状态和废弃策略。</text>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Skill 字段</th>
+            <th>现在的作用</th>
+            <th>需要补强</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>promptFragment</code></td>
+            <td>直接织进 agent 的 system prompt，是技能最核心的行为指导。</td>
+            <td>加 lint：禁止过泛、禁止事件名过时、必须引用适用 action/object/rule。</td>
+          </tr>
+          <tr>
+            <td><code>tools</code></td>
+            <td>作为推荐工具进入 <code>buildSpecFromAction</code>，但只有 registry 中存在的工具会留下。</td>
+            <td>加工具适配测试：skill 推荐的工具是否真的适用于该 action 的输入对象。</td>
+          </tr>
+          <tr>
+            <td><code>decisionRule</code></td>
+            <td>一句决策规则，补足 prompt 中的分支判断。</td>
+            <td>改成结构化 rule：condition、positive event、negative event、evidence required。</td>
+          </tr>
+          <tr>
+            <td><code>domain</code> / <code>*</code></td>
+            <td>控制本域复用或跨域复用。</td>
+            <td>跨域技能需要更严格，建议有 domain compatibility 标签和人工 review。</td>
+          </tr>
+          <tr>
+            <td><code>useCount</code></td>
+            <td>排序信号，复用越多越靠前。</td>
+            <td>不能只看次数，还要记录“复用后 sandbox 是否变好”的 success rate。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3. Agents 之间通信：事件总线，而不是直接对话</h3>
+      <p>
+        这里要区分两类“agent 间通信”：一类是工厂生成期的 <strong>Brain ↔ Subagent</strong>，
+        另一类是运行期的 <strong>Generated Agent ↔ Generated Agent</strong>。目前二者机制完全不同。
+      </p>
+
+      <div class="diagram" aria-label="Agents 通信机制图">
+        <svg viewBox="0 0 1180 720" role="img">
+          <defs>
+            <marker id="arrow-comm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-comm-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Agent Communication Model</text>
+          <text x="28" y="60" class="svg-sub">生成期是子 brain 汇报，运行期是 Inngest 事件链</text>
+
+          <rect class="box" x="70" y="105" width="255" height="130" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="95" y="137" class="svg-label">Main Brain</text>
+          <text x="95" y="164" class="svg-small">负责计划、设计、修复、验收</text>
+          <text x="95" y="187" class="svg-small">可调用 spawn_subagent</text>
+          <text x="95" y="210" class="svg-mono">唯一能部署/修改 specs 的主控</text>
+
+          <rect class="box" x="465" y="105" width="255" height="130" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="490" y="137" class="svg-label">Subagent</text>
+          <text x="490" y="164" class="svg-small">独立 message history + ctx</text>
+          <text x="490" y="187" class="svg-small">只读工具 + web_search</text>
+          <text x="490" y="210" class="svg-mono">返回 summary，不落副作用</text>
+
+          <rect class="box" x="855" y="105" width="250" height="130" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="880" y="137" class="svg-label">Human Steering</text>
+          <text x="880" y="164" class="svg-small">POST /brain/inject</text>
+          <text x="880" y="187" class="svg-small">in-process mailbox</text>
+          <text x="880" y="210" class="svg-mono">下一 turn 作为 user message</text>
+
+          <path d="M325 170 L460 170" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-comm)"></path>
+          <path d="M720 170 L850 170" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-comm-warn)"></path>
+          <text x="350" y="153" class="svg-small">task</text>
+          <text x="740" y="153" class="svg-small">summary only</text>
+
+          <rect class="box" x="70" y="345" width="230" height="120" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="95" y="377" class="svg-label">Agent A</text>
+          <text x="95" y="404" class="svg-small">trigger: ENTRY</text>
+          <text x="95" y="427" class="svg-small">executeGeneratedAgent</text>
+          <text x="95" y="450" class="svg-mono">decide -> EVENT_X</text>
+
+          <rect class="box" x="475" y="345" width="230" height="120" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="500" y="377" class="svg-label">Inngest Event Bus</text>
+          <text x="500" y="404" class="svg-small">name: domain/EVENT_X</text>
+          <text x="500" y="427" class="svg-small">data: _runId, source, reasoning</text>
+          <text x="500" y="450" class="svg-mono">namespaced per domain</text>
+
+          <rect class="box" x="875" y="345" width="230" height="120" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="900" y="377" class="svg-label">Agent B</text>
+          <text x="900" y="404" class="svg-small">trigger: EVENT_X</text>
+          <text x="900" y="427" class="svg-small">reason/tool/decide</text>
+          <text x="900" y="450" class="svg-mono">emit -> EVENT_Y</text>
+
+          <path d="M300 405 L470 405" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-comm)"></path>
+          <path d="M705 405 L870 405" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-comm)"></path>
+
+          <rect class="box" x="300" y="555" width="580" height="80" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="325" y="587" class="svg-label">共享观察介质</text>
+          <text x="325" y="613" class="svg-small">InngestRunArchive / InngestStepArchive / AgentActivity 记录每个 agent 的接收、工具、decision、degraded、emitted。</text>
+        </svg>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>通信类型</th>
+            <th>当前机制</th>
+            <th>好处</th>
+            <th>风险与建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>运行期 agent → agent</strong></td>
+            <td>Inngest namespaced event：上游 <code>step.sendEvent("emit", { name: `${domain}/${event}` })</code>，下游监听同域 event。</td>
+            <td>天然异步、可重试、可观察，适合业务流程链。</td>
+            <td>补 payload schema version、correlation contract、dead-letter/replay UI；避免只靠自由 JSON payload。</td>
+          </tr>
+          <tr>
+            <td><strong>运行期 agent 内部决策</strong></td>
+            <td><code>executeGeneratedAgent</code> 绑定 registry tools，最后必须调用 <code>decide</code> 从 emit enum 选一个事件。</td>
+            <td>把自由文本收敛为事件决策，适合事件驱动流程。</td>
+            <td>degraded fallback 已在 sandbox gate 拒绝，但生产策略也应显式记录，不应静默走首分支。</td>
+          </tr>
+          <tr>
+            <td><strong>生成期 main ↔ subagent</strong></td>
+            <td><code>spawn_subagent</code> 启动隔离 <code>runBrain</code>，只给 read-only tools + web_search，最后回传 summary。</td>
+            <td>能做独立研究，不污染主 ctx，也不能部署或改 agent。</td>
+            <td>summary 是有损压缩；建议保存 subagent trace、task spec、evidence refs 和 token budget。</td>
+          </tr>
+          <tr>
+            <td><strong>人类 → brain</strong></td>
+            <td><code>/api/factory-v3/brain/inject</code> 写入 in-process mailbox，conductor 下一 turn drain 成 authoritative user message。</td>
+            <td>SSE 单向流有了回程通道，且 humanDirectives 会进入 compaction summary。</td>
+            <td>进程重启会丢；生产化应改 DB-backed directives，并显示在 run timeline。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4. Tool Grounding、Sandbox 与闭环控制</h3>
+      <div class="three-col">
+        <div class="card blue">
+          <h3>Tool grounding</h3>
+          <p>
+            <code>read_ontology</code> 输出 <code>availableTools</code>、<code>suggested_tools</code>、<code>dataObjects</code>；
+            <code>schema-grounding</code> 尽量用 enum 约束 action/tool 名；<code>buildSpecFromAction</code>
+            解析 LLM 选择的工具，找不到的进入 <code>unresolvedTools</code>，不会静默假装存在。
+          </p>
+          <p><strong>建议：</strong>加 tool compatibility checker，验证工具输入对象、sideEffect、dryRun 支持和 action intent 是否一致。</p>
+        </div>
+        <div class="card warn">
+          <h3>Sandbox evidence</h3>
+          <p>
+            <code>sandbox_run</code> 会把 specs 部署到 <code>sandbox-&lt;domain&gt;</code>，触发入口事件，
+            通过 archive 观察 runs/events，并把 <code>lastSandbox</code> 存成带 fingerprint 的一等状态。
+            <code>finish</code> 要求当前 specs 与 sandbox fingerprint 一致。
+          </p>
+          <p><strong>建议：</strong>把每次 sandbox evidence 独立落表，支持按 agent/step/event replay 与 diff。</p>
+        </div>
+        <div class="card violet">
+          <h3>Loop control</h3>
+          <p>
+            Brain 有 <code>MAX_TURNS=200</code>、finish refusal 警告、refine attempt history 和自动 compaction。
+            你们已经选择不靠 token 硬上限截断长程工作；因此治理重点应转向成本可视化、软阈值、确认门、sandbox run cap 和可审计预算状态。
+          </p>
+          <p><strong>建议：</strong>加 per-run/per-tool/per-subagent 预算和 interrupt policy，超预算时要求 analyze_failure 而不是继续试。</p>
+        </div>
+      </div>
+
+      <h3>5. 建议新增的技术对象</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>对象</th>
+            <th>解决的问题</th>
+            <th>建议字段</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>FactoryTraceEvent</code></td>
+            <td>替代 v3 单一 transcript JSON，支持查询、回放和成本分析。</td>
+            <td><code>runId</code>, <code>turn</code>, <code>type</code>, <code>parentId</code>, <code>inputRef</code>, <code>outputRef</code>, <code>tokens</code>, <code>cost</code>, <code>createdAt</code></td>
+          </tr>
+          <tr>
+            <td><code>BrainCheckpoint</code></td>
+            <td>让长运行可恢复，而不是 route/进程断开后只能看历史。</td>
+            <td><code>runId</code>, <code>ctxJson</code>, <code>messagesHead</code>, <code>messagesTail</code>, <code>summary</code>, <code>fingerprint</code></td>
+          </tr>
+          <tr>
+            <td><code>SkillEval</code></td>
+            <td>让 skill 不只是“用过几次”，而是知道它是否真的改善生成质量。</td>
+            <td><code>skillSlug</code>, <code>domain</code>, <code>agentAction</code>, <code>beforeScore</code>, <code>afterScore</code>, <code>sandboxDelta</code>, <code>verdict</code></td>
+          </tr>
+          <tr>
+            <td><code>EventContract</code></td>
+            <td>约束 agent 间事件 payload，减少自由 JSON 漂移。</td>
+            <td><code>eventName</code>, <code>domain</code>, <code>schemaVersion</code>, <code>jsonSchema</code>, <code>producerActions</code>, <code>consumerActions</code></td>
+          </tr>
+          <tr>
+            <td><code>HumanDirective</code></td>
+            <td>把 HITL 从进程内队列升级为可审计指令。</td>
+            <td><code>runId</code>, <code>text</code>, <code>status</code>, <code>injectedAt</code>, <code>consumedTurn</code>, <code>author</code></td>
+          </tr>
+          <tr>
+            <td><code>SubagentRun</code></td>
+            <td>保留子 agent 的完整证据，而不是只把 summary 回传给 main brain。</td>
+            <td><code>parentRunId</code>, <code>task</code>, <code>domain</code>, <code>toolCalls</code>, <code>summary</code>, <code>traceRefs</code>, <code>budgetUsed</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="chatops-builder">
+      <h2>目标态改造蓝图：ChatOps Agent Builder</h2>
+      <p>
+        如果目标是“最终生成能运行、能部署到 Inngest 的 agents”，那 Agent 工厂就不应该只像一个生成器，
+        而应该像一个简化版 Claude Code / Codex：用户用聊天提出目标和约束，AI 自主阅读上下文、给计划、执行工具、
+        修改 artifact、部署到 sandbox、观察失败、修复，再把可验证证据交给人批准。关键是：
+        <strong>聊天是交互界面，contract/code/tests/deploy evidence 才是系统事实源</strong>。
+      </p>
+
+      <div class="callout">
+        <strong>北极星：</strong>
+        每次 build run 的最终产物不是一段回答，而是一组版本化 artifact：
+        <code>AgentContract[]</code>、<code>EventContract[]</code>、可编译的 agent implementation、Inngest adapter、
+        golden tests、sandbox run evidence，以及可 promotion 的 <code>AgentVersion</code>。
+      </div>
+
+      <div class="diagram" aria-label="ChatOps Agent Builder 目标态">
+        <svg viewBox="0 0 1180 760" role="img">
+          <defs>
+            <marker id="arrow-chatops" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+            <marker id="arrow-chatops-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a05a00"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">ChatOps Agent Builder：从聊天到可部署 Inngest Agents</text>
+          <text x="28" y="60" class="svg-sub">聊天驱动计划与执行，但所有关键状态都落到可验证 artifact</text>
+
+          <rect class="box" x="45" y="105" width="230" height="125" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="70" y="137" class="svg-label">Chat Surface</text>
+          <text x="70" y="164" class="svg-small">目标 / 约束 / 指导</text>
+          <text x="70" y="187" class="svg-small">批准 / 拒绝 / 改方向</text>
+          <text x="70" y="210" class="svg-mono">人机协作入口</text>
+
+          <rect class="box" x="340" y="105" width="250" height="125" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="365" y="137" class="svg-label">Builder Brain</text>
+          <text x="365" y="164" class="svg-small">plan -> act -> observe -> repair</text>
+          <text x="365" y="187" class="svg-small">预算 / 权限 / checkpoint</text>
+          <text x="365" y="210" class="svg-mono">唯一写入主 artifact 的 AI</text>
+
+          <rect class="box" x="655" y="105" width="215" height="125" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="680" y="137" class="svg-label">Artifact Workspace</text>
+          <text x="680" y="164" class="svg-small">contracts / code / tests</text>
+          <text x="680" y="187" class="svg-small">trace / directives / evidence</text>
+          <text x="680" y="210" class="svg-mono">事实源，不是聊天记录</text>
+
+          <rect class="box" x="930" y="105" width="205" height="125" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="955" y="137" class="svg-label">Human Gates</text>
+          <text x="955" y="164" class="svg-small">contract approve</text>
+          <text x="955" y="187" class="svg-small">prod deploy approve</text>
+          <text x="955" y="210" class="svg-mono">高风险动作需确认</text>
+
+          <path d="M275 168 L335 168" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M590 168 L650 168" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M870 168 L925 168" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-chatops-warn)"></path>
+
+          <rect class="box" x="65" y="315" width="205" height="120" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="90" y="347" class="svg-label">1. Contract Graph</text>
+          <text x="90" y="374" class="svg-small">AgentContract</text>
+          <text x="90" y="397" class="svg-small">EventContract</text>
+          <text x="90" y="420" class="svg-mono">input/output 先冻结</text>
+
+          <rect class="box" x="350" y="315" width="205" height="120" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="375" y="347" class="svg-label">2. Implementation</text>
+          <text x="375" y="374" class="svg-small">Behavior.compute</text>
+          <text x="375" y="397" class="svg-small">tool calls / decision</text>
+          <text x="375" y="420" class="svg-mono">可编译 TypeScript</text>
+
+          <rect class="box" x="635" y="315" width="205" height="120" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="660" y="347" class="svg-label">3. Inngest Adapter</text>
+          <text x="660" y="374" class="svg-small">createFunction</text>
+          <text x="660" y="397" class="svg-small">parse event -> compute</text>
+          <text x="660" y="420" class="svg-mono">sendEvent(domain/event)</text>
+
+          <rect class="box" x="920" y="315" width="205" height="120" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="945" y="347" class="svg-label">4. Verification</text>
+          <text x="945" y="374" class="svg-small">tsc / tests / sandbox</text>
+          <text x="945" y="397" class="svg-small">Inngest archive inspect</text>
+          <text x="945" y="420" class="svg-mono">evidence gate</text>
+
+          <path d="M270 375 L345 375" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M555 375 L630 375" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M840 375 L915 375" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+
+          <rect class="box" x="210" y="540" width="250" height="100" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="235" y="572" class="svg-label">Sandbox Deploy</text>
+          <text x="235" y="598" class="svg-small">sandbox-&lt;domain&gt; Inngest app</text>
+          <text x="235" y="621" class="svg-small">dry-run side effects</text>
+
+          <rect class="box" x="535" y="540" width="250" height="100" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="560" y="572" class="svg-label">Repair Loop</text>
+          <text x="560" y="598" class="svg-small">inspect -> diagnose -> patch</text>
+          <text x="560" y="621" class="svg-small">重新测试 / 重新部署</text>
+
+          <rect class="box" x="860" y="540" width="190" height="100" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="885" y="572" class="svg-label">Promote</text>
+          <text x="885" y="598" class="svg-small">draft -> active</text>
+          <text x="885" y="621" class="svg-small">需人工批准</text>
+
+          <path d="M1022 435 C 1010 510, 430 505, 335 535" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M460 590 L530 590" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M785 590 L855 590" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-chatops)"></path>
+          <path d="M660 540 C 570 495, 455 472, 452 435" stroke="#a05a00" stroke-width="1.8" stroke-dasharray="7 7" fill="none" marker-end="url(#arrow-chatops-warn)"></path>
+        </svg>
+      </div>
+
+      <h3>1. 把“可运行 Agent”定义成三段式 artifact</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>层</th>
+            <th>职责</th>
+            <th>AI 可做什么</th>
+            <th>人在哪里介入</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Contract</strong></td>
+            <td>定义 agent 接收什么事件、输入 payload schema、可发出哪些事件、每个输出 payload schema、工具权限、重试/幂等/副作用策略。</td>
+            <td>从 ontology 和用户目标推导 contract graph，指出不确定处，生成 JSON Schema。</td>
+            <td>批准关键业务合同：事件名、payload 字段、失败分支、人审 gate、外部副作用。</td>
+          </tr>
+          <tr>
+            <td><strong>Implementation</strong></td>
+            <td>实现业务判断：读取输入、调用工具、产出 typed decision。建议形态是 <code>Behavior.compute(input, ctx)</code>。</td>
+            <td>写 TypeScript、补测试、根据 sandbox 失败 patch。</td>
+            <td>审阅高风险逻辑、规则解释、合规/风控阈值。</td>
+          </tr>
+          <tr>
+            <td><strong>Inngest Adapter</strong></td>
+            <td>稳定外壳：<code>createFunction</code>、trigger 绑定、event parse、step.run、sendEvent、日志、AgentActivity。</td>
+            <td>一般不需要自由生成，可由 deterministic generator 从 contract 生成。</td>
+            <td>批准部署目标：sandbox、draft、active。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>推荐选择：</strong>
+        不要让 LLM 每次自由生成整段 Inngest boilerplate。更稳的方式是：
+        AI 生成 <code>AgentContract</code> 和 <code>Behavior.compute</code>；
+        系统用确定性模板生成 Inngest adapter。这样最终仍是可运行 TypeScript/Inngest agent，
+        但部署边界、日志、重试、dry-run、schema parse 都由平台保证。
+      </div>
+
+      <h3>2. Agent I/O Contract：先规定通信合同，再写 agent</h3>
+      <p>
+        Agent 之间不能只靠 prompt 里写“发出某事件”。应把每个事件和每个 agent 的输入输出升级为可验证合同。
+        合同一旦进入 build run，AI 修改它必须生成 diff 和理由；高风险合同变更需要人批准。
+      </p>
+
+      <div class="diagram" aria-label="Agent Input Output Contract">
+        <svg viewBox="0 0 1180 590" role="img">
+          <defs>
+            <marker id="arrow-io" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">Agent I/O Contract Graph</text>
+
+          <rect class="box" x="65" y="110" width="245" height="125" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="90" y="142" class="svg-label">EventContract</text>
+          <text x="90" y="169" class="svg-small">event: RESUME_DOWNLOADED</text>
+          <text x="90" y="192" class="svg-small">schemaVersion: 1</text>
+          <text x="90" y="215" class="svg-mono">payloadSchema</text>
+
+          <rect class="box" x="465" y="95" width="260" height="155" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="490" y="127" class="svg-label">AgentContract</text>
+          <text x="490" y="154" class="svg-small">action: parseResume</text>
+          <text x="490" y="177" class="svg-small">input: RESUME_DOWNLOADED@v1</text>
+          <text x="490" y="200" class="svg-small">outputs: RESUME_PROCESSED | RESUME_INFO_MISSING</text>
+          <text x="490" y="223" class="svg-mono">tools / idempotency / retries</text>
+
+          <rect class="box" x="875" y="80" width="245" height="120" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="900" y="112" class="svg-label">Output A</text>
+          <text x="900" y="139" class="svg-small">event: RESUME_PROCESSED</text>
+          <text x="900" y="162" class="svg-small">payload: CandidateProfile</text>
+          <text x="900" y="185" class="svg-mono">schema validated</text>
+
+          <rect class="box" x="875" y="260" width="245" height="120" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="900" y="292" class="svg-label">Output B</text>
+          <text x="900" y="319" class="svg-small">event: RESUME_INFO_MISSING</text>
+          <text x="900" y="342" class="svg-small">payload: MissingFields</text>
+          <text x="900" y="365" class="svg-mono">schema validated</text>
+
+          <path d="M310 172 L460 172" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-io)"></path>
+          <path d="M725 160 L870 140" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-io)"></path>
+          <path d="M725 200 L870 320" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow-io)"></path>
+
+          <rect class="box" x="150" y="445" width="880" height="70" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="175" y="475" class="svg-label">Validation invariant</text>
+          <text x="175" y="501" class="svg-small">每个 consumed event 必须有 producer 或外部 entry；每个 produced event 必须有 consumer 或显式 terminal；每个 payload 必须被 JSON Schema 校验。</text>
+        </svg>
+      </div>
+
+      <pre style="white-space: pre-wrap; background:#0f172a; color:#e5e7eb; border-radius:8px; padding:16px; overflow:auto;"><code>type EventContract = {
+  name: string;
+  domain: string;
+  version: number;
+  payloadSchema: JsonSchema;
+  producers: string[];
+  consumers: string[];
+  terminal?: boolean;
+};
+
+type AgentContract = {
+  actionName: string;
+  triggerEvents: Array&lt;{ event: string; version: number }&gt;;
+  outputEvents: Array&lt;{ event: string; version: number; when: string }&gt;;
+  inputSchema: JsonSchema;
+  decisionSchema: JsonSchema; // event enum + payload per event
+  tools: Array&lt;{ name: string; required: boolean; sideEffect: "none" | "dry-run" | "external" }&gt;;
+  idempotencyKey: string;
+  retries: number;
+  timeoutMs: number;
+  humanGate?: { event: string; requiredFor: string };
+};</code></pre>
+
+      <h3>3. 聊天式 AI Builder Loop</h3>
+      <p>
+        交互体验上，用户看到的是聊天；系统内部应该是一个明确状态机。AI 的“自主思考”不要只体现为长文字，
+        而要体现为可审计的 plan、工具调用、artifact diff 和 evidence。
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>AI 行为</th>
+            <th>人类介入</th>
+            <th>系统状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Understand</strong></td>
+            <td>读取 ontology、registry、历史 reflection/skills，提出理解摘要和风险点。</td>
+            <td>补充业务目标、禁区、上线范围。</td>
+            <td><code>BuildBrief</code>、<code>ContextPack</code></td>
+          </tr>
+          <tr>
+            <td><strong>Plan</strong></td>
+            <td>生成步骤化计划：contract -> code -> tests -> sandbox -> repair -> promote。</td>
+            <td>批准计划或改优先级。</td>
+            <td><code>BuildPlan</code> 每步有状态、证据要求和预算。</td>
+          </tr>
+          <tr>
+            <td><strong>Contract</strong></td>
+            <td>生成/修改 AgentContract 与 EventContract，展示 diff。</td>
+            <td>批准 input/output、事件名、payload 字段、人审 gate。</td>
+            <td><code>ContractGraph</code> frozen 或 draft。</td>
+          </tr>
+          <tr>
+            <td><strong>Implement</strong></td>
+            <td>生成 <code>Behavior.compute</code>、测试、fixtures，运行 typecheck/test。</td>
+            <td>审阅高风险业务逻辑。</td>
+            <td><code>AgentSource</code>、<code>TestSuite</code>、<code>TraceEvent</code></td>
+          </tr>
+          <tr>
+            <td><strong>Verify</strong></td>
+            <td>部署 sandbox Inngest app，触发 golden scenarios，inspect run archive。</td>
+            <td>指导失败修复方向，确认是否接受边界风险。</td>
+            <td><code>SandboxEvidence</code>、<code>RegressionScore</code></td>
+          </tr>
+          <tr>
+            <td><strong>Promote</strong></td>
+            <td>总结差异、证据、风险，准备从 draft/sandbox promote。</td>
+            <td>最终批准 active deploy。</td>
+            <td><code>AgentVersion</code> draft -> active。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4. Builder 工具集应从“生成工具”升级为“工程工具”</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>工具</th>
+            <th>作用</th>
+            <th>为什么需要</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>draft_contract_graph</code></td>
+            <td>从 ontology 推导 agent/event contract 初稿。</td>
+            <td>让 input/output 先成形，后续代码都围绕合同生成。</td>
+          </tr>
+          <tr>
+            <td><code>patch_contract</code></td>
+            <td>以 JSON Patch 修改 contract，并输出 diff/reason。</td>
+            <td>避免 AI 在聊天里“说改了”，但 artifact 没变。</td>
+          </tr>
+          <tr>
+            <td><code>generate_behavior</code></td>
+            <td>为单个 AgentContract 生成 <code>Behavior.compute</code>。</td>
+            <td>把业务逻辑和 Inngest boilerplate 分离。</td>
+          </tr>
+          <tr>
+            <td><code>generate_inngest_adapter</code></td>
+            <td>确定性生成 <code>createFunction</code> 外壳。</td>
+            <td>部署、日志、parse、sendEvent 不应每次自由发挥。</td>
+          </tr>
+          <tr>
+            <td><code>run_typecheck</code> / <code>run_tests</code></td>
+            <td>在隔离临时项目中执行 <code>tsc --noEmit</code> 和 vitest。</td>
+            <td>让“可运行”有编译和单测证据。</td>
+          </tr>
+          <tr>
+            <td><code>deploy_sandbox_inngest</code></td>
+            <td>部署到 dedicated sandbox app 并注册函数。</td>
+            <td>证明代码真的被 Inngest 接收，不只是本地通过。</td>
+          </tr>
+          <tr>
+            <td><code>run_golden_scenarios</code></td>
+            <td>触发 entry events，观察 expected event sequence。</td>
+            <td>证明 agent 之间 input/output 合同真的串起来。</td>
+          </tr>
+          <tr>
+            <td><code>request_human_decision</code></td>
+            <td>当合同冲突、规则阈值、生产发布等需要人决定时暂停。</td>
+            <td>把人工介入变成可审计状态，而不是聊天噪音。</td>
+          </tr>
+          <tr>
+            <td><code>promote_agents</code></td>
+            <td>在所有 gate 通过后，把 draft/sandbox 版本 promote 到 active。</td>
+            <td>高风险动作必须有明确 approval 和 evidence bundle。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>5. Lane B 代码目标形态：Behavior.compute + Inngest Adapter</h3>
+      <p>
+        对需要代码资产的复杂 deterministic agent，这样做可以兼顾“AI 自主写业务逻辑”和“平台稳定部署”。
+        AI 不需要每次记住所有 Inngest 细节；它只需要实现输入到输出 decision 的核心逻辑，adapter 负责平台一致性。
+        简单 agent 不必强行升级到这个 lane。
+      </p>
+
+      <pre style="white-space: pre-wrap; background:#0f172a; color:#e5e7eb; border-radius:8px; padding:16px; overflow:auto;"><code>export type AgentDecision&lt;E extends string, P&gt; = {
+  event: E;
+  payload: P;
+  reasoning: string;     // 可审计摘要，不要求暴露完整内部推理
+  confidence: number;
+};
+
+export interface AgentBehavior&lt;Input, Decision&gt; {
+  compute(input: Input, ctx: {
+    tools: ToolRegistry;
+    dryRun: boolean;
+    log: AgentLogger;
+  }): Promise&lt;Decision&gt;;
+}
+
+// Deterministic adapter generated from AgentContract
+export function makeInngestAgent(contract: AgentContract, behavior: AgentBehavior&lt;unknown, AgentDecision&lt;string, unknown&gt;&gt;) {
+  return inngest.createFunction(
+    { id: contract.actionName, name: contract.actionName, retries: contract.retries },
+    { event: contract.triggerEvents.map((t) =&gt; `${contract.domain}/${t.event}`) },
+    async ({ event, step }) =&gt; {
+      const input = parseWithSchema(contract.inputSchema, event.data);
+      const decision = await step.run("compute", () =&gt; behavior.compute(input, runtimeCtx));
+      parseWithSchema(contract.decisionSchema, decision);
+      await step.sendEvent("emit", {
+        name: `${contract.domain}/${decision.event}`,
+        data: { _runId: event.data._runId, source: contract.actionName, ...decision.payload },
+      });
+      return decision;
+    },
+  );
+}</code></pre>
+
+      <h3>6. 人工介入应该是“指令对象”，不是临时消息</h3>
+      <p>
+        现在 HITL mailbox 已经从进程内队列升级为 DB-backed 回程通道，但目标态还要把人工介入进一步结构化。每条人工指导应该有 scope，
+        比如全局、某个 agent、某个 event contract、某个测试场景或发布动作。AI 必须在后续计划里标记它如何遵守，
+        或为什么阻塞。
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Directive Scope</th>
+            <th>例子</th>
+            <th>系统行为</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>global</code></td>
+            <td>“这个域不要调用真实外部 API，只允许 dry-run。”</td>
+            <td>所有 tool/deploy action 自动继承，违反时拒绝执行。</td>
+          </tr>
+          <tr>
+            <td><code>agent</code></td>
+            <td>“ruleCheck agent 必须 fail-close。”</td>
+            <td>写入 AgentContract 和测试用例，sandbox 验证失败分支。</td>
+          </tr>
+          <tr>
+            <td><code>event</code></td>
+            <td>“MATCH_FAILED payload 必须包含 reasonCode。”</td>
+            <td>修改 EventContract schema，影响 producer/consumer。</td>
+          </tr>
+          <tr>
+            <td><code>test</code></td>
+            <td>“加一个缺少学历字段的简历样例。”</td>
+            <td>生成 golden fixture，并纳入 finish gate。</td>
+          </tr>
+          <tr>
+            <td><code>deploy</code></td>
+            <td>“先只部署 sandbox，不要 active。”</td>
+            <td>promote 工具被锁住，直到用户解除。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>7. 推荐落地顺序</h3>
+      <div class="roadmap">
+        <div class="card bad">
+          <h3>Step 1 · Contract-first</h3>
+          <ul>
+            <li>新增 <code>EventContract</code> / <code>AgentContract</code>。</li>
+            <li>UI 展示 contract graph 和 diff。</li>
+            <li>finish gate 要求 input/output schema 闭合。</li>
+          </ul>
+        </div>
+        <div class="card warn">
+          <h3>Step 2 · ChatOps Workspace</h3>
+          <ul>
+            <li>把 plan、directives、trace、artifact diff 持久化。</li>
+            <li>AI 每步更新 plan status 和 evidence。</li>
+            <li>人工指导可 scoped、可 consumed、可审计。</li>
+          </ul>
+        </div>
+        <div class="card blue">
+          <h3>Step 3 · Runnable Code</h3>
+          <ul>
+            <li>AI 生成 <code>Behavior.compute</code>。</li>
+            <li>平台确定性生成 Inngest adapter。</li>
+            <li>隔离运行 <code>tsc</code>、unit tests、contract tests。</li>
+          </ul>
+        </div>
+        <div class="card ok">
+          <h3>Step 4 · Deploy Loop</h3>
+          <ul>
+            <li>部署 sandbox Inngest app。</li>
+            <li>跑 golden scenarios 并 inspect archive。</li>
+            <li>证据 bundle + 人工批准后 promote active。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>06 · 当前优势</h2>
+      <div class="three-col">
+        <div class="card ok">
+          <h3>Harness-first 方向正确</h3>
+          <p>v3 不把生成结果直接当真，而是通过工具、图验证、sandbox 和 finish gate 逐层收紧。这个方向比“更大 prompt”可靠得多。</p>
+        </div>
+        <div class="card blue">
+          <h3>Live ontology grounding</h3>
+          <p><code>read_ontology</code> 强依赖 live Allmeta/registry，避免在陈旧快照上部署，这是控制平面系统很重要的保守性。</p>
+        </div>
+        <div class="card violet">
+          <h3>可观察 ReAct loop</h3>
+          <p>Brain event 把 think、tool call/result、plan、inspect、validation、score、done 都流给 UI，使用户能看到 agent 工厂如何自我修复。</p>
+        </div>
+        <div class="card teal">
+          <h3>沙箱证据不是装饰</h3>
+          <p><code>sandbox_run</code> 会部署 dedicated domain、触发 entry event、读取 archive 和 AgentActivity，并用 fingerprint 防止旧结果被复用。</p>
+        </div>
+        <div class="card ok">
+          <h3>失败反思可跨 run 复用</h3>
+          <p><code>FailureReflection</code> 把失败根因和 lesson 注入后续 brain prompt，接近 Reflexion 的 verbal memory 机制。</p>
+        </div>
+        <div class="card blue">
+          <h3>原子化发布</h3>
+          <p>finish 前不把最终草稿写入 fleet，能避免半成品污染 active/draft 版本；这是合理的生产安全默认值。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="gaps">
+      <h2>07 · 不足与风险清单</h2>
+      <p>
+        以下按生产影响排序。P0 是会阻碍“可信自动生成并上线”的关键问题；P1 是会显著影响规模化使用的工程问题；
+        P2/P3 是体验、效率和治理问题。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>优先级</th>
+            <th>问题</th>
+            <th>为什么重要</th>
+            <th>建议修复方向</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>Runtime selector 未显式化</strong></td>
+            <td>代码生成产物与实际执行路径分离本身可接受，但如果不记录 runtimeDecision，审计边界和部署策略会变模糊。</td>
+            <td>按复杂度生成 <code>runtimeDecision</code>：spec-executor / behavior-code / codeact-sandbox；三者都必须实现同一 AgentContract/EventContract。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>成本可观测与策略门未闭环</strong></td>
+            <td>你们已选择不做简单 token 硬上限；因此更需要把 LLM、subagent、Tool-Smith、web/doc fetch 的成本和耗时变成可见、可确认、可审计的状态。</td>
+            <td>增加 cost meter、soft threshold、用户确认门、per-subagent/tool/doc-fetch 策略，并把消耗写入 normalized trace。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>Golden harness 已启动，但还需产品化</strong></td>
+            <td><code>gold-standard.ts</code> 已能对标招聘真实 agents 的签名/分支/工具；但它还未成为所有域的 finish gate，也缺 N-run 稳定性与 mutation tests。</td>
+            <td>把 gold score 接入 FactoryV3 eval；为非招聘域建立 golden fixtures；加入 branch mutation、N-run variance 和 regression score。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p0">P0</span></td>
+            <td><strong>Sandbox 隔离仍偏软</strong></td>
+            <td>当前 AI 代码未直接执行，所以风险可控；但若未来执行 codegen 产物，仅 TS transpile 不是安全边界。</td>
+            <td>先 out-of-process worker，再考虑 Firecracker/gVisor 级隔离；加 import allowlist、network/fs policy。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>v3 trace 未规范化</strong></td>
+            <td>v3 主要存 monolithic transcript JSON，虽然 UI 可看，但难以查询每次 LLM/tool 输入输出、成本、父子关系和 replay。</td>
+            <td>新增 normalized <code>FactoryTraceEvent</code>/<code>FactoryLlmCall</code> v3 版，保留 JSON transcript 只做展示缓存。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>Context compaction 仍是启发式</strong></td>
+            <td>长程 agent 会出现 context rot；当前靠阈值和总结，容易丢失关键约束或失败细节。</td>
+            <td>把状态拆成 deterministic state、retrievable event ledger、LLM summary，并做 summary loss audit。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p1">P1</span></td>
+            <td><strong>代码验证已加强，但还未到可执行发布级</strong></td>
+            <td>新版本加入 import allowlist 和事件接地校验，这是明显进步；但仍主要是语法/静态字符串级检查，不等于隔离项目完整 typecheck/test。</td>
+            <td>在临时项目中运行 <code>tsc --noEmit</code>、unit/contract tests，并把 generatedCode 与真实 runtime artifact 绑定。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p2">P2</span></td>
+            <td><strong>degraded 已被 sandbox/finish 拒绝，生产策略仍需显式化</strong></td>
+            <td>sandbox 和 finish 现在会把 degradedAgents 视为不通过；但生产 runtime 仍有 fallback 行为，需要在 active 环境的策略、告警和 UI 上显式呈现。</td>
+            <td>为 active runtime 增加 degraded policy：fail-close / retry / emit fallback 三选一，并把 degraded decision 进入告警和 run detail。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p2">P2</span></td>
+            <td><strong>HITL 已持久化，但还不是 Directive 模型</strong></td>
+            <td>新版本用 Postgres raw table 保存人工消息，解决了跨 worker 丢消息；但还缺 scope、author、status、consumedTurn 和 UI 审计。</td>
+            <td>升级为 <code>HumanDirective</code> 模型，支持 global/agent/event/test/deploy scope，并在 plan/trace 中标记 consume 结果。</td>
+          </tr>
+          <tr>
+            <td><span class="priority p2">P2</span></td>
+            <td><strong>UI eval 有硬编码启发式</strong></td>
+            <td>例如覆盖度用 agent 数量判断，和 ontology 的真实 expected coverage 不完全一致。</td>
+            <td>从 <code>coverageGap</code> / ontology event flow 派生 expected agent count 和 missing triggers。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="research">
+      <h2>08 · 相关研究与可落地启发</h2>
+      <p>
+        我把资料分成 Harness、Agent Loop、Multi-agent、代码生成评测、上下文管理和隔离执行六组。对我们最有用的不是“多加几个 agent”，
+        而是把评测、上下文、预算、trace 和安全边界工程化。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>资料</th>
+            <th>关键观点</th>
+            <th>对 Agentic Operator 的建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://martinfowler.com/articles/harness-engineering.html">Harness Engineering · Martin Fowler</a></td>
+            <td>Harness 是模型之外的全部工程：上下文、工具、权限、反馈、评测和环境。</td>
+            <td>继续把 v3 做成强 Harness；不要把成功率完全寄托于更大模型。</td>
+          </tr>
+          <tr>
+            <td><a href="https://openai.com/index/harness-engineering/">OpenAI Harness Engineering</a></td>
+            <td>人类设定目标与反馈，agent 执行；工程重点转为设计环境、反馈循环和可控执行面。</td>
+            <td>把 UI cockpit、SSE trace、HITL、finish gate 做成产品级交互，而不是 debug 附件。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2210.03629">ReAct</a></td>
+            <td>交错 reasoning trace 与 actions，提高可解释性和工具任务表现。</td>
+            <td>v3 已符合；下一步要把 trace 从“可看”升级为“可查询、可重放、可评测”。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2303.11366">Reflexion</a></td>
+            <td>用语言化反馈和反思记忆让 agent 从失败中学习，不改模型权重。</td>
+            <td>强化 <code>FailureReflection</code>：加 root-cause taxonomy、适用 domain、失效检测和检索排序。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2308.00352">MetaGPT</a></td>
+            <td>多 agent 若只是消息串联，会级联幻觉；SOP 与结构化产物能降低协作混乱。</td>
+            <td>若引入 subagent，必须给每个 subagent 明确 SOP、输入/输出 schema 和验收规则。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2308.08155">AutoGen</a></td>
+            <td>Conversable agents 可以混合 LLM、人类和工具，以对话组织复杂任务。</td>
+            <td>适合 P2/P3 研究/规则拆解/critic，不适合默认把核心生成链路拆成多个自由对话 agent。</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic Multi-agent Research</a></td>
+            <td>多 agent 擅长 breadth-first 并行研究，但 token 成本可达 chat 的 15 倍；不适合高度依赖链式任务。</td>
+            <td>Agent 工厂的核心链路高度依赖，默认保持单 brain；只在独立 research、tool audit、domain rule mining 使用 subagent。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2401.08500">AlphaCodium</a></td>
+            <td>代码生成需要测试驱动、多阶段、显式边界样例，而不是一次生成。</td>
+            <td>把 reverse-score harness 升为 P0：golden fixtures、branch tests、regression score、失败样例自动加入技能库。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2402.01030">CodeAct</a></td>
+            <td>可执行代码 action 让 agent 原生拥有控制流和数据流，复杂多工具任务可减少 action hop 并利用报错自我 debug。</td>
+            <td>只把少数复杂 Product Agent 升级到 CodeAct-style sandbox；简单事件 agent 继续用 spec executor。执行代码前必须有 out-of-process 隔离与 action audit。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2310.03714">DSPy</a></td>
+            <td>手写 prompt template 脆弱，应该把 LM pipeline 声明化并可优化。</td>
+            <td>把 design/review/refine prompt 抽成可版本化 signatures，未来用 evaluation set 自动优化。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2309.02427">CoALA</a></td>
+            <td>认知 agent 可拆成 memory、action space、decision loop 等模块。</td>
+            <td>把 v3 state 明确拆成 working memory、episodic trace、semantic skills、procedural tools。</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic Context Engineering</a></td>
+            <td>长程 agent 的上下文会腐化；需要持续管理哪些 token 进入上下文。</td>
+            <td>为 compaction 建 loss audit：保留 hard constraints、last failure、coverage gap、sandbox fingerprint 等不可压缩状态。</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents">Anthropic Long-running Harnesses</a></td>
+            <td>长任务需要 initializer、progress file、self-verify、干净环境与可恢复状态。</td>
+            <td>为每个 FactoryBrainRun 生成 machine-readable progress ledger，使 route 重启后可恢复。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2509.13313">ReSum</a> / <a href="https://arxiv.org/abs/2510.24699">AgentFold</a> / <a href="https://arxiv.org/html/2510.00615v1">ACON</a></td>
+            <td>周期总结、主动折叠和优化压缩能缓解长 horizon agent 的上下文饱和。</td>
+            <td>用“可验证摘要 + 可检索原始 trace”替代一次性压缩；对摘要做 coverage/failure/fingerprint 校验。</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2410.10762">AFlow</a></td>
+            <td>把 agentic workflow 表示成代码并自动搜索优化，可在成本更低模型上达到更好表现。</td>
+            <td>把 v3 工具调用序列作为 workflow 数据，未来离线搜索更优 build policy，而不是每次完全自由探索。</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.usenix.org/conference/nsdi20/presentation/agache">Firecracker</a></td>
+            <td>microVM 提供强隔离和低开销，适合运行不可信或多租户 workload。</td>
+            <td>直接执行 AI 生成代码前，应引入 out-of-process / microVM 级 sandbox，而不是同进程 import。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="target">
+      <h2>09 · 推荐目标架构</h2>
+      <p>
+        我建议将 Agent 工厂目标架构定义为：<strong>一个单 Brain 主控、强 Harness 验收、可选 subagent 分工、可回放 trace、
+        可量化 reverse-score、统一合同、混合 runtime 的 Agent 生产线</strong>。
+      </p>
+
+      <div class="diagram" aria-label="推荐目标架构图">
+        <svg viewBox="0 0 1180 760" role="img">
+          <defs>
+            <marker id="arrow5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1463ff"></path>
+            </marker>
+          </defs>
+          <text x="28" y="38" class="svg-title">推荐目标架构：Single Brain + Typed Harness + Evidence Ledger</text>
+          <text x="28" y="60" class="svg-sub">核心链路保持单主控，subagent 只服务可并行、可验收的子任务</text>
+
+          <rect class="box" x="40" y="105" width="240" height="120" fill="#f0ebff" stroke="#d9cfff"></rect>
+          <text x="65" y="136" class="svg-label">Brain Orchestrator</text>
+          <text x="65" y="162" class="svg-small">goal / plan / tool policy</text>
+          <text x="65" y="185" class="svg-small">budget aware ReAct</text>
+          <text x="65" y="208" class="svg-small">durable HITL directives</text>
+
+          <rect class="box" x="360" y="85" width="240" height="95" fill="#e5f5f6" stroke="#bce2e5"></rect>
+          <text x="385" y="116" class="svg-label">Domain Context Pack</text>
+          <text x="385" y="142" class="svg-small">ontology + registry + rules</text>
+          <text x="385" y="165" class="svg-small">signed snapshot for analysis only</text>
+
+          <rect class="box" x="360" y="215" width="240" height="95" fill="#e9f0ff" stroke="#cbdcff"></rect>
+          <text x="385" y="246" class="svg-label">Typed Tool Contracts</text>
+          <text x="385" y="272" class="svg-small">schema enum grounding</text>
+          <text x="385" y="295" class="svg-small">semantic event/tool checker</text>
+
+          <rect class="box" x="680" y="85" width="220" height="95" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="705" y="116" class="svg-label">Optional Subagents</text>
+          <text x="705" y="142" class="svg-small">research / critic / rule miner</text>
+          <text x="705" y="165" class="svg-small">bounded budget + schema output</text>
+
+          <rect class="box" x="680" y="215" width="220" height="95" fill="#fff2db" stroke="#ffd999"></rect>
+          <text x="705" y="246" class="svg-label">Reverse-score Harness</text>
+          <text x="705" y="272" class="svg-small">golden fixtures / branch tests</text>
+          <text x="705" y="295" class="svg-small">degraded=fail / N-run variance</text>
+
+          <rect class="box" x="960" y="150" width="175" height="120" fill="#fff0ed" stroke="#ffc8c1"></rect>
+          <text x="982" y="181" class="svg-label">Evidence Ledger</text>
+          <text x="982" y="207" class="svg-small">normalized trace</text>
+          <text x="982" y="230" class="svg-small">LLM/tool IO refs</text>
+          <text x="982" y="253" class="svg-small">token/cost/parentId</text>
+
+          <rect class="box" x="220" y="405" width="250" height="115" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="245" y="436" class="svg-label">Default Lane A</text>
+          <text x="245" y="462" class="svg-small">Spec executor 正式化</text>
+          <text x="245" y="485" class="svg-small">generic executor + strict eval</text>
+          <text x="245" y="508" class="svg-small">simple agents stay declarative</text>
+
+          <rect class="box" x="710" y="405" width="250" height="115" fill="#e8f6ee" stroke="#b6e2c6"></rect>
+          <text x="735" y="436" class="svg-label">Upgrade Lane B/C</text>
+          <text x="735" y="462" class="svg-small">Behavior.compute or CodeAct</text>
+          <text x="735" y="485" class="svg-small">only when complexity needs it</text>
+          <text x="735" y="508" class="svg-small">isolated compile/run + sandbox</text>
+
+          <rect class="box" x="390" y="610" width="400" height="80" fill="#ffffff" stroke="#b9c2d0"></rect>
+          <text x="420" y="642" class="svg-label">Finish Gate</text>
+          <text x="420" y="668" class="svg-small">coverage + code/schema + sandbox + golden score + trace completeness + budget status</text>
+
+          <path d="M280 165 L355 135" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M280 185 L355 260" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M600 132 L675 132" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M600 262 L675 262" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M900 210 L955 210" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M790 310 C 720 360, 500 370, 350 400" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M790 310 C 820 350, 835 370, 835 400" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M345 520 C 410 575, 475 590, 555 607" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+          <path d="M835 520 C 760 575, 695 590, 625 607" stroke="#1463ff" stroke-width="2" fill="none" marker-end="url(#arrow5)"></path>
+        </svg>
+      </div>
+
+      <div class="three-col">
+        <div class="card blue">
+          <h3>Lane A：Spec Executor</h3>
+          <p>
+            这是默认路线。承认 <code>GeneratedAgentSpec</code> 是正式部署 artifact，重点投入 contract、tool selection、
+            event graph、runtime decision eval、trace 和 golden tests。
+          </p>
+          <p><strong>适合：</strong>近期要稳定支持更多业务域、强调可控和快速上线。</p>
+        </div>
+        <div class="card violet">
+          <h3>Lane B：Behavior.compute</h3>
+          <p>
+            让 codegen 产物真正成为 <code>makeOntologyAgent</code> / <code>Behavior.compute</code> 的实现。
+            需要隔离编译、AST 审计、依赖白名单、类型检查和回归评测。
+          </p>
+          <p><strong>适合：</strong>需要工程师可读可改、可 PR review、可长期维护的 agent 代码资产。</p>
+        </div>
+        <div class="card warn">
+          <h3>Lane C：CodeAct Sandbox</h3>
+          <p>
+            让 agent 用可执行代码 action 组合多个工具、循环调试和复用中间变量。表达力最强，但必须 out-of-process，
+            并受网络、文件系统、依赖、secret 和 wall time 策略限制。
+          </p>
+          <p><strong>适合：</strong>少数多工具编排、动态数据分析、需要自我 debug 的复杂节点。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <h2>10 · 优化路线图</h2>
+      <div class="roadmap">
+        <div class="card bad">
+          <h3>P0 · 1-2 周</h3>
+          <ul>
+            <li>把 token / cost / tool-call / doc-fetch 做成可观测 cost meter、软阈值和用户确认门。</li>
+            <li>巩固已落地的 <code>AgentContract</code> / <code>EventContract</code>，把 contract report 接入 finish。</li>
+            <li>新增 <code>runtimeDecision</code>：spec-executor / behavior-code / codeact-sandbox。</li>
+            <li>新增 v3 normalized trace event 表或等价 ledger。</li>
+            <li>把 raw SQL <code>factory_conversation</code> 升级为正式 Conversation/Turn/BrainCheckpoint 模型。</li>
+            <li>拆分 sandbox 的 natural chain evidence 与 coverage-pass evidence。</li>
+          </ul>
+        </div>
+        <div class="card warn">
+          <h3>P1 · 2-4 周</h3>
+          <ul>
+            <li>把 Meta-Orchestrator 接入 FactoryV3 主 cockpit。</li>
+            <li>把招聘 gold-standard score 接入 finish/eval，并扩展到 energy / feikong fixtures。</li>
+            <li>codegen 产物进入临时 TS project 做 <code>tsc --noEmit</code>。</li>
+            <li>Tool-Smith 加 approve/revoke UI、dry-run test、required env 检查。</li>
+            <li>把 sandbox run evidence 结构化保存，支持 replay。</li>
+          </ul>
+        </div>
+        <div class="card blue">
+          <h3>P2 · 4-8 周</h3>
+          <ul>
+            <li>按 agent 复杂度混合 runtime，而不是全局选择 spec runtime 或 Agent-as-code。</li>
+            <li>为复杂 deterministic agent 生成 <code>Behavior.compute</code> 形态代码。</li>
+            <li>实现 context folding：deterministic state + retrievable trace + summary audit。</li>
+            <li>把 skills-library 接入评测，不只作为经验文档。</li>
+            <li>subagent 只用于 bounded research / critic / rule mining。</li>
+          </ul>
+        </div>
+        <div class="card ok">
+          <h3>P3 · 8 周后</h3>
+          <ul>
+            <li>AI 代码执行进入 out-of-process worker 或 microVM。</li>
+            <li>离线优化 agent workflow policy，借鉴 AFlow。</li>
+            <li>持续 eval dashboard：domain drift、ontology drift、tool failure drift。</li>
+            <li>把失败样例自动转为 future golden case。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>11 · 不建议做的事</h2>
+      <div class="three-col">
+        <div class="card bad">
+          <h3>不要默认多 agent 化核心链路</h3>
+          <p>核心生成链路高度依赖，盲目加 planner/coder/reviewer 自由对话会放大 token 成本和级联错误。</p>
+        </div>
+        <div class="card bad">
+          <h3>不要同进程执行 AI 代码</h3>
+          <p>当前不执行 AI 代码是安全的；一旦改成直接 import，就必须先解决隔离、依赖和权限边界。</p>
+        </div>
+        <div class="card bad">
+          <h3>不要把 terminal event 等同成功</h3>
+          <p>finish 需要证明正确链路、分支和稳定性；看到 terminal 只是必要条件，不是充分条件。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="anchors">
+      <h2>12 · 本次分析的代码锚点</h2>
+      <p class="small">
+        以下是报告主要依据的本地实现位置。它们共同说明了 v3 brain、toolbelt、sandbox、runtime executor 和 persistence 的真实边界。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>文件</th>
+            <th>观察点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>lib/agent-factory-v3/brain/conductor.ts</code></td>
+            <td>ReAct loop、turn 上限、token budget 状态、HITL mailbox drain、context compaction、FailureReflection 写入。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/brain/stream-gateway.ts</code></td>
+            <td>OpenAI-compatible streaming tool-call primitive，transient retry，assistant content/tool call 聚合。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/tools/index.ts</code></td>
+            <td>P1 tools、design/codegen/refine/review/sandbox/finish gate 的主要实现。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/tools/front-desk.ts</code></td>
+            <td>Front Desk intent-routing：<code>list_domains</code> / <code>describe_domain</code> 支持信息性问题直接回答，避免误跑生成流水线。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/tools/p2-p3.ts</code></td>
+            <td>动态扩展工具：<code>web_search</code>、<code>create_skill</code>、<code>use_skill</code>、<code>spawn_subagent</code>；子脑只拿 read-only tools。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/graph.ts</code></td>
+            <td>graph compile / verify / coverage gap，对 <code>triggered_event</code> 分支的静态分析。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/contract.ts</code></td>
+            <td>一等 Agent/Event 合同：从 <code>inputSchema</code>/<code>outputSchema</code> 派生 contract graph，并检查 payload gap / untyped event。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/contract.test.ts</code></td>
+            <td>验证 payload gap、entry/terminal 标记、untyped internal event、failure signal 例外等合同规则。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v2/deploy.ts</code></td>
+            <td><code>shipAgents</code>、sandbox domain 注册、entry event fire、Inngest archive observe。</td>
+          </tr>
+          <tr>
+            <td><code>server/inngest/domain-app.ts</code></td>
+            <td>per-domain Inngest app，通用生成域通过 shell function 执行 generated spec。</td>
+          </tr>
+          <tr>
+            <td><code>server/inngest/factory/agent-executor.ts</code></td>
+            <td>实际 runtime executor：LLM decide tool、dry-run、tool invocation、event emit、degraded fallback。</td>
+          </tr>
+          <tr>
+            <td><code>server/inngest/domains/energy/make-agent.ts</code></td>
+            <td>真实 hand-written / pack-style <code>makeOntologyAgent</code> 与 <code>Behavior.compute</code> 形态。</td>
+          </tr>
+          <tr>
+            <td><code>app/api/factory-v3/brain/stream/route.ts</code></td>
+            <td>SSE run route、FactoryBrainRun finalization、transcript cap、route duration。</td>
+          </tr>
+          <tr>
+            <td><code>app/api/factory-v3/runs/*</code></td>
+            <td>FactoryBrainRun 历史列表与详情回放：支持刷新/跨天后重新打开 brain transcript。</td>
+          </tr>
+          <tr>
+            <td><code>app/api/factory-v3/brain/inject/route.ts</code></td>
+            <td>运行中人工介入入口：POST 写入 DB-backed mailbox，由 conductor 在下一 turn boundary 消费。</td>
+          </tr>
+          <tr>
+            <td><code>components/behavior/factory-v3/FactoryV3Content.tsx</code></td>
+            <td>cockpit UI：streaming transcript、agents、graph、trace、knowledge、eval tabs。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/brain/conversation-store.ts</code></td>
+            <td>聊天连续会话：用 convId 保存 messages + BrainCtx，使用户 follow-up 能延续同一轮 agent 生成状态。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/brain/mailbox.ts</code></td>
+            <td>DB-backed HITL mailbox：人工消息入 Postgres，conductor 在 turn boundary drain，长工具可 peek pending message 中断。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-factory-v3/tools/tool-smith.ts</code></td>
+            <td>Doc-Fetcher + Tool-Smith：从外部开发文档抽 API contract，创建声明式 HTTP 工具，避免 AI 写可执行工具代码。</td>
+          </tr>
+          <tr>
+            <td><code>lib/tools/egress-guard.ts</code></td>
+            <td>AI 可触达 HTTP 出口的 SSRF 防护：拒绝 localhost/private/link-local/metadata、非 http(s)、public→internal redirect。</td>
+          </tr>
+          <tr>
+            <td><code>lib/tools/persisted-tools.ts</code></td>
+            <td>持久化 AI-created tools：<code>tools-library/&lt;slug&gt;/TOOL.json</code>，已批准工具会注册进 brain/runtime registry。</td>
+          </tr>
+          <tr>
+            <td><code>lib/tools/resolve-registry.ts</code></td>
+            <td>domain-scoped registry、sandbox domain、force dry-run、<code>LIVE_WRITE_DOMAINS</code> 写工具允许名单。</td>
+          </tr>
+          <tr>
+            <td><code>app/api/tools/route.ts</code>, <code>components/tools/ToolsLibraryContent.tsx</code></td>
+            <td>独立工具库页面/API：展示工具族、签名、读写副作用、required env、dry-run 状态。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-harness/orchestrator.ts</code></td>
+            <td>Meta-Orchestrator 的确定性核心：对 ontology node slots 做 build-vs-reuse、compose、validate chain。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-harness/selection.ts</code></td>
+            <td>Selection Harness：根据 trigger/emit/domain/capability signature 给已有 agents 打分，决定 reuse 还是 generate。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-harness/types.ts</code></td>
+            <td>统一 AgentNode 描述：当前已有 builder/product/harness、in-process/inngest/tool substrate、trigger/emit signature。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-harness/registry.ts</code></td>
+            <td>统一 Agent Registry：把真实 handwritten agents 与生成的 AgentVersion 合并成可选择/可复用节点。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-harness/gold-standard.ts</code></td>
+            <td>招聘域 gold standard：从真实 agent 反推出签名、分支、工具，对生成结果评分。</td>
+          </tr>
+          <tr>
+            <td><code>lib/agent-harness/runner.ts</code></td>
+            <td>统一 invoke 抽象：tool / in-process sub-brain / Inngest product agent 用同一种事件流调用。</td>
+          </tr>
+          <tr>
+            <td><code>app/api/harness/route.ts</code></td>
+            <td>Multi-harness API：registry、plan、full orchestration loop 的外部入口。</td>
+          </tr>
+          <tr>
+            <td><code>prisma/schema.prisma</code></td>
+            <td><code>AgentVersion</code>、<code>FactoryBrainRun</code>、<code>FailureReflection</code>、Inngest archive、v2 ledger 数据模型。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="refs">
+      <h2>13 · 参考资料</h2>
+      <ol class="refs">
+        <li><a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler: Harness engineering for coding agent users</a></li>
+        <li><a href="https://openai.com/index/harness-engineering/">OpenAI: Harness engineering, leveraging Codex in an agent-first world</a></li>
+        <li><a href="https://arxiv.org/abs/2210.03629">ReAct: Synergizing Reasoning and Acting in Language Models</a></li>
+        <li><a href="https://arxiv.org/abs/2303.11366">Reflexion: Language Agents with Verbal Reinforcement Learning</a></li>
+        <li><a href="https://arxiv.org/abs/2308.00352">MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework</a></li>
+        <li><a href="https://arxiv.org/abs/2308.08155">AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation</a></li>
+        <li><a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic: How we built our multi-agent research system</a></li>
+        <li><a href="https://arxiv.org/abs/2401.08500">AlphaCodium: From Prompt Engineering to Flow Engineering</a></li>
+        <li><a href="https://arxiv.org/abs/2402.01030">Executable Code Actions Elicit Better LLM Agents</a></li>
+        <li><a href="https://arxiv.org/abs/2310.03714">DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines</a></li>
+        <li><a href="https://arxiv.org/abs/2309.02427">CoALA: Cognitive Architectures for Language Agents</a></li>
+        <li><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic: Effective context engineering for AI agents</a></li>
+        <li><a href="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents">Anthropic: Effective harnesses for long-running agents</a></li>
+        <li><a href="https://arxiv.org/abs/2509.13313">ReSum: Unlocking Long-Horizon Search Intelligence via Context Summarization</a></li>
+        <li><a href="https://arxiv.org/abs/2510.24699">AgentFold: Context Folding for Long-Horizon LLM Agents</a></li>
+        <li><a href="https://arxiv.org/html/2510.00615v1">ACON: Optimized Context Compression for Long-Horizon Agentic Tasks</a></li>
+        <li><a href="https://arxiv.org/abs/2410.10762">AFlow: Automating Agentic Workflow Generation</a></li>
+        <li><a href="https://arxiv.org/abs/2310.06770">SWE-bench: Can Language Models Resolve Real-World GitHub Issues?</a></li>
+        <li><a href="https://www.usenix.org/conference/nsdi20/presentation/agache">Firecracker: Lightweight Virtualization for Serverless Applications</a></li>
+      </ol>
+      <p class="small">
+        注：我尝试运行局部测试时，当前 shell 中 <code>npx</code> 不在 PATH，因此本报告没有附带新的测试执行结果。
+        这不影响架构分析，但若后续要把建议落到代码，应先恢复本地 Node/npm 工具链可用性。
+      </p>
+    </section>
+  </main>
+</body>
+</html>

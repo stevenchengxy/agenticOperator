@@ -4,6 +4,7 @@ import { AppBar } from "./AppBar";
 import { LeftNav } from "./LeftNav";
 import { CommandPalette } from "./CommandPalette";
 import { GlobalChatBubble } from "@/components/chat/GlobalChatBubble";
+import { HelpTip } from "./HelpTip";
 
 export function Shell({
   crumbs = [],
@@ -34,13 +35,8 @@ export function Shell({
         <LeftNav />
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">{children}</div>
       </div>
-      {/* Internal IA footnote ("方向 A · …"): dev-only — it's a design-handoff
-          reference, not user-facing info, and bottom-left keeps it clear of the
-          chat bubble (fixed bottom-right). Hidden entirely in production. */}
       {directionTag && process.env.NODE_ENV === "development" && (
-        <div className="absolute left-3 bottom-3 text-[10.5px] mono text-ink-4 bg-[color:var(--c-surface)]/80 px-2 py-1 rounded-sm border border-line pointer-events-none z-[5]">
-          {directionTag}
-        </div>
+        <HelpTip tip={directionTag} placement="top" className="absolute left-3 bottom-3 z-[5]" />
       )}
       <GlobalChatBubble />
       <CommandPalette open={open} onClose={() => setOpen(false)} />

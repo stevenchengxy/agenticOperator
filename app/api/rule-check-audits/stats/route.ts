@@ -18,21 +18,23 @@ export type RuleCheckStatsResponse = {
   estimated_robohire_savings_usd: number;
   by_client: Array<{ client: string; pass: number; fail: number }>;
   top_failure_rules: Array<{ rule_id: string; count: number }>;
-  meta: { window_days: number; not_configured?: boolean; error?: string; generated_at: string };
+  meta: { window_days: number | null; not_configured?: boolean; error?: string; generated_at: string };
 };
 
 const ROBOHIRE_USD_PER_MATCH = 0.2;
 
-function parseWindowDays(searchParams: URLSearchParams): number {
-  // accepts ?days=7 or ?window=7d
+function parseWindowDays(searchParams: URLSearchParams): number | null {
+  // accepts ?days=7, ?window=7d, and ?window=all / ?days=all. `all` is
+  // intentionally unbounded so persisted history never disappears from stats.
   const raw = searchParams.get('days') ?? (searchParams.get('window') ?? '').replace(/d$/i, '');
-  return Math.max(1, Math.min(90, parseInt(raw || '7', 10) || 7));
+  if (raw.toLowerCase() === 'all') return null;
+  return Math.max(1, Math.min(36500, parseInt(raw || '7', 10) || 7));
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const days = parseWindowDays(searchParams);
-  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const cutoff = days == null ? null : new Date(Date.now() - days * 86_400_000);
 
   // Non-recruitment domains: serve from the generic ontology rule-check store
   // (energy validateConstraints / triageScheme …) when it has data.
@@ -58,7 +60,7 @@ export async function GET(req: Request) {
 
   try {
     const allAudits = await prisma.ruleCheckAudit.findMany({
-      where: { created_at: { gte: cutoff } },
+      where: cutoff ? { created_at: { gte: cutoff } } : {},
       select: {
         decision: true,
         client_name: true,

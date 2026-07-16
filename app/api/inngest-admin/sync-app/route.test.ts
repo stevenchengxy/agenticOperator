@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST } from './route';
 
 const originalFetch = global.fetch;
@@ -13,7 +13,12 @@ function makeReq(body: unknown): Request {
 
 describe('POST /api/inngest-admin/sync-app', () => {
   beforeEach(() => {
-    process.env.INNGEST_BASE_URL = 'http://test-inngest:8288';
+    vi.stubEnv('INNGEST_BASE_URL', 'http://test-inngest:8288');
+    global.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
     global.fetch = originalFetch;
   });
 
@@ -44,6 +49,44 @@ describe('POST /api/inngest-admin/sync-app', () => {
     expect(r.status).toBe(400);
     const j = await r.json();
     expect(j.error).toMatch(/RAAS-v1 main endpoint/);
+  });
+
+  it('400 in production when url host is not an allowed AO serve origin', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('INNGEST_SERVE_ORIGIN', 'http://allowed-app:3002');
+
+    const r = await POST(makeReq({ url: 'http://other-app:3002/api/inngest' }));
+
+    expect(r.status).toBe(400);
+    const j = await r.json();
+    expect(j.ok).toBe(false);
+    expect(j.error).toMatch(/not allowed in production/);
+  });
+
+  it('allows INNGEST_SERVE_ORIGIN in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('INNGEST_SERVE_ORIGIN', 'http://allowed-app:3002/');
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, modified: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: { apps: [{ name: 'agentic-operator-main', functionCount: 6 }] },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    global.fetch = fetchSpy as unknown as typeof fetch;
+
+    const r = await POST(makeReq({ url: 'http://allowed-app:3002/api/inngest' }));
+
+    expect(r.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it('PUTs the main SDK endpoint and verifies function count on success', async () => {

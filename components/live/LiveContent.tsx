@@ -6,7 +6,9 @@ import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { fetchJson } from "@/lib/api/client";
 import type { RunsResponse, RunSummary } from "@/lib/api/types";
+import { paginationFrom, readPage, readPageSize, setPaginationParams } from "@/lib/api/pagination";
 import { AGENT_MAP } from "@/lib/agent-mapping";
+import { Pagination } from "@/components/shared/Pagination";
 import { RunSummaryModal } from "./RunSummaryModal";
 import { RealRunCenter, RealRunRight } from "./RealRunDetail";
 
@@ -61,6 +63,8 @@ export function LiveContent() {
   const selectedAgents = agentParam ? agentParam.split(",").filter(Boolean) : [];
   const hasErrorFilter = sp.get("hasError") === "1";
   const hasHitlFilter = sp.get("hasHitl") === "1";
+  const page = readPage(sp.get("page"));
+  const pageSize = readPageSize(sp.get("pageSize"), [20, 50, 100], 20);
 
   const setUrl = React.useCallback(
     (mut: (params: URLSearchParams) => void) => {
@@ -84,12 +88,14 @@ export function LiveContent() {
   // ── Run list fetch ────────────────────────────────────────────────
   const [runs, setRuns] = React.useState<RunRow[] | null>(null);
   const [total, setTotal] = React.useState<number | null>(null);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
   const [summaryRun, setSummaryRun] = React.useState<{ id: string; job: string } | null>(null);
 
   const refresh = React.useCallback(async () => {
     const qs = new URLSearchParams();
-    qs.set("limit", "30");
+    setPaginationParams(qs, page, pageSize);
     const group = STATUS_GROUPS.find((g) => g.id === statusGroup);
     if (group && group.statuses.length > 0) {
       qs.set("status", group.statuses.join(","));
@@ -103,15 +109,21 @@ export function LiveContent() {
     }
     if (hasErrorFilter) qs.set("hasError", "1");
     if (hasHitlFilter) qs.set("hasHitl", "1");
+    setLoading(true);
     try {
       const r = await fetchJson<RunsResponse>(`/api/runs?${qs.toString()}`);
-      setRuns(r.runs.map(toRow));
-      setTotal(r.total);
+      const rows = Array.isArray(r.runs) ? r.runs : [];
+      const pagination = paginationFrom(r, { page, pageSize, rowCount: rows.length });
+      setRuns(rows.map(toRow));
+      setTotal(pagination.total);
+      setTotalPages(pagination.totalPages);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setLoading(false);
     }
-  }, [statusGroup, timeId, agentParam, hasErrorFilter, hasHitlFilter]);
+  }, [statusGroup, timeId, agentParam, hasErrorFilter, hasHitlFilter, page, pageSize]);
   // (agentParam is the encoded form so the dep array doesn't churn on
   // every render even when selectedAgents content is unchanged.)
 
@@ -138,14 +150,33 @@ export function LiveContent() {
             shown={runs?.length ?? 0}
             total={total}
             onRefresh={refresh}
+            loading={loading}
           />
           <RunList
             runs={runs}
             error={error}
+            loading={loading}
             selectedRunId={selectedRunId}
             onSelect={(id) => selectRun(id)}
             onShowSummary={(id, job) => setSummaryRun({ id, job })}
+            onRetry={refresh}
           />
+          {runs && (runs.length > 0 || page > 1) && (
+            <Pagination
+              compact
+              page={page}
+              pageSize={pageSize}
+              rowCount={runs.length}
+              total={total}
+              totalPages={totalPages}
+              loading={loading}
+              onPageChange={(nextPage) => setUrl((p) => {
+                if (nextPage <= 1) p.delete("page");
+                else p.set("page", String(nextPage));
+                p.delete("run");
+              })}
+            />
+          )}
         </aside>
 
         {/* Center: real run detail OR empty state */}
@@ -245,6 +276,7 @@ function FilterBar({
   shown,
   total,
   onRefresh,
+  loading,
 }: {
   statusGroup: string;
   timeId: string;
@@ -255,13 +287,14 @@ function FilterBar({
   shown: number;
   total: number | null;
   onRefresh: () => void;
+  loading: boolean;
 }) {
   const { t: tr } = useApp();
   return (
     <div className="border-b border-line" style={{ padding: "10px 12px" }}>
       <div className="flex items-center gap-2 mb-2">
         <div className="text-[13px] font-semibold flex-1">{tr("lvx_runs_title")}</div>
-        <Btn size="sm" variant="ghost" onClick={onRefresh} title={tr("lvx_refresh")} style={{ padding: "0 6px" }}>
+        <Btn size="sm" variant="ghost" onClick={onRefresh} disabled={loading} title={tr("lvx_refresh")} style={{ padding: "0 6px" }}>
           <Ic.bolt />
         </Btn>
       </div>
@@ -276,6 +309,7 @@ function FilterBar({
               setUrl((p) => {
                 if (g.id === "all") p.delete("status");
                 else p.set("status", g.id);
+                p.delete("page");
               })
             }
           >
@@ -294,6 +328,7 @@ function FilterBar({
               setUrl((p) => {
                 if (t.id === "24h") p.delete("time");
                 else p.set("time", t.id);
+                p.delete("page");
               })
             }
           >
@@ -310,6 +345,7 @@ function FilterBar({
             setUrl((p) => {
               if (hasErrorFilter) p.delete("hasError");
               else p.set("hasError", "1");
+              p.delete("page");
             })
           }
         >
@@ -321,6 +357,7 @@ function FilterBar({
             setUrl((p) => {
               if (hasHitlFilter) p.delete("hasHitl");
               else p.set("hasHitl", "1");
+              p.delete("page");
             })
           }
         >
@@ -339,9 +376,10 @@ function FilterBar({
             const v = Array.from(next).join(",");
             if (v) p.set("agent", v);
             else p.delete("agent");
+            p.delete("page");
           })
         }
-        onClear={() => setUrl((p) => p.delete("agent"))}
+        onClear={() => setUrl((p) => { p.delete("agent"); p.delete("page"); })}
       />
 
       <div className="mono text-[10px] text-ink-4 mt-2 flex items-center">
@@ -477,15 +515,19 @@ function AgentPicker({
 function RunList({
   runs,
   error,
+  loading,
   selectedRunId,
   onSelect,
   onShowSummary,
+  onRetry,
 }: {
   runs: RunRow[] | null;
   error: string | null;
+  loading: boolean;
   selectedRunId: string | null;
   onSelect: (id: string) => void;
   onShowSummary: (id: string, job: string) => void;
+  onRetry: () => void;
 }) {
   const { t } = useApp();
   if (error) {
@@ -496,11 +538,12 @@ function RunList({
           title={t("lvx_load_failed")}
           hint={error}
           variant="warn"
+          action={<Btn size="sm" onClick={onRetry}>{t("lvx_refresh")}</Btn>}
         />
       </div>
     );
   }
-  if (!runs) {
+  if (!runs || (loading && runs.length === 0)) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <span className="text-ink-3 text-[12px]">{t("lvx_loading")}</span>

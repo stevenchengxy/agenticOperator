@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { allFunctions } from "@/server/inngest/functions";
+import { FEIKONG_BEHAVIORS } from "./behaviors";
 
 // The recruitment main app (agentic-operator-main, /api/inngest) must NEVER serve
 // the 费控 or energy packs — those run on their own per-domain apps. This guards
@@ -17,5 +18,13 @@ describe("isolation: recruitment main app never serves feikong/energy", () => {
   it("allFunctions has zero energy- slugs", () => {
     const ids = allFunctions.map(fnId);
     expect(ids.filter((id) => id.startsWith("energy-"))).toEqual([]);
+  });
+});
+
+describe("feikong durable rule-check retry policy", () => {
+  it("retries the audit-producing behavior without changing human-gate retries", () => {
+    expect(FEIKONG_BEHAVIORS.validateExpenseRules.retries).toBe(3);
+    expect(FEIKONG_BEHAVIORS.manualReview.retries).toBeUndefined();
+    expect(FEIKONG_BEHAVIORS.disposeRiskEvent.retries).toBeUndefined();
   });
 });

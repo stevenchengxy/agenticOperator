@@ -816,6 +816,7 @@ function RowActionsMenu({ row, t, onRename, onDelete, onOpen }: { row: FleetRow;
   const [open, setOpen] = React.useState(false);
   const [pos, setPos] = React.useState<{ top: number; right: number } | null>(null);
   const btnRef = React.useRef<HTMLButtonElement>(null);
+  const itemCount = row.manageId ? 3 : 1;
 
   React.useEffect(() => {
     if (!open) return;
@@ -835,7 +836,7 @@ function RowActionsMenu({ row, t, onRename, onDelete, onOpen }: { row: FleetRow;
     e.preventDefault();
     e.stopPropagation();
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    if (r) setPos(menuPosition(r, itemCount));
     setOpen((o) => !o);
   };
   const pick = (fn: () => void) => (e: React.MouseEvent) => {
@@ -867,9 +868,9 @@ function RowActionsMenu({ row, t, onRename, onDelete, onOpen }: { row: FleetRow;
           escapes the transformed ancestor entirely. */}
       {open && pos && typeof document !== "undefined" && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          <div className="fixed inset-0 z-[65]" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
           <div
-            className="fixed z-50 min-w-[140px] rounded-lg border border-line bg-surface shadow-sh-3 py-1 og-card-in"
+            className="fixed z-[70] min-w-[140px] rounded-lg border border-line bg-surface shadow-sh-3 py-1 og-card-in"
             style={{ top: pos.top, right: pos.right }}
             onClick={(e) => e.stopPropagation()}
             role="menu"
@@ -887,6 +888,21 @@ function RowActionsMenu({ row, t, onRename, onDelete, onOpen }: { row: FleetRow;
       )}
     </>
   );
+}
+
+function menuPosition(r: DOMRect, itemCount: number): { top: number; right: number } {
+  const gap = 6;
+  const viewportPad = 12;
+  const menuWidth = 156;
+  const menuHeight = 8 + itemCount * 34;
+  const bottomSpace = window.innerHeight - r.bottom;
+  const shouldOpenUp = bottomSpace < menuHeight + viewportPad && r.top > menuHeight + viewportPad;
+  const top = shouldOpenUp
+    ? Math.max(viewportPad, r.top - menuHeight - gap)
+    : Math.min(r.bottom + gap, window.innerHeight - menuHeight - viewportPad);
+  const maxRight = Math.max(viewportPad, window.innerWidth - menuWidth - viewportPad);
+  const right = Math.min(Math.max(viewportPad, window.innerWidth - r.right), maxRight);
+  return { top, right };
 }
 
 function MenuItem({ label, onClick, danger }: { label: string; onClick: (e: React.MouseEvent) => void; danger?: boolean }) {

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>规则校验智能体 · 交给大模型的输入 / 输出 + 精准度审计</title>
+<style>
+  :root{
+    --bg:#0f1115; --surface:#171a21; --panel:#1d212b; --line:#2a2f3a;
+    --ink1:#e8ecf3; --ink2:#aab2c2; --ink3:#7f8799;
+    --accent:#6ea8fe; --ok:#46c98b; --warn:#e0a64a; --err:#e06a6a;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --serif:ui-serif,Charter,"Iowan Old Style",Palatino,serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink1);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft Yahei",Segoe UI,sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 26px 120px}
+  header.top{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:8px}
+  h1{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:-.01em;margin:0 0 8px}
+  .sub{color:var(--ink3);font-size:13.5px;max-width:760px}
+  .meta-row{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-family:var(--mono);font-size:11.5px;padding:3px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--ink2)}
+  .chip.ok{color:var(--ok);border-color:color-mix(in oklab,var(--ok) 40%,transparent)}
+  .chip.accent{color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+  .chip.warn{color:var(--warn);border-color:color-mix(in oklab,var(--warn) 40%,transparent)}
+  h2{font-family:var(--serif);font-size:22px;font-weight:600;margin:46px 0 14px;padding-top:18px;border-top:1px solid var(--line)}
+  h2 .n{color:var(--accent);font-family:var(--mono);font-size:16px;margin-right:10px}
+  h3{font-size:16px;font-weight:650;margin:26px 0 10px;color:var(--ink1)}
+  p{color:var(--ink2);margin:10px 0}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel);padding:1px 6px;border-radius:5px;color:#cdd6e6}
+  .lead{color:var(--ink2);font-size:15.5px}
+  nav.toc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:20px 0 8px}
+  nav.toc b{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+  nav.toc ol{margin:8px 0 0;padding-left:22px;columns:2;column-gap:34px}
+  nav.toc a{color:var(--accent);text-decoration:none}
+  nav.toc a:hover{text-decoration:underline}
+  .flow{display:flex;flex-direction:column;gap:0;margin:18px 0}
+  .node{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;position:relative}
+  .node .role{font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em}
+  .node .name{font-weight:650;font-size:15px;margin-top:2px}
+  .node .name .en{font-family:var(--mono);font-size:11.5px;color:var(--ink3);font-weight:400;margin-left:8px}
+  .node .desc{color:var(--ink2);font-size:13px;margin-top:4px}
+  .node.agent{border-left:3px solid var(--accent)}
+  .node.rc{border-left:3px solid var(--ok);background:linear-gradient(90deg,color-mix(in oklab,var(--ok) 7%,var(--surface)),var(--surface))}
+  .node.model{border-left:3px solid var(--warn);background:linear-gradient(90deg,color-mix(in oklab,var(--warn) 7%,var(--surface)),var(--surface))}
+  .edge{display:flex;align-items:center;gap:10px;padding:6px 0 6px 18px;color:var(--ink3)}
+  .edge .ev{font-family:var(--mono);font-size:11.5px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:#cdd6e6}
+  .edge::before{content:"▼";color:var(--line);font-size:12px}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink3);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  .tag{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:5px;white-space:nowrap}
+  .tag.keep{background:color-mix(in oklab,var(--ok) 16%,transparent);color:var(--ok)}
+  .tag.drop{background:color-mix(in oklab,var(--err) 16%,transparent);color:var(--err)}
+  .box{border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:16px 0;background:var(--surface)}
+  .box.tip{border-left:3px solid var(--accent)}
+  .box.warn{border-left:3px solid var(--warn)}
+  .box.err{border-left:3px solid var(--err)}
+  .box.note{border-left:3px solid var(--ink3)}
+  .box b{color:var(--ink1)}
+  ul.tight li{margin:5px 0;color:var(--ink2)}
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;font-family:var(--mono);font-size:12.5px;color:#cdd6e6;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+  pre .c{color:var(--ink3)}
+  pre .k{color:var(--accent)}
+  pre .s{color:var(--ok)}
+  pre .w{color:var(--warn)}
+  .lbl{font-family:var(--mono);font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 6px}
+  .pill{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px}
+  .pill.pass{background:color-mix(in oklab,var(--ok) 16%,transparent);color:var(--ok)}
+  .pill.fail{background:color-mix(in oklab,var(--err) 16%,transparent);color:var(--err)}
+  .pill.park{background:color-mix(in oklab,var(--warn) 16%,transparent);color:var(--warn)}
+  .grade{display:flex;align-items:center;gap:16px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:12px;padding:18px 22px;margin:18px 0}
+  .grade .big{font-family:var(--serif);font-size:26px;font-weight:600;color:var(--warn);white-space:nowrap}
+  .mech{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:0;margin:18px 0;overflow:hidden}
+  .mech .head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .mech.crit .head{background:linear-gradient(90deg,color-mix(in oklab,var(--err) 12%,var(--surface)),var(--surface))}
+  .mech.high .head{background:linear-gradient(90deg,color-mix(in oklab,var(--warn) 10%,var(--surface)),var(--surface))}
+  .mech .sev{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.05em}
+  .mech.crit .sev{background:color-mix(in oklab,var(--err) 20%,transparent);color:var(--err)}
+  .mech.high .sev{background:color-mix(in oklab,var(--warn) 22%,transparent);color:var(--warn)}
+  .mech .ttl{font-weight:650;font-size:15px}
+  .mech .body{padding:8px 18px 16px}
+  .mech .row{margin:10px 0}
+  .mech .row .t{font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em}
+  .mech .row .d{color:var(--ink2);font-size:13.5px;margin-top:2px}
+  .mech .ev{font-family:var(--mono);font-size:12px;background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:#cdd6e6;margin-top:4px}
+  .step{display:flex;gap:14px;margin:14px 0}
+  .step .num{flex:0 0 30px;height:30px;border-radius:50%;background:var(--panel);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:600}
+  .step .body .t{font-weight:600;color:var(--ink1)}
+  .step .body .d{font-size:13.5px;color:var(--ink2);margin-top:2px}
+  footer{margin-top:60px;border-top:1px solid var(--line);padding-top:18px;color:var(--ink3);font-size:12.5px}
+  @media(max-width:760px){nav.toc ol{columns:1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>规则校验智能体 · 交给大模型的输入 / 输出 + 精准度审计</h1>
+  <div class="sub">Rule Check（候选人 ↔ 客户规则匹配）—— 一次 LLM 调用里完整的 system / user prompt、可调工具、输出 JSON，以及「按现在这个格式，判断到底准不准」的真实日志审计结论。示例数据取自真实 run：候选人「陈思」（字节跳动行政文秘）投递腾讯 CDG 岗位。</div>
+  <div class="meta-row">
+    <span class="chip accent">agent · rule-check-agent</span>
+    <span class="chip">model · gemini-3-flash-preview</span>
+    <span class="chip ok">prompt 已瘦身（§2 白名单 JR）</span>
+    <span class="chip warn">精度 · adequate-with-known-risks</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#s1">一次调用的全貌</a></li>
+    <li><a href="#s2">① System Prompt</a></li>
+    <li><a href="#s3">② User Prompt（§1–§8）</a></li>
+    <li><a href="#s4">③ 可调工具 Tools</a></li>
+    <li><a href="#s5">④ 输出 Output + server 结算</a></li>
+    <li><a href="#s6">⑤ 精准度审计</a></li>
+    <li><a href="#s7">⑥ 推荐修复</a></li>
+  </ol>
+</nav>
+
+<h2 id="s1"><span class="n">01</span>一次调用的全貌</h2>
+<p class="lead">每个在招岗位（JR）跑一次。智能体把岗位 + 候选人简历 + 命中的规则拼成提示词，交给大模型逐条判定，模型只返回「每条规则的 status」，最终「通过 / 未通过」由 <b>server 端折叠</b>计算 —— 模型不下结论。</p>
+<div class="flow">
+  <div class="node agent">
+    <div class="role">输入装配</div>
+    <div class="name">ruleCheckAgent <span class="en">buildRuleCheckInput → runRuleCheck</span></div>
+    <div class="desc">从 partner-pg 取岗位、回拉简历、按 client/部门从本体拉「命中的规则」，预取 Neo4j 图谱上下文。</div>
+  </div>
+  <div class="edge"><span class="ev">system + user + tools</span> chatComplete(maxTokens 16000)</div>
+  <div class="node model">
+    <div class="role">大模型</div>
+    <div class="name">逐条规则判定 <span class="en">status ∈ {pass · fail · insufficient_info · not_triggered · pending · not_executed}</span></div>
+    <div class="desc">按 §5 决策树独立评估每条规则；可在 5 轮内回查图谱（tools）；输出纯 JSON。</div>
+  </div>
+  <div class="edge"><span class="ev">{ "rule_results": [...] }</span> 必须每条规则各一条目</div>
+  <div class="node rc">
+    <div class="role">server 结算（与模型无关）</div>
+    <div class="name">foldDecision <span class="en">fail-closed</span></div>
+    <div class="desc">任一 <span class="pill fail">fail</span>，或底线规则上的 <span class="pill park">insufficient_info / pending</span> → <b>未通过</b>；否则 <span class="pill pass">通过</span>。</div>
+  </div>
+</div>
+
+<h2 id="s2"><span class="n">02</span>① System Prompt <span style="font-size:13px;color:var(--ink3);font-weight:400">（≈420 字，逐字）</span></h2>
+<pre>你是一名 matchResume 规则评估员。
+
+严格按照 user 消息中的 INPUT / GRAPH_CONTEXT / RULES 评估，输出严格符合 schema 的 JSON。
+
+边界约束：
+- 必须按 Set 顺序、Set 内列出顺序评估，每条 rule 都独立评估并输出 status（不要因为前面有 fail 就把后面标 not_executed）
+- 严格按 user 消息中第 5 节的"单条 rule status 决策树"判断 status
+- 任何 fail 必须在 reason 中引用 GRAPH_CONTEXT 里的具体字段+数值；做不到的标 insufficient_info
+- 字段为 null / 缺失 / 空数组 → insufficient_info，<span class="w">绝对不要</span>判 fail
+- 必须输出合法 JSON，不要在 JSON 外加任何文本（包括 markdown code fence）</pre>
+
+<h2 id="s3"><span class="n">03</span>② User Prompt（§1–§8）</h2>
+<p>用真实 run（陈思 → 腾讯 CDG 岗位）实例化。<b>§2 就是我们刚瘦身的部分</b>：只剩白名单 JR，删掉了 runtime_context、永远为 null 的 specification / hsm_feedback，以及在 §3 重复 dump 的那一份岗位。</p>
+
+<div class="lbl">§1 角色</div>
+<pre># matchResume Rule Check
+## 1. 你的角色
+你是一名 matchResume action 的规则评估员。基于给定的 INPUT、GRAPH_CONTEXT 和 RULES，
+按 Set 顺序逐条评估每条 rule 的 status。<span class="w">你只输出每条规则的 status，不要输出或结算最终
+decision —— 最终 decision 完全由 server 端依据各 rule 的 status 统一汇总（见 §6）。</span>
+- 必须严格按 Set 顺序、Set 内列出顺序评估。
+- 不要给候选人打匹配分数（评分由下游算法负责）。
+- 不要在 reason 中编造 INPUT 或 GRAPH_CONTEXT 中未提供的信息；缺字段一律标 insufficient_info。</pre>
+
+<div class="lbl">§2 Inputs — 瘦身后只剩白名单 JR</div>
+<pre>## 2. Inputs
+### 2.1 job_requisition（仅保留与规则匹配相关的字段：适用性维度 + 岗位明文要求）
+{
+  <span class="k">"job_requisition_id"</span>: <span class="s">"JRQ-a5f6029a-...-TEST334"</span>,
+  <span class="k">"client_id"</span>: <span class="s">"a5f6029a-8af8-4f9a-81e8-7c594cc52aa8"</span>,
+  <span class="k">"client_department_id"</span>: <span class="s">"44cd4ad4-35af-4abd-b418-209491d16789"</span>,
+  <span class="k">"sd_org_name"</span>: <span class="s">"Technology"</span>,
+  <span class="k">"client_job_title"</span>: <span class="s">"测试岗位"</span>,
+  <span class="k">"job_responsibility"</span>: <span class="s">"行政文秘相关"</span>,
+  <span class="k">"must_have_skills"</span>: []
+}
+<span class="c">（候选人简历 resume 见 §3.2 Graph context；岗位 specification / hsm_feedback
+ 及面试流程、内部 ID、招聘运营等字段不参与本批规则匹配，已省略。）</span></pre>
+<div class="box tip"><b>白名单 30 字段</b>：适用性维度（client / 部门 / 事业群 / 组织 / 层级）+ 岗位明文要求（职责 / 要求 / 学历 / 技能 / 语言 / 年龄 / 薪资 / 性别 / 工时 / 外籍 / 负向要求）。覆盖语料里 14 条引用 JR 阈值的规则（10-5 / 10-7 / 10-14 / 10-21 …）。删掉的是面试流程、内部 ID、时间戳、招聘运营、合同元数据，以及 Neo4j 重复 dump 的第二份岗位。</div>
+
+<div class="lbl">§3 Graph context — 5 个 slot（重复的岗位 slot 已删）</div>
+<pre>## 3. Graph context
+你可以通过下列对象引用 ontology 实例数据。先用这些字段，不够再调 tool。
+所有数据已经按 candidate_id / job_requisition_id 预拉取；缺的 slot 显示为 null 或 []，
+对应规则按 "信息不全" 处理。
+
+### 3.1 candidate
+{ <span class="k">"candidate_id"</span>: <span class="s">"d52a569b-..."</span>, <span class="k">"name"</span>: <span class="s">"陈思"</span> }
+
+### 3.2 resume (候选人当前简历, 来自 neo4j Resume 节点)
+{
+  <span class="k">"name"</span>: <span class="s">"陈思"</span>,
+  <span class="k">"experience"</span>: [
+    { <span class="k">"company"</span>: <span class="s">"字节跳动（深圳）科技有限公司"</span>, <span class="k">"title"</span>: <span class="s">"行政文秘专员"</span>, <span class="k">"startDate"</span>: <span class="s">"2024.03"</span>, <span class="k">"endDate"</span>: <span class="s">"至今"</span> },
+    { <span class="k">"company"</span>: <span class="s">"深圳本技有限公司"</span>, <span class="k">"title"</span>: <span class="s">"行政助理"</span>, <span class="k">"startDate"</span>: <span class="s">"2021.07"</span>, <span class="k">"endDate"</span>: <span class="s">"2024.02"</span> }
+  ],
+  <span class="k">"education"</span>: [{ <span class="k">"school"</span>: <span class="s">"北京师范大学"</span>, <span class="k">"degree"</span>: <span class="s">"本科"</span>, <span class="k">"major"</span>: <span class="s">"汉语言文学（师范）"</span> }],
+  <span class="k">"skills"</span>: { <span class="k">"technical"</span>: [<span class="s">"Excel 数据透视"</span>, <span class="s">"公文写作"</span>], <span class="k">"tools"</span>: [<span class="s">"飞书"</span>, <span class="s">"企业微信"</span>, <span class="s">"腾讯文档"</span>] }
+}
+
+### 3.3 applications (历史投递, 全量)    []
+### 3.4 blacklist_hits (全量)           []
+### 3.5 employment_links (含 Employer 节点解析)  []
+
+岗位 Job_Requisition 已在 §2.1 给出（白名单字段）；如需其完整字段或上面未列出的实体
+（亲属关系、合规文档等），通过 tool 调用 get_instance / list_instances / list_links。</pre>
+
+<div class="lbl">§4 Rules — 每条规则的渲染格式（真实命中 5 条；示一条）</div>
+<pre>## 4. Rules to check — 严格按 Set 顺序、Set 内严格按列出顺序评估
+&gt; 执行约束（违反即视为输出无效）：① Set 间按 §4.1 → §4.2 顺序，不得跳过/乱序
+&gt; ② Set 内按列出顺序逐条；③ 不要因前面 fail 就把后续标 not_executed（所有 rule 独立评估）
+&gt; ④ 内部完成全部评估后，再统一输出 rule_results[]。
+
+### 4.1 Set 1 — validateRedlineAndBlacklist  [order=1]
+#### Rule 10-25: 华为荣耀竞对与客户互不挖角红线  [applicableClient=通用, enforcement=mandatory, onFail=block]
+- submissionCriteria: 候选人简历已完成解析，工作经历数据已结构化。
+- logic: 系统在简历匹配环节，自动检索候选人工作经历中是否包含华为、荣耀及其关联公司的
+  任职记录。若存在此类记录，计算离职日期距今间隔；不足3个月→挂起；满3个月→正常继续。
+<span class="c">（其余 10-26 / 10-45 / 10-46 / 10-42 同此格式逐条列出）</span></pre>
+
+<div class="lbl">§5 单条 rule 的 status 决策树 — 判断精度的核心（逐字）</div>
+<pre>## 5. 单条 rule 的 status 决策树（严格按下列顺序判断，命中即止）
+1. rule 触发条件不成立 → <span class="s">not_triggered</span>
+   （server 已按 client+部门过滤一轮，但你仍须按 rule 文案的"针对 X 客户/事业群/候选/岗位"
+    限定再校验一次；明显不落在限定内 → not_triggered，reason 写明不匹配维度）
+2. 要评估的字段在 GRAPH_CONTEXT 中 null / 缺失 / 空数组 → <span class="w">insufficient_info</span>
+   （重要：缺字段 ≠ 不满足。slot 为 null/[] 一律视为"信息不全"，<span class="w">绝对不要</span>判 fail）
+3. 字段存在且明确不满足 → <span class="w">fail</span>（必须在 reason 引用 GRAPH_CONTEXT 的具体字段+数值）
+4. 字段存在且满足 → <span class="s">pass</span>
+5. 需 HSM 主观判断、无法自动结算 → pending
+⚠ 极性陷阱（排除类/冷冻期/竞对/黑名单）：命中坏条件→fail；未命中→pass，极性相反最易判反。
+   "离职满6个月→未命中→放行→pass"（别因 reason 里"满足"二字打 fail）；"离职仅3个月→fail"。
+⚠ 最常见错误是把 insufficient_info 误判为 fail。判 fail 前再自问：引用的字段真的非 null 吗？</pre>
+
+<div class="lbl">§6 决策结算 · §7 输出 schema · §8 自检（逐字，要点）</div>
+<pre>## 6. 决策结算（由 server 计算，与你无关）
+最终 decision 完全由 server 端依据各 rule 的 status 汇总；你只输出 rule_results[]，不要输出 decision。
+
+## 7. Output schema  仅输出严格符合下列结构的 JSON，不允许 markdown 代码块、不允许多余字段：
+{ "rule_results": [ { "rule_id": "&lt;id&gt;", "status": "&lt;status&gt;", "reason": "&lt;判定依据&gt;", "next_action": "&lt;action&gt;" } ] }
+- status ∈ {pass, fail, pending, insufficient_info, not_triggered, not_executed}
+- next_action ∈ {continue, block, supplement, review}，必填，按 status 取值
+- 每条规则都必须有一条对应条目，按 Set 顺序输出；reason 各 status 都必填
+- 不要输出 rule_name / step_id / decision / stats / explanations（runner 会重算）
+
+## 8. 自检  [ ] 按 Set 顺序？ [ ] 每条规则各一条目（数量必须与规则总数一致）？
+[ ] 每条 fail 都引用了具体字段+数值？ [ ] 所有 null/缺失 标 insufficient_info 而非 fail？ [ ] 仅输出 JSON？</pre>
+
+<h2 id="s4"><span class="n">04</span>③ 可调工具 Tools <span style="font-size:13px;color:var(--ink3);font-weight:400">（图谱不够时回查，最多 5 轮）</span></h2>
+<table>
+  <thead><tr><th>工具</th><th>作用</th></tr></thead>
+  <tbody>
+    <tr><td><code>get_instance(label, value)</code></td><td>按主键取一个 ontology 实例（如某候选人 / 岗位节点）</td></tr>
+    <tr><td><code>list_instances(label, filters)</code></td><td>按属性等值列实例（如某候选人的全部 Application）</td></tr>
+    <tr><td><code>list_links(from, to, type)</code></td><td>列实体间关系（如亲属回避、任职 EMPLOYED_BY）</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s5"><span class="n">05</span>④ 输出 Output + server 结算</h2>
+<p>大模型返回的真实样本（取自生产日志，<code>prompt_tokens=5035 · completion=206 · finish=stop · tool_rounds=0</code>）：</p>
+<pre>{
+  <span class="k">"rule_results"</span>: [
+    { <span class="k">"rule_id"</span>: <span class="s">"10-25"</span>, <span class="k">"status"</span>: <span class="s">"pass"</span>,
+      <span class="k">"reason"</span>: <span class="s">"钱八简历显示最近两段经历为美团(2024.04-2026.04)及字节跳动(2020.07-2024.03)，无华为/荣耀任职记录，未命中竞对冷冻期，放行。"</span>,
+      <span class="k">"next_action"</span>: <span class="s">"continue"</span> },
+    { <span class="k">"rule_id"</span>: <span class="s">"10-26"</span>, <span class="k">"status"</span>: <span class="s">"pass"</span>,
+      <span class="k">"reason"</span>: <span class="s">"…无OPPO/小米任职记录，未命中竞对冷冻期，放行。"</span>, <span class="k">"next_action"</span>: <span class="s">"continue"</span> }
+  ]
+}</pre>
+<div class="box note"><b>server 结算（foldDecision）：</b>校验条数 == 规则数 → 任一 <span class="pill fail">fail</span> 即「未通过」；底线规则上的 <span class="pill park">insufficient_info / pending</span> 也折成「未通过」（fail-closed）；否则 <span class="pill pass">通过</span>。本例两条 pass → <b>通过</b>。<br><span style="color:var(--ink3);font-size:12.5px">⚠ 条数必须严格相等：模型少返/多返一条 → parse-error → 整个 run 挂起（park），不出判断。</span></div>
+
+<h2 id="s6"><span class="n">06</span>⑤ 精准度审计 <span style="font-size:13px;color:var(--ink3);font-weight:400">（5 视角对抗审计 × 真实日志：9 个真实候选人 / 664 条 response）</span></h2>
+
+<div class="grade">
+  <div class="big">够用，但有<br>已知精度风险</div>
+  <div>
+    <p style="margin:0;color:var(--ink1)"><b>单条规则的 LLM 判断本身是准的</b>（reason 连贯、引对字段）。不准的是<b>端到端</b>——系统性把"没违规"折成候选人「未通过」（<b>误拒 / false FAIL</b>）。真实候选人里抓到 <b>6 次「零确认违规却未通过」</b>。</p>
+    <p style="margin:8px 0 0;color:var(--ink2);font-size:13.5px">且三大主因都<b>不在 prompt 格式</b>，而在折叠逻辑（foldDecision）和图谱取数（graph.resume）。也就是说：<span style="color:var(--ink1)">"现在的格式"判得准；不准出在别处。</span></p>
+  </div>
+</div>
+
+<h3>三大已证误拒机制</h3>
+
+<div class="mech crit">
+  <div class="head"><span class="sev">致命</span><span class="ttl">底线规则字段在图谱里根本不存在 → 静默未通过</span><span class="tag" style="margin-left:auto;color:var(--ink3);border:1px solid var(--line)">瘦身无关</span></div>
+  <div class="body">
+    <div class="row"><div class="t">怎么误判</div><div class="d">规则 10-35（强制+block=底线）看候选人 <code>nationality</code>，但该字段在 <b>9 个真实候选人里 0 个存在</b>。模型正确返回 <span class="pill park">insufficient_info</span>，<code>foldDecision</code> 把底线规则上的 insufficient_info 无条件折成「未通过」。好候选人被静默、不可挽回地拒掉。</div></div>
+    <div class="row"><div class="t">真实证据</div><div class="ev">d52a569b（陈思）：4 pass + 1 not_triggered + <b>1 insufficient_info（10-35 缺 nationality）→ 整体 FAIL</b>。decision=FAIL，stats.fail=0。</div></div>
+  </div>
+</div>
+
+<div class="mech high">
+  <div class="head"><span class="sev">高</span><span class="ttl">简历选行不确定 → 取到空简历 → 全部 insufficient_info</span><span class="tag" style="margin-left:auto;color:var(--ink3);border:1px solid var(--line)">瘦身无关</span></div>
+  <div class="body">
+    <div class="row"><div class="t">怎么误判</div><div class="d"><code>graph.resume</code> 只按 <code>candidate_id</code> 取、<b>不带 resume_id、不排序、blind rows[0]</b>。多简历候选人可能拿到 experience 为空的那行 → 简历类规则全 insufficient_info → 未通过。<code>resume_id</code> 在 runner 里有，却没传进 <code>buildGraphContext</code>。</div></div>
+    <div class="row"><div class="t">真实证据</div><div class="ev">mirror-dup-chensi：resume.experience='' → 10-25/10-26 insufficient_info → FAIL（零确认违规）；<b>同一个人</b>别处 experience 长度 1336（正常）。</div></div>
+  </div>
+</div>
+
+<div class="mech high">
+  <div class="head"><span class="sev">高</span><span class="ttl">极性翻转：写"满足放行"却盖章 fail，server 原样信任</span><span class="tag" style="margin-left:auto;color:var(--ink3);border:1px solid var(--line)">瘦身无关</span></div>
+  <div class="body">
+    <div class="row"><div class="t">怎么误判</div><div class="d">模型把离职间隔算对了，reason 写"已满6个月，满足放行条件"，却盖 <code>status=fail</code>。<code>coerceRuleResults</code> 只校验 enum + reason 存在、无 reason↔status 一致性校验；10-42 是底线规则 → 翻转的 fail 直折成终态「未通过」，无人工兜底。§5 有极性警告，但纯劝说没挡住。</div></div>
+    <div class="row"><div class="t">真实证据</div><div class="ev">3 次 10-42 status=fail 的 reason 全是放行结论；同一输入上 10-42 分布 = { not_triggered:13, fail:6, pass:5 }。</div></div>
+  </div>
+</div>
+
+<h3>瘦身有没有伤精度？</h3>
+<div class="box tip"><b>净结论：没有。</b>上面 3 个致命/高危全部 <code>slim-neutral</code> —— 住在 <code>graph-context.ts</code> / <code>foldDecision</code> / <code>coerceRuleResults</code>，把 JR 拉回完整版一个都救不了。瘦身对<b>输出鲁棒性反而有益</b>（输入压到白名单 → <b>0/664 截断</b>）。</div>
+<div class="box warn"><b>唯一一处瘦身回退：</b>删 <code>client_name</code>（原带「字节 / 腾讯」）只剩 UUID，且没注入 server 已算好的 <code>business_group_resolved</code> / <code>client_name_resolved</code> → BG / 部门维度的底线规则（10-42 / 10-43 / 10-40）靠模型从英文 <code>sd_org_name='Technology'</code> 瞎猜，来回摇摆。<b>修法是注入那两个字符串进 §2.1，而不是回退白名单。</b></div>
+
+<h3>全部风险（按严重度）</h3>
+<table>
+  <thead><tr><th>风险</th><th>严重度</th><th>瘦身影响</th></tr></thead>
+  <tbody>
+    <tr><td>① 结构性缺字段（nationality）fail-close</td><td><span class="pill fail">致命</span></td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">中性</span></td></tr>
+    <tr><td>② 简历选行不确定 → 空简历</td><td><span class="pill park">高</span></td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">中性</span></td></tr>
+    <tr><td>③ 极性翻转无一致性校验</td><td><span class="pill park">高</span></td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">中性</span></td></tr>
+    <tr><td>④ BG / 客户维度未注入（模型靠英文 org 瞎猜）</td><td><span class="pill park">高</span></td><td><span class="tag drop">变差</span></td></tr>
+    <tr><td>⑤ 数据缺失型 FAIL 与真违规无法区分</td><td><span class="tag" style="background:color-mix(in oklab,var(--warn) 12%,transparent);color:var(--warn)">中</span></td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">中性</span></td></tr>
+    <tr><td>⑥ 条数严格相等：一条坏 → 整批 park</td><td><span class="tag" style="background:color-mix(in oklab,var(--warn) 12%,transparent);color:var(--warn)">中</span></td><td><span class="tag keep">变好</span></td></tr>
+    <tr><td>⑦ 规则元数据缺失默认偏 fail-closed</td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">低</span></td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">中性</span></td></tr>
+    <tr><td>⑧ 数据稀缺时误读规则意图（10-25 当年龄规则）</td><td><span class="tag" style="color:var(--ink3);border:1px solid var(--line)">低</span></td><td><span class="tag drop">略差</span></td></tr>
+  </tbody>
+</table>
+
+<h2 id="s7"><span class="n">07</span>⑥ 推荐修复（按收益排序）</h2>
+<div class="step"><div class="num">1</div><div class="body">
+  <div class="t">🔴 别再用结构性缺失的数据 fail-close</div>
+  <div class="d"><code>foldDecision</code>：底线规则若所需字段在预取图谱里根本不存在（10-35 的 nationality、空简历）→ 走「需人工复核 / 待补数据」而非静默未通过；并在 <code>graph.resume</code> 为空时回退到<b>现在被丢弃的 <code>input.resume</code></b>（刚解析、已过闸门的简历）。→ 直接消掉第 ①②类误拒。</div>
+</div></div>
+<div class="step"><div class="num">2</div><div class="body">
+  <div class="t">🟠 修简历选行 + 注入解析维度</div>
+  <div class="d"><code>buildGraphContext</code> 传入 <code>resume_id</code> 精确取简历（回退优先非空 experience）；把 <code>business_group_resolved</code> + <code>client_name_resolved</code> 渲染进 §2.1（顺手补回瘦身删掉的客户名）→ 修第 ④类摇摆。</div>
+</div></div>
+<div class="step"><div class="num">3</div><div class="body">
+  <div class="t">🟠 加确定性极性 + 解析护栏</div>
+  <div class="d"><code>coerceRuleResults</code>：<code>status=fail</code> 但 reason 是放行措辞 → 判极性矛盾，降级 / 转人工 + 记可统计事件；status 大小写/同义词归一，缺条目从 steps 回填，避免「少一条 → 整批 park」。</div>
+</div></div>
+
+<div class="box note" style="margin-top:24px"><b>一句话：</b>"现在的 prompt 格式"判得准；不准主要在折叠逻辑和图谱取数。修精度应动 <code>foldDecision</code> / <code>coerceRuleResults</code> / <code>graph-context.ts</code>，而不是只调 prompt。瘦身保留即可。</div>
+
+<footer>
+  规则校验智能体 · LLM 输入/输出 + 精准度审计 · 示例取自真实 run（陈思 → 腾讯 CDG）· 审计基于 lib/rule-check/logs 真实日志（9 候选人 / 664 response）。<br>
+  本页为只读评估报告，不改任何线上行为。
+</footer>
+
+</div>
+</body>
+</html>

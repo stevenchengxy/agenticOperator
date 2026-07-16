@@ -1,0 +1,1382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AO 运行时实例写入 Neo4j 后的 Instance Links 生成方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #607089;
+      --line: #dbe1ea;
+      --soft: #eef3f8;
+      --accent: #1769aa;
+      --accent-soft: #e8f3ff;
+      --ok: #16794c;
+      --warn: #9a5a00;
+      --danger: #b3261e;
+      --code-bg: #111827;
+      --code-ink: #e5e7eb;
+      --radius: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      background: #142033;
+      color: #fff;
+      border-bottom: 1px solid #0d1524;
+    }
+
+    .hero {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 42px 28px 34px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #b8c7dc;
+      font-size: 13px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 32px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 900px;
+      margin: 0;
+      color: #d5dfec;
+      font-size: 16px;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 26px 28px 54px;
+    }
+
+    section {
+      margin: 18px 0;
+      padding: 24px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 23px;
+      line-height: 1.28;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 8px;
+      font-size: 18px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 18px 0 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 9px 0;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    ul,
+    ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: var(--soft);
+      color: #25324a;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+
+    pre {
+      overflow: auto;
+      margin: 12px 0;
+      padding: 15px 16px;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font: 13px/1.62 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      margin: 12px 0 18px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #edf2f7;
+      color: #223049;
+      font-weight: 650;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .toc a {
+      display: block;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .note,
+    .warning,
+    .success {
+      margin: 14px 0;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid;
+    }
+
+    .note {
+      background: var(--accent-soft);
+      border-color: #b7d8f7;
+    }
+
+    .warning {
+      background: #fff7e8;
+      border-color: #e7c985;
+    }
+
+    .success {
+      background: #eaf7ef;
+      border-color: #b9dfc9;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 0 4px 4px 0;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #edf2f7;
+      color: #36465f;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin: 12px 0;
+    }
+
+    .box {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #223049;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      gap: 8px;
+      margin: 15px 0;
+      align-items: stretch;
+    }
+
+    .step {
+      position: relative;
+      min-height: 92px;
+      padding: 12px;
+      border: 1px solid #cdd7e4;
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .step:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      top: 50%;
+      right: -9px;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-weight: 700;
+      z-index: 1;
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 4px;
+      color: #1f2c43;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      font-size: 13px;
+    }
+
+    .status-ok {
+      color: var(--ok);
+      font-weight: 650;
+    }
+
+    .status-warn {
+      color: var(--warn);
+      font-weight: 650;
+    }
+
+    .status-danger {
+      color: var(--danger);
+      font-weight: 650;
+    }
+
+    @media (max-width: 920px) {
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .step:not(:last-child)::after {
+        content: "v";
+        top: auto;
+        right: 50%;
+        bottom: -13px;
+        transform: translateX(50%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <p class="eyebrow">Agentic Operator · AllmetaOntology · Neo4j</p>
+      <h1>运行时实例写入 Neo4j 后，如何按 Links Schema 创建实例 Links</h1>
+      <p class="subtitle">
+        本文档说明 AO 的 functions / Inngest agents 在运行过程中把实例数据写入 AllmetaOntology / Neo4j 后，
+        如何基于已经生成好的 AllmetaOntology links schema 自动创建业务实例之间的关系边。
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary">
+      <h2>0. 结论先行</h2>
+      <p>
+        实例数据不能只写成一批孤立节点。AO 每次写入 <code>Candidate</code>、<code>Resume</code>、
+        <code>Application</code>、<code>Job_Requisition</code>、<code>Candidate_Match_Result</code>、
+        <code>Communication_Log</code>、<code>Interview_Record</code> 等实例后，需要额外执行一层
+        <strong>Instance Link Generation</strong>：读取 AllmetaOntology 已生成的 links schema，找出当前实例 payload
+        中的外键字段，然后调用 Allmeta 的实例级 link API 在 Neo4j 中创建实例关系。
+      </p>
+      <div class="success">
+        推荐做法：AO 不在每个 function 里手写关系；新增一个集中式 <code>LinkPlanner + LinkWriter</code>。
+        所有函数只负责声明“我成功写入了哪些实例”，由 LinkPlanner 按 schema 自动推导关系。
+      </div>
+      <div class="note">
+        补充要求：规则检查审计本身也要成为可持久化的多页审计书，而不是只保存一个结论字段。
+        它需要拆成封面、输入快照、规则筛选、逐规则判断、证据、Prompt、响应、实例与回放等页面，
+        并在 Neo4j 中和候选人、简历、岗位、规则、匹配结果建立 instance links。
+      </div>
+      <div class="warning">
+        关键边界：<code>/api/v1/ontology/links</code> 是 schema/meta link，不应该被 AO 当成业务实例 link 使用。
+        实例与实例之间的边应走 <code>/api/v1/ontology/instance-links?domain=...</code>，或者由 Allmeta 提供一个等价的语义实例 link endpoint。
+      </div>
+      <div class="toc">
+        <a href="#concepts">1. 核心概念</a>
+        <a href="#target-flow">2. 目标运行流程</a>
+        <a href="#schema-rules">3. 如何解释 links schema</a>
+        <a href="#planning-algorithm">4. LinkPlanner 推导算法</a>
+        <a href="#api-contract">5. API 调用契约</a>
+        <a href="#examples">6. RAAS 实例例子</a>
+        <a href="#rule-check-audit-book">7. 规则检查审计书</a>
+        <a href="#integration">8. AO 集成位置</a>
+        <a href="#idempotency">9. 幂等、重试与 pending</a>
+        <a href="#backfill">10. 历史数据回补</a>
+        <a href="#observability">11. 观测指标</a>
+        <a href="#checklist">12. 落地 checklist</a>
+      </div>
+    </section>
+
+    <section id="concepts">
+      <h2>1. 核心概念</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>概念</th>
+            <th>含义</th>
+            <th>例子</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>DataObject Schema</code></td>
+            <td>AllmetaOntology 中定义某类业务对象的结构、主键、字段。</td>
+            <td><code>Candidate.primary_key = candidate_id</code></td>
+          </tr>
+          <tr>
+            <td><code>Instance Node</code></td>
+            <td>运行时产生并写入 Neo4j 的真实业务数据节点。</td>
+            <td><code>(:Resume {resume_id: "R001", candidate_id: "C001"})</code></td>
+          </tr>
+          <tr>
+            <td><code>Links Schema</code></td>
+            <td>AllmetaOntology 根据对象定义、外键、描述、业务语义生成的“类型级关系定义”。</td>
+            <td><code>Candidate --targets--&gt; Resume</code>，证据字段 <code>Resume.candidate_id</code></td>
+          </tr>
+          <tr>
+            <td><code>Instance Link</code></td>
+            <td>两个真实实例节点之间的 Neo4j relationship。</td>
+            <td><code>(Candidate C001)-[:TARGETS]-&gt;(Resume R001)</code></td>
+          </tr>
+          <tr>
+            <td><code>FK Evidence</code></td>
+            <td>links schema 中用于判断实例关系的外键证据。</td>
+            <td><code>evidence.source = "fk"</code>，<code>field = "candidate_id"</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        本方案的核心不是让 AO “猜关系”，而是让 AO 只执行 schema 已经声明过、并且能从实例 payload 中找到外键证据的关系。
+        这样关系生成是可解释、可回放、可回补的。
+      </p>
+    </section>
+
+    <section id="target-flow">
+      <h2>2. 目标运行流程</h2>
+      <div class="flow" aria-label="runtime flow">
+        <div class="step">
+          <b>1. Function 运行</b>
+          <span class="small">resume parser、JD creator、rule check、match resume、interview inviter 等。</span>
+        </div>
+        <div class="step">
+          <b>2. 生成实例 payload</b>
+          <span class="small">包含业务主键和外键字段，例如 <code>candidate_id</code>。</span>
+        </div>
+        <div class="step">
+          <b>3. 写实例节点</b>
+          <span class="small">调用 <code>/instances/{label}</code> 写入 Neo4j。</span>
+        </div>
+        <div class="step">
+          <b>4. 收集写入结果</b>
+          <span class="small">返回 label、pk、payload、traceId、runId。</span>
+        </div>
+        <div class="step">
+          <b>5. LinkPlanner</b>
+          <span class="small">读取 links schema，根据 FK 推导应创建的 links。</span>
+        </div>
+        <div class="step">
+          <b>6. LinkWriter</b>
+          <span class="small">调用 <code>/instance-links</code> 创建实例关系。</span>
+        </div>
+        <div class="step">
+          <b>7. 观测与回补</b>
+          <span class="small">记录成功、跳过、失败、pending，支持后续 replay。</span>
+        </div>
+      </div>
+
+      <h3>运行时写入结果的最小结构</h3>
+      <p>每个 Allmeta instance writer 写完节点后，应给 LinkPlanner 一个统一的结构：</p>
+      <pre><code>{
+  "domain": "RAAS-v1",
+  "label": "Resume",
+  "pkField": "resume_id",
+  "pk": "R001",
+  "payload": {
+    "resume_id": "R001",
+    "candidate_id": "C001",
+    "job_requisition_id": "JR001"
+  },
+  "traceId": "trace_xxx",
+  "runId": "inngest_run_xxx",
+  "writer": "resume-parser-agent"
+}</code></pre>
+      <p>
+        这样 functions 不需要知道具体有哪些 links，也不需要手写 <code>Candidate -&gt; Resume</code>。
+        它只要把“成功写入了什么实例”交给 LinkPlanner。
+      </p>
+    </section>
+
+    <section id="schema-rules">
+      <h2>3. 如何解释 AllmetaOntology Links Schema</h2>
+      <h3>3.1 RAAS links schema 的实际形状</h3>
+      <p>当前 RAAS links schema 文件是带元信息的对象，核心数组在 <code>links[]</code> 中：</p>
+      <pre><code>{
+  "metadata": {
+    "domain": "RAAS-v1",
+    "version": "..."
+  },
+  "links": [
+    {
+      "id": "object/Object/Candidate/targets/Object/Resume",
+      "kind": "object-fk",
+      "from": { "type": "Object", "id": "Candidate" },
+      "to": { "type": "Object", "id": "Resume" },
+      "action": "targets",
+      "inverse_action": "...",
+      "cardinality": "1:N",
+      "semanticRelationship": {
+        "zh": "...",
+        "en": "..."
+      },
+      "evidence": [
+        {
+          "source": "fk",
+          "artifact": { "type": "Object", "id": "Resume" },
+          "field": "candidate_id",
+          "reason": "Resume.candidate_id references Candidate."
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+      <h3>3.2 运行时只使用哪些 links</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Link kind</th>
+            <th>是否用于实例 links</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>object-fk</code></td>
+            <td><span class="status-ok">使用</span></td>
+            <td>明确表示对象之间由外键建立业务实例关系，是运行时创建 links 的主来源。</td>
+          </tr>
+          <tr>
+            <td><code>object-composition</code></td>
+            <td><span class="status-ok">可使用</span></td>
+            <td>如果 schema 中有可验证 FK evidence，也可以生成实例关系。</td>
+          </tr>
+          <tr>
+            <td><code>action-*</code> / <code>rule-*</code> / <code>event-*</code> / <code>workflow-*</code></td>
+            <td><span class="status-warn">默认不使用</span></td>
+            <td>这些是 ontology 元数据关系，不是运行时业务实例之间的关系。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3.3 只信 FK evidence，不信纯描述</h3>
+      <p>
+        links schema 中有些关系来自 description、semanticRelationship 或模型推理。运行时自动建边时，应该只处理满足以下条件的 link：
+      </p>
+      <ul>
+        <li><code>kind</code> 是 <code>object-fk</code> 或带明确 FK 的 <code>object-composition</code>。</li>
+        <li><code>from.id</code> 和 <code>to.id</code> 都是 <code>Object</code> / <code>DataObject</code>。</li>
+        <li><code>evidence[]</code> 中至少有一条 <code>source = "fk"</code>，且有 <code>artifact.id</code> 和 <code>field</code>。</li>
+        <li>当前实例 payload 中存在该 <code>field</code>，并且值不是空字符串、空数组或 null。</li>
+      </ul>
+      <div class="note">
+        这条规则很重要：它防止 AO 根据“语义上可能有关”创建不可验证关系。运行时自动化只做证据充分的事情。
+      </div>
+    </section>
+
+    <section id="planning-algorithm">
+      <h2>4. LinkPlanner 推导算法</h2>
+      <h3>4.1 输入</h3>
+      <pre><code>InstanceWriteResult[] writtenInstances
+LinkSchema[] schemaLinks
+PrimaryKeyMap pkByLabel</code></pre>
+
+      <h3>4.2 单条 schema link 的判断逻辑</h3>
+      <p>对每条 schema link，先提取：</p>
+      <pre><code>fromLabel = link.from.id
+toLabel   = link.to.id
+action    = link.action
+fk        = first evidence where evidence.source == "fk"
+fkOwner   = fk.artifact.id
+fkField   = fk.field</code></pre>
+
+      <p>然后按 FK 在哪一侧来判断实例边方向：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>情况</th>
+            <th>含义</th>
+            <th>生成实例 link</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>fkOwner == toLabel</code></td>
+            <td>外键字段在 to 端实例上，指向 from 端实例。</td>
+            <td><code>from.pk = payload[fkField]</code>，<code>to.pk = current.pk</code></td>
+          </tr>
+          <tr>
+            <td><code>fkOwner == fromLabel</code></td>
+            <td>外键字段在 from 端实例上，指向 to 端实例。</td>
+            <td><code>from.pk = current.pk</code>，<code>to.pk = payload[fkField]</code></td>
+          </tr>
+          <tr>
+            <td><code>fkOwner</code> 不是两端之一</td>
+            <td>schema 证据不够直接，或者 link 通过第三方对象表达。</td>
+            <td>跳过，记录 <code>skip_reason = unsupported_fk_owner</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4.3 伪代码</h3>
+      <pre><code>for each writtenInstance in writtenInstances:
+  for each schemaLink in schemaLinks:
+    if schemaLink.kind not in ["object-fk", "object-composition"]:
+      continue
+
+    fk = findFkEvidence(schemaLink)
+    if not fk:
+      continue
+
+    fromLabel = schemaLink.from.id
+    toLabel = schemaLink.to.id
+    fkOwner = fk.artifact.id
+    fkField = fk.field
+
+    if writtenInstance.label != fkOwner:
+      continue
+
+    fkValue = writtenInstance.payload[fkField]
+    if isEmpty(fkValue):
+      skip("missing_fk_value")
+      continue
+
+    for each targetPk in normalizeToArray(fkValue):
+      if fkOwner == toLabel:
+        planLink(
+          relation = relationType(schemaLink.action),
+          from = { label: fromLabel, pk: targetPk },
+          to   = { label: toLabel, pk: writtenInstance.pk },
+          schema = schemaLink
+        )
+
+      if fkOwner == fromLabel:
+        planLink(
+          relation = relationType(schemaLink.action),
+          from = { label: fromLabel, pk: writtenInstance.pk },
+          to   = { label: toLabel, pk: targetPk },
+          schema = schemaLink
+        )</code></pre>
+
+      <h3>4.4 relationType 生成规则</h3>
+      <p>
+        links schema 中的 <code>action</code> 通常是小写 snake_case，例如 <code>records_for</code>。
+        Neo4j relationship type 和当前 Allmeta <code>instance-links</code> handler 要求大写类型名，
+        因此需要一个稳定转换：
+      </p>
+      <pre><code>relationType(action):
+  trim action
+  replace all non [A-Za-z0-9_] with "_"
+  collapse repeated "_"
+  uppercase
+
+examples:
+  "targets"                  =&gt; "TARGETS"
+  "evaluates_fit"            =&gt; "EVALUATES_FIT"
+  "records_process_for"      =&gt; "RECORDS_PROCESS_FOR"
+  "archives_interaction_log" =&gt; "ARCHIVES_INTERACTION_LOG"</code></pre>
+      <div class="warning">
+        上线前必须和 AllmetaOntology 对齐：schema 侧用于校验的 <code>link_name</code> / <code>name</code> /
+        <code>relation</code> 到底存小写 <code>action</code>，还是大写 relationship type。
+        推荐统一为：schema 保留小写 <code>action</code>，同时写入大写 <code>link_name</code>；
+        instance link API 用大写 <code>linkName</code> 创建 Neo4j relationship。
+      </div>
+    </section>
+
+    <section id="api-contract">
+      <h2>5. API 调用契约</h2>
+      <h3>5.1 实例节点写入</h3>
+      <p>AO 运行时先写实例节点：</p>
+      <pre><code>POST /api/v1/ontology/instances/Resume?domain=RAAS-v1
+Authorization: Bearer &lt;ONTOLOGY_API_TOKEN&gt;
+Content-Type: application/json
+
+{
+  "resume_id": "R001",
+  "candidate_id": "C001",
+  "job_requisition_id": "JR001",
+  "source": "ao-runtime"
+}</code></pre>
+
+      <h3>5.2 实例关系写入</h3>
+      <p>实例写入成功后，再按计划创建 instance link：</p>
+      <pre><code>POST /api/v1/ontology/instance-links?domain=RAAS-v1
+Authorization: Bearer &lt;ONTOLOGY_API_TOKEN&gt;
+Content-Type: application/json
+
+{
+  "linkName": "TARGETS",
+  "from": { "label": "Candidate", "pk": "C001" },
+  "to":   { "label": "Resume",    "pk": "R001" },
+  "properties": {
+    "schemaLinkId": "object/Object/Candidate/targets/Object/Resume",
+    "schemaAction": "targets",
+    "schemaKind": "object-fk",
+    "fkField": "candidate_id",
+    "source": "ao-runtime",
+    "traceId": "trace_xxx",
+    "runId": "inngest_run_xxx",
+    "linkKey": "RAAS-v1|Candidate|C001|TARGETS|Resume|R001"
+  }
+}</code></pre>
+
+      <h3>5.3 不要混用 schema links API</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Endpoint</th>
+            <th>用途</th>
+            <th>AO 运行时是否应该调用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/api/v1/ontology/links</code></td>
+            <td>创建或读取 ontology schema 层面的关系，例如 DataObject 与 DataObject 的 link 定义。</td>
+            <td><span class="status-danger">不用于业务实例边</span></td>
+          </tr>
+          <tr>
+            <td><code>/api/v1/ontology/instance-links</code></td>
+            <td>创建真实业务实例节点之间的关系。</td>
+            <td><span class="status-ok">推荐使用</span></td>
+          </tr>
+          <tr>
+            <td><code>/api/v1/ontology/instance-semantic-links</code></td>
+            <td>按 schema 语义自动推导 relationship type 的实例关系 API。</td>
+            <td><span class="status-warn">可作为 Allmeta 侧演进方向，但需确认它支持真实实例节点，而不是 mock instance 节点。</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="examples">
+      <h2>6. RAAS 运行时实例例子</h2>
+      <h3>6.1 Resume Parser：Candidate + Resume</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>写入实例</th>
+            <th>payload 中的 FK</th>
+            <th>匹配 schema link</th>
+            <th>生成 instance link</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Resume R001</code></td>
+            <td><code>candidate_id = C001</code></td>
+            <td><code>Candidate targets Resume</code></td>
+            <td><code>(Candidate C001)-[:TARGETS]-&gt;(Resume R001)</code></td>
+          </tr>
+          <tr>
+            <td><code>Resume R001</code></td>
+            <td><code>job_requisition_id = JR001</code></td>
+            <td><code>Resume submits_to Job_Requisition</code></td>
+            <td><code>(Resume R001)-[:SUBMITS_TO]-&gt;(Job_Requisition JR001)</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>6.2 Rule Check / Match Resume：Candidate_Match_Result</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>payload 字段</th>
+            <th>schema link</th>
+            <th>生成关系</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>candidate_id</code></td>
+            <td><code>Candidate_Match_Result evaluates_fit Candidate</code></td>
+            <td><code>(Candidate_Match_Result)-[:EVALUATES_FIT]-&gt;(Candidate)</code></td>
+          </tr>
+          <tr>
+            <td><code>job_position_id</code></td>
+            <td><code>Candidate_Match_Result evaluates_for Job_Requisition</code></td>
+            <td><code>(Candidate_Match_Result)-[:EVALUATES_FOR]-&gt;(Job_Requisition)</code></td>
+          </tr>
+          <tr>
+            <td><code>client_id</code></td>
+            <td><code>Candidate_Match_Result reports_to Client</code></td>
+            <td><code>(Candidate_Match_Result)-[:REPORTS_TO]-&gt;(Client)</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>6.3 JD Creator：Job_Requisition + Job_Posting</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>payload 字段</th>
+            <th>schema link</th>
+            <th>生成关系</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Job_Posting.job_requisition_id</code></td>
+            <td><code>Job_Requisition advertises_vacancies_for Job_Posting</code></td>
+            <td><code>(Job_Requisition)-[:ADVERTISES_VACANCIES_FOR]-&gt;(Job_Posting)</code></td>
+          </tr>
+          <tr>
+            <td><code>Job_Posting.recruiter_employee_id</code></td>
+            <td><code>Employee assigned_recruiter Job_Posting</code></td>
+            <td><code>(Employee)-[:ASSIGNED_RECRUITER]-&gt;(Job_Posting)</code></td>
+          </tr>
+          <tr>
+            <td><code>Job_Posting.sourcing_channel_id</code></td>
+            <td><code>Sourcing_Channel utilizes Job_Posting</code></td>
+            <td><code>(Sourcing_Channel)-[:UTILIZES]-&gt;(Job_Posting)</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>6.4 Interview Inviter：Communication_Log + Interview_Record</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>payload 字段</th>
+            <th>schema link</th>
+            <th>生成关系</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Communication_Log.application_id</code></td>
+            <td><code>Application archives_interaction_log Communication_Log</code></td>
+            <td><code>(Application)-[:ARCHIVES_INTERACTION_LOG]-&gt;(Communication_Log)</code></td>
+          </tr>
+          <tr>
+            <td><code>Interview_Record.application_id</code></td>
+            <td><code>Application records_process_for Interview_Record</code></td>
+            <td><code>(Application)-[:RECORDS_PROCESS_FOR]-&gt;(Interview_Record)</code></td>
+          </tr>
+          <tr>
+            <td><code>Interview_Record.interviewer_employee_id</code></td>
+            <td><code>Employee conducts Interview_Record</code></td>
+            <td><code>(Employee)-[:CONDUCTS]-&gt;(Interview_Record)</code></td>
+          </tr>
+          <tr>
+            <td><code>Interview_Record.interview_model_id</code></td>
+            <td><code>Interview_Model standardizes_execution_of Interview_Record</code></td>
+            <td><code>(Interview_Model)-[:STANDARDIZES_EXECUTION_OF]-&gt;(Interview_Record)</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        如果某个 endpoint 实例还没写入，例如 <code>Application A001</code> 不存在，但
+        <code>Communication_Log.application_id = A001</code>，不要临时创建 stub 节点。
+        应记录 pending link，等待 Application 真实实例落库后再回补。
+      </div>
+    </section>
+
+    <section id="rule-check-audit-book">
+      <h2>7. 规则检查审计也要是“多页书”，并且持久化</h2>
+      <p>
+        规则检查审计不能只是一条 <code>RuleCheckAudit</code> 结果记录，也不能只依赖前端临时拼装。
+        它应该被建模成一本可分页、可追溯、可回放的 <strong>Audit Book</strong>：
+        封面记录本次审计的结论和索引，内页记录输入快照、规则选择过程、逐规则判定、证据、Prompt、LLM 原始响应、实例写入与 links 结果。
+      </p>
+      <div class="success">
+        推荐原则：Postgres 负责审计列表、筛选、分页和快速读取；Allmeta / Neo4j 负责把审计书与 Candidate、Resume、
+        Job_Requisition、Rule、Candidate_Match_Result 等实例连接成图。两边都要有稳定 ID 和 hash，保证可重放与可校验。
+      </div>
+
+      <h3>7.1 审计书的数据结构</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>对象</th>
+            <th>粒度</th>
+            <th>主键建议</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>RuleCheckAuditBook</code></td>
+            <td>一本审计书 / 一次规则检查运行</td>
+            <td><code>audit_id</code></td>
+            <td>封面和索引：候选人、简历、岗位、结论、runId、traceId、模型、耗时、规则数量。</td>
+          </tr>
+          <tr>
+            <td><code>RuleCheckAuditPage</code></td>
+            <td>一页审计内容</td>
+            <td><code>page_id = audit_id::page_type::ordinal</code></td>
+            <td>多页展示和分页持久化：输入页、规则选择页、判断页、证据页、Prompt 页、响应页、实例页。</td>
+          </tr>
+          <tr>
+            <td><code>RuleCheckFlag</code></td>
+            <td>一条规则判定</td>
+            <td><code>flag_id = audit_id::rule_id</code></td>
+            <td>记录每条规则的 applicable、result、severity、evidence、next_action。</td>
+          </tr>
+          <tr>
+            <td><code>RuleEvidenceBlock</code></td>
+            <td>一段证据</td>
+            <td><code>evidence_id = flag_id::n</code></td>
+            <td>保存引用的简历片段、JD 字段、图查询结果、人工反馈或 LLM reasoning 摘要。</td>
+          </tr>
+          <tr>
+            <td><code>PromptSnapshot</code></td>
+            <td>一次模型输入</td>
+            <td><code>prompt_id = audit_id::prompt::n</code></td>
+            <td>保存 system prompt、user prompt、prompt hash、token 估算、截断策略。</td>
+          </tr>
+          <tr>
+            <td><code>ResponseSnapshot</code></td>
+            <td>一次模型输出</td>
+            <td><code>response_id = audit_id::response::n</code></td>
+            <td>保存 LLM raw text、解析后的 JSON、parse_error、模型 request id。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>7.2 多页书的页面清单</h3>
+      <p>前端看到的是“多页审计书”，后端持久化的是 page records：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>page_type</th>
+            <th>页面名称</th>
+            <th>持久化内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>cover</code></td>
+            <td>封面</td>
+            <td>结论、失败原因、candidate / resume / JR anchor、agent、stage、run、trace。</td>
+          </tr>
+          <tr>
+            <td><code>input_snapshot</code></td>
+            <td>输入快照</td>
+            <td>parsed resume、job requisition、runtime_context、hsm_feedback。</td>
+          </tr>
+          <tr>
+            <td><code>rule_selection</code></td>
+            <td>规则筛选</td>
+            <td>纳入 / 排除的规则、tier、reason、规则库总数、筛选后数量。</td>
+          </tr>
+          <tr>
+            <td><code>rule_judgment</code></td>
+            <td>规则判断</td>
+            <td>逐规则判定表：PASS / FAIL / REVIEW / NOT_TRIGGERED / INSUFFICIENT_INFO。</td>
+          </tr>
+          <tr>
+            <td><code>evidence</code></td>
+            <td>证据页</td>
+            <td>简历证据、岗位证据、图查询证据、人工反馈证据，按 rule_id 分组。</td>
+          </tr>
+          <tr>
+            <td><code>prompt</code></td>
+            <td>Prompt 页</td>
+            <td>system prompt、user prompt、prompt hash、prompt source、schema version。</td>
+          </tr>
+          <tr>
+            <td><code>response</code></td>
+            <td>模型响应页</td>
+            <td>LLM raw text、解析 JSON、parse error、token、latency。</td>
+          </tr>
+          <tr>
+            <td><code>instances</code></td>
+            <td>实例与图谱页</td>
+            <td>本次写入的 Allmeta instances、planned links、created links、pending links。</td>
+          </tr>
+          <tr>
+            <td><code>replay</code></td>
+            <td>回放页</td>
+            <td>parent_audit_id、child_audit_ids、重跑原因、diff 摘要。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>7.3 持久化策略</h3>
+      <div class="grid">
+        <div class="box">
+          <strong>Postgres：操作型审计库</strong>
+          <span>用于 <code>/rule-check</code> 列表、筛选、分页、详情页快速读取。现有 <code>RuleCheckAudit</code> 和 <code>RuleCheckFlag</code> 继续保留，并补充 page/block 概念。</span>
+        </div>
+        <div class="box">
+          <strong>Neo4j：语义图谱归档</strong>
+          <span>把 <code>RuleCheckAuditBook</code> 写成实例节点，并用 instance links 连接 Candidate、Resume、Job_Requisition、Rule、Candidate_Match_Result。</span>
+        </div>
+        <div class="box">
+          <strong>对象存储：大文本正文</strong>
+          <span>Prompt、raw response、超长 resume/JD 可存 MinIO 或等价对象存储，节点只保存 <code>storage_ref</code>、<code>sha256</code>、<code>size</code>。</span>
+        </div>
+      </div>
+
+      <pre><code>{
+  "page_id": "rca_123::prompt::001",
+  "audit_id": "rca_123",
+  "page_type": "prompt",
+  "ordinal": 1,
+  "title": "User Prompt",
+  "content_format": "markdown",
+  "content_inline": null,
+  "storage_ref": "minio://ao-audit/rca_123/prompt.md",
+  "sha256": "f2a7...",
+  "size_bytes": 184233,
+  "trace_id": "trace_xxx",
+  "created_at": "2026-07-02T00:00:00.000Z"
+}</code></pre>
+
+      <h3>7.4 审计书在 Neo4j 中的 instance links</h3>
+      <p>规则检查审计书也要参与同一套 LinkPlanner / LinkWriter，只是需要在 AllmetaOntology 里补齐审计对象的 links schema：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>From</th>
+            <th>Action</th>
+            <th>To</th>
+            <th>FK evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>RuleCheckAuditBook</td><td><code>audits_candidate</code></td><td>Candidate</td><td><code>RuleCheckAuditBook.candidate_id</code></td></tr>
+          <tr><td>RuleCheckAuditBook</td><td><code>audits_resume</code></td><td>Resume</td><td><code>RuleCheckAuditBook.resume_id</code></td></tr>
+          <tr><td>RuleCheckAuditBook</td><td><code>audits_job</code></td><td>Job_Requisition</td><td><code>RuleCheckAuditBook.job_requisition_id</code></td></tr>
+          <tr><td>RuleCheckAuditBook</td><td><code>produces_result</code></td><td>Candidate_Match_Result</td><td><code>RuleCheckAuditBook.match_result_id</code></td></tr>
+          <tr><td>RuleCheckAuditBook</td><td><code>contains_page</code></td><td>RuleCheckAuditPage</td><td><code>RuleCheckAuditPage.audit_id</code></td></tr>
+          <tr><td>RuleCheckAuditBook</td><td><code>has_flag</code></td><td>RuleCheckFlag</td><td><code>RuleCheckFlag.audit_id</code></td></tr>
+          <tr><td>RuleCheckFlag</td><td><code>evaluates_rule</code></td><td>Rule</td><td><code>RuleCheckFlag.rule_id</code></td></tr>
+          <tr><td>RuleCheckFlag</td><td><code>has_evidence</code></td><td>RuleEvidenceBlock</td><td><code>RuleEvidenceBlock.flag_id</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>按 relationType 转换后，实例边会类似：</p>
+      <pre><code>(RuleCheckAuditBook rca_123)-[:AUDITS_CANDIDATE]-&gt;(Candidate C001)
+(RuleCheckAuditBook rca_123)-[:AUDITS_RESUME]-&gt;(Resume R001)
+(RuleCheckAuditBook rca_123)-[:AUDITS_JOB]-&gt;(Job_Requisition JR001)
+(RuleCheckAuditBook rca_123)-[:CONTAINS_PAGE]-&gt;(RuleCheckAuditPage rca_123::prompt::001)
+(RuleCheckAuditBook rca_123)-[:HAS_FLAG]-&gt;(RuleCheckFlag rca_123::10-38)
+(RuleCheckFlag rca_123::10-38)-[:EVALUATES_RULE]-&gt;(Rule 10-38)</code></pre>
+
+      <h3>7.5 写入时机</h3>
+      <ol>
+        <li>RuleCheckAgent 先完成规则检查，得到 decision、flags、prompt、response、输入快照。</li>
+        <li>写 Postgres <code>RuleCheckAudit</code> / <code>RuleCheckFlag</code>，保证 UI 和运营查询可用。</li>
+        <li>把审计详情拆成 <code>RuleCheckAuditPage</code> / <code>RuleEvidenceBlock</code>，持久化正文或 storage_ref。</li>
+        <li>写 Allmeta 实例：<code>RuleCheckAuditBook</code>、pages、flags、evidence blocks。</li>
+        <li>把所有写入结果交给 LinkPlanner，生成审计书相关 instance links。</li>
+        <li>LinkWriter 创建 links；失败时进入 pending，不影响 rule-check 主链路。</li>
+      </ol>
+      <div class="warning">
+        这里的审计持久化是合规和可追溯能力，不应依赖浏览器页面状态。页面只是读取这本已持久化的审计书。
+      </div>
+    </section>
+
+    <section id="integration">
+      <h2>8. AO 集成位置</h2>
+      <h3>8.1 推荐新增的内部模块</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>职责</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>AllmetaClient.createInstanceLink</code></td>
+            <td>封装 <code>/api/v1/ontology/instance-links</code></td>
+            <td>替换旧的 <code>writeLink(source_label, ...)</code> 形态。</td>
+          </tr>
+          <tr>
+            <td><code>LinkSchemaProvider</code></td>
+            <td>加载并缓存当前 domain 的 links schema</td>
+            <td>优先从 Allmeta API 读取，开发环境可从 <code>models/RAAS-v1/links_*.json</code> fallback。</td>
+          </tr>
+          <tr>
+            <td><code>LinkPlanner</code></td>
+            <td>根据实例 payload + schema 生成 link 计划</td>
+            <td>纯函数，便于单测和 dry-run。</td>
+          </tr>
+          <tr>
+            <td><code>LinkWriter</code></td>
+            <td>执行 link 写入、处理 404/pending/重复</td>
+            <td>所有外部副作用集中在这里。</td>
+          </tr>
+          <tr>
+            <td><code>GraphWriteCoordinator</code></td>
+            <td>把 instance write 和 link write 串起来</td>
+            <td>供各 agent function 使用，避免每个 function 自己处理 links。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>8.2 functions 的接入方式</h3>
+      <p>每个 function 保持自己的业务逻辑，只改变写 Allmeta 的返回形态：</p>
+      <pre><code>// 旧思路：写完实例就结束
+await writeResume(payload)
+
+// 新思路：写完实例后返回标准结果，再统一生成 links
+const writes = []
+writes.push(await writeCandidate(candidatePayload))
+writes.push(await writeResume(resumePayload))
+
+const plannedLinks = linkPlanner.plan(writes)
+await linkWriter.write(plannedLinks)</code></pre>
+
+      <h3>8.3 写入顺序</h3>
+      <ol>
+        <li>先写所有实例节点。</li>
+        <li>确认实例写入成功，拿到标准 <code>InstanceWriteResult</code>。</li>
+        <li>基于成功写入的实例生成 link plan。</li>
+        <li>写 links。</li>
+        <li>link 写入失败不应让业务 function 整体失败，除非该 link 是强一致必需。</li>
+      </ol>
+      <p>
+        这个顺序能保证：实例主数据优先落库，links 作为可重放的派生图结构处理。
+      </p>
+    </section>
+
+    <section id="idempotency">
+      <h2>9. 幂等、重试与 pending</h2>
+      <h3>9.1 为什么幂等是硬要求</h3>
+      <p>
+        AO 的 functions 运行在 Inngest / workflow 语义下，失败重试、局部 replay、手动重跑都是正常情况。
+        如果 instance link API 用 <code>CREATE</code> 而不是 <code>MERGE</code>，同一次业务写入重试会创建重复关系边。
+      </p>
+      <div class="warning">
+        当前 Allmeta <code>instance-links</code> handler 需要确认是否已经改为幂等。
+        若仍是 <code>CREATE</code>，上线前建议改为基于 <code>linkKey</code> 的 <code>MERGE</code>。
+      </div>
+
+      <h3>9.2 linkKey</h3>
+      <p>每条实例关系都应有一个确定性 key：</p>
+      <pre><code>linkKey = [
+  domain,
+  from.label,
+  from.pk,
+  relationType,
+  to.label,
+  to.pk
+].join("|")</code></pre>
+      <p>例子：</p>
+      <pre><code>RAAS-v1|Candidate|C001|TARGETS|Resume|R001</code></pre>
+      <p>
+        Allmeta 侧最好用这个 key 做唯一约束或 <code>MERGE</code> 属性；
+        AO 侧也可以在调用前先查 <code>GET /instance-links</code> 做防重，但最终幂等应由服务端保证。
+      </p>
+
+      <h3>9.3 pending link</h3>
+      <p>如果 endpoint 不存在，LinkWriter 不应该创建 stub，也不应该让整个 function 失败。推荐记录 pending：</p>
+      <pre><code>{
+  "domain": "RAAS-v1",
+  "linkKey": "RAAS-v1|Application|A001|RECORDS_PROCESS_FOR|Interview_Record|IR001",
+  "linkName": "RECORDS_PROCESS_FOR",
+  "from": { "label": "Application", "pk": "A001" },
+  "to": { "label": "Interview_Record", "pk": "IR001" },
+  "schemaLinkId": "object/Object/Application/records_process_for/Object/Interview_Record",
+  "status": "pending_endpoint",
+  "missingEndpoint": "from",
+  "traceId": "trace_xxx",
+  "runId": "inngest_run_xxx",
+  "createdAt": "2026-07-02T00:00:00.000Z",
+  "lastTriedAt": "2026-07-02T00:00:00.000Z",
+  "attempts": 1
+}</code></pre>
+      <p>pending link 可以存到 AO Postgres，也可以由 Allmeta 提供 outbox。选择哪边存，取决于谁负责重试。</p>
+
+      <h3>9.4 失败处理策略</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>失败类型</th>
+            <th>处理方式</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>link-not-declared</code></td>
+            <td>schema/API contract 不一致，记录 error，报警；不要自动降级成任意关系。</td>
+          </tr>
+          <tr>
+            <td><code>endpoint-not-found</code></td>
+            <td>记录 pending，等待 endpoint 实例创建后重试。</td>
+          </tr>
+          <tr>
+            <td><code>duplicate</code></td>
+            <td>如果 linkKey 相同，视为成功；如果属性不同，按最新 trace 更新属性。</td>
+          </tr>
+          <tr>
+            <td><code>neo4j-unavailable</code> / 网络失败</td>
+            <td>短期重试；超过阈值后 pending，后续 backfill。</td>
+          </tr>
+          <tr>
+            <td><code>invalid-input</code></td>
+            <td>开发错误或 schema 字段错误，记录详细上下文并报警。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="backfill">
+      <h2>10. 历史数据回补</h2>
+      <p>
+        新方案上线前，Neo4j 中已经存在一批没有实例 links 的节点。它们不应该靠手写脚本一个个补，
+        而应复用同一个 LinkPlanner。
+      </p>
+      <h3>10.1 回补流程</h3>
+      <ol>
+        <li>按 domain 加载 links schema。</li>
+        <li>按 label 分页读取 Allmeta 实例节点，例如 <code>Resume</code>、<code>Application</code>、<code>Candidate_Match_Result</code>。</li>
+        <li>把每条实例包装成 <code>InstanceWriteResult</code> 形状。</li>
+        <li>调用 LinkPlanner 生成计划。</li>
+        <li>dry-run 输出总数和样例，确认无误。</li>
+        <li>批量调用 LinkWriter，依赖 linkKey 保证幂等。</li>
+        <li>输出回补报告：planned、created、already_exists、pending、failed。</li>
+      </ol>
+
+      <h3>10.2 dry-run 报告样例</h3>
+      <pre><code>{
+  "domain": "RAAS-v1",
+  "schemaVersion": "links_v0_1_064",
+  "labelsScanned": ["Resume", "Application", "Candidate_Match_Result"],
+  "instancesScanned": 1842,
+  "linksPlanned": 2679,
+  "willCreate": 2410,
+  "alreadyExists": 206,
+  "pendingEndpoint": 63,
+  "errors": []
+}</code></pre>
+    </section>
+
+    <section id="observability">
+      <h2>11. 观测指标</h2>
+      <p>每次 function run 或 batch backfill 至少记录这些指标：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>含义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>instances_written</code></td>
+            <td>本次成功写入 Allmeta 的实例数量。</td>
+          </tr>
+          <tr>
+            <td><code>links_planned</code></td>
+            <td>LinkPlanner 根据 schema 推导出的关系数量。</td>
+          </tr>
+          <tr>
+            <td><code>links_written</code></td>
+            <td>成功创建或幂等命中的关系数量。</td>
+          </tr>
+          <tr>
+            <td><code>links_pending</code></td>
+            <td>因为 endpoint 暂不存在而进入 pending 的关系数量。</td>
+          </tr>
+          <tr>
+            <td><code>links_skipped</code></td>
+            <td>因为缺 FK、schema 不支持、空字段等被跳过的数量。</td>
+          </tr>
+          <tr>
+            <td><code>links_failed</code></td>
+            <td>真实失败数量，需要报警或排查。</td>
+          </tr>
+          <tr>
+            <td><code>audit_books_written</code></td>
+            <td>成功持久化的规则检查审计书数量。</td>
+          </tr>
+          <tr>
+            <td><code>audit_pages_written</code></td>
+            <td>成功持久化的审计页数量，至少应覆盖 cover、input、selection、judgment、prompt、response、instances。</td>
+          </tr>
+          <tr>
+            <td><code>audit_large_blocks_externalized</code></td>
+            <td>被写入对象存储并以 <code>storage_ref</code> 引用的大文本块数量。</td>
+          </tr>
+          <tr>
+            <td><code>audit_graph_links_written</code></td>
+            <td>审计书到候选人、简历、岗位、规则、结果、页面、证据块的图关系数量。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        日志里建议带上 <code>domain</code>、<code>schemaVersion</code>、<code>linkKey</code>、
+        <code>schemaLinkId</code>、<code>auditId</code>、<code>pageId</code>、<code>traceId</code>、<code>runId</code>，
+        方便从 AO run 追到审计书页面和 Neo4j 边。
+      </p>
+    </section>
+
+    <section id="checklist">
+      <h2>12. 落地 checklist</h2>
+      <h3>AllmetaOntology 侧</h3>
+      <ul>
+        <li>确认 <code>/api/v1/ontology/instance-links</code> 在目标环境可用。</li>
+        <li>确认 schema lookup 能识别 RAAS links schema 中的关系：<code>link_name</code> / <code>action</code> / relationship type 必须统一。</li>
+        <li>将 instance link 创建从 <code>CREATE</code> 改成基于 <code>linkKey</code> 的 <code>MERGE</code>，或提供服务端幂等能力。</li>
+        <li>确认 DataObject primary key 可被 API 正确解析，例如 <code>Candidate.candidate_id</code>、<code>Resume.resume_id</code>。</li>
+        <li>补齐审计书相关 DataObject：<code>RuleCheckAuditBook</code>、<code>RuleCheckAuditPage</code>、<code>RuleEvidenceBlock</code>、<code>PromptSnapshot</code>、<code>ResponseSnapshot</code>。</li>
+        <li>补齐审计书 links schema：audit book 到 Candidate / Resume / Job_Requisition / Rule / Candidate_Match_Result / pages / flags / evidence blocks 的关系。</li>
+      </ul>
+
+      <h3>AO 侧</h3>
+      <ul>
+        <li>让所有 Allmeta instance writer 返回标准 <code>InstanceWriteResult</code>。</li>
+        <li>新增 <code>LinkSchemaProvider</code>，缓存 domain + version 对应的 schema links。</li>
+        <li>新增纯函数 <code>LinkPlanner</code>，只处理带 FK evidence 的 object links。</li>
+        <li>新增 <code>LinkWriter</code>，写入 <code>/instance-links</code>，处理 pending 和幂等命中。</li>
+        <li>在主要 agents 写实例后接入 link generation：resume parser、create JD、rule check、match resume、interview inviter。</li>
+        <li>RuleCheckAgent 写审计时，要把审计拆成多页书：cover、input_snapshot、rule_selection、rule_judgment、evidence、prompt、response、instances、replay。</li>
+        <li>审计大文本要持久化 storage_ref + sha256 + size，避免只存在前端内存或单个超大 Neo4j property 中。</li>
+        <li>增加 dry-run 和 backfill 命令，先对历史实例做报告，再批量创建 links。</li>
+      </ul>
+
+      <h3>推荐实施阶段</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>目标</th>
+            <th>产出</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Phase 1</td>
+            <td>对齐 Allmeta API contract</td>
+            <td><code>linkName</code> 规则、幂等策略、endpoint 可用性确认。</td>
+          </tr>
+          <tr>
+            <td>Phase 2</td>
+            <td>实现 AO dry-run LinkPlanner</td>
+            <td>不写 Neo4j，只输出将创建哪些 links。</td>
+          </tr>
+          <tr>
+            <td>Phase 3</td>
+            <td>接入运行时写入</td>
+            <td>functions 写实例后自动创建 links，失败进入 pending。</td>
+          </tr>
+          <tr>
+            <td>Phase 4</td>
+            <td>历史数据回补</td>
+            <td>对已有实例批量补齐 links。</td>
+          </tr>
+          <tr>
+            <td>Phase 5</td>
+            <td>治理和监控</td>
+            <td>指标、报警、schema version drift 检测。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="success">
+        最终目标：AO functions 只产生实例事实；实例之间的图关系由 AllmetaOntology links schema 驱动生成。
+        这样图结构与 ontology 同步演进，避免 AO 代码里散落硬编码关系名。
+      </div>
+    </section>
+
+    <section id="appendix">
+      <h2>附录：当前 RAAS 常见 schema links 摘要</h2>
+      <p>以下是运行时最可能遇到的 object-fk links，可作为联调样例：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>From</th>
+            <th>Action</th>
+            <th>To</th>
+            <th>FK evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Candidate</td><td><code>targets</code></td><td>Resume</td><td><code>Resume.candidate_id</code></td></tr>
+          <tr><td>Candidate</td><td><code>records_for</code></td><td>Application</td><td><code>Application.candidate_id</code></td></tr>
+          <tr><td>Resume</td><td><code>submits_to</code></td><td>Job_Requisition</td><td><code>Resume.job_requisition_id</code></td></tr>
+          <tr><td>Resume</td><td><code>utilizes_snapshot</code></td><td>Application</td><td><code>Application.resume_id</code></td></tr>
+          <tr><td>Job_Requisition</td><td><code>accepts_submission_record</code></td><td>Application</td><td><code>Application.job_requisition_id</code></td></tr>
+          <tr><td>Job_Requisition</td><td><code>advertises_vacancies_for</code></td><td>Job_Posting</td><td><code>Job_Posting.job_requisition_id</code></td></tr>
+          <tr><td>Candidate_Match_Result</td><td><code>evaluates_fit</code></td><td>Candidate</td><td><code>Candidate_Match_Result.candidate_id</code></td></tr>
+          <tr><td>Candidate_Match_Result</td><td><code>evaluates_for</code></td><td>Job_Requisition</td><td><code>Candidate_Match_Result.job_position_id</code></td></tr>
+          <tr><td>Candidate_Match_Result</td><td><code>reports_to</code></td><td>Client</td><td><code>Candidate_Match_Result.client_id</code></td></tr>
+          <tr><td>Application</td><td><code>archives_interaction_log</code></td><td>Communication_Log</td><td><code>Communication_Log.application_id</code></td></tr>
+          <tr><td>Application</td><td><code>records_process_for</code></td><td>Interview_Record</td><td><code>Interview_Record.application_id</code></td></tr>
+          <tr><td>Employee</td><td><code>conducts</code></td><td>Interview_Record</td><td><code>Interview_Record.interviewer_employee_id</code></td></tr>
+          <tr><td>Interview_Model</td><td><code>standardizes_execution_of</code></td><td>Interview_Record</td><td><code>Interview_Record.interview_model_id</code></td></tr>
+          <tr><td>Employee</td><td><code>assigned_recruiter</code></td><td>Job_Posting</td><td><code>Job_Posting.recruiter_employee_id</code></td></tr>
+          <tr><td>Sourcing_Channel</td><td><code>utilizes</code></td><td>Job_Posting</td><td><code>Job_Posting.sourcing_channel_id</code></td></tr>
+        </tbody>
+      </table>
+      <p class="muted small">
+        文档版本：2026-07-02。依据当前 AO 代码结构与 AllmetaOntology RAAS-v1 links schema / instance-links API 行为整理。
+      </p>
+    </section>
+  </main>
+</body>
+</html>

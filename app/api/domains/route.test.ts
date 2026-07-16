@@ -83,7 +83,7 @@ describe("countAgentsInDomain", () => {
 describe("GET /api/domains", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Force the Allmeta fetch to fail → deterministic seed list (招聘-v1, 能源调度-v1),
+    // Force the Allmeta fetch to fail → deterministic seed list (RAAS-v1, 能源调度-v1),
     // independent of whether the Studio dev server is running.
     vi.spyOn(global, "fetch").mockRejectedValue(new Error("no studio"));
     av.findMany.mockResolvedValue([]); // no agent-bearing domains by default
@@ -95,9 +95,9 @@ describe("GET /api/domains", () => {
     const j = await res.json();
     expect(j.ok).toBe(true);
     const ids = j.domains.map((d: { id: string }) => d.id);
-    expect(ids).toContain("招聘-v1");
+    expect(ids).toContain("RAAS-v1");
     expect(ids).toContain("能源调度-v1");
-    expect(j.domains[0].id).toBe("招聘-v1"); // recruitment ordered first
+    expect(j.domains[0].id).toBe("RAAS-v1"); // recruitment ordered first
     // Never auto-writes / deletes the Domain table from GET (data isolation).
     expect(m.upsert).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();

@@ -46,13 +46,14 @@ describe('apiLogToLogEvent', () => {
     expect(row.message).toContain('→ -');
   });
 
-  it('truncates oversized payloads to 4000 chars and keeps message ≤2000', () => {
+  it('persists oversized request/response payloads losslessly and keeps message ≤2000', () => {
     const row = apiLogToLogEvent({
       ...base,
       url: 'x'.repeat(3000),
       response: { blob: 'y'.repeat(10_000) },
     });
-    expect(row.payloadJson!.length).toBeLessThanOrEqual(4000);
+    expect(row.payloadJson!.length).toBeGreaterThan(10_000);
+    expect(JSON.parse(row.payloadJson!).response.blob).toHaveLength(10_000);
     expect(row.message.length).toBeLessThanOrEqual(2000);
   });
 

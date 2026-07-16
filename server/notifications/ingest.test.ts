@@ -48,7 +48,12 @@ describe('recordNotification', () => {
     const arg = upsert.mock.calls[0][0];
     expect(arg.where).toEqual({ dedupeKey_status: { dedupeKey: 'llm_gateway_401', status: 'firing' } });
     expect(arg.create).toMatchObject({ kind: 'alert', severity: 'critical', status: 'firing', shouldNotify: true });
-    expect(arg.update).toMatchObject({ count: { increment: 1 } });
+    expect(arg.update).toMatchObject({
+      count: { increment: 1 },
+      runId: 'run2',
+      linkKind: 'run',
+      linkId: 'run2',
+    });
     expect(create).not.toHaveBeenCalled();
   });
 

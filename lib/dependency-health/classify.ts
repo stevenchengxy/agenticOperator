@@ -66,12 +66,16 @@ function isEmptyRobohirePayload(op: string, data: Record<string, unknown> | null
       // `title` is NOT a content signal: RoboHire fills the placeholder "Untitled"
       // even when generation fails (and on success too), so a truthy title masks a
       // completely empty JD. A usable JD must carry at least one real body field.
+      // The set below MUST match the fields create-jd's assembleJdContent renders,
+      // or the classifier flags a "thin but usable" 200 JD empty → false FAILED.
       return !(
         data.description ||
         data.qualifications ||
         data.hardRequirements ||
         data.niceToHave ||
-        data.evaluationRules
+        data.interviewRequirements ||
+        data.evaluationRules ||
+        data.benefits
       );
     case 'inviteCandidate':
       return !(data.login_url || data.qrcode_url || data.user_id != null || data.reused);

@@ -7,7 +7,7 @@
 // one OntologyRuleCheck row (+ per-rule evals) under domain 费控-v1 so the
 // /rule-check 总览 + 审计面板 show 费控 records alongside energy + recruitment.
 
-import { prisma } from "@/server/db";
+import { persistOntologyRuleCheckAudit } from "@/lib/rule-check/ontology-audit-writer";
 import { fetchDomainOntology, hasSnapshot, loadSnapshotOntology } from "@/lib/ontology-generator/ontology-source";
 import {
   selectRules,
@@ -73,7 +73,9 @@ export function runExpenseRuleCheck(all: EngineRule[], d: FeikongScenarioData): 
 
   const deductionTotal = Math.round(evals.reduce((a, e) => a + (e.deduction ?? 0), 0) * 100) / 100;
   const payableAfterDeduction = Math.round((d.totalAmount - deductionTotal) * 100) / 100;
-  const riskEval = evals.find((e) => e.result === "FAIL" && e.riskType);
+  // Soft/optional risk hits remain persisted as eval references, but only a
+  // hard rule can mark the claim VIOLATED or drive the blocking risk output.
+  const riskEval = evals.find((e) => e.hardSoft === "hard" && e.result === "FAIL" && e.riskType);
   const redlineFlag = hasRedlineHit(evals);
   const decision: "VALIDATED" | "VIOLATED" = riskEval ? "VIOLATED" : "VALIDATED";
 
@@ -93,12 +95,13 @@ export function runExpenseRuleCheck(all: EngineRule[], d: FeikongScenarioData): 
   };
 }
 
-// ── persistence (soft-fail; never blocks the chain) ─────────────────────────
+// ── persistence (mandatory; Inngest retries before downstream can advance) ──
 export type PersistArgs = {
   agentSlug: string;
   agentName: string;
   stage: string;
   caseId: string;
+  runId: string;
   dsNo?: string;
   decision: string;
   redlineFlag: boolean;
@@ -110,47 +113,41 @@ export type PersistArgs = {
   ruleSource: string;
 };
 
-export async function persistRuleCheck(a: PersistArgs): Promise<string | null> {
-  try {
-    const row = await prisma.ontologyRuleCheck.create({
-      data: {
-        domain: COST_CONTROL_DOMAIN_ID,
-        agentSlug: a.agentSlug,
-        agentName: a.agentName,
-        stage: a.stage,
-        caseId: a.caseId,
-        runId: a.caseId,
-        dsNo: a.dsNo ?? null,
-        decision: a.decision,
-        redlineFlag: a.redlineFlag,
-        rulesTotal: a.rulesTotal,
-        rulesSelected: a.selected.length,
-        rulesExpected: a.rulesExpected,
-        selectionOk: a.verification.ok,
-        selectionNote: JSON.stringify({ missing: a.verification.missing, extra: a.verification.extra, parseIssues: a.verification.parseIssues }),
-        rulesEvaluated: a.evals.length,
-        ruleSource: a.ruleSource,
-        evals: {
-          create: a.evals.map((e) => ({
-            ruleId: e.code || e.ruleId,
-            ruleName: e.name,
-            ruleGroup: e.group,
-            hardSoft: e.hardSoft,
-            result: e.result,
-            checkPoint: e.checkPoint ?? null,
-            beforeVal: e.beforeVal ?? null,
-            afterVal: e.afterVal ?? null,
-            defaultAction: e.defaultAction ?? null,
-            riskType: e.riskType ?? null,
-            riskLevel: e.riskLevel ?? null,
-            evidence: e.evidence ?? null,
-          })),
-        },
-      },
-      select: { id: true },
-    });
-    return row.id;
-  } catch {
-    return null; // store unavailable → chain still proceeds; logs remain
-  }
+export async function persistRuleCheck(a: PersistArgs): Promise<string> {
+  return persistOntologyRuleCheckAudit({
+    domain: COST_CONTROL_DOMAIN_ID,
+    agentSlug: a.agentSlug,
+    agentName: a.agentName,
+    stage: a.stage,
+    caseId: a.caseId,
+    runId: a.runId,
+    dsNo: a.dsNo ?? null,
+    decision: a.decision,
+    redlineFlag: a.redlineFlag,
+    rulesTotal: a.rulesTotal,
+    rulesSelected: a.selected.length,
+    rulesExpected: a.rulesExpected,
+    selectionOk: a.verification.ok,
+    selectionNote: JSON.stringify({
+      missing: a.verification.missing,
+      extra: a.verification.extra,
+      parseIssues: a.verification.parseIssues,
+    }),
+    rulesEvaluated: a.evals.length,
+    ruleSource: a.ruleSource,
+    evals: a.evals.map((e) => ({
+      ruleId: e.code || e.ruleId,
+      ruleName: e.name,
+      ruleGroup: e.group,
+      hardSoft: e.hardSoft,
+      result: e.result,
+      checkPoint: e.checkPoint ?? null,
+      beforeVal: e.beforeVal ?? null,
+      afterVal: e.afterVal ?? null,
+      defaultAction: e.defaultAction ?? null,
+      riskType: e.riskType ?? null,
+      riskLevel: e.riskLevel ?? null,
+      evidence: e.evidence ?? null,
+    })),
+  });
 }

@@ -14,7 +14,8 @@ export type RecruitmentSignal =
   | 'MATCH_PASSED_NEED_INTERVIEW'
   | 'MATCH_FAILED'
   | 'JD_GENERATED'
-  | 'INTERVIEW_INVITATION_SENT';
+  | 'INTERVIEW_INVITATION_SENT'
+  | 'INTERVIEW_INVITATION_FAILED';
 
 const COPY: Record<RecruitmentSignal, string> = {
   RESUME_PROCESSED: '简历解析完成',
@@ -24,6 +25,7 @@ const COPY: Record<RecruitmentSignal, string> = {
   MATCH_FAILED: '候选人匹配未通过',
   JD_GENERATED: '职位描述已生成',
   INTERVIEW_INVITATION_SENT: '面试邀约已发送',
+  INTERVIEW_INVITATION_FAILED: '面试邀约发送失败',
 };
 
 const AGENT_SHORT: Record<RecruitmentSignal, string> = {
@@ -34,6 +36,7 @@ const AGENT_SHORT: Record<RecruitmentSignal, string> = {
   MATCH_FAILED: 'Matcher',
   JD_GENERATED: 'JDGenerator',
   INTERVIEW_INVITATION_SENT: 'InterviewInviter',
+  INTERVIEW_INVITATION_FAILED: 'InterviewInviter',
 };
 
 interface Ctx {
@@ -68,7 +71,19 @@ export async function notifyRecruitmentLifecycle(
   ctx: Ctx,
 ): Promise<void> {
   const short = AGENT_SHORT[signal];
-  await step.run(`notify:${signal}`, async () => {
+  // RuleCheck can fan one resume out to multiple JRs in the same function run.
+  // Include stable business anchors in the step id so every JR gets its own
+  // notification while retries of the same JR remain idempotent.
+  const anchorKey = ['candidate_id', 'job_requisition_id', 'upload_id', 'application_id']
+    .flatMap((key) => {
+      const value = ctx.anchors[key];
+      return typeof value === 'string' && value.trim() ? [`${key}-${value.trim()}`] : [];
+    })
+    .join('-')
+    .replace(/[^A-Za-z0-9_-]/g, '-')
+    .slice(0, 140);
+  const stepId = anchorKey ? `notify:${signal}:${anchorKey}` : `notify:${signal}`;
+  await step.run(stepId, async () => {
     try {
       await recordNotification({
         level: 'info',

@@ -38,12 +38,11 @@ const EVAL_WINDOW_MS = 60 * 60_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── 保留策略(每小时跑一次,挂在 sweep tick 上)──────────────────────────
-// notification:已读消息 + 已解除/已确认告警过期清理(未读/firing 永不清);
-// monitor_eval:90d(2026-06-04 spec §9.2 承诺,一直没实现);
-// log_event:默认不清(审计全量保留是显式需求),要清设 LOG_EVENT_RETENTION_DAYS。
-const NOTIFICATION_RETENTION_DAYS = Number(process.env.NOTIFICATION_RETENTION_DAYS) || 30;
-const MONITOR_EVAL_RETENTION_DAYS = Number(process.env.MONITOR_EVAL_RETENTION_DAYS) || 90;
-const LOG_EVENT_RETENTION_DAYS = Number(process.env.LOG_EVENT_RETENTION_DAYS) || 0; // 0 = 永久保留
+// 监控、告警、评估和日志默认全部永久保留。只有运维显式把对应天数
+// 配置为 > 0 时才会清理，避免长期运行后页面历史悄悄出现断层。
+const NOTIFICATION_RETENTION_DAYS = Number(process.env.NOTIFICATION_RETENTION_DAYS) || 0;
+const MONITOR_EVAL_RETENTION_DAYS = Number(process.env.MONITOR_EVAL_RETENTION_DAYS) || 0;
+const LOG_EVENT_RETENTION_DAYS = Number(process.env.LOG_EVENT_RETENTION_DAYS) || 0;
 const PRUNE_EVERY_MS = 60 * 60_000;
 let lastPruneAt = 0;
 
@@ -52,23 +51,30 @@ async function pruneTick(now = Date.now()): Promise<void> {
   lastPruneAt = now;
   const cut = (days: number) => new Date(now - days * 86_400_000);
   try {
-    const ntf = cut(NOTIFICATION_RETENTION_DAYS);
-    const msgs = await prisma.notification.deleteMany({
-      where: { kind: "message", readAt: { not: null }, ts: { lt: ntf } },
-    });
-    const alerts = await prisma.notification.deleteMany({
-      where: { kind: "alert", status: { in: ["resolved", "ack"] }, lastSeenAt: { lt: ntf } },
-    });
-    const evals = await prisma.monitorEval.deleteMany({
-      where: { ts: { lt: cut(MONITOR_EVAL_RETENTION_DAYS) } },
-    });
+    let msgs = 0;
+    let alerts = 0;
+    let evals = 0;
     let logs = 0;
+    if (NOTIFICATION_RETENTION_DAYS > 0) {
+      const ntf = cut(NOTIFICATION_RETENTION_DAYS);
+      msgs = (await prisma.notification.deleteMany({
+        where: { kind: "message", readAt: { not: null }, ts: { lt: ntf } },
+      })).count;
+      alerts = (await prisma.notification.deleteMany({
+        where: { kind: "alert", status: { in: ["resolved", "ack"] }, lastSeenAt: { lt: ntf } },
+      })).count;
+    }
+    if (MONITOR_EVAL_RETENTION_DAYS > 0) {
+      evals = (await prisma.monitorEval.deleteMany({
+        where: { ts: { lt: cut(MONITOR_EVAL_RETENTION_DAYS) } },
+      })).count;
+    }
     if (LOG_EVENT_RETENTION_DAYS > 0) {
       logs = (await prisma.logEvent.deleteMany({ where: { ts: { lt: cut(LOG_EVENT_RETENTION_DAYS) } } })).count;
     }
-    if (msgs.count + alerts.count + evals.count + logs > 0) {
+    if (msgs + alerts + evals + logs > 0) {
       console.log(
-        `[monitor] prune — messages-${msgs.count} alerts-${alerts.count} evals-${evals.count} logs-${logs}`,
+        `[monitor] prune — messages-${msgs} alerts-${alerts} evals-${evals} logs-${logs}`,
       );
     }
   } catch (e) {

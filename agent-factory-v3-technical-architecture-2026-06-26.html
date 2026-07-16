@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>智能体工厂 v3 · 技术架构深度分析</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --surface:#ffffff; --surface2:#f5f3ef; --line:#e7e3db; --line2:#d9d4ca;
+    --ink:#201e1b; --ink2:#55514a; --ink3:#8c867c;
+    --accent:#5a51c8; --accent-bg:#efeefb; --accent-line:#cdc8f2;
+    --ok:#0f8f63; --ok-bg:#e6f5ee; --warn:#b1770c; --warn-bg:#fbf1da; --danger:#c0392b; --danger-bg:#fbeae8; --info:#2666a8; --info-bg:#e7f0fa;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.72;-webkit-font-smoothing:antialiased}
+  .wrap{display:grid;grid-template-columns:268px 1fr;max-width:1340px;margin:0 auto;gap:0}
+  /* TOC */
+  .toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:28px 18px 40px;border-right:1px solid var(--line);background:var(--surface2)}
+  .toc h1{font-size:15px;margin:0 0 3px;letter-spacing:-.01em}
+  .toc .sub{font-size:11.5px;color:var(--ink3);margin-bottom:18px}
+  .toc a{display:block;color:var(--ink2);text-decoration:none;font-size:12.8px;padding:5px 10px;border-radius:8px;line-height:1.4;border-left:2px solid transparent}
+  .toc a:hover{background:var(--surface);color:var(--ink)}
+  .toc a.h3{padding-left:22px;font-size:12px;color:var(--ink3)}
+  .toc .grp{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin:16px 10px 5px;font-weight:700}
+  /* content */
+  main{padding:46px 56px 120px;min-width:0;max-width:980px}
+  .kicker{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700}
+  h1.title{font-size:34px;line-height:1.18;margin:8px 0 10px;letter-spacing:-.02em}
+  .lede{font-size:16.5px;color:var(--ink2);line-height:1.75;margin:0 0 18px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 6px}
+  .pill{font-size:11.5px;border:1px solid var(--line2);background:var(--surface);border-radius:999px;padding:3px 11px;color:var(--ink2)}
+  .pill b{color:var(--ink);font-weight:600}
+  section{margin-top:46px;scroll-margin-top:18px}
+  h2{font-size:23px;letter-spacing:-.015em;margin:0 0 4px;padding-top:8px}
+  h2 .n{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px;font-weight:700}
+  h3{font-size:16.5px;margin:26px 0 6px;letter-spacing:-.01em}
+  h4{font-size:14px;margin:18px 0 4px;color:var(--ink);font-weight:600}
+  p{margin:9px 0}
+  .section-intro{color:var(--ink2);font-size:15px}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--surface2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:#4a3fb0;white-space:nowrap}
+  .ref{font-family:var(--mono);font-size:11.5px;color:var(--ink3);background:transparent;border:0;padding:0;white-space:normal}
+  .ref::before{content:"⟢ ";color:var(--accent)}
+  pre{margin:12px 0;background:#1f1d29;color:#e7e4f3;border-radius:12px;padding:15px 17px;overflow-x:auto;font-family:var(--mono);font-size:12.3px;line-height:1.62;border:1px solid #2c2940}
+  pre .c{color:#8b86a8}      /* comment */
+  pre .k{color:#c9a8ff}      /* keyword */
+  pre .s{color:#9fe7b8}      /* string */
+  pre .f{color:#8fd0ff}      /* fn/ident */
+  pre .n{color:#ffce8f}      /* number/const */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin:16px 0}
+  .call{border-radius:12px;padding:13px 16px;margin:14px 0;font-size:14px;line-height:1.65;border:1px solid var(--line);border-left-width:4px}
+  .call .lbl{font-weight:700;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:3px}
+  .call.key{background:var(--accent-bg);border-color:var(--accent-line);border-left-color:var(--accent)} .call.key .lbl{color:var(--accent)}
+  .call.note{background:var(--info-bg);border-left-color:var(--info)} .call.note .lbl{color:var(--info)}
+  .call.warn{background:var(--warn-bg);border-left-color:var(--warn)} .call.warn .lbl{color:var(--warn)}
+  .call.gotcha{background:var(--danger-bg);border-left-color:var(--danger)} .call.gotcha .lbl{color:var(--danger)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--surface2);font-weight:600;font-size:12px;color:var(--ink2);border-bottom:1px solid var(--line2)}
+  td code{font-size:11.5px;white-space:normal}
+  tr:last-child td{border-bottom:0}
+  .tag{display:inline-block;font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:5px;font-family:var(--sans)}
+  .tag.read{background:var(--info-bg);color:var(--info)} .tag.write{background:var(--warn-bg);color:var(--warn)} .tag.gen{background:var(--accent-bg);color:var(--accent)} .tag.verify{background:var(--ok-bg);color:var(--ok)} .tag.end{background:var(--surface2);color:var(--ink2)}
+  figure{margin:20px 0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{font-size:12px;color:var(--ink3);margin-top:10px;text-align:center}
+  .svgt{font-family:var(--sans);fill:var(--ink)} .svgt2{font-family:var(--sans);fill:var(--ink2)} .svgm{font-family:var(--mono);fill:var(--ink3)}
+  ul,ol{margin:8px 0;padding-left:22px} li{margin:4px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--ink3);font-size:12.5px}
+  @media(max-width:920px){.wrap{grid-template-columns:1fr}.toc{display:none}main{padding:30px 20px 80px}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc">
+  <h1>智能体工厂 v3</h1>
+  <div class="sub">技术架构深度分析 · 2026-06-26</div>
+  <div class="grp">总览</div>
+  <a href="#summary">执行摘要</a>
+  <a href="#overview">0 · 系统全景与两类智能体</a>
+  <div class="grp">大脑与编排</div>
+  <a href="#brain">1 · Harness 大脑（ReAct 引擎）</a>
+  <a href="#tools">2 · 工具空间（动作集）</a>
+  <a href="#harness-eng">3 · Harness Engineering 核心</a>
+  <div class="grp">正确性</div>
+  <a href="#compile">4 · 先编译后生成 · 校验栈</a>
+  <a href="#sandbox">5 · 沙箱与真实部署（Inngest）</a>
+  <a href="#testcase">6 · 测试用例验证闭环</a>
+  <div class="grp">基础设施</div>
+  <a href="#durability">7 · 持久化与耐久性</a>
+  <a href="#data">8 · 本体 · 工具接地 · SSRF</a>
+  <a href="#meta">9 · 多-Harness 元编排（蓝图）</a>
+  <div class="grp">参考</div>
+  <a href="#model">数据模型一览</a>
+  <a href="#limits">已知局限与设计决策</a>
+  <a href="#appendix">附录：文件地图 / env</a>
+</nav>
+
+<main>
+  <div class="kicker">Agentic Operator · Behavior 轴</div>
+  <h1 class="title">智能体工厂 v3 — 技术架构深度分析</h1>
+  <p class="lede">一个<strong>自主 ReAct 大脑</strong>把业务<strong>本体</strong>编译成事件图、逐个设计并亲手写出可运行的智能体、在隔离沙箱里真实部署到 Inngest 跑通事件链、并在验收门通过后才交付。本文逐层拆解它的工程内核：大脑的流式推理与接地、harness engineering（验证回路 / 约束解码 / 跨次学习 / 子大脑）、先编译后生成的确定性校验栈、真实部署桥、测试用例验证闭环，以及持久化与基础设施。</p>
+  <div class="meta">
+    <span class="pill">代码库 <b>/Desktop/agenticOperator</b></span>
+    <span class="pill">模型 <b>gemini-3-flash</b>（OpenAI 兼容网关）</span>
+    <span class="pill">运行时 <b>Inngest + Postgres + Neo4j(Allmeta)</b></span>
+    <span class="pill">前端 <b>Next.js 16 · React 19</b></span>
+  </div>
+
+  <!-- ───────────────────────────── SUMMARY ───────────────────────────── -->
+  <section id="summary">
+    <h2><span class="n">§</span>执行摘要</h2>
+    <div class="card">
+      <p style="margin-top:0">工厂不是一条固定流水线，而是一个像 Claude Code / Codex 那样<strong>自己思考、自己决定下一步</strong>的大脑（<code>conductor.ts</code>）。它的可靠性来自三件事的分工：</p>
+      <ul>
+        <li><strong>大脑提供智能</strong> — 读什么、造什么、什么时候验证、失败了怎么反应，全由 LLM 在 ReAct 循环里自主决定。</li>
+        <li><strong>工具提供可靠执行</strong> — ~20 个确定性工具（读本体 / 设计 / 写代码 / 校验 / 沙箱跑 / 诊断 / 反思…），每个都是纯粹、可测的能力。</li>
+        <li><strong>验收门提供真相</strong> — 静态闭合 + AI 亲写代码过 TS 编译 + <em>真实沙箱跑通</em>（带指纹防 stale）三道门全过才能 <code>finish</code>，杜绝"纸面成功"。</li>
+      </ul>
+      <p style="margin-bottom:0">围绕这个核心是一整套 harness engineering：源级约束解码防幻觉、模糊接地把 LLM 写错的工具名绑到真名、refine/revert/score 带回归检测的迭代、隔离子大脑、按效果排序的持久技能库、跨次学习的反思、自动上下文压缩、人在环路 mailbox、进程内后台运行。下面逐层展开。</p>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── OVERVIEW ───────────────────────────── -->
+  <section id="overview">
+    <h2><span class="n">0</span>系统全景与两类智能体</h2>
+    <p class="section-intro">工厂区分两个<strong>智能体平面（agent planes）</strong>，UI 上刻意不混在一起：</p>
+    <table>
+      <tr><th style="width:130px">平面</th><th>是什么</th><th>例子</th><th>在哪呈现</th></tr>
+      <tr><td><b>Harness 平面</b><br>（过程，非交付物）</td><td>造业务智能体的"智能"。自带思考、能调工具、能派子大脑。</td><td>主大脑、子大脑、Tool-Smith</td><td>右侧「大脑」tab（活动日志 + 活动图）</td></tr>
+      <tr><td><b>Product 平面</b><br>（交付物）</td><td>生成出来、真正跑业务流的 Inngest 函数。</td><td>简历匹配、规则校验等 agent</td><td>「智能体」tab + 「事件图」tab</td></tr>
+    </table>
+
+    <figure>
+      <svg viewBox="0 0 920 430" role="img" aria-label="系统全景图">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="#8c867c"/></marker>
+          <marker id="ara" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="#5a51c8"/></marker>
+        </defs>
+        <!-- cockpit -->
+        <rect x="14" y="16" width="892" height="78" rx="12" fill="#efeefb" stroke="#cdc8f2"/>
+        <text x="28" y="40" class="svgt" font-size="13" font-weight="700">三栏 Cockpit（前端 · FactoryV3Content.tsx）</text>
+        <rect x="28" y="50" width="180" height="32" rx="7" fill="#fff" stroke="#d9d4ca"/><text x="118" y="70" text-anchor="middle" class="svgt2" font-size="11.5">左：业务域 / 历史运行</text>
+        <rect x="220" y="50" width="300" height="32" rx="7" fill="#fff" stroke="#d9d4ca"/><text x="370" y="70" text-anchor="middle" class="svgt2" font-size="11.5">中：流式对话（推理→agent卡→沙箱→用例确认）</text>
+        <rect x="532" y="50" width="360" height="32" rx="7" fill="#fff" stroke="#d9d4ca"/><text x="712" y="70" text-anchor="middle" class="svgt2" font-size="11.5">右：智能体 · 事件图 · 大脑 · 轨迹 · 过程 · 验证</text>
+        <!-- SSE -->
+        <line x1="460" y1="94" x2="460" y2="128" stroke="#5a51c8" stroke-width="1.6" marker-end="url(#ara)"/>
+        <text x="470" y="116" class="svgm" font-size="10.5">SSE 订阅 ?runId= 重连</text>
+        <!-- run registry -->
+        <rect x="120" y="128" width="680" height="92" rx="12" fill="#fff" stroke="#cdc8f2"/>
+        <text x="138" y="150" class="svgt" font-size="12.5" font-weight="700">后台运行注册表（run-registry.ts）· 与请求解耦</text>
+        <rect x="138" y="160" width="640" height="48" rx="9" fill="#f5f3ef" stroke="#e7e3db"/>
+        <text x="158" y="180" class="svgt" font-size="12" font-weight="600">🧠 ReAct 大脑（conductor.ts）</text>
+        <text x="158" y="197" class="svgt2" font-size="11">streamTurn 流式 → 执行工具 → 观察 → 循环（MAX_TURNS=200，唯一闸）</text>
+        <!-- down to tools/runtime -->
+        <line x1="250" y1="220" x2="250" y2="256" stroke="#8c867c" stroke-width="1.4" marker-end="url(#ar)"/>
+        <line x1="670" y1="220" x2="670" y2="256" stroke="#8c867c" stroke-width="1.4" marker-end="url(#ar)"/>
+        <!-- ontology -->
+        <rect x="14" y="256" width="270" height="64" rx="11" fill="#e7f0fa" stroke="#bcd5ef"/>
+        <text x="28" y="278" class="svgt" font-size="12" font-weight="700">本体源（Allmeta→Neo4j）</text>
+        <text x="28" y="296" class="svgt2" font-size="11">fetchLiveOntologyStrict · 读不到就阻断</text>
+        <text x="28" y="311" class="svgm" font-size="10">objects / actions / events / rules</text>
+        <!-- tool registry -->
+        <rect x="300" y="256" width="270" height="64" rx="11" fill="#fff" stroke="#d9d4ca"/>
+        <text x="314" y="278" class="svgt" font-size="12" font-weight="700">工具库（registry）+ 模糊接地</text>
+        <text x="314" y="296" class="svgt2" font-size="11">resolveToolName / suggestToolsForAction</text>
+        <text x="314" y="311" class="svgm" font-size="10">招聘=手写库 · 其它=本体声明 dry-run</text>
+        <!-- inngest -->
+        <rect x="586" y="256" width="320" height="64" rx="11" fill="#e6f5ee" stroke="#bce0cd"/>
+        <text x="600" y="278" class="svgt" font-size="12" font-weight="700">沙箱真实部署（Inngest per-domain app）</text>
+        <text x="600" y="296" class="svgt2" font-size="11">shipAgents → fireAndObserve → 真 run/事件链</text>
+        <text x="600" y="311" class="svgm" font-size="10">agentic-operator-sandbox-&lt;domain&gt;（隔离·dry-run）</text>
+        <!-- postgres bottom -->
+        <line x1="460" y1="320" x2="460" y2="352" stroke="#8c867c" stroke-width="1.4" marker-end="url(#ar)"/>
+        <rect x="120" y="352" width="680" height="62" rx="11" fill="#f5f3ef" stroke="#e7e3db"/>
+        <text x="138" y="374" class="svgt" font-size="12" font-weight="700">Postgres 持久层</text>
+        <text x="138" y="392" class="svgt2" font-size="11">FactoryBrainRun（轨迹）· FailureReflection（跨次学习）· AgentVersion（部署）· factory_conversation（checkpoint）· factory_human_msg（HITL）</text>
+        <text x="138" y="407" class="svgm" font-size="10">+ Inngest 归档表（写穿中间件 + 30s 轮询 archiver，监控/验证可survive Inngest 故障）</text>
+      </svg>
+      <figcaption>图 0 · 从前端 cockpit 到后台大脑、本体/工具/部署运行时、再到 Postgres 耐久层的全景。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ───────────────────────────── BRAIN ───────────────────────────── -->
+  <section id="brain">
+    <h2><span class="n">1</span>Harness 大脑（ReAct 引擎）</h2>
+    <p class="section-intro">大脑是一个流式 ReAct 循环：一个 LLM 推理 → 调一个工具 → 观察结果 → 再推理，直到它自己调 <code>finish</code> 且通过验收门。<span class="ref">lib/agent-factory-v3/brain/conductor.ts · runBrain()</span></p>
+
+    <figure>
+      <svg viewBox="0 0 880 250" role="img" aria-label="ReAct 循环">
+        <defs><marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="#5a51c8"/></marker></defs>
+        <rect x="20" y="100" width="150" height="52" rx="10" fill="#efeefb" stroke="#cdc8f2"/><text x="95" y="123" text-anchor="middle" class="svgt" font-size="12" font-weight="700">streamTurn</text><text x="95" y="139" text-anchor="middle" class="svgt2" font-size="10.5">流式思考+工具调用</text>
+        <rect x="220" y="100" width="150" height="52" rx="10" fill="#fff" stroke="#d9d4ca"/><text x="295" y="123" text-anchor="middle" class="svgt" font-size="12" font-weight="700">执行工具</text><text x="295" y="139" text-anchor="middle" class="svgt2" font-size="10.5">tool.execute(args,ctx)</text>
+        <rect x="420" y="100" width="150" height="52" rx="10" fill="#fff" stroke="#d9d4ca"/><text x="495" y="123" text-anchor="middle" class="svgt" font-size="12" font-weight="700">观察 + 压缩</text><text x="495" y="139" text-anchor="middle" class="svgt2" font-size="10.5">drain buffer → messages</text>
+        <rect x="620" y="100" width="150" height="52" rx="10" fill="#e6f5ee" stroke="#bce0cd"/><text x="695" y="120" text-anchor="middle" class="svgt" font-size="12" font-weight="700">finish 验收门</text><text x="695" y="136" text-anchor="middle" class="svgt2" font-size="10.5">通过才结束</text>
+        <line x1="170" y1="126" x2="216" y2="126" stroke="#5a51c8" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <line x1="370" y1="126" x2="416" y2="126" stroke="#5a51c8" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <line x1="570" y1="126" x2="616" y2="126" stroke="#5a51c8" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <!-- loop back -->
+        <path d="M495 100 C 495 50, 95 50, 95 98" fill="none" stroke="#5a51c8" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+        <text x="295" y="44" text-anchor="middle" class="svgm" font-size="10.5">循环（观察驱动，不写死顺序）</text>
+        <!-- refuse -->
+        <path d="M695 152 C 695 200, 95 200, 95 154" fill="none" stroke="#b1770c" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+        <text x="395" y="216" text-anchor="middle" class="svgm" font-size="10.5" fill="#b1770c">验收门拒绝 → 回去修 + 重新验证（loop-until-green）</text>
+      </svg>
+      <figcaption>图 1 · 大脑的 ReAct 循环。验收门 <code>finish</code> 可以"拒绝"——把大脑赶回去修复，直到真跑通。</figcaption>
+    </figure>
+
+    <h3>1.1 流式网关 <code>streamTurn</code>：重试、退避、402 降级</h3>
+    <p>大脑通过 OpenAI 兼容网关流式调 LLM，并对上游不稳健做了硬化处理。<span class="ref">lib/agent-factory-v3/brain/stream-gateway.ts</span></p>
+    <ul>
+      <li><strong>流式拼装</strong>：异步生成器逐 token <code>yield {t:"think"}</code>；<code>tool_calls</code> 按 <code>index</code> 把 name/arguments 字符串<strong>逐块拼接</strong>，结束时 <code>yield {t:"tool_calls"|"done"}</code> + <code>{t:"usage"}</code> 计 token。</li>
+      <li><strong>重试 5 次 + 指数退避</strong>：检测 <code>5xx / overload / timeout / rate-limit / econn</code> 等瞬时特征 → 退避 <code>2s→4s→8s→16s</code>；4xx（自身 bug）不重试。</li>
+      <li><strong>402 余额降级</strong>：网关回"can only afford N"时，单次把 <code>max_tokens</code> 降到 <code>0.9×N</code> 立即重试（不占退避轮数）——这正是历史上"沙箱不部署"假象的真因被根治后保留的护栏。</li>
+      <li><strong>输出无上限</strong>：<code>max_tokens</code> 默认省略（用户拍板移除 token cap），逃生阀 <code>FACTORY_BRAIN_MAX_TOKENS</code>；温度 0.4。</li>
+    </ul>
+    <pre><span class="c">// 瞬时错误 → 指数退避；402 → 单次降额重试（stream-gateway.ts）</span>
+<span class="k">const</span> transient = (code &gt;= <span class="n">500</span> &amp;&amp; code &lt; <span class="n">600</span>) || /overload|50[234]|timeout|rate.?limit|econn/.<span class="f">test</span>(msg);
+<span class="k">if</span> (!transient || attempt === MAX_ATTEMPTS-<span class="n">1</span>) <span class="k">throw</span> e;
+<span class="k">await</span> <span class="f">sleep</span>(<span class="n">2000</span> * <span class="n">2</span> ** attempt);   <span class="c">// 2s,4s,8s,16s</span></pre>
+
+    <h3>1.2 意图路由：不对每条消息都跑生成</h3>
+    <p>System prompt 的第一条硬原则是<strong>先判意图</strong>：①信息性问题（有几个域 / 某域有哪些动作 / 某次运行发生了什么）→ 用 front-desk 工具查到答案后直接一段文字回答即结束；②闲聊/澄清 → 直接答；③明确要造/改/部署 → 才走 <code>read_ontology→create_plan→design_agent→…→finish</code> 完整流水线。这避免了"问个问题也重跑整条流水线"。<span class="ref">conductor.ts · systemPrompt()</span></p>
+
+    <h3>1.3 自动上下文压缩（无需 turn-cap 截断）</h3>
+    <p>循环的"记忆"是每轮重发的完整消息历史。在硬域上它会无限增长。工厂不靠粗暴的 turn-cap，而是<strong>当历史超过 ~120k 字符时压缩</strong>：保留 system+goal + 最近 6 个工具轮，把更早的中段折叠成一段摘要。<span class="ref">conductor.ts · maybeCompact()</span></p>
+    <table>
+      <tr><th>层</th><th>来源</th><th>保证</th></tr>
+      <tr><td>Tier-1 结构化锚点</td><td><code>buildStateSummary(ctx)</code> 从 ctx 确定性生成</td><td>忠实、免费、永远在；显式锚定"未解决问题"（校验未过的 agent、缺工具、未接地工具）</td></tr>
+      <tr><td>Tier-2 推理脉络</td><td><code>summarizeDropped()</code> 让 LLM 抽象摘要被丢轮次</td><td>尽力而为（网关挂就退化到只用 Tier-1），捕捉"为什么这么决策"的细节</td></tr>
+    </table>
+    <p>被折叠的细节仍可通过 <code>read_spec / inspect_run</code> 回取——只是被换出热上下文，不是真丢。工具结果本身也有 60k 字符上限（截断会显式标记，让大脑知道要重取而非脑补）。</p>
+
+    <div class="call note"><span class="lbl">设计决策</span>无 token 预算上限（用户拍板）。<code>MAX_TURNS=200</code> 是唯一的 runaway backstop；真正的上下文管理靠自动压缩，而不是把循环截短。成本只做<strong>软阈值</strong>提示（<code>FACTORY_COST_*_TOKENS</code>，2M/4M），永不拦截。</div>
+  </section>
+
+  <!-- ───────────────────────────── TOOLS ───────────────────────────── -->
+  <section id="tools">
+    <h2><span class="n">2</span>工具空间（大脑的动作集）</h2>
+    <p class="section-intro">大脑能调的全部能力。每个都是确定性、可测的纯能力；"清单不是流程"——用不用、什么顺序由大脑自己判断。<span class="ref">lib/agent-factory-v3/tools/index.ts · p2-p3.ts · front-desk.ts · tool-smith.ts</span></p>
+    <table>
+      <tr><th style="width:160px">工具</th><th>类别</th><th>作用</th></tr>
+      <tr><td><code>list_domains</code> / <code>describe_domain</code></td><td><span class="tag read">前台</span></td><td>回答信息性问题，不触发生成</td></tr>
+      <tr><td><code>read_ontology</code></td><td><span class="tag read">调研</span></td><td>读本体的动作/事件/规则 + 工具库 + 事件流摘要 + 每动作的相关规则 + 预匹配的 suggested_tools + 可复用技能</td></tr>
+      <tr><td><code>web_search</code></td><td><span class="tag read">调研</span></td><td>联网搜业务规则/最佳实践（DuckDuckGo + Wikipedia，keyless）</td></tr>
+      <tr><td><code>fetch_doc</code></td><td><span class="tag read">调研</span></td><td>抓外部平台开发者文档（经 SSRF 防护，内容当不可信数据）</td></tr>
+      <tr><td><code>create_plan</code></td><td><span class="tag gen">规划</span></td><td>把要造的 agent 写成显式 BuildPlan（自校验 vs 本体）</td></tr>
+      <tr><td><code>design_agent</code></td><td><span class="tag gen">造</span></td><td>首次创建一个 agent：LLM 亲写 system prompt + 选工具 + 分支决策 + I/O schema</td></tr>
+      <tr><td><code>codegen_agent</code></td><td><span class="tag gen">造</span></td><td>LLM 亲手把 agent 写成可运行 .ts（过 TS 编译 + import/事件接地校验）</td></tr>
+      <tr><td><code>refine_agent</code> / <code>revert_refine</code></td><td><span class="tag gen">改</span></td><td>带历史快照的迭代修订 + 自动评分回归检测 + 回滚</td></tr>
+      <tr><td><code>create_tool</code></td><td><span class="tag gen">造</span></td><td>Tool-Smith：把外部 API 写成声明式 HTTP 契约存进工具库待审</td></tr>
+      <tr><td><code>create_skill</code> / <code>use_skill</code></td><td><span class="tag gen">沉淀</span></td><td>织入 prompt 的可复用技能，持久化到技能库</td></tr>
+      <tr><td><code>spawn_subagent</code></td><td><span class="tag gen">派生</span></td><td>派一个隔离子大脑（独立 ctx、只读工具）做聚焦研究</td></tr>
+      <tr><td><code>validate_graph</code></td><td><span class="tag verify">验证</span></td><td>静态校验事件图闭合 + 字段合同 + 覆盖率，问题绑到 agent slug</td></tr>
+      <tr><td><code>verify_chain</code></td><td><span class="tag verify">验证</span></td><td>确定性可达性遍历，算出断点（哪个 agent 的 trigger 没人产出）</td></tr>
+      <tr><td><code>review_agent</code></td><td><span class="tag verify">验证</span></td><td>独立审查视角：确定性检查 + LLM 判规则是否真编进 prompt</td></tr>
+      <tr><td><code>score_spec</code> / <code>diff_spec</code> / <code>list_agents</code> / <code>read_spec</code></td><td><span class="tag verify">自省</span></td><td>打分（四维）/ 看改动 / 看已造 / 读完整规格</td></tr>
+      <tr><td><code>generate_test_cases</code></td><td><span class="tag verify">验证</span></td><td>沿事件图造全流程测试用例供用户确认（见 §6）</td></tr>
+      <tr><td><code>sandbox_run</code> / <code>inspect_run</code></td><td><span class="tag verify">验证</span></td><td>真实部署 Inngest 跑事件链 / 看每个 agent 真实运行细节</td></tr>
+      <tr><td><code>analyze_failure</code></td><td><span class="tag end">结束</span></td><td>把根因/经验写成结构化反思存库（跨次学习）</td></tr>
+      <tr><td><code>finish</code></td><td><span class="tag end">结束</span></td><td>过三道验收门才能真正结束 + 持久化交付</td></tr>
+    </table>
+  </section>
+
+  <!-- ───────────────────────────── HARNESS ENGINEERING ───────────────────────────── -->
+  <section id="harness-eng">
+    <h2><span class="n">3</span>Harness Engineering 核心</h2>
+    <p class="section-intro">这是工厂"造得对"的工程内核——一组围绕 LLM 不可靠性设计的机制，把一个会幻觉、会偷懒、会自称成功的模型，约束成一个能交付可运行系统的工程师。</p>
+
+    <h3>3.1 验证回路 / 三道验收门（verifier-in-the-loop）</h3>
+    <p><code>finish</code> 不是说结束就结束——它原子地检查三层证据，任一不过就返回 <code>ok:false</code>，把大脑赶回去修。<span class="ref">tools/index.ts · finish.execute()</span></p>
+    <figure>
+      <svg viewBox="0 0 860 150" role="img" aria-label="三道验收门">
+        <defs><marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="#8c867c"/></marker></defs>
+        <rect x="16" y="44" width="244" height="62" rx="11" fill="#e7f0fa" stroke="#bcd5ef"/>
+        <text x="138" y="68" text-anchor="middle" class="svgt" font-size="12.5" font-weight="700">① 静态闭合</text>
+        <text x="138" y="86" text-anchor="middle" class="svgt2" font-size="11">validateSpecs：覆盖每个 Agent 动作</text>
+        <text x="138" y="100" text-anchor="middle" class="svgt2" font-size="11">+ 事件图闭合 + 接地 + 非模板</text>
+        <rect x="300" y="44" width="244" height="62" rx="11" fill="#efeefb" stroke="#cdc8f2"/>
+        <text x="422" y="68" text-anchor="middle" class="svgt" font-size="12.5" font-weight="700">② AI 亲写代码</text>
+        <text x="422" y="86" text-anchor="middle" class="svgt2" font-size="11">每个 spec 必须 codeSource="ai"</text>
+        <text x="422" y="100" text-anchor="middle" class="svgt2" font-size="11">且过 TS 编译（无渲染兜底）</text>
+        <rect x="584" y="44" width="260" height="62" rx="11" fill="#e6f5ee" stroke="#bce0cd"/>
+        <text x="714" y="64" text-anchor="middle" class="svgt" font-size="12.5" font-weight="700">③ 真实沙箱跑通</text>
+        <text x="714" y="81" text-anchor="middle" class="svgt2" font-size="11">lastSandbox 指纹 == 当前 specs</text>
+        <text x="714" y="95" text-anchor="middle" class="svgt2" font-size="11">agentsRan==deployed · 无降级 · 全链路</text>
+        <line x1="260" y1="75" x2="296" y2="75" stroke="#8c867c" stroke-width="1.5" marker-end="url(#ar3)"/>
+        <line x1="544" y1="75" x2="580" y2="75" stroke="#8c867c" stroke-width="1.5" marker-end="url(#ar3)"/>
+        <text x="430" y="26" text-anchor="middle" class="svgt" font-size="12" font-weight="700">finish 验收门：三层 AND，全过才交付</text>
+        <text x="430" y="134" text-anchor="middle" class="svgm" font-size="10.5">任一不过 → ok:false → 大脑回去修 → 重新验证（loop-until-green）</text>
+      </svg>
+      <figcaption>图 3.1 · 三道验收门串联。第三道用<strong>指纹</strong>把沙箱证据绑死到当时跑的 specs。</figcaption>
+    </figure>
+    <div class="call key"><span class="lbl">关键：指纹防 stale-green</span><code>specsFingerprint()</code> 用 djb2 把每个 spec 的 <code>slug|trigger|emit|tools|codeSource|代码哈希</code> 折成一个等值串。任何 design/refine/revert/codegen 都会把 <code>ctx.lastSandbox=null</code>——所以"改完代码但拿改之前的绿沙箱来 finish"这条路被堵死：证据过期就必须重跑。</div>
+    <p>更微妙的是第三道门要求 <code>fullChainRan</code>（!partial &amp;&amp; 到达成功终态 &amp;&amp; 无 degraded），而不只是 <code>agentsRan===deployed</code>：因为沙箱的 coverage pass 会<em>直接</em>喂每个未跑 agent 的 trigger，一条<strong>断了的链</strong>也能凑到 agentsRan===deployed 却从未端到端连通。只有 <code>fullChainRan</code> 才是"链真的串通了"的信号。</p>
+
+    <h3>3.2 三层防幻觉（接地）</h3>
+    <p>LLM 最常见的失败是凭空造符号——写 <code>parseResumeFile</code> 而真名是 <code>robohire.parseResume</code>，或写本体里不存在的事件名。工厂用三层防护：</p>
+    <table>
+      <tr><th style="width:90px">层</th><th>机制</th><th>文件</th></tr>
+      <tr><td><b>P5 源级</b></td><td><b>约束解码</b>：每轮把 <code>design_agent/refine_agent</code> 的 <code>action</code> / <code>tools[]</code> 参数 schema 注入 <code>enum</code>（真实动作名 / 真实工具名）。网关支持 JSON-schema enum 时，编码阶段就生不出不存在的符号。</td><td>schema-grounding.ts</td></tr>
+      <tr><td><b>P1 桥接</b></td><td><b>模糊接地</b>：<code>resolveToolName</code> 四级（精确→规范化→子串→令牌超集），把 LLM 写错的名字绑到最接近的真名，并在结果里显式标"🔗 已对到真名"让大脑确认。</td><td>tools/registry.ts</td></tr>
+      <tr><td><b>P2 后验</b></td><td><b>拒绝</b>：<code>ungroundedEventTokens</code> 扫 prompt/代码里本体没声明的事件名 token，作为警告 surface；<code>validate_graph</code> 的 ungrounded-event 硬判。</td><td>tools/index.ts</td></tr>
+    </table>
+    <pre><span class="c">// 令牌超集模糊接地：LLM 的 "parseResumeFile" → "robohire.parseResume"（registry.ts）</span>
+<span class="k">const</span> queryTokens = <span class="k">new</span> <span class="f">Set</span>(<span class="f">toTokens</span>(raw));            <span class="c">// {parse,resume,file}</span>
+<span class="k">for</span> (<span class="k">const</span> name <span class="k">of</span> registry.<span class="f">names</span>()) {
+  <span class="k">const</span> content = <span class="f">catalogContentTokens</span>(name);       <span class="c">// 家族名后的有意义令牌 {parse,resume}</span>
+  <span class="k">if</span> (content.<span class="f">every</span>(t =&gt; queryTokens.<span class="f">has</span>(t))) <span class="c">// 工具名的每个令牌都被查询覆盖 → 命中</span>
+    bestName = name;
+}</pre>
+
+    <h3>3.3 迭代修订：预算、回归检测、回滚</h3>
+    <ul>
+      <li><code>refine_agent</code> 保留每次的 <strong>prior 快照 + critique</strong> 到 <code>ctx.attemptHistory</code>，不是盲覆盖。</li>
+      <li><strong>预算</strong>：单 agent <code>REFINE_BUDGET=3</code>，全域 <code>3×agent数</code>，沙箱 <code>MAX_SANDBOX_RUNS=8</code>——防 churn 到超时。</li>
+      <li><strong>自动评分回归</strong>：每次 refine 后用四维（工具解析率/prompt 富度/决策覆盖/refine 健康）打分对比上一版，<code>delta≤-10</code> 或单维跌 <code>≤-20</code> 判 regression，提示 <code>revert_refine</code> 回滚而非硬塞。</li>
+    </ul>
+
+    <h3>3.4 隔离子大脑（递归 ReAct）</h3>
+    <p><code>spawn_subagent</code> 递归调 <code>runBrain</code>，但 <code>isSubAgent=true</code>：独立 ctx、独立消息历史、只读工具集（<code>READONLY_TOOLS + web_search</code>，不能部署/改 agent），并<strong>转发父大脑的 abort signal</strong>（父被取消则级联取消）。用于"先深入调研某子问题再定阈值"而不污染主对话。<span class="ref">tools/p2-p3.ts · spawn_subagent</span></p>
+
+    <h3>3.5 持久技能库（按效果排序）</h3>
+    <p>技能 = 织入 agent prompt 的指导 + 推荐工具 + 决策规则，落盘到 <code>skills-library/&lt;slug&gt;/SKILL.md</code>（YAML frontmatter + body）。<code>read_ontology</code> 暴露可复用技能，<code>use_skill</code> 调入。<span class="ref">skills-library.ts</span></p>
+    <div class="call key"><span class="lbl">SkillsBench：按"证明有效"排序</span>每次运行结束按沙箱裁决给用过的技能 <code>recordSkillEvaluation</code>。<code>skillEffectiveness = (success+1)/(eval+2)</code>（Laplace 平滑，未评测=0.5 中性先验）。<code>loadSkills</code> 一级按有效性、二级按复用次数排序——大脑优先复用<strong>真跑通过</strong>的技能，而非单纯被复用多次的。</div>
+
+    <h3>3.6 跨次学习（反思）</h3>
+    <p>这是工厂真正的"长期记忆"。<code>finish</code>/<code>analyze_failure</code> 把 <code>{kind, summary, rootCause, lesson}</code> 写进 <code>FailureReflection</code> 表（按域）。<strong>下一次</strong>为同域生成时，<code>loadReflections</code> 把最近 8 条注入 system prompt 的"来自之前的反思"块——不靠模型记得，靠这次把教训留下来。路由层还有一道 fail-safe：流结束若没观察到任何 reflect 事件且生成了 agent，就按观察到的 <code>fullChainRan</code> 合成一条，确保下次不健忘。<span class="ref">conductor.ts · loadReflections() / finally fail-safe</span></p>
+
+    <h3>3.7 人在环路（HITL mailbox）</h3>
+    <p>SSE 是单向的（server→client）。回程是一个 Postgres 表 <code>factory_human_msg</code>：inject 路由 push、conductor 在<strong>每个 turn 边界</strong> <code>drainHumanMsgs</code> 取出作为权威 user turn 喂给大脑（是"引导"不是硬命令——大脑可自由分析/重规划）。长工具（sandbox 轮询）也会 <code>hasPendingHumanMsg</code> 中途探，提前 settle 让大脑下一轮就响应。指令也存进 ctx 以 survive 压缩。<span class="ref">brain/mailbox.ts · inject/route.ts</span></p>
+  </section>
+
+  <!-- ───────────────────────────── COMPILE ───────────────────────────── -->
+  <section id="compile">
+    <h2><span class="n">4</span>先编译后生成 · 确定性校验栈</h2>
+    <p class="section-intro">v3 相对 v2 的核心范式转变：<strong>生成任何代码前先把本体编译成事件图并静态验证闭合</strong>，且"代码能判断的事绝不委托给 LLM 判断"。五层独立校验：</p>
+    <table>
+      <tr><th style="width:150px">层</th><th>查什么</th><th>关键产物</th></tr>
+      <tr><td><code>graph.ts</code><br>图编译/校验</td><td><code>compileGraph</code> 把本体动作编译成事件 DAG（节点=动作，边=事件）；<code>verifyGraph</code> 查 4 类闭合：missing_producer / orphan_emit / unreachable_node（从入口 BFS）/ no_entry·no_terminal</td><td>DomainGraph + VerifyResult</td></tr>
+      <tr><td><code>validator.ts</code><br>规范校验</td><td>P1：悬空 emit / 无工具 agent / slug 冲突。P2（带本体）：<b>uncovered-agent-action</b>（每个 actor=Agent 动作都得有 spec——根治"静默漏掉 rule-check agent"）、ungrounded-event、fallback-prompt</td><td>structuredIssues + agentIssueMap</td></tr>
+      <tr><td><code>contract.ts</code><br>字段合同</td><td>组装 AI 写的 input/output schema，算每个事件的 <b>payload gap</b>：消费者要的字段 − 生产者产出的字段。这是事件名闭合<em>查不出</em>的运行时真 bug（读到 undefined）</td><td>payload_gap / untyped_event</td></tr>
+      <tr><td><code>review.ts</code><br>独立审查</td><td>确定性：多分支 agent 的 prompt 是否覆盖每个分支事件 / 工具是否接地 / 是否 degraded 占位。语义（LLM 判，仅 rule-check 闸口）：强制规则是否真编进 prompt（要求引用片段为证）</td><td>ReviewFinding[]</td></tr>
+      <tr><td><code>codegen.ts</code><br>代码校验</td><td><code>validateAgentCode</code> 用真实 TS 编译器 <code>ts.transpileModule</code> 取诊断；再查 import 白名单（只能 import 绑定工具的真实模块 + inngest/gateway/ontology-rules）+ 事件接地</td><td>{ok, errors[]}</td></tr>
+    </table>
+    <div class="call note"><span class="lbl">问题反向索引</span>所有校验问题都带 <code>agentIssueMap[slug]</code>——大脑不用文本匹配猜，直接知道对哪个 agent 调 <code>refine_agent</code>。这是把"校验"变成"可执行修复指引"的关键。</div>
+    <pre><span class="c">// 字段合同：payload gap = 消费者期望 − 生产者提供（contract.ts）</span>
+<span class="k">const</span> provided = <span class="k">new</span> <span class="f">Set</span>(producers.<span class="f">flatMap</span>(p =&gt; p.outputFields).<span class="f">map</span>(f =&gt; f.field));
+<span class="k">const</span> payloadGaps = expectedFields
+  .<span class="f">map</span>(f =&gt; f.field)
+  .<span class="f">filter</span>(f =&gt; !provided.<span class="f">has</span>(f));   <span class="c">// 上游没产出、下游却要 → 运行时崩</span></pre>
+  </section>
+
+  <!-- ───────────────────────────── SANDBOX ───────────────────────────── -->
+  <section id="sandbox">
+    <h2><span class="n">5</span>沙箱与真实部署（Inngest 桥）</h2>
+    <p class="section-intro">沙箱不是模拟——它<strong>真的</strong>把生成的 agent 部署成 Inngest 函数、真的发事件、真的产生可查询的 run 行。<span class="ref">lib/agent-factory-v2/deploy.ts · server/inngest/domain-app.ts</span></p>
+
+    <h3>5.1 上架 <code>shipAgents</code></h3>
+    <ol>
+      <li><code>persistSpecs</code> 把 specs 落成 <code>AgentVersion</code> 草稿行（按 versionLabel 幂等）；</li>
+      <li>降级该域旧 active 行，把本版翻成 <code>active</code>；</li>
+      <li><code>registerDomainApp</code>：upsert <code>DomainInngestApp</code> + <strong>PUT callbackUrl 触发 SDK 自注册</strong>，让 Inngest introspect；<code>resyncDomainApp</code> 重同步；</li>
+      <li><strong>验证真注册</strong>：轮询 <code>getDomainApp().sync.functionCount</code> 最多 8×1.2s，<code>functionsRegistered===0</code> 报"部署未生效"（区别于"跑了但没到终态"）。</li>
+    </ol>
+    <div class="call key"><span class="lbl">隔离</span>沙箱部署到<strong>专用 app</strong> <code>agentic-operator-sandbox-&lt;domain&gt;</code>，与真实域的 app 隔离；事件用 <code>${domain}/${event}</code> 命名空间前缀，所以 <code>sandbox-raas</code> 永不污染 <code>raas</code> 的运行。会话结束 conductor <code>teardownSandbox</code> 删行 + 重同步（沙箱 app 函数数归零、消失）。</div>
+
+    <h3>5.2 触发 + 观察 <code>fireAndObserve</code></h3>
+    <ul>
+      <li>算<strong>入口事件</strong>（被消费但无人产出）→ 发事件（用用户确认的测试用例 payload，或 schema 化的种子）。</li>
+      <li><strong>静默期 settle</strong>：轮询 Postgres 归档表（写穿无滞后），直到 run+事件计数稳定 ≥3 个周期、无 Running、且到达终态。</li>
+      <li><strong>Coverage pass</strong>：happy path 只走一条分支——再直接喂每个未跑 agent 的 trigger（最多 3 轮），让每个部署的 agent 至少跑一次，验收门才可满足。</li>
+      <li><strong>降级检测</strong>：从 run output 的 <code>degraded</code> 标记识别"网关挂了走兜底"的假前进——这种链不算跑通。</li>
+    </ul>
+
+    <h3>5.3 生成的 agent 怎么真跑 <code>executeGeneratedAgent</code></h3>
+    <p>每个生成的 agent 函数被触发时不是 sleep+emit 桩——它<strong>真的</strong>用自己的 prompt + 案例数据调 LLM、用绑定工具（真 function-calling，最多 6 轮）、并<strong>调 <code>decide</code> 工具从候选事件里选恰好一个发出</strong>。所以每次 run 都对真实案例推理、选分支。<span class="ref">server/inngest/factory/agent-executor.ts</span></p>
+    <div class="call warn"><span class="lbl">写操作 fail-closed</span>写/双写工具只在 <code>LIVE_WRITE_DOMAINS</code> 白名单的域真做副作用；否则降级 dry-run。沙箱域（<code>isSandboxDomain</code>）+ 测试域恒 dry-run——一个没盘点过的域不会静默发真邀约/写库。</div>
+  </section>
+
+  <!-- ───────────────────────────── TESTCASE ───────────────────────────── -->
+  <section id="testcase">
+    <h2><span class="n">6</span>测试用例验证闭环（带人工确认）</h2>
+    <p class="section-intro">到沙箱阶段，AI 自动派一个"测试用例子大脑"沿事件图造全流程用例，在聊天里展示给用户确认后才真喂进沙箱；跑完展示每个 agent 真实的输入→输出，证明跑通。</p>
+    <figure>
+      <svg viewBox="0 0 880 168" role="img" aria-label="测试用例闭环">
+        <defs><marker id="ar4" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="#8c867c"/></marker></defs>
+        <rect x="12" y="56" width="150" height="56" rx="10" fill="#efeefb" stroke="#cdc8f2"/><text x="87" y="79" text-anchor="middle" class="svgt" font-size="11.5" font-weight="700">generate_test_cases</text><text x="87" y="96" text-anchor="middle" class="svgt2" font-size="10">LLM 造 pass/reject/edge</text>
+        <rect x="196" y="56" width="150" height="56" rx="10" fill="#fbf1da" stroke="#ecd9a8"/><text x="271" y="73" text-anchor="middle" class="svgt" font-size="11.5" font-weight="700">park 等确认</text><text x="271" y="89" text-anchor="middle" class="svgt2" font-size="10">conductor 轮询 mailbox</text><text x="271" y="103" text-anchor="middle" class="svgt2" font-size="10">不烧 LLM·不耗 turn</text>
+        <rect x="380" y="36" width="150" height="40" rx="10" fill="#e6f5ee" stroke="#bce0cd"/><text x="455" y="61" text-anchor="middle" class="svgt" font-size="11.5" font-weight="700">执行 → sandbox_run</text>
+        <rect x="380" y="92" width="150" height="40" rx="10" fill="#fff" stroke="#d9d4ca"/><text x="455" y="117" text-anchor="middle" class="svgt2" font-size="11">重新生成 ↺</text>
+        <rect x="564" y="56" width="150" height="56" rx="10" fill="#e6f5ee" stroke="#bce0cd"/><text x="639" y="79" text-anchor="middle" class="svgt" font-size="11.5" font-weight="700">fireAndObserve(cases)</text><text x="639" y="96" text-anchor="middle" class="svgt2" font-size="10">真实事件链</text>
+        <rect x="748" y="56" width="120" height="56" rx="10" fill="#e7f0fa" stroke="#bcd5ef"/><text x="808" y="79" text-anchor="middle" class="svgt" font-size="11.5" font-weight="700">collectAgentRuns</text><text x="808" y="96" text-anchor="middle" class="svgt2" font-size="10">逐 agent I/O</text>
+        <line x1="162" y1="84" x2="192" y2="84" stroke="#8c867c" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <line x1="346" y1="78" x2="376" y2="60" stroke="#0f8f63" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <line x1="346" y1="92" x2="376" y2="108" stroke="#b1770c" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <path d="M455 92 C 455 30, 271 30, 271 54" fill="none" stroke="#b1770c" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ar4)"/>
+        <line x1="530" y1="60" x2="562" y2="74" stroke="#8c867c" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <line x1="714" y1="84" x2="746" y2="84" stroke="#8c867c" stroke-width="1.4" marker-end="url(#ar4)"/>
+      </svg>
+      <figcaption>图 6 · 用例生成 → 人工确认门 → 真实执行 → 逐 agent I/O 采集。</figcaption>
+    </figure>
+    <ul>
+      <li><strong>自动触发</strong>：<code>sandbox_run</code> 首次调用若还没用例，自动 <code>proposeTestCases</code>——不靠 LLM 记得调这个新工具。</li>
+      <li><strong>park 门</strong>：conductor 主循环顶部检测 <code>ctx.awaitingApproval</code> → 轮询 mailbox 等 <code>[测试用例决策:执行/重新生成]</code>，<code>turn--; continue</code> 不耗 turn、不烧 LLM；20 分钟超时自动按"执行"（防遗忘挂死）。因为跑在后台，park 能 survive 页面跳转。</li>
+      <li><strong>I/O 采集</strong>：settle 后 <code>collectAgentRuns</code> 从 <code>inngestRunArchive</code>（<code>eventPayload</code>=输入、<code>output</code>=输出/emitted）+ <code>agentActivity</code>（决策/工具/reasoning）+ 发出事件的 payload，拼出每个 agent 的 <code>输入事件+payload → 工具 → 输出事件+payload</code>，塞进 <code>sandbox</code> 事件给验证面板。<span class="ref">tools/agent-io.ts · collectAgentRuns()</span></li>
+    </ul>
+  </section>
+
+  <!-- ───────────────────────────── DURABILITY ───────────────────────────── -->
+  <section id="durability">
+    <h2><span class="n">7</span>持久化与耐久性</h2>
+
+    <h3>7.1 进程内后台运行（大脑与请求解耦）</h3>
+    <p>历史上大脑跑在 SSE 请求体内——一断连就 abort 停掉。现在 <code>run-registry.ts</code> 把驱动<strong>从请求解耦</strong>：一个脱离请求的 driver 跑 <code>runBrain</code>，每个事件推进缓冲 + 通知订阅者 + 节流（3s）落 transcript。<span class="ref">brain/run-registry.ts</span></p>
+    <table>
+      <tr><th>动作</th><th>行为</th></tr>
+      <tr><td>离开页面（组件卸载）</td><td>关 EventSource = <b>只取消订阅</b>，后台 run 继续跑</td></tr>
+      <tr><td>返回页面 / 切回域</td><td>localStorage 记 <code>ACTIVE_KEY</code> → <code>?runId=</code> attach → 回放缓冲 + 接实时</td></tr>
+      <tr><td>SSE 瞬断</td><td>onerror 自动 reattach（1.5s 后），不会误起新 run</td></tr>
+      <tr><td>停止任务（按钮）</td><td><code>POST /stop</code> → <code>abortRun</code> → conductor 下轮 break → 收尾 aborted（已生成的保留）</td></tr>
+      <tr><td>run 已结束/被evict</td><td>attach 读 <code>FactoryBrainRun.transcript</code> 回放 + done</td></tr>
+    </table>
+    <div class="call warn"><span class="lbl">已知局限（已接受）</span>进程内 → dev 服务器重启/HMR 会中断在跑的 run。重连检测到 <code>FactoryBrainRun.status=running</code> 但 registry 没有 → 提示"已中断，点继续"走 <code>convId</code> rehydrate。要抗重启需把 ReAct 主循环迁 Inngest 持久执行（单独立项）。</div>
+
+    <h3>7.2 会话 checkpoint + 运行存档</h3>
+    <ul>
+      <li><b>factory_conversation</b>（裸 SQL 动态表）：内存 LRU Map（40）+ Postgres 镜像。序列化时删 emit/registry/signal（函数），rehydrate 时从 domain+ontology 重建 registry——这让 HMR/重启后"继续"能真续聊而非重来。</li>
+      <li><b>FactoryBrainRun</b>：整段 <code>transcript</code>(JSON BrainEvent[]) + status/tokens/turns/agentsCount——驱动历史运行列表 + 刷新恢复 + 重开。</li>
+    </ul>
+
+    <h3>7.3 Inngest 归档（监控/验证 survive Inngest 故障）</h3>
+    <p>Inngest dev server 是 run/事件/trace 的实时真相，但易失。两路镜像进 Postgres：</p>
+    <table>
+      <tr><th>路径</th><th>机制</th></tr>
+      <tr><td><b>写穿中间件</b></td><td>在 <code>inngest.send</code> / run start / run finish 时<strong>立即</strong>写归档表（无滞后、无损）</td></tr>
+      <tr><td><b>轮询 archiver</b></td><td>独立长驻进程每 30s reconcile（listEvents + listRecentRuns + 终态时拉 step trace），最终一致</td></tr>
+      <tr><td><b>读取弹性</b></td><td><code>inngest-source.ts</code>：auto 模式 LIST 读 live∪archive（live 赢冲突）、单 run 读 archive-first + live fallback；<code>MONITOR_READ_SOURCE=postgres</code> 严格只读归档</td></tr>
+    </table>
+    <p>这也是 §6 逐 agent I/O 能被采集的底座——<code>collectAgentRuns</code> 查的就是这些归档表。</p>
+  </section>
+
+  <!-- ───────────────────────────── DATA ───────────────────────────── -->
+  <section id="data">
+    <h2><span class="n">8</span>本体 · 工具接地 · SSRF</h2>
+
+    <h3>8.1 本体源：live vs snapshot（按用途分裂）</h3>
+    <p>本体来自 Allmeta→Neo4j（live）或 in-repo snapshot。三个入口按用途选不同策略：<span class="ref">lib/ontology-generator/ontology-source.ts</span></p>
+    <table>
+      <tr><th style="width:210px">函数</th><th>策略</th><th>失败行为</th></tr>
+      <tr><td><code>fetchLiveOntologyStrict</code><br>（v3 大脑 read_ontology）</td><td><b>仅 live</b>，绝不回退 snapshot</td><td><b>抛异常阻断生成</b>——绝不在 stale 本地数据上偷偷造</td></tr>
+      <tr><td><code>fetchRunnableOntology</code><br>（部署/规则执行）</td><td>snapshot 优先（runnable pack 可靠）</td><td>回退 fetchDomainOntology</td></tr>
+      <tr><td><code>fetchDomainOntology</code><br>（总览/UI）</td><td>live 优先，自动回退 snapshot</td><td>空壳（空数组）</td></tr>
+    </table>
+    <p><code>OntologyAction</code> 携带 <code>trigger</code>(消费事件) / <code>triggered_event</code>(发出事件) / <code>tool_use</code> / <code>target_objects</code> / <code>inputs·outputs</code>(业务字段) / <code>system_prompt·description</code> / <code>actor</code>(["Agent"]|["Human"])——这是生成的全部信号源。Allmeta 的嵌套字段以 <code>*_json</code> 字符串存（Neo4j 存不了嵌套），读时解析。</p>
+
+    <h3>8.2 工具注册与按域解析</h3>
+    <ul>
+      <li><code>resolveRegistry(domain)</code>：招聘域 → 手写工具库；其它域 → 按本体 <code>tool_use</code> 建<strong>声明式 dry-run mock</strong> 库。</li>
+      <li><code>ToolDescriptor.impl{module,export}</code> 是代码生成的关键——AI 写的 .ts 靠它 import 真实模块。</li>
+      <li><code>suggestToolsForAction</code> 按 action 名 + target_objects 的令牌重叠给工具打分（名中命中 +3、对象命中 +2、描述命中 +1）取 top-N，作为 design 的接地候选。</li>
+    </ul>
+
+    <h3>8.3 SSRF 出站防护</h3>
+    <p>AI 能造 HTTP 工具、能 <code>fetch_doc</code> 抓文档——裸 fetch 能打本机 Postgres(5433) / 云元数据(169.254.169.254)。<code>egress-guard.ts</code> 做 fail-closed 防护：<span class="ref">lib/tools/egress-guard.ts</span></p>
+    <ul>
+      <li><code>isPrivateHost</code>：黑名单 loopback / RFC1918(10/172.16-31/192.168) / link-local+元数据(169.254) / CGNAT(100.64) / IPv6(::1,fe80,fc/fd) / 十进制·十六进制编码绕过。</li>
+      <li><code>assertPublicUrl</code>：只允许 http(s)；<code>EGRESS_ALLOW_HOSTS</code> 白名单例外。</li>
+      <li><code>safeFetch</code>：手动跟随重定向，<strong>逐跳 re-check</strong>（公网→302→localhost 被拦），最多 3 跳。</li>
+    </ul>
+  </section>
+
+  <!-- ───────────────────────────── META ───────────────────────────── -->
+  <section id="meta">
+    <h2><span class="n">9</span>多-Harness 元编排（蓝图）</h2>
+    <p class="section-intro">愿景：顶层元编排调度"生成 / 选择 / 执行 / 验收"多套 harness——统一节点 = 绑本体事件签名的 Inngest 函数（手写/生成无差别）。<span class="ref">lib/agent-harness/{registry,selection,orchestrator}.ts</span></p>
+    <table>
+      <tr><th style="width:130px">模块</th><th>作用</th></tr>
+      <tr><td><code>registry</code></td><td>合并预写 agent（AGENT_MAP）+ 生成 agent（AgentVersion.specJson 的事件签名），统一成 RegistryAgent</td></tr>
+      <tr><td><code>selection</code></td><td><code>scoreAgent</code> 按事件签名匹配打分（trigger 覆盖 0.55 + emit 覆盖 0.25 + 域 0.10 + 语义 0.10 + 已验证 0.05），≥0.5 且签名 exact/trigger → <b>reuse</b>，否则 <b>generate</b></td></tr>
+      <tr><td><code>orchestrator</code></td><td>逐槽 build-vs-reuse 计划 + <code>validateChain</code> 链路 gap 检测 + composeExecution</td></tr>
+    </table>
+    <div class="call note"><span class="lbl">现状</span>这套是<strong>纯函数蓝图</strong>，已有 <code>/api/harness</code> 端点 + 测试，但<strong>尚未接进 v3 大脑</strong>——当前 <code>design_agent</code> 完全由 LLM 设计，不自动查 registry 建议复用。是明确的可扩展接入点（design 前可选调 <code>selectAgent</code> 建议复用既有 agent）。</div>
+  </section>
+
+  <!-- ───────────────────────────── DATA MODEL ───────────────────────────── -->
+  <section id="model">
+    <h2><span class="n">§</span>数据模型一览</h2>
+    <table>
+      <tr><th style="width:200px">表 / 来源</th><th>作用</th></tr>
+      <tr><td><code>FactoryBrainRun</code></td><td>每次大脑运行：domain/goal/status/tokens/turns/agentsCount/reachedTerminal + 全量 transcript(JSON)</td></tr>
+      <tr><td><code>FailureReflection</code></td><td>跨次学习：kind/summary/rootCause/lesson，按 domain 加载注入 prompt</td></tr>
+      <tr><td><code>AgentVersion</code></td><td>部署单元：short/slug/versionLabel/status/domain + <code>specJson</code>(事件签名) + <code>codeBlob</code>；多 harness registry 读它</td></tr>
+      <tr><td><code>DomainInngestApp</code></td><td>per-domain Inngest app 生命周期：appId/status(online·offline)/callbackUrl</td></tr>
+      <tr><td><code>AgentActivity</code></td><td>运行时 agent 决策日志（type=agent_decision：chosen/tools/degraded + narrative）</td></tr>
+      <tr><td><code>InngestEvent / Run / StepArchive</code></td><td>Inngest 镜像：<code>eventPayload</code>(输入) / <code>output</code>(输出) / step input·output·error——逐 agent I/O 的数据源</td></tr>
+      <tr><td><code>factory_conversation</code><br>(裸 SQL)</td><td>会话 checkpoint：messages_json + ctx_json（survive 重启续聊）</td></tr>
+      <tr><td><code>factory_human_msg</code><br>(裸 SQL)</td><td>HITL mailbox：run_id/text/consumed</td></tr>
+    </table>
+  </section>
+
+  <!-- ───────────────────────────── LIMITS ───────────────────────────── -->
+  <section id="limits">
+    <h2><span class="n">§</span>已知局限与设计决策</h2>
+    <div class="grid2">
+      <div class="call gotcha"><span class="lbl">局限</span>进程内后台运行：dev 重启/HMR 会中断在跑的 run（提示"已中断点继续"）。抗重启需迁 Inngest 持久执行。</div>
+      <div class="call gotcha"><span class="lbl">局限</span>多-Harness 元编排（reuse-vs-generate）尚未接进大脑——design 不自动建议复用既有 agent。</div>
+      <div class="call key"><span class="lbl">决策</span>无 token 上限（用户拍板）。MAX_TURNS=200 唯一闸，靠自动压缩管上下文，成本只软提示。</div>
+      <div class="call key"><span class="lbl">决策</span>无渲染兜底——每个 agent 的 .ts 必须 LLM 亲写并过 TS 编译。<code>specToAgentCode</code> 仅留作 dev/测试工具。</div>
+      <div class="call key"><span class="lbl">决策</span>规则绝不烤进 prompt——rule-check 闸口运行时 <code>ontology.fetchActionRules</code> 动态抓（规则随客户/时间变）。</div>
+      <div class="call key"><span class="lbl">决策</span>本体读取 fail-closed（strict 不回退 snapshot）；写工具 fail-closed（非白名单域 dry-run）；SSRF fail-closed（黑名单 + 逐跳）。</div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── APPENDIX ───────────────────────────── -->
+  <section id="appendix">
+    <h2><span class="n">§</span>附录：文件地图 / 环境变量</h2>
+    <h3>关键文件</h3>
+    <table>
+      <tr><th style="width:340px">文件</th><th>职责</th></tr>
+      <tr><td><code>lib/agent-factory-v3/brain/conductor.ts</code></td><td>ReAct 主循环、意图路由、压缩、验收 loop、park 门</td></tr>
+      <tr><td><code>lib/agent-factory-v3/brain/stream-gateway.ts</code></td><td>流式 LLM 网关、重试退避、402 降级</td></tr>
+      <tr><td><code>lib/agent-factory-v3/brain/run-registry.ts</code></td><td>进程内后台运行、订阅/回放、停止</td></tr>
+      <tr><td><code>lib/agent-factory-v3/brain/conversation-store.ts</code> / <code>mailbox.ts</code></td><td>会话 checkpoint / HITL mailbox</td></tr>
+      <tr><td><code>lib/agent-factory-v3/tools/index.ts</code></td><td>核心工具空间 + buildSpecFromAction + finish 验收门</td></tr>
+      <tr><td><code>lib/agent-factory-v3/tools/{test-cases,agent-io}.ts</code></td><td>测试用例生成 / 逐 agent I/O 采集</td></tr>
+      <tr><td><code>lib/agent-factory-v3/{graph,contract,review,codegen,schema-grounding,skills-library}.ts</code></td><td>编译/校验/审查/代码/约束/技能</td></tr>
+      <tr><td><code>lib/agent-factory-v2/deploy.ts</code></td><td>shipAgents / fireAndObserve / teardownSandbox</td></tr>
+      <tr><td><code>server/inngest/domain-app.ts</code></td><td>per-domain Inngest app + 生成 agent 函数</td></tr>
+      <tr><td><code>server/inngest/factory/agent-executor.ts</code></td><td>生成 agent 的真实执行（LLM+工具+decide）</td></tr>
+      <tr><td><code>lib/ontology-generator/ontology-source.ts</code> · <code>lib/tools/{registry,resolve-registry,egress-guard}.ts</code></td><td>本体源 / 工具接地 / SSRF</td></tr>
+      <tr><td><code>components/behavior/factory-v3/FactoryV3Content.tsx</code></td><td>三栏 cockpit 前端</td></tr>
+    </table>
+    <h3>环境变量</h3>
+    <table>
+      <tr><th style="width:280px">变量</th><th>默认</th><th>语义</th></tr>
+      <tr><td><code>AI_BASE_URL</code> / <code>AI_API_KEY</code> / <code>AI_MODEL</code></td><td>— / — / gemini-3-flash-preview</td><td>OpenAI 兼容网关</td></tr>
+      <tr><td><code>FACTORY_AI_MODEL</code></td><td>gemini-3-flash-preview</td><td>工厂大脑专用模型</td></tr>
+      <tr><td><code>FACTORY_BRAIN_MAX_TOKENS</code></td><td>∞（省略）</td><td>大脑单轮输出上限逃生阀</td></tr>
+      <tr><td><code>FACTORY_TEST_APPROVAL_TIMEOUT_MS</code></td><td>20 分钟</td><td>用例确认 park 超时（到点自动执行）</td></tr>
+      <tr><td><code>FACTORY_COST_ELEVATED_TOKENS</code> / <code>_HIGH_TOKENS</code></td><td>2M / 4M</td><td>成本软阈值（只提示）</td></tr>
+      <tr><td><code>LIVE_WRITE_DOMAINS</code></td><td>空</td><td>允许真实写操作的域白名单</td></tr>
+      <tr><td><code>EGRESS_ALLOW_HOSTS</code></td><td>空</td><td>SSRF 白名单例外</td></tr>
+      <tr><td><code>MONITOR_READ_SOURCE</code></td><td>auto</td><td>监控读取：auto / postgres / live</td></tr>
+    </table>
+  </section>
+
+  <div class="foot">
+    智能体工厂 v3 · 技术架构深度分析 · 生成于 2026-06-26 ·
+    本报告基于对 <code>/Users/yuhancheng/Desktop/agenticOperator</code> 代码库的逐文件审读（含 file:line 取证），描述的是当前 v3 架构（非 /agentic operator_new 迁移仓库）。
+  </div>
+</main>
+</div>
+</body>
+</html>

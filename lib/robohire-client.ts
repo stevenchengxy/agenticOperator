@@ -132,6 +132,15 @@ export class RobohireApiError extends Error {
   get isClientError(): boolean {
     return this.httpStatus >= 400 && this.httpStatus < 500 && this.httpStatus !== 429;
   }
+  /**
+   * 400/422 — our own request is malformed (prompt too long / invalid input).
+   * This is an AO-side bug, NOT a vendor health problem, so the caller should fail
+   * the run WITHOUT recording a RoboHire dependency-degraded signal. 401/403 are
+   * auth (real vendor/credential issue) and deliberately excluded.
+   */
+  get isBadRequest(): boolean {
+    return this.httpStatus === 400 || this.httpStatus === 422;
+  }
 }
 
 function statusToCode(status: number): RobohireApiError['code'] {

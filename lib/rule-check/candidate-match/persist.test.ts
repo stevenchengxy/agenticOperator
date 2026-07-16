@@ -26,20 +26,21 @@ beforeEach(() => {
 });
 
 describe('persistCandidateRuleCheck', () => {
-  it('upserts on a deterministic id (caseId+agentSlug) so a retry can not duplicate the row', async () => {
+  it('upserts on a deterministic execution id so a retry can not duplicate the row', async () => {
     const res = await persistCandidateRuleCheck({
       agentSlug: 'rule-check-candidate-identity',
       agentName: '规则校验·候选人身份去重',
       stage: '候选人入库',
       caseId: 'run_42',
+      runId: 'run_42',
       ruleSource: 'snapshot',
       selectionNote: { note: 'x' },
       check,
     });
     expect(upsert).toHaveBeenCalledOnce();
     const args = upsert.mock.calls[0][0];
-    expect(args.where.id).toBe('cm_rule-check-candidate-identity_run_42');
-    expect(res.id).toBe('cm_rule-check-candidate-identity_run_42');
+    expect(args.where.id).toMatch(/^orc_[a-f0-9]{40}$/);
+    expect(res.id).toBe(args.where.id);
     // create payload
     expect(args.create.domain).toBe(RECRUITMENT_DOMAIN_ID);
     expect(args.create.agentSlug).toBe('rule-check-candidate-identity');
@@ -56,6 +57,7 @@ describe('persistCandidateRuleCheck', () => {
       agentName: '规则校验·候选人归属判定',
       stage: '候选人认领',
       caseId: 'run_7',
+      runId: 'run_7',
       ruleSource: 'snapshot',
       check,
     });
@@ -63,6 +65,6 @@ describe('persistCandidateRuleCheck', () => {
     expect(args.update.decision).toBe('VIOLATED');
     expect(args.update.evals.deleteMany).toBeDefined();
     expect(args.update.evals.create).toHaveLength(1);
-    expect(args.create.runId).toBe('run_7'); // defaults to caseId
+    expect(args.create.runId).toBe('run_7');
   });
 });

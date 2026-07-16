@@ -1,5 +1,6 @@
 // GET /api/audit — recent AuditLog rows.
-// Filters: ?eventName=...&traceId=...&source=...&limit=N
+// Filters: ?eventName=...&traceId=...&source=...&page=1&pageSize=100
+// `limit` remains a pageSize alias for older callers.
 // AuditLog is populated by the EM library (em.publish writes one row per
 // publish per source). Today the table may be empty (em.publish library
 // not yet shipped); we still return a well-formed response with meta.empty=true
@@ -24,6 +25,9 @@ export type AuditLogRow = {
 export type AuditResponse = {
   rows: AuditLogRow[];
   total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
   meta: {
     empty: boolean;
     generatedAt: string;
@@ -35,7 +39,9 @@ export async function GET(req: Request): Promise<Response> {
   const eventName = url.searchParams.get("eventName") ?? undefined;
   const traceId = url.searchParams.get("traceId") ?? undefined;
   const source = url.searchParams.get("source") ?? undefined;
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 500);
+  const legacyLimit = positiveInt(url.searchParams.get("limit"), 100, 500);
+  const page = positiveInt(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positiveInt(url.searchParams.get("pageSize"), legacyLimit, 500);
 
   const where: Record<string, unknown> = {};
   if (eventName) where.eventName = eventName;
@@ -48,8 +54,9 @@ export async function GET(req: Request): Promise<Response> {
     const [items, count] = await Promise.all([
       prisma.auditLog.findMany({
         where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         select: {
           id: true,
           eventName: true,
@@ -79,7 +86,16 @@ export async function GET(req: Request): Promise<Response> {
   const body: AuditResponse = {
     rows,
     total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
     meta: { empty: rows.length === 0, generatedAt: new Date().toISOString() },
   };
   return NextResponse.json(body);
+}
+
+function positiveInt(raw: string | null, fallback: number, max: number): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(max, Math.max(1, Math.floor(n))) : fallback;
 }

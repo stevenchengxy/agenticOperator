@@ -41,8 +41,24 @@ const ACTION_RULES = {
       applicableDepartment: 'N/A',
       businessLogicRuleName: '客户级通用',
     },
+    {
+      id: '10-O1',
+      executor: 'Agent',
+      enforcementLevel: 'optional',
+      failurePolicy: 'warn',
+      applicableClient: '腾讯',
+      applicableDepartment: 'N/A',
+      businessLogicRuleName: '可选弱信号参考',
+    },
   ],
-  action_steps: [],
+  action_steps: [
+    {
+      id: '10::reference',
+      order: 99,
+      name: 'optionalReferenceChecks',
+      rules: [{ id: '10-O1' }],
+    },
+  ],
 };
 
 /** Neo4j 全部 404 / 空,逼解析走 partner-pg 兜底;只有 action-rules 返回真数据。 */
@@ -127,5 +143,26 @@ describe('resolveDepartmentBg — partner-pg client_department.dept_name 兜底'
     });
 
     expect(result.business_group_resolved).toBeNull();
+  });
+
+  it('keeps a matching optional Agent rule in the evaluated rule set', async () => {
+    mPg.mockImplementation(async (sql: string) => {
+      if (sql.includes('client_department')) return { rows: [{ dept_name: 'CDG' }] } as never;
+      if (sql.includes('client_name')) return { rows: [{ client_name: '腾讯' }] } as never;
+      return { rows: [] } as never;
+    });
+
+    const result = await fetchRulesViaOntologyApi({
+      clientId: TENCENT_ID,
+      departmentId: CDG_DEPT_UUID,
+      logger: createNullLogger(),
+    });
+    const optional = result.rules.find((rule) => rule.id === '10-O1');
+    expect(optional).toMatchObject({ enforcementLevel: 'optional', failurePolicy: 'warn' });
+    expect(result.steps.flatMap((step) => step.rules).map((rule) => rule.id)).toContain('10-O1');
+    expect(result.provenance.find((item) => item.rule_id === '10-O1')).toMatchObject({
+      included: true,
+      reference_only: true,
+    });
   });
 });

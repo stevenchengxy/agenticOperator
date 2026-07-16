@@ -6,6 +6,7 @@ vi.mock('@/server/db', () => ({
     workflowStep: { findMany: vi.fn() },
     agentActivity: { findMany: vi.fn() },
     eventInstance: { findMany: vi.fn() },
+    logEvent: { findMany: vi.fn() },
   },
 }));
 
@@ -18,6 +19,7 @@ describe('GET /api/monitor/failures/[runId]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (prisma.eventInstance.findMany as any).mockResolvedValue([]);
+    (prisma.logEvent.findMany as any).mockResolvedValue([]);
   });
 
   it('returns 404 when run is not found', async () => {

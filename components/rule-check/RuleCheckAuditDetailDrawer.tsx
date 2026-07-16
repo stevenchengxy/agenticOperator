@@ -10,7 +10,13 @@ import {
 } from "@/components/rule-check/RuleSelectionVerifyTab";
 import { CandidateProfileCard } from "@/components/rule-check/CandidateProfileCard";
 import { verdictLabel } from "@/components/rule-check/verdict-label";
-import { isInfraFailure } from "@/lib/rule-check/infra-failure";
+import { friendlyInfraReason, isInfraFailure } from "@/lib/rule-check/infra-failure";
+import {
+  classifyFailureKind,
+  isBlockingFlag,
+  parseFailureReason,
+  type RuleCheckFailureKind,
+} from "@/lib/rule-check/failure-reason";
 import { fetchJson } from "@/lib/api/client";
 import { useApp } from "@/lib/i18n";
 import type {
@@ -21,6 +27,18 @@ import type {
 type Tab = "select" | "prompt" | "verify" | "response" | "instances";
 
 const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
+
+type FailureItem = {
+  key: string;
+  kind: RuleCheckFailureKind;
+  ruleId: string | null;
+  ruleName: string | null;
+  detail: string;
+  result: string | null;
+  evidence: string | null;
+  nextAction: string | null;
+  severity: string | null;
+};
 
 // DrawerSection shell — defined here for use by the 4 tab bodies but not
 // yet wired in. Wrapping the existing PromptTab / RulesTab / ResponseTab /
@@ -83,6 +101,7 @@ export function RuleCheckAuditDetailBody({
     null,
   );
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<Tab>("select");
   const [isReplaying, setIsReplaying] = React.useState(false);
   const [replayMsg, setReplayMsg] = React.useState<string | null>(null);
@@ -91,11 +110,24 @@ export function RuleCheckAuditDetailBody({
   const verify = useVerifyRun(auditId, data?.ok === true);
 
   React.useEffect(() => {
+    let cancel = false;
     setLoading(true);
+    setLoadError(null);
+    setData(null);
     fetchJson<RuleCheckAuditDetailResponse>(`/api/rule-check-audits/${encodeURIComponent(auditId)}`)
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [auditId]);
+      .then((next) => {
+        if (!cancel) setData(next);
+      })
+      .catch((e) => {
+        if (!cancel) setLoadError((e as Error)?.message || t("rc_drawer_no_response"));
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [auditId, t]);
 
   const onReplay = React.useCallback(async () => {
     if (isReplaying) return;
@@ -135,7 +167,7 @@ export function RuleCheckAuditDetailBody({
   const headerAndBody = (
     <>
       <div
-        className="border-b border-line flex items-center gap-3 bg-bg"
+        className="border-b border-line flex items-center gap-3 bg-bg flex-wrap"
         style={{ padding: "11px 18px" }}
       >
         <Ic.shield />
@@ -150,6 +182,7 @@ export function RuleCheckAuditDetailBody({
           onClick={onReplay}
           disabled={isReplaying}
           title={t("rc_replay_title")}
+          className="shrink-0"
         >
           <Ic.play />
           {isReplaying ? t("rc_replay_running") : t("rc_replay")}
@@ -170,7 +203,8 @@ export function RuleCheckAuditDetailBody({
           <EmptyState
             icon={<Ic.alert />}
             title={t("rc_drawer_load_failed")}
-            hint={t("rc_drawer_no_response")}
+            hint={loadError ?? t("rc_drawer_no_response")}
+            variant={loadError ? "warn" : "default"}
           />
         </div>
       ) : !data.ok ? (
@@ -203,7 +237,7 @@ export function RuleCheckAuditDetailBody({
             </div>
           ) : null}
           <div
-            className="border-b border-line flex bg-bg"
+            className="border-b border-line flex bg-bg rc-detail-tabbar"
             style={{ padding: "8px 18px", gap: 6 }}
           >
             <TabBtn active={tab === "select"} onClick={() => setTab("select")}>
@@ -222,7 +256,7 @@ export function RuleCheckAuditDetailBody({
               {t("rc_tab_instances")}
             </TabBtn>
           </div>
-          <div className="flex-1 overflow-auto" style={{ padding: "16px 18px" }}>
+          <div className="flex-1 overflow-auto min-w-0" style={{ padding: "16px 18px" }}>
             <div key={tab} className="rc-fade-in">
               {tab === "select" ? (
                 <RuleSelectionTab detail={data.detail} verify={verify} />
@@ -397,7 +431,7 @@ function DetailHeader({
             {t("rc_identifiers")}
           </summary>
           <div
-            className="grid mt-2"
+            className="grid mt-2 rc-instance-grid-3"
             style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "10px 28px" }}
           >
             <Kv label={t("rc_kv_candidate_id")}>
@@ -412,42 +446,7 @@ function DetailHeader({
           </div>
         </details>
       </div>
-      {detail.failure_reasons.length > 0 && (
-        <details
-          className="border-b border-line"
-          style={{
-            padding: "9px 22px",
-            background: "var(--c-err-bg)",
-          }}
-        >
-          <summary className="cursor-pointer select-none text-err" style={{ fontSize: 12.5, fontWeight: 560 }}>
-            {t("rc_failure_reasons_label")} · {detail.failure_reasons.length}
-          </summary>
-          <div className="mono text-[11.5px] text-err" style={{ marginTop: 7, lineHeight: 1.55 }}>
-              {detail.failure_reasons.join("、")}
-          </div>
-        </details>
-      )}
-      {detail.parse_error && (
-        <div
-          className="border-b border-line"
-          style={{
-            padding: "10px 22px",
-            background: "var(--c-warn-bg)",
-            display: "flex",
-            gap: 10,
-            alignItems: "flex-start",
-          }}
-        >
-          <Ic.alert />
-          <div className="min-w-0 flex-1">
-            <div className="hint" style={{ color: "oklch(0.45 0.14 75)" }}>{t("rc_parse_error_label")}</div>
-            <div className="mono text-[11px]" style={{ color: "oklch(0.45 0.14 75)", marginTop: 4, lineHeight: 1.5 }}>
-              {detail.parse_error}
-            </div>
-          </div>
-        </div>
-      )}
+      <FailureReasonPanel detail={detail} />
     </>
   );
 }
@@ -542,6 +541,231 @@ function buildDecisionSummary(
   return t("rc_decision_summary_fail").replace("{reasons}", reasons);
 }
 
+function FailureReasonPanel({ detail }: { detail: RuleCheckAuditDetail }) {
+  const { t, lang } = useApp();
+  const items = buildFailureItems(detail);
+  const infra = isInfraFailure(detail.fail_reason);
+  const hasParseError = Boolean(detail.parse_error);
+  if (!infra && !hasParseError && items.length === 0) return null;
+
+  const rootKind = rootFailureKind(detail, items);
+  const tone = failureTone(rootKind);
+  const infraText =
+    lang === "zh"
+      ? friendlyInfraReason(detail.fail_reason)
+      : t("rc_failure_candidate_not_rejected");
+  const style = {
+    "--rc-failure-accent": tone.accent,
+    "--rc-failure-bg": tone.bg,
+  } as React.CSSProperties;
+
+  return (
+    <section className="rc-failure-panel border-b border-line" style={style}>
+      <div className="flex items-start gap-3 min-w-0">
+        <span className="rc-failure-icon" aria-hidden="true">
+          {rootKind === "infra" ? <Ic.plug /> : rootKind === "parse" ? <Ic.cpu /> : <Ic.alert />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant={tone.variant}>{kindLabel(rootKind, t)}</Badge>
+            <div className="text-ink-1" style={{ fontSize: 13, fontWeight: 620 }}>
+              {rootTitle(rootKind, t)}
+            </div>
+            {items.length > 0 ? (
+              <span className="mono text-ink-3" style={{ fontSize: 11 }}>
+                {t("rc_failure_panel_count").replace("{count}", String(items.length))}
+              </span>
+            ) : null}
+          </div>
+          <div className="text-ink-2 mt-1" style={{ fontSize: 12, lineHeight: 1.55 }}>
+            {infra
+              ? infraText
+              : rootKind === "parse"
+                ? t("rc_failure_root_parse")
+                : t("rc_failure_matched_rules")}
+          </div>
+          {infra && detail.fail_reason ? (
+            <div className="mono text-ink-3 mt-1" style={{ fontSize: 10.5 }}>
+              fail_reason: {detail.fail_reason}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {items.length > 0 ? (
+        <div className="rc-failure-list">
+          {items.map((item) => (
+            <FailureReasonItem key={item.key} item={item} />
+          ))}
+        </div>
+      ) : null}
+
+      {detail.parse_error ? (
+        <div className="rc-failure-list">
+          <div className="rc-failure-item" style={{ "--rc-failure-item-accent": "var(--c-warn)" } as React.CSSProperties}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="warn">{t("rc_failure_kind_parse")}</Badge>
+              <span className="text-ink-1" style={{ fontSize: 12.5, fontWeight: 580 }}>
+                {t("rc_parse_error_label")}
+              </span>
+            </div>
+            <div className="mono text-ink-2 rc-failure-text" style={{ fontSize: 11.5, marginTop: 6 }}>
+              {detail.parse_error}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function FailureReasonItem({ item }: { item: FailureItem }) {
+  const { t } = useApp();
+  const tone = failureTone(item.kind);
+  const evidence = item.evidence && item.evidence !== item.detail ? item.evidence : null;
+  return (
+    <div
+      className="rc-failure-item"
+      style={{ "--rc-failure-item-accent": tone.accent } as React.CSSProperties}
+    >
+      <div className="flex items-center gap-2 flex-wrap min-w-0">
+        <Badge variant={tone.variant}>{kindLabel(item.kind, t)}</Badge>
+        {item.ruleId ? <span className="mono text-ink-1 text-[11.5px] font-semibold">{item.ruleId}</span> : null}
+        <span className="text-ink-1 min-w-0" style={{ fontSize: 12.5, fontWeight: 580 }}>
+          {item.ruleName || t("rc_failure_rule_name_unknown")}
+        </span>
+        {item.result ? <Badge variant={tone.variant}>{verdictLabel(item.result, t)}</Badge> : null}
+        {item.severity ? <span className="mono text-ink-4 text-[10.5px]">{item.severity}</span> : null}
+      </div>
+      <div className="text-ink-2 rc-failure-text" style={{ fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>
+        {item.detail || t("rc_failure_no_reason")}
+      </div>
+      {evidence ? (
+        <div className="rc-failure-subline">
+          <span className="hint">{t("rc_failure_evidence")}</span>
+          <span className="text-ink-2">{evidence}</span>
+        </div>
+      ) : null}
+      {item.nextAction ? (
+        <div className="rc-failure-subline">
+          <span className="hint">{t("rc_failure_next_action")}</span>
+          <Badge
+            variant={item.nextAction === "block" ? "err" : item.nextAction === "continue" ? "ok" : "warn"}
+          >
+            {nextActionLabel(item.nextAction, t)}
+          </Badge>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildFailureItems(detail: RuleCheckAuditDetail): FailureItem[] {
+  const flags = detail.flags ?? [];
+  const flagByRuleId = new Map(flags.map((f) => [f.rule_id, f]));
+  const seen = new Set<string>();
+  const items = detail.failure_reasons.map((raw, idx) => {
+    const parsed = parseFailureReason(raw);
+    const flag = parsed.ruleId ? flagByRuleId.get(parsed.ruleId) ?? null : null;
+    if (parsed.ruleId) seen.add(parsed.ruleId);
+    return failureItemFromParts({
+      key: `${parsed.ruleId ?? "reason"}-${idx}`,
+      raw,
+      parsed,
+      flag,
+    });
+  });
+
+  for (const flag of flags) {
+    if (!isBlockingFlag(flag) || seen.has(flag.rule_id)) continue;
+    seen.add(flag.rule_id);
+    items.push(
+      failureItemFromParts({
+        key: `flag-${flag.rule_id}`,
+        raw: flag.evidence,
+        parsed: {
+          raw: flag.evidence,
+          ruleId: flag.rule_id,
+          ruleName: flag.rule_name_snapshot,
+          detail: flag.evidence,
+        },
+        flag,
+      }),
+    );
+  }
+  return items;
+}
+
+function failureItemFromParts({
+  key,
+  raw,
+  parsed,
+  flag,
+}: {
+  key: string;
+  raw: string;
+  parsed: ReturnType<typeof parseFailureReason>;
+  flag: RuleCheckAuditDetail["flags"][number] | null;
+}): FailureItem {
+  return {
+    key,
+    kind: classifyFailureKind(raw, flag),
+    ruleId: parsed.ruleId ?? flag?.rule_id ?? null,
+    ruleName: flag?.rule_name_snapshot || parsed.ruleName,
+    detail: parsed.detail || flag?.evidence || raw,
+    result: flag?.result ?? null,
+    evidence: flag?.evidence ?? null,
+    nextAction: flag?.next_action ?? null,
+    severity: flag?.severity ?? null,
+  };
+}
+
+function rootFailureKind(detail: RuleCheckAuditDetail, items: FailureItem[]): RuleCheckFailureKind {
+  if (isInfraFailure(detail.fail_reason)) return "infra";
+  if (items.some((item) => item.kind === "rule")) return "rule";
+  if (items.some((item) => item.kind === "insufficient")) return "insufficient";
+  if (items.some((item) => item.kind === "review")) return "review";
+  if (detail.parse_error) return "parse";
+  return "unknown";
+}
+
+function failureTone(kind: RuleCheckFailureKind): {
+  accent: string;
+  bg: string;
+  variant: "default" | "ok" | "warn" | "err" | "info";
+} {
+  if (kind === "rule") return { accent: "var(--c-err)", bg: "var(--c-err-bg)", variant: "err" };
+  if (kind === "infra" || kind === "parse" || kind === "insufficient" || kind === "review") {
+    return { accent: "var(--c-warn)", bg: "var(--c-warn-bg)", variant: "warn" };
+  }
+  return { accent: "var(--c-ink-3)", bg: "var(--c-panel)", variant: "default" };
+}
+
+function kindLabel(kind: RuleCheckFailureKind, t: (k: string) => string): string {
+  if (kind === "rule") return t("rc_failure_kind_rule");
+  if (kind === "insufficient") return t("rc_failure_kind_insufficient");
+  if (kind === "review") return t("rc_failure_kind_review");
+  if (kind === "infra") return t("rc_failure_kind_infra");
+  if (kind === "parse") return t("rc_failure_kind_parse");
+  return t("rc_failure_kind_unknown");
+}
+
+function rootTitle(kind: RuleCheckFailureKind, t: (k: string) => string): string {
+  if (kind === "rule") return t("rc_failure_root_rule");
+  if (kind === "insufficient") return t("rc_failure_root_insufficient");
+  if (kind === "review") return t("rc_failure_root_review");
+  if (kind === "infra") return t("rc_failure_root_infra");
+  if (kind === "parse") return t("rc_failure_root_parse");
+  return t("rc_failure_root_unknown");
+}
+
+function nextActionLabel(a: string, t: (k: string) => string): string {
+  if (a === "block") return t("rc_action_block");
+  if (a === "supplement") return t("rc_action_supplement");
+  if (a === "review") return t("rc_action_review");
+  return t("rc_action_continue");
+}
+
 function Kv({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
@@ -621,7 +845,7 @@ function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
           <CopyBtn text={detail.system_prompt ?? ""} />
         </div>
         <pre
-          className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
+          className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap rc-code-block"
           style={{ padding: "12px 14px", maxHeight: 240, overflow: "auto" }}
         >
           {detail.system_prompt ?? "(no system prompt)"}
@@ -650,7 +874,7 @@ function PromptTab({ detail }: { detail: RuleCheckAuditDetail }) {
           </div>
         ) : (
           <pre
-            className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
+            className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap rc-code-block"
             style={{ padding: "12px 14px", maxHeight: 700, overflow: "auto" }}
           >
             {detail.user_prompt}
@@ -734,7 +958,7 @@ function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
             <CopyBtn text={detail.resume_augmentation} />
           </div>
           <pre
-            className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
+            className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap rc-code-block"
             style={{ padding: "12px 14px" }}
           >
             {detail.resume_augmentation}
@@ -752,7 +976,7 @@ function ResponseTab({ detail }: { detail: RuleCheckAuditDetail }) {
           ) : null}
         </div>
         <pre
-          className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap"
+          className="mono text-[11.5px] text-ink-1 bg-panel border border-line rounded-sm whitespace-pre-wrap rc-code-block"
           style={{ padding: "12px 14px" }}
         >
           {detail.llm_raw_text ?? t("rc_llm_raw_missing")}
@@ -773,7 +997,7 @@ function DeterministicInstances({ detail }: { detail: RuleCheckAuditDetail }) {
       <div>
         <div className="hint" style={{ marginBottom: 8 }}>{t("rc_deterministic_instances_title")}</div>
         <div
-          className="grid"
+          className="grid rc-instance-grid-3"
           style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "10px 22px", marginBottom: 8 }}
         >
           <Kv label={t("rc_kv_candidate_id")}>
@@ -840,11 +1064,14 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
             className="border border-line bg-panel rounded-sm text-[11.5px] text-ink-2"
             style={{ padding: "10px 14px", lineHeight: 1.6 }}
           >
-            <span className="text-warn font-semibold">⚠ {t("rc_instances_full_missing_warn")}</span>
+            <span className="text-warn font-semibold inline-flex items-center gap-1.5">
+              <Ic.alert />
+              {t("rc_instances_full_missing_warn")}
+            </span>
             {" — "}{t("rc_instances_full_missing_body")}
             <br />
             <span className="text-ink-3">
-              {t("rc_instances_full_missing_new")} <strong> 🔁 {t("rc_replay")} </strong>
+              {t("rc_instances_full_missing_new")} <strong>{t("rc_replay")}</strong>
             </span>
             <br />
             <span className="text-ink-3">
@@ -852,7 +1079,7 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
             </span>
           </div>
         ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="grid gap-4 rc-instance-grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <InstanceCard
               title={t("rc_instance_parsed_resume_title")}
               data={detail.parsed_resume_full}
@@ -873,7 +1100,7 @@ function InstancesTab({ detail }: { detail: RuleCheckAuditDetail }) {
         >
           <span>{t("rc_anchor_title")}</span>
         </div>
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <div className="grid gap-4 rc-instance-grid-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <InstanceCard
             title={t("rc_snapshot_candidate")}
             data={detail.candidate_snapshot}
@@ -912,9 +1139,10 @@ function AllmetaLiveSnapshot({ detail }: { detail: RuleCheckAuditDetail }) {
         className="hint flex items-center"
         style={{ gap: 8, marginBottom: 8 }}
       >
-        <span>🛰️ {t("rc_allmeta_title")}</span>
+        <Ic.db />
+        <span>{t("rc_allmeta_title")}</span>
       </div>
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+      <div className="grid gap-4 rc-instance-grid-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
         {targets.map((t) => (
           <AllmetaInstanceCard key={t.label} label={t.label} pk={t.pk} title={t.displayName} />
         ))}
@@ -999,7 +1227,7 @@ function AllmetaInstanceCard({
       ) : data.ok ? (
         <>
           <pre
-            className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap"
+            className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap rc-code-block"
             style={{ lineHeight: 1.5, maxHeight: 280, overflow: "auto" }}
           >
             {JSON.stringify(data.instance, null, 2)}
@@ -1016,7 +1244,7 @@ function AllmetaInstanceCard({
               borderRadius: 3,
             }}
           >
-            <div className="text-ink-3 mb-1">📋 {t("rc_verify_cypher_dev")}</div>
+            <div className="text-ink-3 mb-1">{t("rc_verify_cypher_dev")}</div>
             <CypherSnippet cypher={data.verify.cypher} />
             <div className="mt-2 text-ink-3 text-[9.5px]">
               图引擎 API: {data.verify.api_path}
@@ -1037,7 +1265,7 @@ function AllmetaInstanceCard({
               className="mono text-[10px] text-ink-3"
               style={{ marginTop: 6, padding: "6px 8px", background: "var(--c-bg)", borderRadius: 3 }}
             >
-              <div className="text-ink-3 mb-1">📋 {t("rc_direct_cypher_dev")}</div>
+              <div className="text-ink-3 mb-1">{t("rc_direct_cypher_dev")}</div>
               <CypherSnippet cypher={data.verify.cypher} />
             </div>
           ) : null}
@@ -1054,7 +1282,7 @@ function CypherSnippet({ cypher }: { cypher: string }) {
   return (
     <div className="flex items-start" style={{ gap: 6 }}>
       <pre
-        className="mono text-[10.5px] text-ink-1 whitespace-pre-wrap"
+        className="mono text-[10.5px] text-ink-1 whitespace-pre-wrap rc-code-block"
         style={{ flex: 1, lineHeight: 1.4 }}
       >
         {cypher}
@@ -1107,7 +1335,7 @@ function InstanceCard({
         <div className="text-ink-3 text-[11.5px]">{t("rc_cell_unloaded")}</div>
       ) : (
         <pre
-          className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap"
+          className="mono text-[10.5px] text-ink-2 whitespace-pre-wrap rc-code-block"
           style={{ lineHeight: 1.5, maxHeight: 480, overflow: "auto" }}
         >
           {text}

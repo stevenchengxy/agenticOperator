@@ -198,7 +198,7 @@ export const AGENT_INTERNAL_FLOWS: Record<string, AgentInternalFlow> = {
         id: 'rule-check',
         name: 'rule-check',
         label: '5. Rule Check 预筛 ⚡',
-        description: 'AO 内部 5-agent pipeline(OntologyQuery → SeverityInference → RuleScopeClassifier → RuleClassifier → PromptComposer → LLMRunner)对每个 JR + Candidate 跑 ontology 规则预筛 · 写 RuleCheckAudit 到 Prisma SQLite · 失败的 JR 跳过 /match-resume 节省 RoboHire 配额。',
+        description: 'AO 内部 5-agent pipeline(OntologyQuery → SeverityInference → RuleScopeClassifier → RuleClassifier → PromptComposer → LLMRunner)对每个 JR + Candidate 跑 ontology 规则预筛 · 写 RuleCheckAudit 到 Prisma/Postgres · 失败的 JR 跳过 /match-resume 节省 RoboHire 配额。',
         kind: 'subsystem',
         externalCall: 'AO Prisma RuleCheckAudit · scripts/rule-check-poc',
         note: '★ POC 已完成,生产集成中(matchResumeAgent step 4 之前插入)',

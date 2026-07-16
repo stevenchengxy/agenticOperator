@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { useRouter } from "next/navigation";
 import { Ic } from "./Ic";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { fetchJson } from "@/lib/api/client";
 import type {
@@ -30,6 +31,7 @@ const PREFIX_TO_KIND: Record<string, ResultKind> = {
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useApp();
+  const { domain } = useDomain();
   const router = useRouter();
   const [q, setQ] = React.useState("");
   const [results, setResults] = React.useState<Result[]>([]);
@@ -70,13 +72,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     if (!open) return;
     const trimmed = q.trim();
     const handle = setTimeout(() => {
-      runSearch(trimmed).then((r) => {
+      runSearch(trimmed, domain).then((r) => {
         setResults(r);
         setActiveIdx(0);
       });
     }, 250);
     return () => clearTimeout(handle);
-  }, [q, open]);
+  }, [q, open, domain]);
 
   if (!open) return null;
 
@@ -184,7 +186,7 @@ function groupByKind(results: Result[]): Partial<Record<ResultKind, Result[]>> {
   return out;
 }
 
-async function runSearch(query: string): Promise<Result[]> {
+async function runSearch(query: string, domain: string): Promise<Result[]> {
   if (!query) return [];
   const prefix = query[0];
   const kindFilter = PREFIX_TO_KIND[prefix];
@@ -196,7 +198,7 @@ async function runSearch(query: string): Promise<Result[]> {
   if (want("agent")) tasks.push(searchAgents(term));
   if (want("run")) tasks.push(searchRuns(term));
   if (want("task")) tasks.push(searchTasks(term));
-  if (want("event")) tasks.push(searchEvents(term));
+  if (want("event")) tasks.push(searchEvents(term, domain));
 
   const settled = await Promise.allSettled(tasks);
   const all: Result[] = [];
@@ -272,9 +274,10 @@ async function searchTasks(term: string): Promise<Result[]> {
   }
 }
 
-async function searchEvents(term: string): Promise<Result[]> {
+async function searchEvents(term: string, domain: string): Promise<Result[]> {
   try {
-    const r = await fetchJson<EventsResponse>(`/api/events?q=${encodeURIComponent(term)}`);
+    const params = new URLSearchParams({ q: term, domain });
+    const r = await fetchJson<EventsResponse>(`/api/events?${params.toString()}`);
     return r.events.slice(0, 5).map((e) => ({
       kind: "event" as const,
       id: e.name,

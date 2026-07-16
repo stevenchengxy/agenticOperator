@@ -11,9 +11,9 @@
 // Env (see .env.local §1b):
 //   ARCHIVE_ENABLED            1 (default) | 0 to no-op
 //   ARCHIVE_INTERVAL_MS        poll period (default 30000)
-//   ARCHIVE_WINDOW_HOURS       rolling run window to scan (default 24)
-//   ARCHIVE_EVENT_LIMIT        events per poll (default 200)
-//   ARCHIVE_RUN_LIMIT          runs per poll (default 200)
+//   ARCHIVE_WINDOW_HOURS       rolling run window to scan (default 168)
+//   ARCHIVE_EVENT_LIMIT        events per poll (default 1000)
+//   ARCHIVE_RUN_LIMIT          runs per poll (default 1000)
 //   ARCHIVE_TRACE_CONCURRENCY  parallel trace fetches (default 4)
 //   INNGEST_BASE_URL           Inngest dev server (reused from app config)
 //
@@ -31,9 +31,9 @@ import { prisma } from "../server/db";
 
 const ENABLED = process.env.ARCHIVE_ENABLED !== "0";
 const INTERVAL_MS = numEnv("ARCHIVE_INTERVAL_MS", 30000);
-const WINDOW_HOURS = numEnv("ARCHIVE_WINDOW_HOURS", 24);
-const EVENT_LIMIT = numEnv("ARCHIVE_EVENT_LIMIT", 200);
-const RUN_LIMIT = numEnv("ARCHIVE_RUN_LIMIT", 200);
+const WINDOW_HOURS = numEnv("ARCHIVE_WINDOW_HOURS", 168);
+const EVENT_LIMIT = numEnv("ARCHIVE_EVENT_LIMIT", 1000);
+const RUN_LIMIT = numEnv("ARCHIVE_RUN_LIMIT", 1000);
 const TRACE_CONCURRENCY = numEnv("ARCHIVE_TRACE_CONCURRENCY", 4);
 
 function numEnv(name: string, fallback: number): number {

@@ -1,13 +1,14 @@
 "use client";
 import React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Ic } from "@/components/shared/Ic";
 import { Badge, Btn, EmptyState } from "@/components/shared/atoms";
 import { useApp } from "@/lib/i18n";
 import { fetchJson } from "@/lib/api/client";
 import { getInngestUrlClient } from "@/lib/inngest-url-client";
 import type { EventInstanceDetail } from "@/app/api/em/event-instances/[id]/route";
+import { useDeepLinkFocus } from "@/lib/hooks/useDeepLinkFocus";
 
 // /events/:name/instances/:id
 //
@@ -30,9 +31,12 @@ export function InstanceTrailContent({
 }) {
   const { t } = useApp();
   const router = useRouter();
+  const sp = useSearchParams();
   const [data, setData] = React.useState<EventInstanceDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const focusKey = sp.get("focus");
+  useDeepLinkFocus(focusKey, data != null);
 
   React.useEffect(() => {
     setLoading(true);
@@ -85,7 +89,7 @@ export function InstanceTrailContent({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <Header data={data} t={t} />
+      <Header data={data} t={t} focusKey={`event:${data.id}`} />
       <div
         className="flex-1 grid min-h-0"
         style={{ gridTemplateColumns: "1fr 360px" }}
@@ -97,10 +101,11 @@ export function InstanceTrailContent({
   );
 }
 
-function Header({ data, t }: { data: EventInstanceDetail; t: (k: string) => string }) {
+function Header({ data, t, focusKey }: { data: EventInstanceDetail; t: (k: string) => string; focusKey: string }) {
   const ts = new Date(data.ts);
   return (
     <div
+      data-focus-key={focusKey}
       className="border-b border-line bg-surface flex items-center"
       style={{ padding: "14px 22px", gap: 18 }}
     >

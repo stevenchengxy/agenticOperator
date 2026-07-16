@@ -85,7 +85,10 @@ function groupOf(code: string, stage: string): string {
 export function toEngineRules(rules: Rule[]): EngineRule[] {
   return rules.map((r) => {
     const code = parseCode(r);
-    const hardSoft: "hard" | "soft" = r.failurePolicy === "block" ? "hard" : "soft";
+    // Optional is an absolute reference-only contract. Even inconsistent
+    // ontology data such as optional+block must stay soft/non-blocking.
+    const hardSoft: "hard" | "soft" =
+      r.enforcementLevel === "optional" || r.failurePolicy !== "block" ? "soft" : "hard";
     return {
       id: r.id,
       code,
@@ -143,5 +146,11 @@ export function verifyCoverage(
 
 /** Did any hard red-line rule fail? */
 export function hasRedlineHit(evals: RuleEval[]): boolean {
+  return evals.some((e) => e.hardSoft === "hard" && e.result === "FAIL");
+}
+
+/** Shared gate fold for deterministic rule-check agents. Soft/optional FAILs
+ * remain in `evals` for audit/reference but cannot change the stage decision. */
+export function hasBlockingFailure(evals: RuleEval[]): boolean {
   return evals.some((e) => e.hardSoft === "hard" && e.result === "FAIL");
 }

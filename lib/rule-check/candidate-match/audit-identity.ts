@@ -5,13 +5,14 @@
 // 审计与落库行为出自同一次执行,杜绝「合并后重跑判定 → self 被排除 → 审计报无重复」
 // 的失真。独立的候选人查重智能体默认停用,保留为可选的独立复核器(共用本函数)。
 //
-// 全程 soft-fail:9-15 抓取失败回退快照展示、大模型失败回退机械文案、persist 失败
-// 返回 null —— 绝不向简历解析主流程抛错。
+// 规则抓取/说明生成可以降级，但 authoritative audit 持久化不能 soft-fail：
+// DB 写失败必须抛出，让 Inngest 重试后再继续主流程。
 
 import { fetchActionRulesLive } from '../api-rule-fetcher';
 import { generateIdentityRationale, type OntologyRuleDefinition } from './identity-rationale';
 import { identityToCheck, type IdentityOntologyRule } from './to-ontology-check';
 import { persistCandidateRuleCheck, type PersistCandidateCheckArgs } from './persist';
+import { asRuleAuditPersistenceError } from '@/lib/rule-check/ontology-audit-writer';
 import type { IdentityResolution } from './resolve-identity';
 
 export const IDENTITY_AGENT_SLUG = 'rule-check-candidate-identity';
@@ -25,6 +26,7 @@ export interface AuditIdentityArgs {
   /** bundled rules.json 的 metadata.source(9-15 抓取失败时的回退来源标注)。 */
   snapshotSource: string;
   caseId: string;
+  runId?: string | null;
   traceId: string | null;
   persist?: (a: PersistCandidateCheckArgs) => Promise<{ id: string }>;
 }
@@ -57,13 +59,14 @@ async function fetchOntologyRule(): Promise<
 
 export async function auditIdentityResolution(
   args: AuditIdentityArgs,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string }> {
   const persist = args.persist ?? persistCandidateRuleCheck;
   const { resolution } = args;
-  try {
-    const onto = await fetchOntologyRule();
-    const rationale = onto
-      ? await generateIdentityRationale({
+  const onto = await fetchOntologyRule();
+  let rationale = { reason: null as string | null, prompt: '', raw: '' };
+  if (onto) {
+    try {
+      rationale = await generateIdentityRationale({
           result: resolution.result,
           candidateName: args.candidateName,
           matchedCandidateId: resolution.matchedCandidateId,
@@ -72,26 +75,31 @@ export async function auditIdentityResolution(
           ontologyRuleId: onto.rule.id,
           ontologyRuleName: onto.rule.name,
           ruleDefinition: onto.definition,
-        })
-      : { reason: null, prompt: '', raw: '' };
+        });
+    } catch {
+      // Deterministic judgment remains auditable without generated prose.
+    }
+  }
 
-    const check = identityToCheck(
-      resolution.result,
-      args.rulesTotal,
-      {
-        matchedCandidateId: resolution.matchedCandidateId,
-        matchedCandidateName: resolution.matchedCandidateName,
-        dedupAction: resolution.dedupAction,
-      },
-      onto?.rule,
-      rationale.reason,
-    );
+  const check = identityToCheck(
+    resolution.result,
+    args.rulesTotal,
+    {
+      matchedCandidateId: resolution.matchedCandidateId,
+      matchedCandidateName: resolution.matchedCandidateName,
+      dedupAction: resolution.dedupAction,
+    },
+    onto?.rule,
+    rationale.reason,
+  );
 
+  try {
     return await persist({
       agentSlug: IDENTITY_AGENT_SLUG,
       agentName: IDENTITY_AGENT_NAME,
       stage: IDENTITY_STAGE,
       caseId: args.caseId,
+      runId: args.runId ?? args.caseId,
       traceId: args.traceId,
       ruleSource: onto ? 'ontology-api' : args.snapshotSource,
       selectionNote: {
@@ -107,7 +115,7 @@ export async function auditIdentityResolution(
       },
       check,
     });
-  } catch {
-    return null;
+  } catch (error) {
+    throw asRuleAuditPersistenceError(error);
   }
 }

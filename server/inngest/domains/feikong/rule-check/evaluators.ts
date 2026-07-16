@@ -69,7 +69,8 @@ export function feikongRulesToEngine(rules: Rule[]): EngineRule[] {
       name: r.businessLogicRuleName,
       stage: r.specificScenarioStage,
       group: feikongGroup(code),
-      hardSoft: r.failurePolicy === "block" ? "hard" : "soft",
+      hardSoft:
+        r.enforcementLevel === "optional" || r.failurePolicy !== "block" ? "soft" : "hard",
       redline: FEIKONG_RISK_RAISERS.has(code),
       defaultAction: (r.standardizedLogicRule || "").slice(0, 120),
       raw: r,

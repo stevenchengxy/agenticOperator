@@ -11,7 +11,7 @@
 // and persists one OntologyRuleCheck row (+ per-rule evals) so the /rule-check
 // 总览 + 审计面板 show distinct, per-stage energy records.
 
-import { prisma } from "@/server/db";
+import { persistOntologyRuleCheckAudit } from "@/lib/rule-check/ontology-audit-writer";
 import { fetchDomainOntology } from "@/lib/ontology-generator/ontology-source";
 import { normalizeOntologyRule } from "@/lib/rule-check/normalize-ontology-rule";
 import {
@@ -20,6 +20,7 @@ import {
   verifySelection,
   verifyCoverage,
   hasRedlineHit,
+  hasBlockingFailure,
   HARD_REDLINES,
   type EngineRule,
   type RuleEval,
@@ -111,7 +112,7 @@ export function runForecastCheck(all: EngineRule[], d: ScenarioData): StageCheck
   const selected = selectRules(all, { stage: "出力预测" });
   const verification = verifyCoverage(selected, FORECAST_REQUIRED);
   const evals = judgeForecast(selected, d);
-  const bad = evals.some((e) => e.result === "FAIL");
+  const bad = hasBlockingFailure(evals);
   return { stage: "出力预测", selected, verification, evals, rulesExpected: FORECAST_REQUIRED.length, decision: bad ? "VIOLATED" : "VALIDATED" };
 }
 
@@ -120,16 +121,17 @@ export function runSuggestionCheck(all: EngineRule[], d: ScenarioData): StageChe
   const selected = selectRules(all, { stage: "调度建议生成" });
   const verification = verifyCoverage(selected, SUGGEST_REQUIRED);
   const evals = judgeSuggestion(selected, d);
-  const bad = evals.some((e) => e.result === "FAIL");
+  const bad = hasBlockingFailure(evals);
   return { stage: "调度建议生成", selected, verification, evals, rulesExpected: SUGGEST_REQUIRED.length, decision: bad ? "VIOLATED" : "VALIDATED" };
 }
 
-// ── persistence (soft-fail; never blocks the chain) ─────────────────────────
+// ── persistence (mandatory; Inngest retries before downstream can advance) ──
 export type PersistArgs = {
   agentSlug: string;
   agentName: string;
   stage: string;
   caseId: string;
+  runId: string;
   dsNo?: string;
   decision: string;
   redlineFlag: boolean;
@@ -141,47 +143,41 @@ export type PersistArgs = {
   ruleSource: string;
 };
 
-export async function persistRuleCheck(a: PersistArgs): Promise<string | null> {
-  try {
-    const row = await prisma.ontologyRuleCheck.create({
-      data: {
-        domain: ENERGY_DOMAIN_ID,
-        agentSlug: a.agentSlug,
-        agentName: a.agentName,
-        stage: a.stage,
-        caseId: a.caseId,
-        runId: a.caseId,
-        dsNo: a.dsNo ?? null,
-        decision: a.decision,
-        redlineFlag: a.redlineFlag,
-        rulesTotal: a.rulesTotal,
-        rulesSelected: a.selected.length,
-        rulesExpected: a.rulesExpected,
-        selectionOk: a.verification.ok,
-        selectionNote: JSON.stringify({ missing: a.verification.missing, extra: a.verification.extra, parseIssues: a.verification.parseIssues }),
-        rulesEvaluated: a.evals.length,
-        ruleSource: a.ruleSource,
-        evals: {
-          create: a.evals.map((e) => ({
-            ruleId: e.code || e.ruleId,
-            ruleName: e.name,
-            ruleGroup: e.group,
-            hardSoft: e.hardSoft,
-            result: e.result,
-            checkPoint: e.checkPoint ?? null,
-            beforeVal: e.beforeVal ?? null,
-            afterVal: e.afterVal ?? null,
-            defaultAction: e.defaultAction ?? null,
-            riskType: e.riskType ?? null,
-            riskLevel: e.riskLevel ?? null,
-            evidence: e.evidence ?? null,
-          })),
-        },
-      },
-      select: { id: true },
-    });
-    return row.id;
-  } catch {
-    return null; // store unavailable → chain still proceeds; logs remain
-  }
+export async function persistRuleCheck(a: PersistArgs): Promise<string> {
+  return persistOntologyRuleCheckAudit({
+    domain: ENERGY_DOMAIN_ID,
+    agentSlug: a.agentSlug,
+    agentName: a.agentName,
+    stage: a.stage,
+    caseId: a.caseId,
+    runId: a.runId,
+    dsNo: a.dsNo ?? null,
+    decision: a.decision,
+    redlineFlag: a.redlineFlag,
+    rulesTotal: a.rulesTotal,
+    rulesSelected: a.selected.length,
+    rulesExpected: a.rulesExpected,
+    selectionOk: a.verification.ok,
+    selectionNote: JSON.stringify({
+      missing: a.verification.missing,
+      extra: a.verification.extra,
+      parseIssues: a.verification.parseIssues,
+    }),
+    rulesEvaluated: a.evals.length,
+    ruleSource: a.ruleSource,
+    evals: a.evals.map((e) => ({
+      ruleId: e.code || e.ruleId,
+      ruleName: e.name,
+      ruleGroup: e.group,
+      hardSoft: e.hardSoft,
+      result: e.result,
+      checkPoint: e.checkPoint ?? null,
+      beforeVal: e.beforeVal ?? null,
+      afterVal: e.afterVal ?? null,
+      defaultAction: e.defaultAction ?? null,
+      riskType: e.riskType ?? null,
+      riskLevel: e.riskLevel ?? null,
+      evidence: e.evidence ?? null,
+    })),
+  });
 }

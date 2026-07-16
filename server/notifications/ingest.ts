@@ -100,6 +100,18 @@ export async function recordNotification(
           severity: draft.severity,
           shouldNotify: draft.shouldNotify,
           disposition: draft.disposition,
+          // A deduped alert represents the latest occurrence. Keep its deep
+          // link and correlation anchors fresh; otherwise the alert count and
+          // title advance while clicking it still opens the first failed run.
+          source: draft.source,
+          runId: draft.runId,
+          traceId: draft.traceId,
+          eventInstanceId: draft.eventInstanceId,
+          agent: draft.agent,
+          domain: draft.domain,
+          anchorsJson: draft.anchorsJson,
+          linkKind: draft.linkKind,
+          linkId: draft.linkId,
         },
       });
       // Eager-on-critical: the FIRST occurrence of a critical alert (count===1)

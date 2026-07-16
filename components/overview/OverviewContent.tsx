@@ -49,7 +49,7 @@ export function OverviewContent() {
   const slugToDomain = useAgentDomainMap();
 
   // SSE-backed Inngest event stream (real-time). Falls back to 2s polling.
-  const eventStream = useInngestEventsStream();
+  const eventStream = useInngestEventsStream({ domain });
 
   // KPI + panels (polled every 8s — these are aggregate snapshots).
   const [failed1hCount, setFailed1hCount] = React.useState<number | null>(null);

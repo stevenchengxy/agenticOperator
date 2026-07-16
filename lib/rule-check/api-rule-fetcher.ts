@@ -8,13 +8,14 @@
 //
 // 现在:
 //   1. GET /api/v1/ontology/actions/ruleCheckForMatchResume/rules?domain=RAAS-v1
-//      → 已 server-side 预过滤 executor='Agent' + enforcementLevel='mandatory'
+//      → 返回 action 绑定的完整规则集(mandatory + optional)
 //   2. 给定 JR 的 client_id,通过 Ontology API 在 Neo4j 中查 :Client.client_name:
 //        a) GET /api/v1/ontology/instances/Client/{client_id}      首选
 //        b) POST /api/v1/ontology/cypher/query  MATCH (c:Client) WHERE c.client_id=$cid RETURN c.client_name
 //        c) 都失败 → fall back 到 normalizeClientId 硬编码映射
 //   3. 客户端再过滤一次:applicableClient ∈ {'通用', clientName}
-//      + 防御性 re-check executor === 'Agent' + enforcementLevel === 'mandatory'
+//      + 防御性 re-check executor === 'Agent' + enforcementLevel 属于
+//        mandatory/optional。optional 也进入检查,但由 runner 标为参考项且不阻断。
 //   4. 每一次 Ontology API 调用都通过 logger.apiCall(...) 落到 logs/<agent>-*.log
 //
 // 不再有 JSON fallback —— API 失败直接抛错(failSafe in runner.ts)。
@@ -73,7 +74,7 @@ export function ruleSurvivesFilter(
   bg: string | null,
 ): boolean {
   if (r.executor !== 'Agent') return false;
-  if (r.enforcementLevel !== 'mandatory') return false;
+  if (r.enforcementLevel !== 'mandatory' && r.enforcementLevel !== 'optional') return false;
   const ac = typeof r.applicableClient === 'string' ? r.applicableClient : '';
   const clientOk = ac === '通用' || (!!clientName && ac === clientName);
   if (!clientOk) return false;
@@ -108,12 +109,28 @@ export function ruleProvenance(
   const ac = typeof r.applicableClient === 'string' ? r.applicableClient : '';
   const dept = typeof r.applicableDepartment === 'string' ? r.applicableDepartment : '';
 
-  if (r.executor !== 'Agent' || r.enforcementLevel !== 'mandatory') {
+  const enforcement: RuleProvenance['enforcement_level'] =
+    r.enforcementLevel === 'mandatory' || r.enforcementLevel === 'optional'
+      ? r.enforcementLevel
+      : undefined;
+  const failurePolicy: RuleProvenance['failure_policy'] =
+    r.failurePolicy === 'block' || r.failurePolicy === 'warn' ? r.failurePolicy : undefined;
+  const governance: Pick<
+    RuleProvenance,
+    'enforcement_level' | 'failure_policy' | 'reference_only'
+  > = {
+    enforcement_level: enforcement,
+    failure_policy: failurePolicy,
+    reference_only: enforcement === 'optional',
+  };
+
+  if (r.executor !== 'Agent' || !enforcement) {
     return {
       rule_id,
       tier,
       included: false,
-      reason: `排除：executor=${String(r.executor)} / enforcement=${String(r.enforcementLevel)},非 Agent+mandatory`,
+      reason: `排除：executor=${String(r.executor)} / enforcement=${String(r.enforcementLevel)},非 Agent 或 enforcement 非 mandatory/optional`,
+      ...governance,
     };
   }
 
@@ -124,18 +141,39 @@ export function ruleProvenance(
       tier,
       included: false,
       reason: `排除：规则客户=${ac} ≠ 岗位客户=${clientName ?? '(未解析)'}`,
+      ...governance,
     };
   }
 
+  const inclusionSuffix = enforcement === 'optional' ? '；optional 参考规则,参与检查但不阻断' : '';
+
   if (tier === 'general') {
-    return { rule_id, tier, included: true, reason: '通用规则(CSI),无条件纳入' };
+    return {
+      rule_id,
+      tier,
+      included: true,
+      reason: `通用规则(CSI),无条件纳入${inclusionSuffix}`,
+      ...governance,
+    };
   }
   if (tier === 'client') {
-    return { rule_id, tier, included: true, reason: `客户=${clientName} 命中,部门无限定,纳入` };
+    return {
+      rule_id,
+      tier,
+      included: true,
+      reason: `客户=${clientName} 命中,部门无限定,纳入${inclusionSuffix}`,
+      ...governance,
+    };
   }
   // department tier
   if (matchesDepartment(dept, bg)) {
-    return { rule_id, tier, included: true, reason: `部门=${dept} 命中岗位 bg=${bg},纳入` };
+    return {
+      rule_id,
+      tier,
+      included: true,
+      reason: `部门=${dept} 命中岗位 bg=${bg},纳入${inclusionSuffix}`,
+      ...governance,
+    };
   }
   if (!bg) {
     return {
@@ -143,6 +181,7 @@ export function ruleProvenance(
       tier,
       included: false,
       reason: `排除：岗位 bg 未解析,部门专属规则(${dept})fail-closed`,
+      ...governance,
     };
   }
   return {
@@ -150,6 +189,7 @@ export function ruleProvenance(
     tier,
     included: false,
     reason: `排除：规则部门=${dept} ≠ 岗位 bg=${bg}`,
+    ...governance,
   };
 }
 
@@ -654,10 +694,10 @@ function toRule(r: Record<string, unknown>): Rule {
   const enforcement = s('enforcementLevel') as 'mandatory' | 'optional' | '';
   const failure = s('failurePolicy') as 'block' | 'warn' | '';
   const sev =
-    enforcement === 'mandatory' && failure === 'block'
-      ? 'terminal'
-      : enforcement === 'optional' && failure === 'warn'
-        ? 'flag_only'
+    enforcement === 'optional'
+      ? 'flag_only'
+      : enforcement === 'mandatory' && failure === 'block'
+        ? 'terminal'
         : 'needs_human';
   return {
     id: s('id'),

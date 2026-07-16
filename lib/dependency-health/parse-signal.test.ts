@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { RECRUITMENT_DOMAIN_ID } from '../domain-ids';
 import { parseDependencyRow } from './parse-signal';
 
 const ts = new Date('2026-06-05T10:00:00Z');
@@ -33,7 +34,11 @@ describe('parseDependencyRow', () => {
       ts,
       payloadJson: JSON.stringify({ provider: 'llm', op: 'ruleCheck', reason: 'empty' }),
     };
-    expect(parseDependencyRow(row)).toMatchObject({ provider: 'llm', reason: 'empty', domain: '招聘-v1' });
+    expect(parseDependencyRow(row)).toMatchObject({
+      provider: 'llm',
+      reason: 'empty',
+      domain: RECRUITMENT_DOMAIN_ID,
+    });
   });
 
   it('returns null for malformed / unparseable / incomplete payloads', () => {

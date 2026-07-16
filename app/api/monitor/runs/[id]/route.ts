@@ -3,6 +3,7 @@ import { prisma } from '@/server/db';
 import { NODES } from '@/lib/workflow-graph-meta';
 import { sumTokensFromActivities, safeParse } from '@/lib/monitor/aggregations';
 import type { MonitorRunDetail, RunTrailStep } from '@/lib/monitor/types';
+import { classifyLogFailure } from '@/server/log/failure-classifier';
 
 export async function GET(
   _req: Request,
@@ -13,7 +14,7 @@ export async function GET(
     const run = await prisma.workflowRun.findUnique({ where: { id } });
     if (!run) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
-    const [activities, hitlRows, eventRows, stepRows] = await Promise.all([
+    const [activities, hitlRows, eventRows, stepRows, failureLogRows] = await Promise.all([
       prisma.agentActivity.findMany({
         // Chatbot rows are conversational ABOUT the run, not part of its execution. Filter for the timeline.
         where: { runId: id, agentName: { not: 'Chatbot' } },
@@ -59,6 +60,29 @@ export async function GET(
           startedAt: true,
           completedAt: true,
           durationMs: true,
+        },
+      }),
+      prisma.logEvent.findMany({
+        where: {
+          runId: id,
+          OR: [
+            { level: { in: ['error', 'critical'] } },
+            { category: { in: ['dependency', 'anomaly'] } },
+            { payloadJson: { contains: '"failure"', mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { ts: 'asc' },
+        take: 200,
+        select: {
+          id: true,
+          ts: true,
+          level: true,
+          category: true,
+          source: true,
+          agent: true,
+          eventName: true,
+          message: true,
+          payloadJson: true,
         },
       }),
     ]);
@@ -120,6 +144,36 @@ export async function GET(
       tokensByAgent[agentName] = { ...tokens, model };
     }
 
+    const failures = failureLogRows
+      .map((r) => {
+        const failure = classifyLogFailure({
+          level: r.level,
+          category: r.category,
+          source: r.source,
+          agent: r.agent,
+          eventName: r.eventName,
+          message: r.message,
+          payloadJson: r.payloadJson,
+        });
+        if (!failure) return null;
+        return {
+          id: r.id,
+          ts: r.ts.toISOString(),
+          level: r.level as MonitorRunDetail['failureSummary']['failures'][number]['level'],
+          category: r.category,
+          source: r.source,
+          agent: r.agent,
+          eventName: r.eventName,
+          message: r.message,
+          failure,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    const primaryFailure =
+      failures.find((f) => f.level === 'error' || f.level === 'critical') ??
+      failures[0] ??
+      null;
+
     const detail: MonitorRunDetail = {
       run: {
         id: run.id,
@@ -162,6 +216,10 @@ export async function GET(
         createdAt: h.createdAt.toISOString(),
         completedAt: h.completedAt?.toISOString() ?? null,
       })),
+      failureSummary: {
+        primary: primaryFailure,
+        failures,
+      },
     };
     return NextResponse.json(detail);
   } catch (e) {

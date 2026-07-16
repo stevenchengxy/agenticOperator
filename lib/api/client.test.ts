@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchJson } from './client';
+import { ApiTimeoutError, fetchJson } from './client';
 
 describe('fetchJson', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
@@ -40,5 +40,24 @@ describe('fetchJson', () => {
       error: 'INTERNAL',
       message: 'Internal',
     });
+  });
+
+  it('uses custom timeoutMs for AbortSignal without forwarding it to fetch', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ a: 1 }),
+    });
+    await fetchJson<{ a: number }>('/api/runs', { timeoutMs: 12_000 });
+    expect(timeoutSpy).toHaveBeenCalledWith(12_000);
+    const init = (fetch as any).mock.calls[0][1];
+    expect(init.timeoutMs).toBeUndefined();
+    expect(init.signal).toBeDefined();
+  });
+
+  it('throws ApiTimeoutError when fetch is aborted by the timeout signal', async () => {
+    (fetch as any).mockRejectedValueOnce({ name: 'TimeoutError' });
+    await expect(fetchJson('/api/runs')).rejects.toBeInstanceOf(ApiTimeoutError);
   });
 });

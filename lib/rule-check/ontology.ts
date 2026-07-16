@@ -34,8 +34,8 @@ function deriveLegacySeverity(
   enforcementLevel: 'mandatory' | 'optional' | undefined,
   failurePolicy: 'block' | 'warn' | undefined,
 ): Severity {
+  if (enforcementLevel === 'optional') return 'flag_only';
   if (enforcementLevel === 'mandatory' && failurePolicy === 'block') return 'terminal';
-  if (enforcementLevel === 'optional' && failurePolicy === 'warn') return 'flag_only';
   if (enforcementLevel === undefined || failurePolicy === undefined) return 'flag_only';
   return 'needs_human';
 }

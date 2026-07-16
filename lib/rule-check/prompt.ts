@@ -122,7 +122,10 @@ const STATUS_DECISION_TREE = `## 5. 单条 rule 的 status 决策树（**严格�
 
 const DECISION_FOLD_BLOCK = `## 6. 决策结算（由 server 计算，与你无关）
 
-最终 decision 完全由 server 端依据各 rule 的 status 汇总；你**只**输出 rule_results[]，**不要**输出 decision，也**不要为了影响最终结果而改变任何一条 rule 的 status**。你的唯一职责是按 §5 决策树独立、诚实地判定每条规则的真实 status（缺字段一律 \`insufficient_info\`，既不是 \`fail\` 也不是 \`pass\`）。`;
+最终 decision 完全由 server 端依据各 rule 的 status + ontology governance 汇总；你**只**输出 rule_results[]，**不要**输出 decision，也**不要为了影响最终结果而改变任何一条 rule 的 status**。你的唯一职责是按 §5 决策树独立、诚实地判定每条规则的真实 status（缺字段一律 \`insufficient_info\`，既不是 \`fail\` 也不是 \`pass\`）。
+
+- 标记为 \`enforcement=mandatory\` 的规则参与最终门禁。
+- 标记为 \`enforcement=optional\` 的规则也必须逐条检查并输出真实 status；即使 status=fail，也只作为参考写入审计/Neo4j，**绝不阻断**最终流程。`;
 
 const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
 
@@ -138,7 +141,7 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
 
 **关键规则（违反即视为无效输出）：**
 - status ∈ {pass, fail, pending, insufficient_info, not_triggered, not_executed}。
-- next_action ∈ {continue, block, supplement, review}，**必填**，按 status 取值：fail→block(阻断)；insufficient_info→supplement(补充材料)；pending→review(人工复核)；pass / not_triggered→continue(放行)。
+- next_action ∈ {continue, block, supplement, review}，**必填**。mandatory 规则按 status 取值：fail→block(阻断)；insufficient_info→supplement(补充材料)；pending→review(人工复核)；pass / not_triggered→continue(放行)。optional 规则的 fail / pending / insufficient_info 一律→review(仅供参考、不阻断)，pass / not_triggered→continue。
 - 每条规则都必须有一条对应的 \`rule_results\` 条目，按 Set 顺序、Set 内列出顺序输出。
 - \`reason\` 字段 **必填**（每条 rule 都要写，所有 status 都要写）：
   - status='fail'：写**详细**判定链(≤120 字)——①触发判定:为何本规则适用本候选人 ②引用 GRAPH_CONTEXT 的具体字段+数值 ③套用规则逻辑(注意极性:排除/冷冻类是"命中坏条件→fail"，别被"满足"二字误导)④结论。例:"目标岗位归属CDG适用；employment_links 最近腾讯离职 2024.02 距今约3个月<6；命中冷冻期阻断条件→未通过"
@@ -153,6 +156,7 @@ const OUTPUT_SCHEMA_MATCH_RESUME = `## 7. Output schema
 const SELF_CHECK_MATCH_RESUME = `## 8. 自检
 - [ ] 是否按 Set 顺序、Set 内列出顺序评估？
 - [ ] 是否在 rule_results 中**为每一条规则**输出了一条条目？（数量必须与本提示中的规则总数完全一致）
+- [ ] 是否完整评估了 optional rules，并确保 optional 的 next_action 没有使用 block？
 - [ ] 每条 fail 是否都在 reason 中引用了 GRAPH_CONTEXT 中的具体字段+数值？
 - [ ] 是否把所有"字段为 null / 缺失"的情况标成了 \`insufficient_info\` 而不是 \`fail\`？
 - [ ] 仅输出 JSON 对象本身，无 markdown 包裹？`;
@@ -258,6 +262,7 @@ export const MATCH_RESUME_SYSTEM_PROMPT = `你是一名 matchResume 规则评估
 边界约束：
 - 必须按 Set 顺序、Set 内列出顺序评估，**每条 rule 都独立评估并输出 status**（不要因为前面有 fail 就把后面标 not_executed）
 - 严格按 user 消息中第 5 节的"单条 rule status 决策树"判断 status
+- enforcement=optional 的规则也必须检查；命中时保留 fail，但 next_action=review，绝不能输出 block
 - 任何 fail 必须在 reason 中引用 GRAPH_CONTEXT 里的具体字段+数值；做不到的标 insufficient_info
 - 字段为 null / 缺失 / 空数组 → insufficient_info，**绝对不要**判 fail
 - 必须输出合法 JSON，不要在 JSON 外加任何文本（包括 markdown code fence）`;

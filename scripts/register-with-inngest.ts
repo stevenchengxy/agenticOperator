@@ -7,9 +7,10 @@
 //   npm run register
 //
 // What it does:
-//   PUT http://172.16.1.83:3002/api/inngest
+//   PUT <INNGEST_SERVE_ORIGIN><INNGEST_SERVE_PATH>
 //
-// Reads INNGEST_BASE_URL + AO_LAN_IP + AO_PORT from .env.local.
+// Reads INNGEST_BASE_URL + INNGEST_SERVE_ORIGIN + INNGEST_SERVE_PATH from .env.local.
+// AO_LAN_IP + AO_PORT remain as local-dev fallbacks.
 // Re-run any time after the AO dev server restarts (registration is in-memory).
 
 // dotenv only auto-loads .env, not .env.local. Load explicitly.
@@ -23,41 +24,27 @@ config({ path: path.resolve(process.cwd(), ".env.local") });
 config({ path: path.resolve(process.cwd(), ".env") });
 
 async function main(): Promise<void> {
-  const base =
-    process.env.INNGEST_BASE_URL ??
-    process.env.INNGEST_DEV ??
-    "http://localhost:8288";
-  const lanIp = process.env.AO_LAN_IP ?? "127.0.0.1";
-  const port = process.env.AO_PORT ?? "3002";
-  const callback = `http://${lanIp}:${port}/api/inngest`;
+  const base = resolveInngestBaseUrl();
+  let callback: ResolvedServeCallback;
+  try {
+    callback = resolveServeCallbackUrl();
+  } catch (e) {
+    console.error(`✗ Invalid AO callback configuration: ${(e as Error).message}`);
+    process.exit(1);
+  }
 
   console.log(`Registering RAAS-v1 main app with Inngest:`);
   console.log(`  Inngest server: ${base}`);
-  console.log(`  AO callback:    ${callback}`);
+  console.log(`  AO callback:    ${callback.url}`);
+  console.log(`  Callback source: ${callback.source}`);
   console.log(`  App ID:         ${RAAS_V1_APP_ID}`);
   console.log(`  Expected funcs: ${RAAS_V1_EXPECTED_FUNCTION_COUNT}`);
   console.log("");
 
-  // First sanity-check that the callback is reachable from THIS host.
-  // (If localhost can't hit it, neither can 10.100.0.70.)
-  try {
-    const ping = await fetch(`http://localhost:${port}/api/inngest`, {
-      method: "PUT",
-    });
-    if (!ping.ok) {
-      console.warn(`⚠ Local PUT /api/inngest returned ${ping.status}; AO may not be running yet`);
-    } else {
-      console.log("✓ AO /api/inngest reachable from localhost");
-    }
-  } catch (e) {
-    console.error(`✗ AO is not running on port ${port}: ${(e as Error).message}`);
-    process.exit(1);
-  }
-
-  // Then self-sync the exact callback URL that the shared Inngest server should
+  // Self-sync the exact callback URL that the shared Inngest server should
   // store. The SDK endpoint owns the app id + manifest, so PUT is enough.
   try {
-    const res = await fetch(callback, { method: "PUT" });
+    const res = await fetch(callback.url, { method: "PUT" });
     const text = await res.text();
     if (!res.ok) {
       console.error(`✗ Register failed (${res.status}): ${text}`);
@@ -78,14 +65,62 @@ async function main(): Promise<void> {
     }
     console.log("");
     console.log(`Next: send a RESUME_DOWNLOADED event from RAAS or trigger locally:`);
-    console.log(`  curl -X POST http://localhost:${port}/api/test/trigger-resume-uploaded`);
+    console.log(`  curl -X POST http://localhost:${callback.localPort}/api/test/trigger-resume-uploaded`);
   } catch (e) {
-    console.error(`✗ Couldn't PUT ${callback}: ${(e as Error).message}`);
+    console.error(`✗ Couldn't PUT ${callback.url}: ${(e as Error).message}`);
     process.exit(1);
   }
 }
 
 main();
+
+type ResolvedServeCallback = {
+  url: string;
+  source: string;
+  localPort: string;
+};
+
+function resolveInngestBaseUrl(): string {
+  const raw =
+    process.env.INNGEST_BASE_URL ??
+    process.env.INNGEST_DEV ??
+    process.env.INNGEST_LOCAL_URL ??
+    process.env.INNGEST_ADMIN_URL ??
+    "http://localhost:8288";
+  return raw.replace(/\/+$/, "");
+}
+
+function resolveServeCallbackUrl(): ResolvedServeCallback {
+  const path = normalizeServePath(process.env.INNGEST_SERVE_PATH ?? "/api/inngest");
+  const configuredOrigin = process.env.INNGEST_SERVE_ORIGIN ?? process.env.INNGEST_SERVE_HOST;
+  if (configuredOrigin) {
+    const parsedOrigin = new URL(configuredOrigin);
+    const origin = parsedOrigin.origin;
+    return {
+      url: joinUrl(origin, path),
+      source: process.env.INNGEST_SERVE_ORIGIN ? "INNGEST_SERVE_ORIGIN" : "INNGEST_SERVE_HOST",
+      localPort: process.env.AO_PORT ?? (parsedOrigin.port || "3002"),
+    };
+  }
+
+  const lanIp = process.env.AO_LAN_IP ?? "127.0.0.1";
+  const port = process.env.AO_PORT ?? "3002";
+  return {
+    url: joinUrl(`http://${lanIp}:${port}`, path),
+    source: "AO_LAN_IP/AO_PORT fallback",
+    localPort: port,
+  };
+}
+
+function normalizeServePath(value: string): string {
+  const trimmed = value.trim();
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeadingSlash.replace(/\/+$/, "") || "/api/inngest";
+}
+
+function joinUrl(origin: string, pathname: string): string {
+  return `${origin.replace(/\/+$/, "")}${pathname}`;
+}
 
 async function probeFunctionCount(base: string, appId: string): Promise<number | null> {
   try {

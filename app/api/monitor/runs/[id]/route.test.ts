@@ -7,6 +7,7 @@ vi.mock('@/server/db', () => ({
     humanTask: { findMany: vi.fn() },
     eventInstance: { findMany: vi.fn() },
     workflowStep: { findMany: vi.fn() },
+    logEvent: { findMany: vi.fn() },
   },
 }));
 
@@ -16,7 +17,10 @@ import { prisma } from '@/server/db';
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
 describe('GET /api/monitor/runs/[id]', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (prisma.logEvent.findMany as any).mockResolvedValue([]);
+  });
 
   it('returns 404 when run is not found', async () => {
     (prisma.workflowRun.findUnique as any).mockResolvedValue(null);

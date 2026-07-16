@@ -35,6 +35,7 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.deploy
 
 # vercel
 .vercel
@@ -91,3 +92,7 @@ prisma/dev.db-journal
 
 # brainstorming visual-companion mockups
 .superpowers/
+
+# stray pnpm experiments — npm is the package manager
+pnpm-lock.yaml
+pnpm-workspace.yaml

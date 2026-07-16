@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';
 import type { MonitorFailureDetailResponse } from '@/lib/monitor/types';
+import { classifyLogFailure } from '@/server/log/failure-classifier';
 
 export async function GET(
   _req: Request,
@@ -8,7 +9,7 @@ export async function GET(
 ): Promise<Response> {
   const { runId } = await ctx.params;
   try {
-    const [run, steps, retries, events] = await Promise.all([
+    const [run, steps, retries, events, logRows] = await Promise.all([
       prisma.workflowRun.findUnique({ where: { id: runId } }),
       prisma.workflowStep.findMany({
         where: { runId, status: 'failed' },
@@ -22,8 +23,60 @@ export async function GET(
         where: { causedByEventId: { not: null } /* loose proxy; refine if needed */ },
         take: 50,
       }).catch(() => []),
+      prisma.logEvent.findMany({
+        where: {
+          runId,
+          OR: [
+            { level: { in: ['error', 'critical'] } },
+            { category: { in: ['dependency', 'anomaly'] } },
+            { payloadJson: { contains: '"failure"', mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { ts: 'asc' },
+        take: 200,
+        select: {
+          id: true,
+          ts: true,
+          level: true,
+          category: true,
+          source: true,
+          agent: true,
+          eventName: true,
+          message: true,
+          payloadJson: true,
+        },
+      }),
     ]);
     if (!run) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    const logFailures = logRows
+      .map((r) => {
+        const failure = classifyLogFailure({
+          level: r.level,
+          category: r.category,
+          source: r.source,
+          agent: r.agent,
+          eventName: r.eventName,
+          message: r.message,
+          payloadJson: r.payloadJson,
+        });
+        if (!failure) return null;
+        return {
+          id: r.id,
+          ts: r.ts.toISOString(),
+          level: r.level,
+          category: r.category,
+          source: r.source,
+          agent: r.agent,
+          eventName: r.eventName,
+          message: r.message,
+          failure,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    const primaryFailure =
+      logFailures.find((f) => f.level === 'error' || f.level === 'critical') ??
+      logFailures[0] ??
+      null;
     const body: MonitorFailureDetailResponse = {
       run: {
         id: run.id,
@@ -60,6 +113,8 @@ export async function GET(
         status: e.status,
         ts: e.ts.toISOString(),
       })),
+      logFailures,
+      primaryFailure,
     };
     return NextResponse.json(body);
   } catch (e) {

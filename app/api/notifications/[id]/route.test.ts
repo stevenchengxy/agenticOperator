@@ -26,6 +26,7 @@ function makeNotification(over: Record<string, unknown> = {}) {
     aiSummary: '后端崩溃后已自动重启,需确认原因',
     aiSource: 'llm',
     llmModel: 'x',
+    aiGeneratedAt: new Date('2026-06-01T12:01:00Z'),
     count: 1,
     firstSeenAt: new Date('2026-06-01T12:00:00Z'),
     lastSeenAt: new Date('2026-06-01T12:00:00Z'),
@@ -88,8 +89,23 @@ describe('GET /api/notifications/[id]', () => {
 
     const res = await GET(req(), ctx('n1'));
     const body = await res.json();
-    expect(body.href).toBe('/monitor/runs/R9');
+    expect(body.href).toBe('/monitor/runs/R9?focus=run%3AR9');
     const call = (prisma.logEvent.findMany as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.where).toEqual({ runId: 'R9' });
+  });
+
+  it('hides an AI summary generated before the latest deduped occurrence', async () => {
+    (prisma.notification.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeNotification({
+        lastSeenAt: new Date('2026-06-01T12:02:00Z'),
+        aiGeneratedAt: new Date('2026-06-01T12:01:00Z'),
+      }),
+    );
+    (prisma.logEvent.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const res = await GET(req(), ctx('n1'));
+    const body = await res.json();
+    expect(body.notification.aiSummary).toBeNull();
+    expect(body.notification.aiSource).toBeNull();
   });
 });

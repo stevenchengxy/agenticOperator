@@ -18,9 +18,15 @@
 // 见 docs/superpowers/specs/2026-05-19-rule-check-consolidation-design.md
 
 import { NonRetriableError } from 'inngest';
+import { createHash } from 'node:crypto';
 import { buildRuleCheckInput, runRuleCheck, formatExplanation } from '@/lib/rule-check';
 import { extractDims, severityForRuleId } from '@/lib/rule-check/ontology';
 import { getLiveRuleCatalog } from '@/lib/rule-check/live-rule-catalog';
+import {
+  blockingExplanations,
+  formatOptionalRuleReference,
+} from '@/lib/rule-check/optional-reference';
+import { asRuleAuditPersistenceError } from '@/lib/rule-check/ontology-audit-writer';
 import { isInfraFailure, friendlyInfraReason } from '@/lib/rule-check/infra-failure';
 import { recordNotification } from '@/server/notifications/ingest';
 import { resolveAlertsByPrefix } from '@/server/notifications/resolve';
@@ -66,7 +72,7 @@ export async function ruleCheckAgentHandler({
   logger,
   runId,
 }: {
-  event: { name: string; data: unknown };
+  event: { id?: string; name: string; data: unknown };
   step: {
     run: <T>(id: string, fn: () => Promise<T>) => Promise<T>;
     sendEvent: (id: string, e: { name: string; data: unknown }) => Promise<unknown>;
@@ -80,6 +86,12 @@ export async function ruleCheckAgentHandler({
   const candidateId = pickCandidateId(data);
   const employeeId = pickEmployeeId(data);
   const resumeId = typeof data.resume_id === 'string' ? data.resume_id : '';
+  const parentAuditId = pickParentAuditId(data);
+  // 透传候选人求职期望(resumeParser 抽出)→ matchResume 拼 candidatePreferences。
+  const candidateExpectation =
+    data.candidate_expectation && typeof data.candidate_expectation === 'object'
+      ? (data.candidate_expectation as MatchRuleCheckPassedData['candidate_expectation'])
+      : undefined;
 
   const fileLogger = createAgentLogger({
     agent: 'ruleCheck',
@@ -370,6 +382,7 @@ export async function ruleCheckAgentHandler({
         job_requisition: req as unknown as Record<string, unknown>,
         parsed_resume: parsedData ?? null,
         parsed_content: parsedContent,
+        candidate_expectation: candidateExpectation,
         runtime_context: runtimeContext,
       };
       await step.sendEvent(`emit-bypass-passed-${stepKey}`, {
@@ -458,9 +471,18 @@ export async function ruleCheckAgentHandler({
         // FAILED event — those all live AFTER this throw. Idempotent upsert on a
         // stable id so Inngest retries overwrite instead of piling up rows.
         const parkedReason = friendlyInfraReason(reason, oc && !oc.ok ? oc.reason : undefined);
-        const parkedAuditId = `rca_parked_${candidateId || 'unknown'}_${jrid}`;
+        const parkedAuditId = makePersistentAuditId({
+          kind: 'parked',
+          runId,
+          traceId,
+          eventId: event.id,
+          uploadId,
+          candidateId,
+          resumeId,
+          jobRequisitionId: jrid,
+        });
         const parkedData = {
-          run_id: runtimeContext.trace_id ?? parkedAuditId,
+          run_id: runId ?? runtimeContext.trace_id ?? parkedAuditId,
           trace_id: runtimeContext.trace_id ?? null,
           upload_id: uploadId ?? '',
           candidate_id: candidateId ?? '',
@@ -478,6 +500,7 @@ export async function ruleCheckAgentHandler({
           llm_duration_ms: Math.round(r.audit.llm_duration_ms ?? 0),
           llm_prompt_tokens: r.audit.llm_prompt_tokens ?? null,
           llm_completion_tokens: r.audit.llm_completion_tokens ?? null,
+          parse_error: r.audit.parse_error ?? null,
           rules_evaluated: r.audit.rules_evaluated ?? 0,
           // 规则库总数 = 候选规则全集(provenance,含被排除的);早期误写成
           // rules_evaluated(只数选中的)→ KPI「规则库 N」偏小。
@@ -485,10 +508,14 @@ export async function ruleCheckAgentHandler({
           rule_source: r.audit.rule_source ?? 'ontology-api',
           partial_resume_fields: '[]',
           rule_provenance: JSON.stringify(r.audit.rule_provenance ?? []),
+          user_prompt: r.audit.user_prompt ?? null,
+          system_prompt: r.audit.system_prompt ?? null,
+          llm_raw_text: r.audit.llm_raw_text ?? r.audit.raw_llm_text ?? null,
           // Carry the resume/JR snapshot so the 总览 "故障挂起的校验" panel can
           // show the candidate name + 岗位 (not "(未知候选人)").
-          parsed_resume_json: parsedData ? JSON.stringify(parsedData).slice(0, 200_000) : null,
-          job_requisition_json: req ? JSON.stringify(req).slice(0, 200_000) : null,
+          parsed_resume_json: parsedData ? JSON.stringify(parsedData) : null,
+          job_requisition_json: req ? JSON.stringify(req) : null,
+          parent_audit_id: parentAuditId,
         };
         try {
           await prisma.ruleCheckAudit.upsert({
@@ -496,14 +523,16 @@ export async function ruleCheckAgentHandler({
             create: { audit_id: parkedAuditId, ...parkedData },
             update: parkedData,
           });
-          logger.info(
-            `[${AGENT_NAME}] ⏸ wrote PARKED audit ${parkedAuditId} reason=${reason} rules_fetched=${parkedData.rules_evaluated}`,
-          );
-        } catch (e) {
-          logger.warn(
-            `[${AGENT_NAME}] parked-audit write failed jr=${jrid}: ${(e as Error).message.slice(0, 200)}`,
-          );
+        } catch (error) {
+          // A PARKED row is the authoritative record that this candidate was
+          // *not* rejected because infrastructure failed. Never turn a failed
+          // audit write into a successful/opaque run: keep the tagged error so
+          // Inngest retries the same stable id before anything can advance.
+          throw asRuleAuditPersistenceError(error);
         }
+        logger.info(
+          `[${AGENT_NAME}] ⏸ wrote PARKED audit ${parkedAuditId} reason=${reason} rules_fetched=${parkedData.rules_evaluated}`,
+        );
 
         // Surface a critical alert into the 消息通知 center. Deduped by reason, so
         // a gateway outage collapses every parked rule-check into ONE alert with a
@@ -532,6 +561,39 @@ export async function ruleCheckAgentHandler({
     // 续跑成功却不关告警会让 firing 行永久挂着(2026-06-11 审计)。Fire-and-forget。
     void resolveAlertsByPrefix('rule_check_parked.').catch(() => {});
 
+    // Optional rules are real evaluations, but reference-only. Keep the split
+    // once and reuse it for the safety gate, audit, events, partner-pg and the
+    // Neo4j Candidate_Match_Result write so no downstream path can accidentally
+    // reinterpret an optional fail as a blocker.
+    const blockingFailures = blockingExplanations(result.explanations);
+    const optionalRuleReference = formatOptionalRuleReference(result.rule_results);
+
+    // Final safety gate: no non-business FAIL may cross into downstream state
+    // writes or MATCH_RULE_CHECK_FAILED. This is intentionally close to the
+    // emit/write section, so future refactors cannot accidentally bypass the
+    // in-step infra guard above and reject a candidate because the LLM/parser
+    // failed.
+    if (result.decision === 'FAIL') {
+      const failReason = result.audit.fail_reason;
+      const hasBusinessEvidence = blockingFailures.length > 0;
+      if (failReason || !hasBusinessEvidence) {
+        await recordNotification({
+          level: 'critical',
+          category: 'system',
+          source: 'rule-check',
+          agent: AGENT_NAME,
+          message: `规则校验未产出业务失败证据,已阻止 MATCH_RULE_CHECK_FAILED emit (reason=${failReason ?? 'empty-explanations'})`,
+          runId: runId ?? null,
+          traceId: traceId ?? null,
+          anchors: { candidate_id: candidateId, job_requisition_id: jrid, upload_id: uploadId },
+          dedupeHint: `rule_check_emit_guard.${failReason ?? 'empty-explanations'}`,
+        });
+        throw new Error(
+          `[${AGENT_NAME}] blocked unsafe MATCH_RULE_CHECK_FAILED emit (jr=${jrid}, reason=${failReason ?? 'empty-explanations'}); candidate NOT rejected`,
+        );
+      }
+    }
+
     const dims = extractDims(req as unknown as Record<string, unknown>);
     const audit: RuleCheckAuditMeta = {
       rules_evaluated: result.audit.rules_evaluated,
@@ -551,135 +613,117 @@ export async function ruleCheckAgentHandler({
     // ★ Wire audit into Prisma so /rule-check UI gets live data
     //   (the page reads from prisma.ruleCheckAudit via /api/rule-check-audits;
     //    before this hook the table only had stale 2026-05-15 fixtures).
-    //   Soft-fail: write errors don't break the rule-check flow.
-    const auditWriteResult = await step.run(`write-audit-${stepKey}`, async () => {
-      const auditId = `rca_${runtimeContext.trace_id ?? 'no-trace'}_${stepKey.slice(0, 50)}_${Date.now()}`;
-      try {
-        await prisma.ruleCheckAudit.create({
-          data: {
-            audit_id: auditId,
-            run_id: runtimeContext.trace_id ?? auditId,
-            trace_id: runtimeContext.trace_id ?? null,
-            upload_id: uploadId ?? '',
-            candidate_id: candidateId ?? '',
-            resume_id: resumeId || '',
-            job_requisition_id: jrid,
-            client_name: dims.client_id || null,
-            // 写时持久化可读客户名(解析自 partner-pg/ontology);读时直接读,
-            // 不再实时查 partner-pg → 干掉 detail/总览 的 ETIMEDOUT。
-            client_display_name: result.audit.client_name_resolved ?? null,
-            // Prefer the fetch-time resolved bg (graph lookup ⊇ JR's own bg field);
-            // fall back to dims only when resolution returned nothing.
-            business_group: result.audit.business_group_resolved ?? dims.business_group ?? null,
-            studio: dims.studio ?? null,
-            // Policy 2026-06-01 (fail-closed): 底线规则若 agent 无法自证达标
-            // (insufficient_info / pending / not_executed)→ foldDecision 折成 FAIL。
-            // decision 仍只 PASS/FAIL 两态。
-            decision: result.decision === 'FAIL' ? 'FAIL' : 'PASS',
-            llm_decision: result.decision,
-            // 不通过原因含全部阻断状态(确认违反 + 信息不足/待复核/未能评估),
-            // 后者带「需人工复核」标注 — 见 formatExplanation。
-            failure_reasons: JSON.stringify(
-              result.explanations.map((e) => formatExplanation(e).slice(0, 240)),
-            ),
-            llm_model: result.audit.llm_model,
-            llm_duration_ms: Math.round(result.audit.llm_duration_ms ?? 0),
-            llm_prompt_tokens: result.audit.llm_prompt_tokens ?? null,
-            llm_completion_tokens: result.audit.llm_completion_tokens ?? null,
-            rules_evaluated: result.audit.rules_evaluated ?? 0,
-            // 规则库总数 = 候选规则全集(provenance,含被排除的);早期误写成
-            // rules_evaluated(只数选中的)→ KPI「规则库 N」偏小。
-            rules_total_in_ontology:
-              result.audit.rule_provenance?.length || result.audit.rules_evaluated || 0,
-            rule_source: result.audit.rule_source ?? 'unknown',
-            // Business decisions reach this write (infra failures throw earlier),
-            // so fail_reason is null/non-infra here → counted normally by stats.
-            fail_reason: result.audit.fail_reason ?? null,
-            partial_resume_fields: '[]',
-            // 2026-05-26: 三层抓取证据(为何纳入/排除每条规则)落 audit,供 UI 展示。
-            rule_provenance: JSON.stringify(result.audit.rule_provenance ?? []),
-            // 2026-05-20: persist prompts + raw LLM response so the
-            // /rule-check Audit detail UI (User Prompt / LLM Response /
-            // Rule Flags tabs) has data. Slice to 200k to avoid blowing
-            // SQLite TEXT column on extreme cases.
-            user_prompt: result.audit.user_prompt
-              ? result.audit.user_prompt.slice(0, 200_000)
-              : null,
-            system_prompt: result.audit.system_prompt ?? null,
-            llm_raw_text: result.audit.llm_raw_text
-              ? result.audit.llm_raw_text.slice(0, 200_000)
-              : null,
-            parsed_resume_json: parsedData
-              ? JSON.stringify(parsedData).slice(0, 200_000)
-              : null,
-            job_requisition_json: req
-              ? JSON.stringify(req).slice(0, 200_000)
-              : null,
-          },
-        });
+    // Persistence is a mandatory gate: audit + every flag commit atomically,
+    // and downstream writes/events only happen after this step succeeds.
+    // A thrown DB error lets Inngest retry the same stable audit id.
+    await step.run(`write-audit-${stepKey}`, async () => {
+      const auditId = makePersistentAuditId({
+        kind: 'decision',
+        runId,
+        traceId,
+        eventId: event.id,
+        uploadId,
+        candidateId,
+        resumeId,
+        jobRequisitionId: jrid,
+      });
+      const liveCat = await getLiveRuleCatalog();
+      const flagRows = result.rule_results.map((rr) => {
+        const liveRule = liveCat.get(rr.rule_id);
+        const s = rr.status.toLowerCase();
+        const resultUpper =
+          s === 'pass'
+            ? 'PASS'
+            : s === 'fail'
+              ? 'FAIL'
+              : s === 'insufficient_info'
+                ? 'INSUFFICIENT_INFO'
+                : s === 'not_triggered'
+                  ? 'NOT_TRIGGERED'
+                  : s === 'review' || s === 'pending'
+                    ? 'REVIEW'
+                    : rr.status.toUpperCase();
+        return {
+          flag_id: `${auditId}::${rr.rule_id}`,
+          audit_id: auditId,
+          rule_id: rr.rule_id,
+          rule_name_snapshot: liveRule?.businessLogicRuleName ?? '',
+          severity: rr.severity ?? liveRule?.severity ?? severityForRuleId(rr.rule_id),
+          applicable_client: dims.client_id || null,
+          applicable: s !== 'not_triggered',
+          result: resultUpper,
+          evidence: rr.reason ?? null,
+          next_action: rr.next_action ?? null,
+        };
+      });
+      const auditData = {
+        run_id: runId ?? runtimeContext.trace_id ?? auditId,
+        trace_id: runtimeContext.trace_id ?? null,
+        upload_id: uploadId ?? '',
+        candidate_id: candidateId ?? '',
+        resume_id: resumeId || '',
+        job_requisition_id: jrid,
+        client_name: dims.client_id || null,
+        client_display_name: result.audit.client_name_resolved ?? null,
+        business_group: result.audit.business_group_resolved ?? dims.business_group ?? null,
+        studio: dims.studio ?? null,
+        decision: result.decision === 'FAIL' ? 'FAIL' : 'PASS',
+        llm_decision: result.decision,
+        failure_reasons: JSON.stringify(blockingFailures.map(formatExplanation)),
+        llm_model: result.audit.llm_model,
+        llm_duration_ms: Math.round(result.audit.llm_duration_ms ?? 0),
+        llm_prompt_tokens: result.audit.llm_prompt_tokens ?? null,
+        llm_completion_tokens: result.audit.llm_completion_tokens ?? null,
+        parse_error: result.audit.parse_error ?? null,
+        rules_evaluated: result.audit.rules_evaluated ?? 0,
+        rules_total_in_ontology:
+          result.audit.rule_provenance?.length || result.audit.rules_evaluated || 0,
+        rule_source: result.audit.rule_source ?? 'unknown',
+        fail_reason: result.audit.fail_reason ?? null,
+        partial_resume_fields: '[]',
+        rule_provenance: JSON.stringify(result.audit.rule_provenance ?? []),
+        user_prompt: result.audit.user_prompt ?? null,
+        system_prompt: result.audit.system_prompt ?? null,
+        llm_raw_text: result.audit.llm_raw_text ?? result.audit.raw_llm_text ?? null,
+        parsed_resume_json: parsedData ? JSON.stringify(parsedData) : null,
+        job_requisition_json: req ? JSON.stringify(req) : null,
+        parent_audit_id: parentAuditId,
+      };
 
-        // Persist every evaluated rule as a RuleCheckFlag row so 总览
-        // (matrix/coverage) reads the same data as 审计 — straight from
-        // Postgres, no read-time recovery from llm_raw_text needed.
-        // 规则名/severity 从 live 目录取(Neo4j 优先、打包兜底),改 Neo4j 立即对齐。
-        const liveCat = await getLiveRuleCatalog();
-        const flagRows = result.rule_results.map((rr) => {
-          const liveRule = liveCat.get(rr.rule_id);
-          const s = rr.status.toLowerCase();
-          const resultUpper =
-            s === 'pass'
-              ? 'PASS'
-              : s === 'fail'
-                ? 'FAIL'
-                : s === 'insufficient_info'
-                  ? 'INSUFFICIENT_INFO'
-                  : s === 'not_triggered'
-                    ? 'NOT_TRIGGERED'
-                    : s === 'review' || s === 'pending'
-                      ? 'REVIEW'
-                      : rr.status.toUpperCase();
-          return {
-            flag_id: `${auditId}::${rr.rule_id}`,
-            audit_id: auditId,
-            rule_id: rr.rule_id,
-            rule_name_snapshot: liveRule?.businessLogicRuleName ?? '',
-            severity: liveRule?.severity ?? severityForRuleId(rr.rule_id),
-            applicable_client: dims.client_id || null,
-            applicable: s !== 'not_triggered',
-            result: resultUpper,
-            evidence: rr.reason ?? null,
-            next_action: rr.next_action ?? null,
-          };
+      await prisma.$transaction(async (tx) => {
+        await tx.ruleCheckAudit.upsert({
+          where: { audit_id: auditId },
+          create: { audit_id: auditId, ...auditData },
+          update: auditData,
         });
-        if (flagRows.length > 0) {
-          await prisma.ruleCheckFlag.createMany({ data: flagRows });
-        }
+        await tx.ruleCheckFlag.deleteMany({ where: { audit_id: auditId } });
+        if (flagRows.length > 0) await tx.ruleCheckFlag.createMany({ data: flagRows });
+      });
 
-        logger.info(
-          `[${AGENT_NAME}] ✓ wrote RuleCheckAudit ${auditId} decision=${result.decision} flags=${flagRows.length}`,
-        );
-        return { ok: true, auditId };
-      } catch (e) {
-        const msg = (e as Error).message ?? String(e);
-        logger.warn(`[${AGENT_NAME}] write-audit failed jr=${jrid}: ${msg.slice(0, 240)}`);
-        return { ok: false, error: msg.slice(0, 240) };
-      }
+      logger.info(
+        `[${AGENT_NAME}] ✓ durably wrote RuleCheckAudit ${auditId} decision=${result.decision} flags=${flagRows.length}`,
+      );
+      return { auditId, flags: flagRows.length };
     });
 
     // ★ actions JSON 10-1 side_effect: write Candidate_Match_Result instance
-    //   to Neo4j via Allmeta Ontology API. rule_check_result / rule_check_reason
-    //   are property-bag additions (not in the 8-field schema, allowed by API).
+    //   to Neo4j via Allmeta Ontology API. `rule_check_reason` is the canonical
+    //   ontology field used for both blocking reasons and a JSON snapshot of
+    //   every optional outcome. The optional section is explicitly labelled
+    //   reference-only and never changes `rule_check_result`.
     //   PK convention: cmr_<candidate>_<jr>  (one row per (candidate, JR) pair).
     //   Soft-fail: write errors don't block emit downstream.
     await step.run(`write-cmr-${stepKey}`, async () => {
       const cmrId = `cmr_${candidateId || 'unknown'}_${jrid}`;
-      // rule_check_result 二元化:通过/未通过。原因含全部阻断状态(信息不足等带标注)。
+      // rule_check_result 二元化:通过/未通过。原因只把 mandatory 写成阻断原因;
+      // optional 全量判定另附为参考(包括 PASS/not_triggered),保证 Neo4j 可追溯。
       const ruleCheckResult: '通过' | '未通过' =
         result.decision === 'FAIL' ? '未通过' : '通过';
-      const ruleCheckReason =
+      const blockingReason =
         result.decision === 'FAIL'
-          ? result.explanations.map(formatExplanation).join(' | ').slice(0, 1000)
+          ? blockingFailures.map(formatExplanation).join(' | ').slice(0, 1000)
           : '';
+      const ruleCheckReason = [blockingReason, optionalRuleReference].filter(Boolean).join(' | ');
       const r = await writeCandidateMatchResultInstance({
         candidate_match_result_id: cmrId,
         client_id: clientId,
@@ -717,10 +761,14 @@ export async function ruleCheckAgentHandler({
           rule_name: r.rule_name,
           status: r.status,
           reason: r.reason ? r.reason.slice(0, 300) : undefined,
+          enforcement_level: r.enforcement_level,
+          failure_policy: r.failure_policy,
+          blocking: r.blocking,
         })),
         job_requisition: req as unknown as Record<string, unknown>,
         parsed_resume: parsedData ?? null,
         parsed_content: parsedContent,
+        candidate_expectation: candidateExpectation,
         runtime_context: runtimeContext,
       };
       await step.sendEvent(`emit-passed-${stepKey}`, {
@@ -735,8 +783,9 @@ export async function ruleCheckAgentHandler({
       logger.info(`[${AGENT_NAME}] ✓ emitted MATCH_RULE_CHECK_PASSED for JR=${jrid}`);
       passed += 1;
     } else {
-      // 全部阻断状态都进 failed_rules(确认违反 + 信息不足/待复核/未能评估)。
-      const failedRules = result.explanations.map((e) => ({
+      // 只有 mandatory/底线规则进 failed_rules；optional 结论已经作为参考
+      // 落审计 + Neo4j,不污染业务失败契约。
+      const failedRules = blockingFailures.map((e) => ({
         rule_id: e.rule_id,
         rule_name: e.rule_name,
         step_id: e.step_id,
@@ -744,7 +793,7 @@ export async function ruleCheckAgentHandler({
         reason: e.reason,
       }));
       // match_reason / 事件 rule_check_reason:用统一 formatExplanation(信息不足等带标注)。
-      const failureReason = result.explanations
+      const failureReason = blockingFailures
         .map(formatExplanation)
         .join(' | ')
         .slice(0, 1000);
@@ -838,7 +887,7 @@ export const ruleCheckAgent = inngest.createFunction(
   {
     id: AGENT_ID,
     name: 'Rule Check Agent',
-    retries: 1,
+    retries: 3,
     triggers: [{ event: 'RESUME_PROCESSED' }],
   },
   async (ctx) => {
@@ -872,6 +921,13 @@ function pickUploadId(data: any): string | null {
 function pickCandidateId(data: any): string | null {
   if (typeof data.candidate_id === 'string' && data.candidate_id.trim()) return data.candidate_id.trim();
   return null;
+}
+
+function pickParentAuditId(data: any): string | null {
+  const replayMeta = data?.replay_meta;
+  if (!replayMeta || typeof replayMeta !== 'object' || Array.isArray(replayMeta)) return null;
+  const value = (replayMeta as Record<string, unknown>).parent_audit_id;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 // ADR-0040 — RAAS 预填的窄化 JR 数组。容忍 snake/camel、非数组、空串、重复值,
@@ -954,6 +1010,40 @@ function getTraceId(eventData: unknown): string | undefined {
     return t.trace_id;
   }
   return undefined;
+}
+
+/**
+ * One logical rule-check execution gets one durable row. Inngest retries reuse
+ * runId/eventId and therefore upsert the same row; a later execution has a new
+ * runId and cannot overwrite historical audits for the same candidate + JR.
+ */
+export function makePersistentAuditId(input: {
+  kind: 'decision' | 'parked';
+  runId?: string;
+  eventId?: string;
+  traceId?: string;
+  uploadId?: string | null;
+  candidateId?: string | null;
+  resumeId?: string | null;
+  jobRequisitionId: string;
+}): string {
+  const executionIdentity =
+    input.runId ||
+    input.eventId ||
+    input.traceId ||
+    `anchors:${input.uploadId ?? ''}:${input.candidateId ?? ''}:${input.resumeId ?? ''}`;
+  const digest = createHash('sha256')
+    .update([
+      input.kind,
+      executionIdentity,
+      input.uploadId ?? '',
+      input.candidateId ?? '',
+      input.resumeId ?? '',
+      input.jobRequisitionId,
+    ].join('\u0000'))
+    .digest('hex')
+    .slice(0, 40);
+  return `rca_${input.kind}_${digest}`;
 }
 
 function sanitize(s: string): string {

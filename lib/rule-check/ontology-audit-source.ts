@@ -20,21 +20,17 @@ function isOntologyAuditDomain(domain: string | null | undefined): boolean {
 /** True when this domain has any recorded ontology rule-check runs. */
 export async function hasOntologyRuleChecks(domain: string | null | undefined): Promise<boolean> {
   if (!isOntologyAuditDomain(domain)) return false;
-  try {
-    const n = await prisma.ontologyRuleCheck.count({ where: { domain: domain!.trim() } });
-    return n > 0;
-  } catch {
-    return false;
-  }
+  const n = await prisma.ontologyRuleCheck.count({ where: { domain: domain!.trim() } });
+  return n > 0;
 }
 
 const passOf = (decision: string, redline: boolean, selectionOk: boolean): "PASS" | "FAIL" =>
   !redline && selectionOk && (decision === "VALIDATED" || decision === "AUTO") ? "PASS" : "FAIL";
 
-export async function ontologyStats(domain: string, days: number) {
-  const cutoff = new Date(Date.now() - days * 86_400_000);
+export async function ontologyStats(domain: string, days: number | null) {
+  const cutoff = days == null ? null : new Date(Date.now() - days * 86_400_000);
   const rows = await prisma.ontologyRuleCheck.findMany({
-    where: { domain, createdAt: { gte: cutoff } },
+    where: { domain, ...(cutoff ? { createdAt: { gte: cutoff } } : {}) },
     select: { decision: true, redlineFlag: true, selectionOk: true, stage: true, evals: { where: { result: "FAIL" }, select: { ruleId: true } } },
   });
   let pass = 0;
@@ -65,15 +61,80 @@ export async function ontologyStats(domain: string, days: number) {
   };
 }
 
-export async function ontologyAuditList(domain: string, limit: number) {
+export type OntologyAuditFilters = {
+  decision?: string;
+  client?: string;
+  jrId?: string;
+  ruleId?: string;
+  agent?: string;
+  stage?: string;
+  verdict?: "pass" | "fail" | "parked" | "";
+};
+
+/**
+ * Build the database predicate for the generic ontology audit store.
+ *
+ * It deliberately mirrors the recruitment-shaped fields returned below:
+ * client_name -> stage, job_requisition_id -> dsNo ?? caseId. Keeping every
+ * filter in SQL makes counts/page boundaries exact instead of filtering an
+ * already-truncated in-memory prefix.
+ */
+function ontologyAuditWhere(domain: string, filters: OntologyAuditFilters) {
+  const and: Array<Record<string, unknown>> = [];
+  if (filters.ruleId) and.push({ evals: { some: { ruleId: filters.ruleId } } });
+  if (filters.agent) and.push({ agentSlug: filters.agent });
+  if (filters.stage) and.push({ stage: filters.stage });
+  if (filters.client) and.push({ stage: filters.client });
+  if (filters.jrId) {
+    and.push({
+      OR: [
+        { dsNo: filters.jrId },
+        { AND: [{ dsNo: null }, { caseId: filters.jrId }] },
+      ],
+    });
+  }
+
+  // A deterministic ontology check cannot be infra-parked.
+  if (filters.verdict === "parked") and.push({ id: { equals: "__no_ontology_parked_audit__" } });
+  else if (filters.verdict === "pass" || (!filters.verdict && filters.decision === "PASS")) {
+    and.push({ redlineFlag: false, selectionOk: true, decision: { in: ["VALIDATED", "AUTO"] } });
+  } else if (filters.verdict === "fail" || (!filters.verdict && filters.decision === "FAIL")) {
+    and.push({
+      OR: [
+        { redlineFlag: true },
+        { selectionOk: false },
+        { decision: { notIn: ["VALIDATED", "AUTO"] } },
+      ],
+    });
+  }
+
+  return { domain, ...(and.length > 0 ? { AND: and } : {}) };
+}
+
+export async function ontologyAuditCount(
+  domain: string,
+  filters: OntologyAuditFilters = {},
+): Promise<number> {
+  return prisma.ontologyRuleCheck.count({ where: ontologyAuditWhere(domain, filters) });
+}
+
+export async function ontologyAuditRows(
+  domain: string,
+  args: { skip?: number; take: number; filters?: OntologyAuditFilters },
+) {
+  const where = ontologyAuditWhere(domain, args.filters ?? {});
   const rows = await prisma.ontologyRuleCheck.findMany({
-    where: { domain },
-    orderBy: { createdAt: "desc" },
-    take: limit,
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: args.skip ?? 0,
+    take: args.take,
     select: {
       id: true, createdAt: true, decision: true, redlineFlag: true, selectionOk: true, stage: true,
-      caseId: true, dsNo: true, agentSlug: true, agentName: true, rulesEvaluated: true, ruleSource: true,
-      evals: { where: { result: "FAIL" }, select: { ruleId: true, ruleName: true } },
+      caseId: true, runId: true, traceId: true, dsNo: true, agentSlug: true, agentName: true, rulesEvaluated: true, ruleSource: true,
+      evals: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: { ruleId: true, ruleName: true, result: true },
+      },
     },
   });
   const friendly = friendlyDomainName(domain);
@@ -107,10 +168,15 @@ export async function ontologyAuditList(domain: string, limit: number) {
     rules_evaluated: r.rulesEvaluated,
     rule_source: r.ruleSource,
     n_flags: r.evals.length,
-    trace_id: r.caseId,
-    failure_reasons: r.evals.map((e) => `${e.ruleId} ${e.ruleName}`),
+    trace_id: r.traceId ?? r.runId ?? r.caseId,
+    failure_reasons: r.evals.filter((e) => e.result === "FAIL").map((e) => `${e.ruleId} ${e.ruleName}`),
     };
   });
+}
+
+/** Legacy helper retained for callers that still pass `limit`. */
+export async function ontologyAuditList(domain: string, limit: number, ruleId?: string) {
+  return ontologyAuditRows(domain, { take: limit, filters: { ruleId } });
 }
 
 /** Distinct (agent, stage) facet options for a domain's ontology rule-checks.
@@ -134,10 +200,10 @@ export async function ontologyAuditFacets(domain: string): Promise<AuditFacets> 
   };
 }
 
-export async function ontologyMatrix(domain: string, days: number) {
-  const cutoff = new Date(Date.now() - days * 86_400_000);
+export async function ontologyMatrix(domain: string, days: number | null) {
+  const cutoff = days == null ? null : new Date(Date.now() - days * 86_400_000);
   const checks = await prisma.ontologyRuleCheck.findMany({
-    where: { domain, createdAt: { gte: cutoff } },
+    where: { domain, ...(cutoff ? { createdAt: { gte: cutoff } } : {}) },
     select: { id: true, evals: { select: { ruleId: true, ruleName: true, result: true, evidence: true, hardSoft: true, ruleGroup: true } } },
   });
   type Row = { rule_id: string; rule_name: string; severity: string; applicable_client: string; total: number; pass: number; fail: number; not_applicable: number; sample_fail_evidence?: string; sample_audit_ids: { pass?: string; fail?: string } };
@@ -212,7 +278,7 @@ export async function ontologyAuditDetail(checkId: string): Promise<OntologyAudi
     candidate_id: c.dsNo ?? c.caseId,
     resume_id: c.caseId,
     job_requisition_id: c.dsNo ?? c.caseId,
-    trace_id: c.caseId,
+    trace_id: c.traceId ?? c.runId ?? c.caseId,
     client_name: c.stage,
     client_display_name: null,
     business_group: friendlyDomainName(c.domain),

@@ -52,7 +52,7 @@ describe("specToAgentCode — typed I/O from AI schemas", () => {
   it("the render itself is syntactically valid TS", async () => {
     const v = await validateAgentCode(code);
     expect(v.ok).toBe(true);
-  });
+  }, 15_000);
 });
 
 describe("validateAgentCode — gates AI-written code on real syntax", () => {

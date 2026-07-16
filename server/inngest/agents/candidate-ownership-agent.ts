@@ -19,6 +19,10 @@ import { loadCandidateMatchRules } from '@/lib/rule-check/candidate-match/rules-
 import { decideOwnership, type OwnershipContext } from '@/lib/rule-check/candidate-match/ownership-engine';
 import { ownershipToCheck } from '@/lib/rule-check/candidate-match/to-ontology-check';
 import { persistCandidateRuleCheck, type PersistCandidateCheckArgs } from '@/lib/rule-check/candidate-match/persist';
+import {
+  asRuleAuditPersistenceError,
+  isRuleAuditPersistenceFailure,
+} from '@/lib/rule-check/ontology-audit-writer';
 
 const AGENT_ID = 'rule-check-candidate-ownership-agent';
 const AGENT_NAME = '候选人归属核验';
@@ -99,12 +103,14 @@ export async function candidateOwnershipHandler(ctx: HandlerCtx, depsOverride: P
     // evaluated for lack of a relationship data source (it currently defaults false).
     const tencentNotEvaluable =
       (octx.client ?? '').trim() === '腾讯' && !octx.tencentRelationship;
-    const { id } = (await ctx.step.run('persist-candidate-ownership', () =>
-      deps.persist({
+    let persisted: { id: string };
+    try {
+      persisted = (await ctx.step.run('persist-candidate-ownership', () => deps.persist({
         agentSlug: 'rule-check-candidate-ownership',
         agentName: AGENT_NAME,
         stage: STAGE,
         caseId,
+        runId: ctx.runId ?? caseId,
         traceId: (ev.trace_id as string) ?? null,
         ruleSource: ruleset.source,
         selectionNote: {
@@ -116,8 +122,11 @@ export async function candidateOwnershipHandler(ctx: HandlerCtx, depsOverride: P
             : {}),
         },
         check,
-      }),
-    )) as { id: string };
+      }))) as { id: string };
+    } catch (error) {
+      throw asRuleAuditPersistenceError(error);
+    }
+    const { id } = persisted;
 
     fileLogger.event('handler.done', {
       decision: decision.decision,
@@ -133,6 +142,7 @@ export async function candidateOwnershipHandler(ctx: HandlerCtx, depsOverride: P
       auditId: id,
     };
   } catch (e) {
+    if (isRuleAuditPersistenceFailure(e)) throw e;
     // handler.error → agent_error → 审计日志 + 消息通知(经 mirrorAgentFileLog)。
     fileLogger.event('handler.error', { error: (e as Error).message ?? String(e) });
     return { skipped: false as const, error: (e as Error).message ?? String(e) };

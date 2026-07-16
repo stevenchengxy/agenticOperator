@@ -5,8 +5,21 @@ import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
 import { Ic } from "@/components/shared/Ic";
 import { Btn, EmptyState } from "@/components/shared/atoms";
+import { Pagination } from "@/components/shared/Pagination";
 import { agentsForDomain, lookupAgent } from "@/lib/rule-check/agent-registry";
 import { fetchJson } from "@/lib/api/client";
+import {
+  paginationFrom,
+  readPage,
+  readPageSize,
+  setPaginationParams,
+} from "@/lib/api/pagination";
+import { friendlyInfraReason, isInfraFailure } from "@/lib/rule-check/infra-failure";
+import {
+  classifyFailureKind,
+  parseFailureReason,
+  type RuleCheckFailureKind,
+} from "@/lib/rule-check/failure-reason";
 import type {
   RuleCheckAuditListResponse,
   RuleCheckAuditRow,
@@ -28,13 +41,20 @@ export function RuleCheckAuditsContent() {
   const client = searchParams.get("client") ?? "";
   const jrId = searchParams.get("jrId") ?? "";
   const ruleId = searchParams.get("ruleId") ?? "";
+  const page = readPage(searchParams.get("page"));
+  const pageSize = readPageSize(searchParams.get("pageSize"), [20, 50, 100], 50);
 
   const [data, setData] = React.useState<RuleCheckAuditListResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [listError, setListError] = React.useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = React.useState(0);
   const [stats, setStats] = React.useState<RuleCheckStatsResponse | null>(null);
 
   React.useEffect(() => {
+    let cancel = false;
     setLoading(true);
+    setListError(null);
+    setData(null);
     const sp = new URLSearchParams();
     if (agent) sp.set("agent", agent);
     if (verdict) sp.set("verdict", verdict);
@@ -42,13 +62,25 @@ export function RuleCheckAuditsContent() {
     if (jrId) sp.set("jrId", jrId);
     if (ruleId) sp.set("ruleId", ruleId);
     sp.set("domain", domain);
+    setPaginationParams(sp, page, pageSize);
     const qs = sp.toString();
     fetchJson<RuleCheckAuditListResponse>(
       `/api/rule-check-audits${qs ? "?" + qs : ""}`,
+      { timeoutMs: 20_000 },
     )
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [agent, verdict, client, jrId, ruleId, domain]);
+      .then((next) => {
+        if (!cancel) setData(next);
+      })
+      .catch((e) => {
+        if (!cancel) setListError((e as Error)?.message || t("rc_audits_load_failed"));
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [agent, verdict, client, jrId, ruleId, domain, page, pageSize, refreshToken, t]);
 
   // value-anchor stats (7d window)
   React.useEffect(() => {
@@ -57,11 +89,18 @@ export function RuleCheckAuditsContent() {
       .catch(() => {});
   }, [domain]);
 
-  const setFilter = (k: "agent" | "verdict" | "client" | "jrId" | "ruleId", v: string) => {
+  const setUrl = React.useCallback((mutate: (params: URLSearchParams) => void) => {
     const sp = new URLSearchParams(searchParams.toString());
-    if (v) sp.set(k, v);
-    else sp.delete(k);
-    router.replace(`/rule-check?${sp.toString()}`);
+    mutate(sp);
+    router.replace(`/rule-check${sp.toString() ? `?${sp.toString()}` : ""}`);
+  }, [router, searchParams]);
+
+  const setFilter = (k: "agent" | "verdict" | "client" | "jrId" | "ruleId", v: string) => {
+    setUrl((sp) => {
+      if (v) sp.set(k, v);
+      else sp.delete(k);
+      sp.delete("page");
+    });
   };
 
   // 执行 agent 选项:招聘域走本地注册表(可本地化 + 标注规划中);其它域用
@@ -82,10 +121,26 @@ export function RuleCheckAuditsContent() {
   // view the whole viewport, makes URLs shareable, and lets browser back
   // work as expected.
   const openDetail = (auditId: string) => {
-    router.push(`/rule-check/audits/${encodeURIComponent(auditId)}`);
+    const returnTo = `/rule-check${searchParams.toString() ? `?${searchParams.toString()}` : "?view=audits"}`;
+    router.push(
+      `/rule-check/audits/${encodeURIComponent(auditId)}?returnTo=${encodeURIComponent(returnTo)}`,
+    );
   };
 
   const hasFilters = !!(agent || verdict || client || jrId || ruleId);
+  const retry = React.useCallback(() => setRefreshToken((v) => v + 1), []);
+  const pagination = data
+    ? paginationFrom(data, { page, pageSize, rowCount: data.rows.length })
+    : { page, pageSize, total: null, totalPages: null };
+
+  React.useEffect(() => {
+    if (pagination.totalPages != null && page > pagination.totalPages) {
+      setUrl((sp) => {
+        if (pagination.totalPages! <= 1) sp.delete("page");
+        else sp.set("page", String(pagination.totalPages));
+      });
+    }
+  }, [page, pagination.totalPages, setUrl]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -141,7 +196,10 @@ export function RuleCheckAuditsContent() {
           </button>
         )}
         {hasFilters && (
-          <Btn size="sm" variant="ghost" onClick={() => router.replace("/rule-check?view=audits")}>
+          <Btn size="sm" variant="ghost" onClick={() => setUrl((sp) => {
+            for (const key of ["agent", "verdict", "client", "jrId", "ruleId", "page"]) sp.delete(key);
+            sp.set("view", "audits");
+          })}>
             {t("rc_clear_filters")}
           </Btn>
         )}
@@ -151,6 +209,14 @@ export function RuleCheckAuditsContent() {
       <div className="flex-1 overflow-auto" style={{ padding: "16px 26px 40px" }}>
         {loading && !data ? (
           <EmptyState title={t("rc_loading")} hint="" />
+        ) : listError ? (
+          <EmptyState
+            icon={<Ic.alert />}
+            title={t("rc_audits_load_failed")}
+            hint={listError}
+            variant="warn"
+            action={<Btn size="sm" onClick={retry}>{t("rc_verify_retry")}</Btn>}
+          />
         ) : data?.meta.not_configured ? (
           <EmptyState
             icon={<Ic.alert />}
@@ -173,7 +239,10 @@ export function RuleCheckAuditsContent() {
             variant={data?.meta.empty ? "info" : "default"}
             action={
               !data?.meta.empty ? (
-                <Btn size="sm" onClick={() => router.replace("/rule-check")}>
+                <Btn size="sm" onClick={() => setUrl((sp) => {
+                  for (const key of ["agent", "verdict", "client", "jrId", "ruleId", "page"]) sp.delete(key);
+                  sp.set("view", "audits");
+                })}>
                   {t("rc_clear_filters")}
                 </Btn>
               ) : undefined
@@ -192,16 +261,29 @@ export function RuleCheckAuditsContent() {
                 </div>
               ))}
             </div>
-            {data.rows.length > 0 && data.total > data.rows.length && (
-              <div className="text-[11px] text-ink-3 text-center mt-4">
-                {t("rc_loaded_of_total")
-                  .replace("{loaded}", String(data.rows.length))
-                  .replace("{total}", String(data.total))}
-              </div>
-            )}
           </>
         )}
       </div>
+
+      {data && !data.meta.not_configured && !data.meta.error && (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          rowCount={data.rows.length}
+          total={pagination.total}
+          totalPages={pagination.totalPages}
+          loading={loading}
+          onPageChange={(nextPage) => setUrl((sp) => {
+            if (nextPage <= 1) sp.delete("page");
+            else sp.set("page", String(nextPage));
+          })}
+          onPageSizeChange={(nextSize) => setUrl((sp) => {
+            if (nextSize === 50) sp.delete("pageSize");
+            else sp.set("pageSize", String(nextSize));
+            sp.delete("page");
+          })}
+        />
+      )}
 
     </div>
   );
@@ -359,7 +441,7 @@ function AuditCard({
   const candidate = row.candidate_name || (row.candidate_id ? row.candidate_id.slice(0, 8) : "—");
   const job = row.jr_title || (row.job_requisition_id ? row.job_requisition_id.slice(-10) : "—");
   const flagsText = `${row.n_flags > 0 ? row.n_flags : 0}/${row.rules_evaluated}`;
-  const reason = row.failure_reasons[0];
+  const failure = summarizeAuditFailure(row, t, lang);
   return (
     <button
       type="button"
@@ -367,7 +449,7 @@ function AuditCard({
       className="rc-audit-card text-left cursor-pointer w-full"
       style={{ "--rc-accent": accent, "--rc-bg": verdictBg } as React.CSSProperties}
     >
-      <div className="grid items-center gap-3" style={{ gridTemplateColumns: "96px minmax(0,1fr) 128px" }}>
+      <div className="grid items-center gap-3 rc-audit-card-grid">
         <span className="rc-verdict-pill" style={{ color: accent, background: verdictBg }}>
           {verdictText}
         </span>
@@ -380,10 +462,20 @@ function AuditCard({
           </div>
           <div className="flex items-center gap-2 mt-1 min-w-0">
             <span className="mono text-ink-4 truncate" style={{ fontSize: 10.5 }}>{agentText}{stageText ? ` · ${stageText}` : ""}</span>
-            {reason ? <span className="text-ink-3 truncate" style={{ fontSize: 11 }}>{reason}</span> : null}
+            {failure ? (
+              <span className="rc-failure-chip-wrap min-w-0" title={failure.text}>
+                <span
+                  className="rc-failure-chip"
+                  style={{ "--rc-failure-chip-accent": failure.accent, "--rc-failure-chip-bg": failure.bg } as React.CSSProperties}
+                >
+                  {failure.label}
+                </span>
+                <span className="text-ink-3 truncate" style={{ fontSize: 11 }}>{failure.text}</span>
+              </span>
+            ) : null}
           </div>
         </div>
-        <div className="text-right flex-shrink-0">
+        <div className="text-right flex-shrink-0 rc-audit-card-meta">
           <div className="mono text-ink-3" style={{ fontSize: 11 }}>{formatRelative(row.created_at, lang)}</div>
           <div className="mono text-ink-4 mt-1" style={{ fontSize: 10.5 }}>
             {flagsText}
@@ -393,6 +485,50 @@ function AuditCard({
       </div>
     </button>
   );
+}
+
+function summarizeAuditFailure(
+  row: RuleCheckAuditRow,
+  t: (k: string) => string,
+  lang: "zh" | "en",
+): {
+  kind: RuleCheckFailureKind;
+  label: string;
+  text: string;
+  accent: string;
+  bg: string;
+} | null {
+  if (row.verdict === "pass") return null;
+  if (isInfraFailure(row.fail_reason)) {
+    const text =
+      lang === "zh"
+        ? friendlyInfraReason(row.fail_reason)
+        : t("rc_failure_candidate_not_rejected");
+    return {
+      kind: "infra",
+      label: t("rc_failure_kind_infra"),
+      text,
+      accent: "var(--c-warn)",
+      bg: "var(--c-warn-bg)",
+    };
+  }
+  const raw = row.failure_reasons[0] ?? row.fail_reason ?? row.llm_decision ?? "";
+  if (!raw) return null;
+  const parsed = parseFailureReason(raw);
+  const kind = classifyFailureKind(raw);
+  const warn = kind === "insufficient" || kind === "review";
+  return {
+    kind,
+    label:
+      kind === "insufficient"
+        ? t("rc_failure_kind_insufficient")
+        : kind === "review"
+          ? t("rc_failure_kind_review")
+          : t("rc_failure_kind_rule"),
+    text: parsed.ruleId ? `${parsed.ruleId} · ${parsed.detail}` : parsed.detail,
+    accent: warn ? "var(--c-warn)" : "var(--c-err)",
+    bg: warn ? "var(--c-warn-bg)" : "var(--c-err-bg)",
+  };
 }
 
 function formatRelative(iso: string | null | undefined, lang: "zh" | "en"): string {

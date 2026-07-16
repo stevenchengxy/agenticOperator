@@ -440,4 +440,17 @@ describe('RobohireApiError', () => {
     expect(new RobohireApiError(429, 'RATE_LIMITED', 'x').isClientError).toBe(false);
     expect(new RobohireApiError(500, 'SERVER', 'x').isClientError).toBe(false);
   });
+
+  it('isBadRequest true for our-fault 4xx (400/422) — NOT 401/403 auth, NOT 5xx', () => {
+    // 400/422 = 我们发的入参有问题(prompt 太长/格式非法) → AO 侧 bug,不是厂商健康问题。
+    expect(new RobohireApiError(400, 'CLIENT', 'bad prompt').isBadRequest).toBe(true);
+    expect(new RobohireApiError(422, 'CLIENT', 'unprocessable').isBadRequest).toBe(true);
+    // 401/403 = 密钥失效/被吊销 → 真·厂商/凭证问题,不算 bad request。
+    expect(new RobohireApiError(401, 'CLIENT', 'unauthorized').isBadRequest).toBe(false);
+    expect(new RobohireApiError(403, 'CLIENT', 'forbidden').isBadRequest).toBe(false);
+    // 429 / 5xx / network 都不是 bad request。
+    expect(new RobohireApiError(429, 'RATE_LIMITED', 'x').isBadRequest).toBe(false);
+    expect(new RobohireApiError(500, 'SERVER', 'x').isBadRequest).toBe(false);
+    expect(new RobohireApiError(0, 'NETWORK', 'x').isBadRequest).toBe(false);
+  });
 });

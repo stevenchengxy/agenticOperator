@@ -21,6 +21,7 @@
 import { prisma } from "@/server/db";
 import { getInngestUrl } from "@/lib/inngest-url";
 import { listEvents } from "@/lib/inngest-source";
+import { eventMatchesDomain, inferEventDomain } from "@/lib/events/domain-scope";
 
 const LOCAL_INNGEST = getInngestUrl();
 
@@ -39,28 +40,36 @@ type InngestEvent = {
   data: unknown;
   ts?: number;
   received_at?: string;
+  sourceApp?: string | null;
+  source_app?: string | null;
+  domain?: string | null;
 };
 
 // Shape matches InngestEventRow so the client hook can pass rows through
 // directly without remapping.
 type EventPayload = {
   id: string;
+  internal_id?: string;
   name: string;
   source: string | null;
+  sourceApp?: string | null;
+  domain: string;
   status: string;
   received_at: string;
   payloadSummary: string | null;
   data: unknown;
 };
 
-async function fetchInngestEvents(limit: number): Promise<InngestEvent[]> {
+async function fetchInngestEvents(limit: number, domain?: string): Promise<InngestEvent[]> {
   try {
-    const r = await fetch(`${LOCAL_INNGEST}/v1/events?limit=${limit}`, {
+    const fetchLimit = domain ? Math.min(500, Math.max(limit * 5, limit)) : limit;
+    const r = await fetch(`${LOCAL_INNGEST}/v1/events?limit=${fetchLimit}`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!r.ok) return [];
     const body = (await r.json()) as { data?: InngestEvent[] };
-    return body.data ?? [];
+    const events = body.data ?? [];
+    return domain ? events.filter((e) => eventMatchesDomain(e, domain)).slice(0, limit) : events;
   } catch {
     return [];
   }
@@ -91,8 +100,11 @@ function toPayload(e: InngestEvent, sourceMap: Map<string, string>): EventPayloa
   const receivedAt = e.received_at ?? (e.ts ? new Date(e.ts).toISOString() : new Date().toISOString());
   return {
     id,
+    internal_id: e.internal_id,
     name: e.name,
     source: sourceMap.get(id) ?? null,
+    sourceApp: e.sourceApp ?? e.source_app ?? null,
+    domain: inferEventDomain(e),
     status: "accepted",
     received_at: receivedAt,
     payloadSummary: typeof e.data === "string" ? e.data : safeStringify(e.data),
@@ -105,7 +117,9 @@ function safeStringify(v: unknown): string | null {
   try { return JSON.stringify(v); } catch { return null; }
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const domain = url.searchParams.get("domain") ?? undefined;
   const encoder = new TextEncoder();
   const seen = new Set<string>();
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -128,7 +142,11 @@ export async function GET(): Promise<Response> {
       // often empty after a quiet period or an Inngest restart, so reading it
       // alone makes the stream open blank even though the archive has history.
       try {
-        const initial = await listEvents(INITIAL_LIMIT);
+        const fetchLimit = domain ? Math.min(500, INITIAL_LIMIT * 3) : INITIAL_LIMIT;
+        const initialRaw = await listEvents(fetchLimit);
+        const initial = domain
+          ? initialRaw.filter((e) => eventMatchesDomain(e, domain)).slice(0, INITIAL_LIMIT)
+          : initialRaw;
         for (const e of initial) seen.add(e.internal_id ?? e.id);
         const sourceMap = await enrichWithSource(initial);
         emit({
@@ -143,7 +161,7 @@ export async function GET(): Promise<Response> {
       pollTimer = setInterval(async () => {
         if (closed) return;
         try {
-          const recent = await fetchInngestEvents(POLL_LIMIT);
+          const recent = await fetchInngestEvents(POLL_LIMIT, domain);
           const fresh = recent.filter((e) => {
             const id = e.internal_id ?? e.id;
             if (seen.has(id)) return false;

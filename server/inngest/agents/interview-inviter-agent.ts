@@ -33,6 +33,7 @@ import { getRequirementDetail } from '@/lib/partner-pg/requirements';
 import { markInterviewInvitationSent } from '@/lib/partner-pg/interview-invitations';
 import { createAgentLogger, currentLogger, runWithLogger } from '@/lib/agent-logger';
 import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-lifecycle';
+import { recordNotification } from '@/server/notifications/ingest';
 import {
   inngest,
   type InterviewInvitationRequestedData,
@@ -344,6 +345,7 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
     // 同一 candidate+jr 多次邀请会冲一个 PK;实际 RoboHire 那边自带 dedup
     // (reused:true),Neo4j 这边 allmeta upsert by PK 也只保留最新一条。
     const communicationLogId = `comm_invite_${candidateId}_${jrId}_${Date.now()}`;
+    const technicalWarnings: string[] = [];
 
     const loginUrl = nullableString(inviteResult.data?.login_url);
     const qrcodeUrl = nullableString(inviteResult.data?.qrcode_url);
@@ -358,7 +360,7 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
         ? inviteResult.data.job_interview_duration
         : payload.interview_duration ?? null;
 
-    await step.run(`write-comm-log-${stepKey}`, async () => {
+    const communicationWrite = await step.run(`write-comm-log-${stepKey}`, async () => {
       const contentLines: string[] = [];
       if (loginUrl) contentLines.push(`登陆链接:${loginUrl}`);
       if (qrcodeUrl) contentLines.push(`二维码:${qrcodeUrl}`);
@@ -381,8 +383,11 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       else logger.warn(`[${AGENT_NAME}] allmeta Communication_Log write failed: ${r.error}`);
       return r;
     });
+    if (!communicationWrite.ok) {
+      technicalWarnings.push(`Allmeta Communication_Log 写入失败: ${communicationWrite.error}`);
+    }
 
-    await step.run(`write-interview-record-${stepKey}`, async () => {
+    const interviewWrite = await step.run(`write-interview-record-${stepKey}`, async () => {
       const notes: Record<string, unknown> = {
         invite_request_id: inviteResult.requestId,
         invite_user_id: userId,
@@ -410,6 +415,9 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       else logger.warn(`[${AGENT_NAME}] allmeta Interview_Record write failed: ${r.error}`);
       return r;
     });
+    if (!interviewWrite.ok) {
+      technicalWarnings.push(`Allmeta Interview_Record 写入失败: ${interviewWrite.error}`);
+    }
 
     // ── 3b. partner-pg dual-write:UPDATE interview_invitation by correlation_id ─
     //
@@ -423,7 +431,7 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
     // payload 自行 reconcile.
     const correlationId = nullableString(payload.correlation_id);
     if (correlationId) {
-      await step.run(`update-invitation-pg-${stepKey}`, async () => {
+      const partnerWrite = await step.run(`update-invitation-pg-${stepKey}`, async () => {
         const r = await markInterviewInvitationSent(correlationId, {
           login_url: loginUrl,
           qrcode_url: qrcodeUrl,
@@ -450,14 +458,21 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
         }
         return r;
       });
+      if (!partnerWrite.ok) {
+        technicalWarnings.push(`Partner-PG interview_invitation 更新失败: ${partnerWrite.error}`);
+      } else if (!partnerWrite.updated) {
+        technicalWarnings.push(`Partner-PG interview_invitation 未命中 correlation_id=${correlationId}`);
+      }
     } else {
       logger.warn(
         `[${AGENT_NAME}] payload 缺 correlation_id, 跳过 partner-pg interview_invitation UPDATE`,
       );
+      technicalWarnings.push('缺 correlation_id，未回写 Partner-PG interview_invitation');
     }
 
     // ── 4a. PERSISTENCE_WARNING 旁路:Neo4j 写完后仍要 emit _FAILED 通知 ──
     if (persistenceWarning) {
+      technicalWarnings.push(`RoboHire 邀请送达但 RoboHire 端 DB 写失败: ${persistenceWarning}`);
       const failedPayload: InterviewInvitationFailedPayload = {
         candidate_id: candidateId,
         job_requisition_id: jrId,
@@ -469,6 +484,25 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       };
       await emitFailed(step, stepKey, failedPayload, traceId);
       // 不 return — 仍然 emit _SENT(候选人确实拿到了 login_url),让 RAAS 两条都看见。
+    }
+
+    if (technicalWarnings.length > 0) {
+      fileLogger.event('persistence.failed', {
+        candidate_id: candidateId,
+        job_requisition_id: jrId,
+        warnings: technicalWarnings,
+      });
+      await recordNotification({
+        level: 'warn',
+        category: 'agent_error',
+        source: 'InterviewInviter',
+        agent: 'InterviewInviter',
+        runId: runId ?? null,
+        traceId: traceId ?? null,
+        message: `面试邀约已送达，但存在 ${technicalWarnings.length} 个持久化问题: ${technicalWarnings.join('; ')}`,
+        anchors: { candidate_id: candidateId, job_requisition_id: jrId, application_id: applicationId },
+        dedupeHint: 'interview_invitation.persistence_partial',
+      });
     }
 
     // ── 4b. Success — emit _SENT ───────────────────────────────────────
@@ -490,6 +524,9 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       interview_language: interviewLanguage,
       interview_duration_minutes: typeof durationMinutes === 'number' ? durationMinutes : null,
       robohire_request_id: inviteResult.requestId ?? null,
+      execution_success: true,
+      business_outcome: 'passed',
+      technical_warnings: technicalWarnings,
       sent_at: sentAt,
     };
 
@@ -544,6 +581,9 @@ export async function interviewInviterAgentHandler({ event, step, logger, runId 
       interview_record_id: interviewRecordId,
       communication_log_id: communicationLogId,
       reused: inviteResult.data?.reused === true,
+      execution_success: true,
+      business_outcome: 'passed',
+      technical_warnings: technicalWarnings,
     };
   }); // runWithLogger
 }
@@ -559,11 +599,16 @@ async function emitFailed(
   traceId: string | undefined,
 ): Promise<void> {
   const logger = currentLogger();
+  const payloadWithOutcome: InterviewInvitationFailedPayload = {
+    ...failedPayload,
+    execution_success: false,
+    business_outcome: failedPayload.error_code === 'GOHIRE_REJECTED' ? 'rejected' : 'blocked',
+  };
   logger?.event('emit.invitation-failed', {
     from: 'AO.interviewInviter',
     to: 'RAAS (Inngest event INTERVIEW_INVITATION_FAILED)',
     error_code: failedPayload.error_code,
-    full_payload: failedPayload,    // 完整 _FAILED payload
+    full_payload: payloadWithOutcome,    // 完整 _FAILED payload
   });
   await step.sendEvent(`emit-invitation-failed-${stepKey}-${failedPayload.error_code}`, {
     name: 'INTERVIEW_INVITATION_FAILED',
@@ -571,9 +616,18 @@ async function emitFailed(
       entity_type: 'Candidate',
       entity_id: failedPayload.candidate_id,
       event_id: `inv_failed_${failedPayload.candidate_id}_${failedPayload.job_requisition_id}_${Date.now()}`,
-      payload: failedPayload,
+      payload: payloadWithOutcome,
       trace: { trace_id: traceId ?? null },
     },
+  });
+  await notifyRecruitmentLifecycle(step, 'INTERVIEW_INVITATION_FAILED', {
+    anchors: {
+      candidate_id: failedPayload.candidate_id,
+      job_requisition_id: failedPayload.job_requisition_id,
+      application_id: failedPayload.application_id,
+    },
+    runId: logger?.ctx?.runId ?? null,
+    traceId: traceId ?? null,
   });
 }
 

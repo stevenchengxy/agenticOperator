@@ -63,8 +63,9 @@ export async function POST(req: Request): Promise<Response> {
 
   // Basic URL sanity — Inngest will give a clearer error if it can't reach
   // the URL, but catching obvious typos here avoids a confusing 5xx.
+  let parsed: URL;
   try {
-    const parsed = new URL(appUrl);
+    parsed = new URL(appUrl);
     if (parsed.pathname.replace(/\/+$/, '') !== '/api/inngest') {
       return NextResponse.json(
         {
@@ -79,6 +80,19 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json(
       { ok: false, inngestUrl, appUrl, error: `Invalid URL: ${appUrl}` },
+      { status: 400 },
+    );
+  }
+
+  if (!isAllowedServeEndpoint(parsed, req)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        inngestUrl,
+        appUrl,
+        error:
+          'appUrl host is not allowed in production. Set INNGEST_SERVE_ORIGIN to the AO origin Inngest should call, or use the current deployment origin.',
+      },
       { status: 400 },
     );
   }
@@ -126,6 +140,35 @@ export async function POST(req: Request): Promise<Response> {
     expectedFunctions: RAAS_V1_EXPECTED_FUNCTION_COUNT,
     raw,
   });
+}
+
+function endpointKey(url: URL): string {
+  return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+function allowedEndpointKeys(req: Request): Set<string> {
+  const origins = [
+    process.env.INNGEST_SERVE_ORIGIN,
+    process.env.INNGEST_SERVE_HOST,
+    new URL(req.url).origin,
+  ];
+  const allowed = new Set<string>();
+  for (const origin of origins) {
+    if (!origin) continue;
+    try {
+      const url = new URL('/api/inngest', new URL(origin).origin);
+      allowed.add(endpointKey(url));
+    } catch {
+      // Invalid env values are handled by env-check; ignore here so the route
+      // can still report a clear allowlist error instead of throwing.
+    }
+  }
+  return allowed;
+}
+
+function isAllowedServeEndpoint(appUrl: URL, req: Request): boolean {
+  if (process.env.NODE_ENV !== 'production') return true;
+  return allowedEndpointKeys(req).has(endpointKey(appUrl));
 }
 
 async function probeMainFunctionCount(inngestUrl: string): Promise<number | null> {

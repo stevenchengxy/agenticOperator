@@ -29,7 +29,7 @@ export type RuleMatrixRow = {
 export type RuleMatrixResponse = {
   rules: RuleMatrixRow[];
   total_audits: number;
-  window_days: number;
+  window_days: number | null;
   meta: { generated_at: string; error?: string };
 };
 
@@ -41,10 +41,11 @@ export async function GET(req: Request) {
   // causing the matrix to disagree with the dashboard's KPI window.
   const windowParam = searchParams.get('window');
   const daysParam = searchParams.get('days');
+  const all = windowParam?.toLowerCase() === 'all' || daysParam?.toLowerCase() === 'all';
   const fromWindow = windowParam?.match(/^(\d+)d$/)?.[1];
   const raw = parseInt(daysParam ?? fromWindow ?? '30', 10);
-  const days = Math.max(1, Math.min(90, Number.isFinite(raw) ? raw : 30));
-  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const days = all ? null : Math.max(1, Math.min(36500, Number.isFinite(raw) ? raw : 30));
+  const cutoff = days == null ? null : new Date(Date.now() - days * 86_400_000);
 
   // Non-recruitment domains: serve from the generic ontology rule-check store.
   const domain = searchParams.get('domain');
@@ -63,7 +64,7 @@ export async function GET(req: Request) {
 
   try {
     const totalAudits = await prisma.ruleCheckAudit.count({
-      where: { created_at: { gte: cutoff } },
+      where: cutoff ? { created_at: { gte: cutoff } } : {},
     });
 
     // Read flags the SAME way the audit detail does, so 总览 == 审计:prefer
@@ -71,7 +72,7 @@ export async function GET(req: Request) {
     // (legacy), recover them from llm_raw_text. Keeps coverage accurate even
     // before the write-side persistence fills the table for old audits.
     const auditRows = await prisma.ruleCheckAudit.findMany({
-      where: { created_at: { gte: cutoff } },
+      where: cutoff ? { created_at: { gte: cutoff } } : {},
       select: {
         audit_id: true,
         llm_raw_text: true,

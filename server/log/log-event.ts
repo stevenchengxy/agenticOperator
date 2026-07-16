@@ -6,6 +6,11 @@
 
 import { prisma } from '@/server/db';
 import { recordNotification } from '@/server/notifications/ingest';
+import {
+  classifyFailure,
+  enrichPayloadJsonWithFailure,
+  messageWithFailureSummary,
+} from './failure-classifier';
 
 export type LogLevel = 'debug' | 'info' | 'notice' | 'warn' | 'error' | 'critical';
 
@@ -107,6 +112,8 @@ export interface RecordLogEventInput {
   runId?: string | null;
   traceId?: string | null;
   eventName?: string | null;
+  rawKind?: string | null;
+  anchorsJson?: string | null;
   payloadJson?: string | null;
   durationMs?: number | null;
 }
@@ -117,6 +124,20 @@ export interface RecordLogEventInput {
  *  inviter-agent.test.ts 的 dependency-health mock)。 */
 export async function recordLogEvent(input: RecordLogEventInput): Promise<void> {
   const { level, category } = levelCategoryFor(input.type);
+  const failure = classifyFailure({
+    type: input.type,
+    level,
+    category,
+    source: input.source ?? 'agent',
+    agent: input.agent ?? null,
+    eventName: input.eventName ?? null,
+    message: input.message,
+    payloadJson: input.payloadJson ?? null,
+  });
+  const payloadJson = failure
+    ? enrichPayloadJsonWithFailure(input.payloadJson ?? null, failure, Number.MAX_SAFE_INTEGER)
+    : input.payloadJson ?? null;
+  const message = messageWithFailureSummary(input.message, input.type, failure).slice(0, 2000);
   try {
     await prisma.logEvent.create({
       data: {
@@ -127,8 +148,10 @@ export async function recordLogEvent(input: RecordLogEventInput): Promise<void> 
         runId: input.runId ?? null,
         traceId: input.traceId ?? null,
         eventName: input.eventName ?? null,
-        message: input.message.slice(0, 2000),
-        payloadJson: input.payloadJson ?? null,
+        rawKind: input.rawKind ?? null,
+        anchorsJson: input.anchorsJson ?? null,
+        message,
+        payloadJson,
         durationMs: input.durationMs ?? null,
       },
     });
@@ -141,6 +164,7 @@ export interface MirrorFileLogInput {
   agent: string;
   runId?: string | null;
   traceId?: string | null;
+  anchors?: Record<string, string | null | undefined>;
   kind: string;
   payload?: unknown;
 }
@@ -160,19 +184,32 @@ export async function mirrorAgentFileLog(input: MirrorFileLogInput): Promise<voi
   let payloadJson: string | null = null;
   if (input.payload !== undefined) {
     try {
-      payloadJson = JSON.stringify(input.payload).slice(0, 4000);
+      payloadJson = JSON.stringify(input.payload);
     } catch {
       payloadJson = null;
     }
   }
+  const failure = classifyFailure({
+    type,
+    source: 'agent',
+    agent: input.agent,
+    message: input.kind,
+    payloadJson,
+  });
+  const enrichedPayloadJson = failure
+    ? enrichPayloadJsonWithFailure(payloadJson, failure, Number.MAX_SAFE_INTEGER)
+    : payloadJson;
+  const narrative = messageWithFailureSummary(input.kind, type, failure);
   await recordLogEvent({
     type,
-    message: input.kind,
+    message: narrative,
     source: 'agent',
     agent: input.agent,
     runId: input.runId ?? null,
     traceId: input.traceId ?? null,
-    payloadJson,
+    rawKind: input.kind,
+    anchorsJson: input.anchors ? safeJson(input.anchors) : null,
+    payloadJson: enrichedPayloadJson,
   });
   // Also mirror into AgentActivity (name-aligned) so the existing /monitor
   // views (run-detail timeline, overview rollup, per-agent pages) — which read
@@ -185,8 +222,8 @@ export async function mirrorAgentFileLog(input: MirrorFileLogInput): Promise<voi
           nodeId: input.agent,
           agentName: canonicalShortForFileAgent(input.agent),
           type,
-          narrative: input.kind,
-          metadata: payloadJson,
+          narrative,
+          metadata: enrichedPayloadJson,
         },
       });
     } catch (e) {
@@ -201,8 +238,18 @@ export async function mirrorAgentFileLog(input: MirrorFileLogInput): Promise<voi
       agent: input.agent,
       runId: input.runId ?? null,
       traceId: input.traceId ?? null,
-      message: `${input.agent} 运行异常:${input.kind}`,
+      message: failure
+        ? `${input.agent} 运行异常:${failure.summary}`
+        : `${input.agent} 运行异常:${input.kind}`,
       dedupeHint: `agent_error.${input.agent}`,
     }).catch(() => {});
+  }
+}
+
+function safeJson(value: unknown): string | null {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
   }
 }

@@ -16,6 +16,8 @@ import { eventLeafName, eventMatchesDomain } from "@/lib/events/domain-scope";
 import { classifyByPublishers, DIRECTION_META } from "@/lib/events/event-direction";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { Pagination } from "@/components/shared/Pagination";
+import { OutcomeBadges } from "@/components/monitor/OutcomeBadges";
+import { useDeepLinkFocus } from "@/lib/hooks/useDeepLinkFocus";
 
 // /events — 事件
 //
@@ -148,6 +150,7 @@ export function EventsContent() {
   const filterName = sp.get("name");
   const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d" | "all";
   const selectedId = sp.get("id");
+  const focusParam = sp.get("focus");
   const view = (sp.get("view") ?? "stream") as "stream" | "dlq";
   // registration filter — disabled in UI for now (development), but the
   // URL state and filtering logic are wired so we can flip the disable bit
@@ -214,6 +217,7 @@ export function EventsContent() {
     if (!selectedId) return filtered[0] ?? null;
     return filtered.find((e) => (e.internal_id ?? e.id) === selectedId) ?? filtered[0] ?? null;
   }, [filtered, selectedId]);
+  useDeepLinkFocus(focusParam, focusParam ? filtered.some((event) => `event-stream:${event.internal_id ?? event.id}` === focusParam) : true);
 
   React.useEffect(() => {
     const pages = view === "dlq" ? dlq.totalPages : eventPage.totalPages;
@@ -349,13 +353,14 @@ export function EventsContent() {
           <div className="flex-1 overflow-auto min-h-0">
             <div
               className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
-              style={{ gridTemplateColumns: "120px 76px minmax(0, 1.4fr) 84px minmax(0, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
+              style={{ gridTemplateColumns: "112px 70px minmax(0, 1.2fr) 80px minmax(140px, .8fr) minmax(190px, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
             >
               <span>{t("evx_col_received_at")}</span>
               <span>{t("evx_col_direction")}</span>
               <span>{t("evx_col_event_name")}</span>
               <span>{t("evx_col_registration")}</span>
               <span>{t("evx_col_triggered_agents")}</span>
+              <span>{lang === "zh" ? "处理 / 业务结果" : "Processing / business"}</span>
             </div>
             {eventPage.loading && eventPage.events == null && (
               <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>{t("evx_loading")}</div>
@@ -378,11 +383,12 @@ export function EventsContent() {
             return (
               <button
                 key={id}
+                data-focus-key={`event-stream:${id}`}
                 onClick={() => setUrl((p) => p.set("id", id))}
                 className="w-full grid items-center gap-4 border-b border-line transition-colors text-left"
                 style={{
                   padding: "11px 24px",
-                  gridTemplateColumns: "120px 76px minmax(0, 1.4fr) 84px minmax(0, 1fr)",
+                  gridTemplateColumns: "112px 70px minmax(0, 1.2fr) 80px minmax(140px, .8fr) minmax(190px, 1fr)",
                   background: isSelected ? "var(--c-panel)" : "transparent",
                   cursor: "pointer",
                 }}
@@ -419,6 +425,7 @@ export function EventsContent() {
                     </Link>
                   ))}
                 </span>
+                <EventOutcomeCell event={e} lang={lang} />
               </button>
             );
             })}
@@ -519,6 +526,22 @@ function PayloadViewer({ event, contract, setUrl, t }: { event: InngestEventRow;
       )}
 
       <div className="mt-3 grid gap-y-1.5" style={{ gridTemplateColumns: "auto 1fr", columnGap: 16, fontSize: 12 }}>
+        {event.outcome && (
+          <>
+            <span className="text-ink-3">技术 / 业务</span>
+            <span className="flex items-center gap-2 flex-wrap">
+              <OutcomeBadges outcome={event.outcome} />
+              {event.processingRuns?.[0] && (
+                <Link
+                  href={`/monitor?run=${encodeURIComponent(event.processingRuns[0].runId)}&focus=${encodeURIComponent(`run:${event.processingRuns[0].runId}`)}`}
+                  className="text-accent hover:underline text-[11px]"
+                >
+                  查看处理 Run →
+                </Link>
+              )}
+            </span>
+          </>
+        )}
         <span className="text-ink-3">{t("evx_event_id")}</span>
         <code className="text-ink-2 tabular-nums break-all" style={{ fontFamily: "var(--f-mono)", fontSize: 11.5 }}>
           {event.internal_id ?? event.id}
@@ -632,6 +655,29 @@ function PayloadViewer({ event, contract, setUrl, t }: { event: InngestEventRow;
         </div>
       )}
     </div>
+  );
+}
+
+function EventOutcomeCell({ event, lang }: { event: InngestEventRow; lang: "zh" | "en" }) {
+  const runs = event.processingRuns ?? [];
+  const primary = runs.find((run) => run.outcome.technical === "failed") ?? runs[0];
+  const meaningful = event.outcome && event.outcome.business !== "not_applicable";
+  return (
+    <span className="min-w-0 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+      {event.outcome && (runs.length > 0 || meaningful) ? (
+        <OutcomeBadges outcome={event.outcome} compact />
+      ) : (
+        <span className="text-[10.5px] text-ink-4">{lang === "zh" ? "事件已记录" : "Recorded"}</span>
+      )}
+      {primary && (
+        <Link
+          href={`/monitor?run=${encodeURIComponent(primary.runId)}&focus=${encodeURIComponent(`run:${primary.runId}`)}`}
+          className="text-[10.5px] text-accent hover:underline whitespace-nowrap"
+        >
+          Run →
+        </Link>
+      )}
+    </span>
   );
 }
 
