@@ -62,18 +62,44 @@ fi
 ROBOHIRE=$(get ROBOHIRE_API_BASE_URL)
 [ -n "$ROBOHIRE" ] && check_http "RoboHire (公网) " "$ROBOHIRE" || skip "RoboHire"
 
+# Bare container names (no dot, not localhost) only resolve on the Docker
+# network, not from this host shell — probing them here would false-fail.
+is_container_name() {
+  case "$1" in
+    localhost|host.docker.internal|127.*|*.*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+# From the host shell, the host bridge name is just localhost.
+host_view() { printf '%s' "$1" | sed 's/host\.docker\.internal/localhost/'; }
+
 RAAS_URL=$(get RAAS_POSTGRES_URL)
 if [ -n "$RAAS_URL" ]; then
   raas_host=$(printf '%s' "$RAAS_URL" | sed -E 's#^[a-z+]+://([^@]*@)?([^:/?]+).*#\2#')
   raas_port=$(printf '%s' "$RAAS_URL" | sed -nE 's#^[a-z+]+://([^@]*@)?[^:/?]+:([0-9]+).*#\2#p')
-  check_tcp "RAAS Postgres   " "$raas_host" "${raas_port:-5432}"
+  if is_container_name "$raas_host"; then
+    echo "  - RAAS Postgres    容器名 '$raas_host'——宿主侧无法探测，起容器后在共享网络内解析；可用:"
+    echo "      docker run --rm --network \${RAAS_SHARED_NETWORK:-raas-deploy-next_default} ${POSTGRES_IMAGE:-postgres:17.10-alpine} pg_isready -h $raas_host -p ${raas_port:-5432}"
+    SKIP=$((SKIP+1))
+  else
+    check_tcp "RAAS Postgres   " "$(host_view "$raas_host")" "${raas_port:-5432}"
+  fi
 else
   skip "RAAS Postgres"
 fi
 
 MINIO_HOST=$(get MINIO_ENDPOINT)
 MINIO_PORT=$(get MINIO_PORT)
-[ -n "$MINIO_HOST" ] && check_tcp "MinIO 简历存储  " "$MINIO_HOST" "${MINIO_PORT:-9000}" || skip "MinIO"
+if [ -n "$MINIO_HOST" ]; then
+  if is_container_name "$MINIO_HOST"; then
+    echo "  - MinIO 简历存储   容器名 '$MINIO_HOST'——宿主侧无法探测，起容器后在共享网络内解析"
+    SKIP=$((SKIP+1))
+  else
+    check_tcp "MinIO 简历存储  " "$(host_view "$MINIO_HOST")" "${MINIO_PORT:-9000}"
+  fi
+else
+  skip "MinIO"
+fi
 
 echo ""
 echo "===== 参考项（不计入失败）====="

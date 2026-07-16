@@ -87,7 +87,26 @@ bash scripts/survey-old-deployment.sh          # 在仓库里时
 5. **外部依赖连通性**：五个依赖里"✗"的项，部署前先解决网络（尤其
    RoboHire 是公网域名，内网机器要确认出网口子）。
 
-## 3. 阶段一 · 构建机：产出离线部署包
+## 3. 阶段一 · 把代码/镜像弄到目标机（两条路径）
+
+**路径 A · 在线（目标机能访问 GitHub/DockerHub/npm 时的首选）**：
+构建机把代码快照 commit + push 到远端仓库，目标机直接 clone 并在本地
+构建——不需要离线包：
+
+```bash
+# 目标机上:
+git clone -b <部署分支> <仓库URL> ao-v2 && cd ao-v2
+cp .env.deploy.example .env.deploy    # 按 5.3 表填写
+# 预检/连通自检同第 5 节；启动命令在 5.5 的基础上加 --build:
+docker compose --env-file .env.deploy \
+  -f docker-compose.deploy.yml -f docker-compose.shared-inngest.yml up -d --build --wait
+```
+
+首次构建在目标机上完成（M 系列 Mac 约 15–25 分钟，需要拉 node/postgres
+基础镜像和 npm 包）。此后升级 = `git pull` + 重新 `up -d --build --wait`。
+
+**路径 B · 离线 bundle（目标机拉不了公网资源时的兜底）**——以下小节即
+此路径：构建机产出离线包，目标机 `docker load` 后不带 `--build` 启动。
 
 前置：Docker Desktop 在跑；当前工作区就是要部署的代码状态（`docker build`
 用的是工作区文件，与 git 提交状态无关，但**建议先提交并推送存档**，保证
@@ -158,8 +177,10 @@ mkdir -p ~/ao-deploy && tar xf ~/ao-deploy-bundle-*.tar -C ~/ao-deploy && cd ~/a
 > 孤儿，`up` 时有被误删的风险。
 
 ```bash
+# 先看老 AO 到底有哪些容器（名字以勘察为准）:
+docker ps --format '{{.Names}}' | grep -iE '^ao-|agentic'
 # 只 stop 不 rm —— 老容器和它的数据原样保留，可随时回滚
-docker stop ao-main                    # 老 AO 容器名以勘察结果为准
+docker stop ao-main                    # 老 AO 应用
 docker stop ao-postgres 2>/dev/null    # 老 AO 自己的 Postgres（若存在）
 ```
 
@@ -196,7 +217,8 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 | `AO_POSTGRES_PORT` | `5436` | 宿主 5433 已被占用、5434 是老 ao-postgres、5435 是 allmeta 的——避开 |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | 沿用老 env §9 的两个随机值 | 生产拒绝字面量 `dev` |
 | `AO_POSTGRES_PASSWORD` | 生成一个长随机串 | `openssl rand -hex 24` |
-| `DATABASE_URL` | 把密码同步进去，host 保持 `postgres:5432` | 这是**新栈自己的** Postgres 服务名（project 前缀隔离，不会撞 RAAS 的 postgres 容器） |
+| `DATABASE_URL` | 把密码同步进去，host 保持 `ao-postgres:5432` | **新栈自己的** Postgres 服务名。故意不叫 `postgres`——共享网络上已有同名容器（new-api 的库），同名别名会让 DNS 二义、写错库 |
+| `RAAS_SHARED_NETWORK` | `new-api_new-api-network` | 实勘结论：partner `raas` 库所在的 `postgres` 容器挂在 new-api 的网络上（不是 raas-deploy-next_default） |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | 沿用老 env §3（`https://new-api.jointpilot.com/v1` + key + `kimi-k2.6`） | 或换成内网网关 `http://host.docker.internal:3010/v1`，二选一 |
 | `ALLMETA_BASE_URL` | `http://host.docker.internal:3500` | Allmeta 栈在目标机本机 Docker 里 |
 | `ALLMETA_API_KEY` | 沿用老 env §6 的 `oskey_*` | 与 Allmeta Studio 一致 |
@@ -204,7 +226,7 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 | `ROBOHIRE_API_BASE_URL` | `https://api.gohire.top` | **不带 /v1**（client 自己拼 `/api/v1`） |
 | `ROBOHIRE_API_KEY` | 沿用老 env §4 的 `rh_*` | |
 | `ROBOHIRE_TIMEOUT_MS` | `300000` | ⚠ 老 env 是 120000——那是坑：match 实测 ~195s 会被杀，必须用 300000 |
-| `RAAS_POSTGRES_URL` | 沿用老 env §5a：`postgresql://postgres:<密码URL编码>@postgres:5432/raas` | `postgres` 容器**未发布宿主端口**，必须靠 shared overlay 加入 `raas-deploy-next_default` 网络按容器名访问；库名 `raas`；密码含 `@` 写成 `%40` |
+| `RAAS_POSTGRES_URL` | 沿用老 env §5a：`postgresql://postgres:<密码URL编码>@postgres:5432/raas` | `postgres` 容器**未发布宿主端口**，必须靠 shared overlay 按容器名访问（网络名见上行 `RAAS_SHARED_NETWORK`）；库名 `raas`；密码含 `@` 写成 `%40` |
 | `RAAS_DEFAULT_EMPLOYEE_ID` | `0000199059`（老 env §5b） | 匹配结果归属兜底 |
 | `MINIO_ENDPOINT` / `MINIO_PORT` | `host.docker.internal` / `9000` | 共享 MinIO 在目标机本机；endpoint 不带 scheme |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | 沿用老 env §8 | |
@@ -329,7 +351,7 @@ aoc down                    # 停止并删容器，named volume 全保留
 
 ```bash
 mkdir -p backups
-aoc exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+aoc exec -T ao-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
   > "backups/ao-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
@@ -349,8 +371,8 @@ aoc start
 
 （离线机器上没有 alpine 镜像，上面借 postgres 镜像自带的 tar 完成打包。）
 
-迁机：新机器先创建同名空 volume 并解入两个 tar 包，启动 `postgres` 后用
-`pg_restore --clean --if-exists` 恢复 dump，再起整套 compose。Postgres
+迁机：新机器先创建同名空 volume 并解入两个 tar 包，启动 `ao-postgres`
+后用 `pg_restore --clean --if-exists` 恢复 dump，再起整套 compose。Postgres
 归档是监控历史的权威副本——即使不迁 Inngest volume，已归档记录也不丢。
 
 ## 9. 离线升级与回滚

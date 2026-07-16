@@ -142,8 +142,13 @@ if (Number(env.LOG_EVENT_RETENTION_DAYS ?? 0) > 0) {
 
 try {
   const db = new URL(env.DATABASE_URL ?? "");
-  if (db.hostname !== "postgres") {
-    warnings.push(`DATABASE_URL host is '${db.hostname}', not the bundled 'postgres' service`);
+  if (db.hostname !== "ao-postgres") {
+    warnings.push(`DATABASE_URL host is '${db.hostname}', not the bundled 'ao-postgres' service`);
+  }
+  if (db.hostname === "postgres") {
+    errors.push(
+      "DATABASE_URL host 'postgres' is ambiguous in shared-network deployments (an external container may own that name) — use the bundled service name 'ao-postgres'",
+    );
   }
   if (decodeURIComponent(db.username) !== env.AO_POSTGRES_USER) {
     errors.push("DATABASE_URL username does not match AO_POSTGRES_USER");
