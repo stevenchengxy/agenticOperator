@@ -117,9 +117,15 @@ README-TARGET.md     # 目标机快速步骤（本节的精简版）
 scripts/             # deploy-preflight.mjs · check-connectivity.sh · survey-old-deployment.sh
 ```
 
-参考耗时（Apple Silicon 构建机、同架构目标）：镜像构建 10–20 分钟 +
-docker save 数分钟。交叉构建（`--arch` 与构建机不同）走 QEMU 模拟，预期
-慢 3–5 倍。
+参考数字（2026-07-16 在 Apple Silicon 构建机实测）：AO 镜像约 **2.1 GB**；
+冷缓存构建 30–40 分钟（npm 全量拉包，网络抖动会自动重试），热缓存约
+10 分钟。交叉构建（`--arch` 与构建机不同）走 QEMU 模拟，预期慢 3–5 倍。
+整套 compose 已在构建机完整烟测通过：五容器 healthy、`/api/health` 全绿、
+6/6 RAAS-v1 函数注册成功。
+
+两个常见构建失败及自救：`next build` 阶段报 TS 错误 = 工作区有改到一半
+的代码（构建用的是工作区快照），改完重跑；`npm ci` 阶段网络重置 = 直接
+重跑（缓存续传，且已配自动重试）。
 
 ## 4. 阶段二 · 传输
 
