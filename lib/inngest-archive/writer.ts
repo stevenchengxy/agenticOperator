@@ -11,6 +11,7 @@ import {
   type RecentRun,
   type RunHistory,
 } from "./mappers";
+import { isRunTombstoned } from "./tombstones";
 
 /** Insert any new events. Events are immutable, so skipDuplicates is correct. */
 export async function archiveEvents(events: InngestEvent[]): Promise<number> {
@@ -35,6 +36,8 @@ export async function readRunSyncState(): Promise<Map<string, RunSyncState>> {
 
 /** Create or update a run's scalar/timing fields (never touches traceFetched). */
 export async function upsertRun(run: RecentRun): Promise<void> {
+  // Operator deleted this run from 监控 — the poller must not resurrect it.
+  if (await isRunTombstoned(run.id)) return;
   await prisma.inngestRunArchive.upsert({
     where: { runId: run.id },
     create: runToCreate(run),
@@ -48,6 +51,9 @@ export async function upsertRun(run: RecentRun): Promise<void> {
  * re-fetches are idempotent regardless of span ordering. Returns step count.
  */
 export async function archiveRunTrace(runId: string, history: RunHistory): Promise<number> {
+  // Tombstoned run: its archive row is deleted — updating it would throw and
+  // re-inserting steps would leave orphans. Skip.
+  if (await isRunTombstoned(runId)) return 0;
   const steps = historyToStepRows(runId, history);
   await prisma.$transaction([
     prisma.inngestRunArchive.update({

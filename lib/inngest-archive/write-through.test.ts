@@ -3,6 +3,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("../../server/db", () => ({
   prisma: {
     inngestRunArchive: { upsert: vi.fn(), findUnique: vi.fn() },
+    // Tombstone guard lookup — default impl (survives clearAllMocks) says
+    // "not tombstoned" so the pre-existing tests exercise the normal path.
+    inngestRunTombstone: { findUnique: vi.fn(async () => null) },
   },
 }));
 vi.mock("./writer", () => ({ archiveEvents: vi.fn(), archiveRunTrace: vi.fn() }));
@@ -173,6 +176,46 @@ describe("captureRunTrace", () => {
         finishedAtIso: "2026-06-11T00:00:00.000Z",
       }),
     ).toBe(0);
+    expect(archiveRunTrace).not.toHaveBeenCalled();
+  });
+});
+
+describe("tombstone guard (操作员已删除的 run 不复活)", () => {
+  it("recordRunStart skips a tombstoned run entirely", async () => {
+    vi.mocked(prisma.inngestRunTombstone.findUnique).mockResolvedValueOnce({ runId: "r1" } as never);
+    await recordRunStart({
+      runId: "r1",
+      functionSlug: "s",
+      functionName: "n",
+      startedAtIso: "2026-07-16T00:00:00Z",
+    });
+    expect(prisma.inngestRunArchive.upsert).not.toHaveBeenCalled();
+    expect(archiveEvents).not.toHaveBeenCalled();
+  });
+
+  it("recordRunFinish skips a tombstoned run", async () => {
+    vi.mocked(prisma.inngestRunTombstone.findUnique).mockResolvedValueOnce({ runId: "r1" } as never);
+    await recordRunFinish({
+      runId: "r1",
+      functionSlug: "s",
+      functionName: "n",
+      status: "Failed",
+      finishedAtIso: "2026-07-16T00:00:00Z",
+      output: null,
+    });
+    expect(prisma.inngestRunArchive.upsert).not.toHaveBeenCalled();
+  });
+
+  it("captureRunTrace returns 0 for a tombstoned run without fetching history", async () => {
+    vi.mocked(prisma.inngestRunTombstone.findUnique).mockResolvedValueOnce({ runId: "r1" } as never);
+    const n = await captureRunTrace({
+      runId: "r1",
+      status: "Failed",
+      output: null,
+      finishedAtIso: "2026-07-16T00:00:00Z",
+    });
+    expect(n).toBe(0);
+    expect(getRunHistory).not.toHaveBeenCalled();
     expect(archiveRunTrace).not.toHaveBeenCalled();
   });
 });

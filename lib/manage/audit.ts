@@ -18,6 +18,7 @@ const ACTION_LABEL: Record<string, string> = {
   'manage.run.replay': '重放运行',
   'manage.event.replay': '重放事件',
   'manage.event.replay.batch': '批量重放事件',
+  'manage.run.delete.batch': '批量删除运行',
   'manage.runs.batch': '批量操作运行',
   'manage.agent.config': '修改智能体配置',
   'manage.agent.throttle': '调整智能体限流',

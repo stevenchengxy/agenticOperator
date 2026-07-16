@@ -395,3 +395,8 @@ export async function getTriggerEventFromRuns(
   if (!row?.eventName || !row.eventPayload) return null;
   return { name: row.eventName, data: parseMaybeJson(row.eventPayload) };
 }
+
+// Read-path tombstone filter, re-exported here so lib/inngest-source (which
+// treats this module as the archive boundary) can hide operator-deleted runs
+// that the live Inngest buffer still returns.
+export { listTombstonedAmong as listTombstonedRunIds } from "./tombstones";

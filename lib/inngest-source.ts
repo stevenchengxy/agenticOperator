@@ -66,19 +66,35 @@ async function mergeLists<T>(
   return [...byKey.values()].sort((a, b) => timeOf(b) - timeOf(a)).slice(0, limit);
 }
 
+/**
+ * Drop operator-deleted runs. The archive rows are already gone (and the
+ * writers skip them), but the live Inngest buffer has no delete API, so any
+ * live read can resurrect a deleted run — this filter is what makes 监控页
+ * 「删除」stick. Soft-fails open: a tombstone-lookup error must not take the
+ * monitor down with it.
+ */
+async function withoutTombstoned<T>(rows: T[], idOf: (r: T) => string): Promise<T[]> {
+  if (rows.length === 0) return rows;
+  const dead = new Set(
+    (await archive.listTombstonedRunIds(rows.map(idOf)).catch(() => [])) ?? [],
+  );
+  return dead.size === 0 ? rows : rows.filter((r) => !dead.has(idOf(r)));
+}
+
 export async function listRecentRuns(
   ...args: Parameters<typeof live.listRecentRuns>
 ): ReturnType<typeof live.listRecentRuns> {
   const s = source();
-  if (s === "live") return live.listRecentRuns(...args);
+  if (s === "live") return withoutTombstoned(await live.listRecentRuns(...args), (r) => r.id);
   if (s === "postgres") return archive.listRecentRuns(...args);
-  return mergeLists(
+  const merged = await mergeLists(
     live.listRecentRuns(...args),
     archive.listRecentRuns(...args),
     (r) => r.id,
     (r) => startedMs(r.startedAt),
     args[0]?.limit ?? 50,
   );
+  return withoutTombstoned(merged, (r) => r.id);
 }
 
 export type PagedRead<T> = archive.PageResult<T> & { source: "postgres" | "live" };
@@ -104,13 +120,16 @@ export async function listRecentRunsPage(
   const page = Math.max(1, Math.floor(opts.page ?? 1));
   const pageSize = Math.min(500, Math.max(1, Math.floor(opts.pageSize ?? 50)));
   const needed = Math.min(1000, page * pageSize);
-  const rows = await live.listRecentRuns({
-    limit: needed,
-    functionSlug: opts.functionSlug,
-    // Preserve the archive API's all-history default as far as the live store
-    // allows; this branch is degraded fallback only.
-    sinceHours: opts.sinceHours ?? 24 * 365 * 100,
-  });
+  const rows = await withoutTombstoned(
+    await live.listRecentRuns({
+      limit: needed,
+      functionSlug: opts.functionSlug,
+      // Preserve the archive API's all-history default as far as the live store
+      // allows; this branch is degraded fallback only.
+      sinceHours: opts.sinceHours ?? 24 * 365 * 100,
+    }),
+    (r) => r.id,
+  );
   const filtered = rows.filter((row) => {
     if (opts.status?.length && !opts.status.includes(row.status)) return false;
     if (opts.eventName && row.eventName !== opts.eventName) return false;
@@ -175,15 +194,18 @@ export async function listRunsWithEvents(
   ...args: Parameters<typeof live.listRunsWithEvents>
 ): ReturnType<typeof live.listRunsWithEvents> {
   const s = source();
-  if (s === "live") return live.listRunsWithEvents(...args);
+  if (s === "live") {
+    return withoutTombstoned(await live.listRunsWithEvents(...args), (r) => r.runId);
+  }
   if (s === "postgres") return archive.listRunsWithEvents(...args);
-  return mergeLists(
+  const merged = await mergeLists(
     live.listRunsWithEvents(...args),
     archive.listRunsWithEvents(...args),
     (r) => r.runId,
     (r) => startedMs(r.startedAt),
     args[1]?.limit ?? 100,
   );
+  return withoutTombstoned(merged, (r) => r.runId);
 }
 
 // Event recency for the merge sort. received_at is the natural timeline; fall

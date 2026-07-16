@@ -11,6 +11,7 @@ import { getRunHistory } from "../inngest-admin-client";
 import { archiveEvents, archiveRunTrace } from "./writer";
 import { toDate, safeJson, type RunHistory } from "./mappers";
 import { inferRunDomain } from "../events/domain-scope";
+import { isRunTombstoned } from "./tombstones";
 
 export type TriggerEventSnapshot = {
   id?: string;
@@ -55,6 +56,8 @@ export async function recordRunStart(args: {
   eventId?: string;
   event?: TriggerEventSnapshot;
 }): Promise<void> {
+  // Operator deleted this run from 监控 — don't resurrect it.
+  if (await isRunTombstoned(args.runId)) return;
   const startedAt = toDate(args.startedAtIso);
   const eventId = args.event?.id ?? args.eventId;
   const eventName = args.event?.name ?? args.eventName;
@@ -122,6 +125,8 @@ export async function recordRunFinish(args: {
   eventName?: string;
   eventId?: string;
 }): Promise<void> {
+  // Operator deleted this run from 监控 — don't resurrect it.
+  if (await isRunTombstoned(args.runId)) return;
   const endedAt = toDate(args.finishedAtIso);
   const existing = await prisma.inngestRunArchive.findUnique({
     where: { runId: args.runId },
@@ -181,6 +186,9 @@ export async function captureRunTrace(args: {
   output: unknown;
   finishedAtIso: string;
 }): Promise<number> {
+  // Tombstoned run: the archive row is gone, so the trace update would only
+  // error (or recreate steps for a deleted run) — skip.
+  if (await isRunTombstoned(args.runId)) return 0;
   const history = (await getRunHistory(args.runId)) as RunHistory | null;
   if (!history) return 0;
   return archiveRunTrace(args.runId, {

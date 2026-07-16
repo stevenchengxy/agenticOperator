@@ -350,19 +350,14 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
   const { t } = useApp();
   const [expandedId, setExpandedId] = React.useState<string | null>(initialExpandedId);
   const [details, setDetails] = React.useState<Record<string, RunDetail | "loading" | "error">>({});
-  // Bulk retry selection — retry works by re-emitting each run's trigger
-  // event, so only rows that still carry an eventId are selectable. "全选"
-  // scopes to the current view: switch to the 失败 tab first to select all
-  // failed runs in one click.
+  // Bulk selection — "全选" scopes to the current view (switch to the 失败 tab
+  // first to grab all failed runs in one click). Every row is selectable:
+  // 删除 works on any run, 批量重试 only re-emits the ones that still carry a
+  // trigger eventId. Selection is kept as run ids and derived against the
+  // current view so rows that left the page/filter drop out of the batch.
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
-  const selectable = React.useMemo(
-    () => runs.filter((r) => !!r.eventId),
-    [runs],
-  );
-  // Selection is kept as run ids; derive against the current view so rows that
-  // left the page/filter silently drop out of the pending batch.
   const selectedRuns = React.useMemo(
-    () => runs.filter((r) => selected.has(r.id) && !!r.eventId),
+    () => runs.filter((r) => selected.has(r.id)),
     [runs, selected],
   );
   const toggleSelect = React.useCallback((runId: string) => {
@@ -421,13 +416,15 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
 
   return (
     <>
-      <BulkRetryBar
+      <BulkActionsBar
         selectedCount={selectedRuns.length}
-        selectableCount={selectable.length}
-        onSelectAll={() => setSelected(new Set(selectable.map((r) => r.id)))}
+        replayableCount={selectedRuns.filter((r) => !!r.eventId).length}
+        selectableCount={runs.length}
+        onSelectAll={() => setSelected(new Set(runs.map((r) => r.id)))}
         onClear={() => setSelected(new Set())}
         eventIds={[...new Set(selectedRuns.map((r) => r.eventId).filter((id): id is string => !!id))]}
-        onRetried={() => {
+        runIds={selectedRuns.map((r) => r.id)}
+        onMutated={() => {
           setSelected(new Set());
           onRunsMutated?.();
         }}
@@ -458,12 +455,11 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
                 <input
                   type="checkbox"
                   checked={selected.has(r.id)}
-                  disabled={!r.eventId}
                   onChange={() => toggleSelect(r.id)}
                   onClick={(e) => e.stopPropagation()}
-                  title={r.eventId ? t("mox_select_run_tip") : t("mox_rerun_no_event_id")}
+                  title={t("mox_select_run_tip")}
                   aria-label={t("mox_select_run_tip")}
-                  className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                  className="cursor-pointer"
                   style={{ width: 13, height: 13, accentColor: "var(--c-accent)" }}
                 />
               </span>
@@ -515,32 +511,52 @@ function RunsList({ runs, initialExpandedId, onRunsMutated }: { runs: RunRow[]; 
   );
 }
 
-// ── Bulk retry bar (一键全选当前视图 + 批量重试, calls /api/inngest-admin/replay
-//    with eventIds[]) — "全选" follows the active status tab / filters, so
-//    selecting every failed run = switch to the 失败 tab, then 全选. Always
+// ── Bulk actions bar (一键全选当前视图 + 批量重试/删除) — "全选" follows the
+//    active status tab / filters, so selecting every failed run = switch to
+//    the 失败 tab, then 全选. Retry re-emits trigger events
+//    (/api/inngest-admin/replay), delete tombstones + removes archive rows
+//    (/api/inngest-admin/runs/delete) behind a two-step confirm. Always
 //    visible above the runs table so the affordance stays discoverable. ─────
-function BulkRetryBar({
+function BulkActionsBar({
   selectedCount,
+  replayableCount,
   selectableCount,
   onSelectAll,
   onClear,
   eventIds,
-  onRetried,
+  runIds,
+  onMutated,
 }: {
   selectedCount: number;
+  replayableCount: number;
   selectableCount: number;
   onSelectAll: () => void;
   onClear: () => void;
   eventIds: string[];
-  onRetried: () => void;
+  runIds: string[];
+  onMutated: () => void;
 }) {
   const { t } = useApp();
-  const [busy, setBusy] = React.useState(false);
+  const [busy, setBusy] = React.useState<null | "retry" | "delete">(null);
   const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null);
+  // Delete is destructive → two-step confirm: first click arms the button,
+  // second click executes. Disarm on timeout or when the selection changes.
+  const [armedDelete, setArmedDelete] = React.useState(false);
+  React.useEffect(() => {
+    if (!armedDelete) return;
+    const timer = setTimeout(() => setArmedDelete(false), 8000);
+    return () => clearTimeout(timer);
+  }, [armedDelete]);
+  React.useEffect(() => setArmedDelete(false), [selectedCount]);
+
+  function finish(text: string, ok: boolean) {
+    setMsg({ text, ok });
+    setTimeout(() => setMsg(null), 6000);
+  }
 
   async function retrySelected() {
     if (eventIds.length === 0 || busy) return;
-    setBusy(true);
+    setBusy("retry");
     setMsg(null);
     try {
       const r = await fetch("/api/inngest-admin/replay", {
@@ -553,13 +569,41 @@ function BulkRetryBar({
       const failSuffix = b.failed > 0
         ? t("mox_bulk_retry_fail_suffix").replace("{fail}", String(b.failed))
         : "";
-      setMsg({ text: `${t("mox_bulk_retry_done").replace("{ok}", String(b.replayed))}${failSuffix}`, ok: b.failed === 0 });
-      onRetried();
+      finish(`${t("mox_bulk_retry_done").replace("{ok}", String(b.replayed))}${failSuffix}`, b.failed === 0);
+      onMutated();
     } catch (err) {
-      setMsg({ text: `✗ ${(err as Error).message}`, ok: false });
+      finish(`✗ ${(err as Error).message}`, false);
     } finally {
-      setBusy(false);
-      setTimeout(() => setMsg(null), 6000);
+      setBusy(null);
+    }
+  }
+
+  async function deleteSelected() {
+    if (runIds.length === 0 || busy) return;
+    if (!armedDelete) {
+      setArmedDelete(true);
+      return;
+    }
+    setArmedDelete(false);
+    setBusy("delete");
+    setMsg(null);
+    try {
+      const r = await fetch("/api/inngest-admin/runs/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runIds }),
+      });
+      const b = await r.json();
+      if (!r.ok) throw new Error((b as { message?: string; error?: string }).message ?? (b as { error?: string }).error ?? `HTTP ${r.status}`);
+      const keptSuffix = b.rejected > 0
+        ? t("mox_bulk_delete_rejected_suffix").replace("{n}", String(b.rejected))
+        : "";
+      finish(`${t("mox_bulk_delete_done").replace("{n}", String(b.deleted))}${keptSuffix}`, b.rejected === 0);
+      onMutated();
+    } catch (err) {
+      finish(`✗ ${(err as Error).message}`, false);
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -591,11 +635,30 @@ function BulkRetryBar({
       )}
       <button
         type="button"
+        onClick={deleteSelected}
+        disabled={busy !== null || selectedCount === 0}
+        className="text-[11px] px-2.5 py-1 rounded border disabled:opacity-40 disabled:cursor-not-allowed font-medium whitespace-nowrap transition-colors"
+        style={{
+          color: "var(--c-err)",
+          borderColor: armedDelete
+            ? "var(--c-err)"
+            : "color-mix(in oklab, var(--c-err) 45%, transparent)",
+          background: armedDelete ? "color-mix(in oklab, var(--c-err) 12%, transparent)" : "transparent",
+        }}
+      >
+        {busy === "delete"
+          ? t("mox_bulk_deleting")
+          : armedDelete
+            ? t("mox_bulk_delete_confirm").replace("{n}", String(selectedCount))
+            : `${t("mox_bulk_delete")}${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+      </button>
+      <button
+        type="button"
         onClick={retrySelected}
-        disabled={busy || selectedCount === 0}
+        disabled={busy !== null || replayableCount === 0}
         className="text-[11px] px-2.5 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium whitespace-nowrap"
       >
-        {busy ? t("mox_bulk_retrying") : `↺ ${t("mox_bulk_retry")}${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+        {busy === "retry" ? t("mox_bulk_retrying") : `↺ ${t("mox_bulk_retry")}${replayableCount > 0 ? ` (${replayableCount})` : ""}`}
       </button>
     </div>
   );

@@ -27,6 +27,9 @@ vi.mock("./inngest-archive/reader", () => ({
   getEventById: vi.fn(),
   getTriggerEventFromRuns: vi.fn(),
   listRunsByTriggerEvent: vi.fn(),
+  // Default impl (survives clearAllMocks): nothing tombstoned, so the
+  // pre-existing merge tests exercise the normal path untouched.
+  listTombstonedRunIds: vi.fn(async () => []),
 }));
 
 import * as live from "./inngest-admin-client";
@@ -410,5 +413,41 @@ describe("inngest-source getEventRuns (auto = merge live + archive)", () => {
     ]);
     const rows = await getEventRuns("ev-1");
     expect(rows.map((r) => r.run_id)).toEqual(["r1"]);
+  });
+});
+
+describe("inngest-source tombstoned runs (操作员删除后 live 不复活)", () => {
+  it("hides a tombstoned run that the live buffer still returns", async () => {
+    // Archive row is deleted; only live still knows the run. Without the
+    // filter the merge would resurrect it in 监控 right after 删除.
+    vi.mocked(archive.listRecentRuns).mockResolvedValue([]);
+    vi.mocked(live.listRecentRuns).mockResolvedValue([
+      run("deleted", "Failed", "2026-06-03T05:00:00Z"),
+      run("kept", "Completed", "2026-06-03T05:00:30Z"),
+    ]);
+    vi.mocked(archive.listTombstonedRunIds).mockResolvedValueOnce(["deleted"]);
+    const rows = await listRecentRuns({ limit: 50 });
+    expect(rows.map((r) => r.id)).toEqual(["kept"]);
+  });
+
+  it("fails open when the tombstone lookup errors (monitor must stay up)", async () => {
+    vi.mocked(archive.listRecentRuns).mockResolvedValue([]);
+    vi.mocked(live.listRecentRuns).mockResolvedValue([
+      run("a", "Completed", "2026-06-03T05:00:00Z"),
+    ]);
+    vi.mocked(archive.listTombstonedRunIds).mockRejectedValueOnce(new Error("pg down"));
+    const rows = await listRecentRuns({ limit: 50 });
+    expect(rows.map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("filters tombstoned runs out of listRunsWithEvents too", async () => {
+    vi.mocked(archive.listRunsWithEvents).mockResolvedValue([]);
+    vi.mocked(live.listRunsWithEvents).mockResolvedValue([
+      rwe("deleted", "Failed", "2026-06-03T05:00:00Z"),
+      rwe("kept", "Completed", "2026-06-03T05:00:30Z"),
+    ]);
+    vi.mocked(archive.listTombstonedRunIds).mockResolvedValueOnce(["deleted"]);
+    const rows = await listRunsWithEvents("slug", { limit: 50 });
+    expect(rows.map((r) => r.runId)).toEqual(["kept"]);
   });
 });

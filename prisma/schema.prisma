@@ -1089,6 +1089,18 @@ model InngestStepArchive {
   @@map("inngest_step_archive")
 }
 
+// Operator-deleted runs (监控页「删除」). The live Inngest dev server has no
+// run-deletion API and both the polling archiver and the write-through
+// middleware re-mirror live runs, so deleting the archive row alone would
+// resurrect it — the tombstone makes deletion stick: writers skip tombstoned
+// runIds and the live-merge read path filters them out.
+model InngestRunTombstone {
+  runId     String   @id @map("run_id")
+  deletedAt DateTime @default(now()) @map("deleted_at")
+
+  @@map("inngest_run_tombstone")
+}
+
 // Singleton heartbeat row (id='singleton') — archiver writes its last poll
 // time + counts + last error here so /monitor can show archive freshness.
 model InngestArchiveCursor {
