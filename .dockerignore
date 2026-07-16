@@ -15,6 +15,11 @@ prisma/dev.db*
 !.env.example
 !.env.deploy.example
 
+# Stray pnpm experiment files — npm is the package manager. If these reach
+# the image, Next.js misdetects pnpm and its SWC fallback installer breaks.
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
 # Local/editor/runtime debris and large design/reference artifacts.
 .DS_Store
 *.log

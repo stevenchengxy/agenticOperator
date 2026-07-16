@@ -3,10 +3,24 @@
 ARG NODE_VERSION=22.17.0
 
 FROM node:${NODE_VERSION}-bookworm AS dependencies
+ARG TARGETPLATFORM
 WORKDIR /app
-ENV NEXT_TELEMETRY_DISABLED=1
+# Registry fetches must survive flaky networks — a cold cache re-downloads
+# the full tree and a single ECONNRESET otherwise kills the build.
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN --mount=type=cache,target=/root/.npm,id=npm-${TARGETPLATFORM} npm ci
+# npm's libc-scoped optional-dependency resolution has proven flaky under
+# BuildKit (observed: only @next/swc-linux-*-musl installed on this glibc
+# image, which breaks `next build`). Pin the glibc SWC binary explicitly,
+# version-locked to the installed next.
+RUN --mount=type=cache,target=/root/.npm,id=npm-${TARGETPLATFORM} \
+    NEXT_VERSION=$(node -p "require('next/package.json').version") \
+    && SWC_ARCH=$(node -p "process.arch === 'arm64' ? 'arm64' : 'x64'") \
+    && npm install --no-save --no-audit --no-fund "@next/swc-linux-${SWC_ARCH}-gnu@${NEXT_VERSION}"
 
 FROM dependencies AS builder
 WORKDIR /app
@@ -26,10 +40,14 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:${NODE_VERSION}-bookworm AS production-dependencies
+ARG TARGETPLATFORM
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm,id=npm-${TARGETPLATFORM} npm ci --omit=dev && npm cache clean --force
 
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 WORKDIR /app

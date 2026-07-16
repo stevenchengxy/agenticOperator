@@ -28,6 +28,14 @@ echo "===== 2. 全部容器（含已停止）====="
 docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}'
 
 echo ""
+echo "===== 2b. Docker 网络（找共享 RAAS 网络真名）====="
+docker network ls
+echo "-- raas-inngest / raas postgres 所在网络与发布端口 --"
+for c in raas-inngest postgres raas-postgres; do
+  docker inspect "$c" --format "$c → 网络: {{range \$k,\$v := .NetworkSettings.Networks}}{{\$k}} {{end}} · 端口: {{range \$p,\$b := .NetworkSettings.Ports}}{{\$p}}→{{if \$b}}{{(index \$b 0).HostPort}}{{end}} {{end}}" 2>/dev/null
+done
+
+echo ""
 echo "===== 3. 老版本 AO 项目目录 ====="
 if [ -d "$OLD_AO_DIR" ]; then
   ls -la "$OLD_AO_DIR" | head -40

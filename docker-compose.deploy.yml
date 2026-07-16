@@ -20,8 +20,12 @@ x-ao-service: &ao-service
     AO_LOG_DIR: /app/persist/logs
     AO_BASE_URL: http://app:3002
     INNGEST_DEV: "1"
-    INNGEST_BASE_URL: http://inngest:8288
-    INNGEST_SERVE_ORIGIN: http://app:3002
+    # Defaults target the bundled inngest service. For a SHARED Inngest
+    # (e.g. reusing an existing raas-inngest container on the same host),
+    # override both in .env.deploy and disable the bundled service by
+    # clearing COMPOSE_PROFILES. See docs/deployment.md.
+    INNGEST_BASE_URL: ${INNGEST_BASE_URL:-http://inngest:8288}
+    INNGEST_SERVE_ORIGIN: ${INNGEST_SERVE_ORIGIN:-http://app:3002}
     INNGEST_SERVE_PATH: /api/inngest
     NEXT_PUBLIC_BASE_URL: ${AO_PUBLIC_ORIGIN:-http://localhost:3002}
     NEXT_PUBLIC_INNGEST_URL: ${INNGEST_PUBLIC_ORIGIN:-http://localhost:8288}
@@ -89,6 +93,10 @@ services:
       start_period: 60s
 
   inngest:
+    # Bundled event engine — only started when COMPOSE_PROFILES includes
+    # "bundled-inngest". Deployments that join an existing shared Inngest
+    # (AO + RAAS on one instance) leave the profile unset.
+    profiles: ["bundled-inngest"]
     image: ${INNGEST_IMAGE:-inngest/inngest:v1.19.2}
     working_dir: /var/lib/inngest
     command:
@@ -123,10 +131,11 @@ services:
   archiver:
     <<: *ao-service
     command: ["archiver"]
+    # No hard dependency on the inngest service: the archiver is the
+    # compensating poller and must tolerate Inngest downtime by design —
+    # and in shared-Inngest mode the bundled service does not exist.
     depends_on:
       app:
-        condition: service_healthy
-      inngest:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/app/node_modules/.bin/tsx", "/app/scripts/deployment-health.ts", "archiver"]

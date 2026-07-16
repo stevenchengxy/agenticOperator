@@ -24,9 +24,25 @@
 | --- | --- | --- |
 | `app` | Next.js UI、API、Agent/Inngest 回调（端口 3002） | `<项目名>-logs`（完整 JSONL agent 日志）、`<项目名>-skills`、`<项目名>-tools`（工厂运行时产物） |
 | `postgres` | AO 运营数据、LogEvent、通知、事件/run/step 归档 | `<项目名>-postgres-data` |
-| `inngest` | 事件调度与实时运行（端口 8288/8289，显式 `--persist`） | `<项目名>-inngest-data` |
+| `inngest`（可选） | 事件调度与实时运行（端口 8288/8289，显式 `--persist`） | `<项目名>-inngest-data` |
 | `archiver` | Inngest events/runs/steps 补偿归档到 Postgres | 写 `postgres` |
 | `monitor-sweeper` | SLA、健康、错误率、成本和保留策略扫描 | 写 `postgres` |
+
+### Inngest 两种模式（部署前必须选定）
+
+架构铁律：**AO 和 RAAS partner 共用同一个 Inngest 实例**（partner 侧的
+RESUME_DOWNLOADED 等事件直接进这个实例触发 AO 函数）。因此：
+
+- **模式 S · 共享 Inngest（Mac Studio 生产现状，本指南主线）**——机器上已
+  有 RAAS 栈的 `raas-inngest` 容器，AO **不再**自带 Inngest：
+  `.env.deploy` 里 `COMPOSE_PROFILES=`（置空，bundled 服务不启动），
+  `INNGEST_BASE_URL` / `INNGEST_SERVE_ORIGIN` 指向共享实例，并叠加
+  `docker-compose.shared-inngest.yml` 加入 RAAS 的 Docker 网络。
+  **如果错误地自带一套新 Inngest，partner 事件到不了 AO，六函数链路直接
+  断掉。**
+- **模式 B · 自带 Inngest（全新独立机器）**——机器上没有任何共享实例：
+  保持 `COMPOSE_PROFILES=bundled-inngest`（模板默认），compose 启动第三行
+  的 `inngest` 服务，四个 URL 全走默认，无需 overlay 文件。
 
 **验收目标**：RAAS-v1 域六个核心 agent 函数注册并能端到端跑通 ——
 `createJdAgent` / `resumeParserAgent` / `candidateIdentityAgent` /
@@ -52,17 +68,23 @@ bash scripts/survey-old-deployment.sh          # 在仓库里时
 # 或把 scripts/survey-old-deployment.sh 的内容整段粘贴进目标机终端
 ```
 
-对着报告确认四件事，后面步骤都会用到：
+对着报告确认五件事，后面步骤都会用到：
 
 1. **架构**：`uname -m` 输出 `arm64` → 打包时用 `--arch arm64`（Apple
    Silicon / 国产 ARM）；`x86_64` → `--arch amd64`。
 2. **老部署形态**：老 AO 容器名、compose 项目名、占了哪些端口（通常是
    3002）、env 指向哪套 MinIO/Postgres、容器里有没有 `/app/data` 下的
    SQLite 旧数据（决定要不要做数据迁移）。
-3. **端口空位**：3002/8288/8289/5433 是否被占；被占则停老服务或在
-   `.env.deploy` 里改 `AO_PORT`/`INNGEST_PORT`/`AO_POSTGRES_PORT`。
-4. **外部依赖连通性**：五个依赖里"✗"的项，部署前先解决网络（尤其
-   RoboHire 是公网域名，内网机器常常不通，需要网络侧开出网口子）。
+3. **共享 Inngest 事实**（决定第 1 节的模式）：`docker ps` 里有没有
+   `raas-inngest` 之类的共享事件引擎；共享网络真名用
+   `docker network ls | grep -i raas` 确认（默认假设
+   `raas-deploy-next_default`，不一致则在 `.env.deploy` 设
+   `RAAS_SHARED_NETWORK=<真名>`）。
+4. **端口空位**：3002/8288/8289/5433 是否被占；被占则停老服务或在
+   `.env.deploy` 里改 `AO_PORT`/`INNGEST_PORT`/`AO_POSTGRES_PORT`
+   （注意老 AO 自己的 ao-postgres 常占 5433/5434）。
+5. **外部依赖连通性**：五个依赖里"✗"的项，部署前先解决网络（尤其
+   RoboHire 是公网域名，内网机器要确认出网口子）。
 
 ## 3. 阶段一 · 构建机：产出离线部署包
 
@@ -73,9 +95,10 @@ bash scripts/survey-old-deployment.sh          # 在仓库里时
 一条命令完成 构建镜像 → 拉基础镜像 → 打包：
 
 ```bash
+# Mac Studio (10.100.0.70) 生产的实际命令:
 scripts/make-deploy-bundle.sh \
-  --public-origin  http://<目标机内网IP>:3002 \
-  --inngest-origin http://<目标机内网IP>:8288 \
+  --public-origin  http://10.100.0.70:3002 \
+  --inngest-origin http://10.100.0.70:8288 \
   --arch arm64
 ```
 
@@ -127,11 +150,14 @@ mkdir -p ~/ao-deploy && tar xf ~/ao-deploy-bundle-*.tar -C ~/ao-deploy && cd ~/a
 ```bash
 # 只 stop 不 rm —— 老容器和它的数据原样保留，可随时回滚
 docker stop ao-main                    # 老 AO 容器名以勘察结果为准
-# 老部署若带自己的 inngest / postgres 容器，也一并 stop（同样不 rm）
+docker stop ao-postgres 2>/dev/null    # 老 AO 自己的 Postgres（若存在）
 ```
 
-老 AO 的历史数据（旧版是 SQLite）**默认不迁移**——新版本用自己的
-Postgres 从零开始积累。确实需要旧数据时，见附录 B 的迁移路径。
+**共享模式下千万不要停** `raas-inngest`、RAAS 的 `postgres`、MinIO、
+Allmeta——它们是新部署继续要用的共享服务。
+
+老 AO 的历史数据**默认不迁移**——新版本用自己的 Postgres 从零开始积累，
+老数据留在老容器/volume 里可随时回看。确实需要旧数据时，见附录 B。
 
 ### 5.2 导入镜像
 
@@ -148,27 +174,30 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 ```
 
 镜像 tag 和两个公开地址已预填。剩下的变量按下表逐个替换（所有
-`replace-*` 占位必须消灭，否则预检不过）：
+`replace-*` 占位必须消灭，否则预检不过）。「老 env」指老部署仓库里的
+`.env.production`——大部分外部凭证直接沿用它的值：
 
-| 变量 | Mac Studio 环境填什么 | 说明 |
+| 变量 | Mac Studio（10.100.0.70）填什么 | 说明 |
 | --- | --- | --- |
 | `COMPOSE_PROJECT_NAME` | `ao-v2` | 与老部署隔离（见 5.1 警告） |
+| `COMPOSE_PROFILES` | 置空（`COMPOSE_PROFILES=`） | 共享模式不起 bundled inngest（第 1 节模式 S） |
+| `INNGEST_BASE_URL` | `http://raas-inngest:8288` | 共享实例的容器名（走 shared overlay 网络） |
+| `INNGEST_SERVE_ORIGIN` | `http://ao-v2-app:3002` | overlay 给 app 起的网络别名，共享 Inngest 回调用 |
+| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | 沿用老 env §9 的两个随机值 | 生产拒绝字面量 `dev` |
 | `AO_POSTGRES_PASSWORD` | 生成一个长随机串 | `openssl rand -hex 24` |
-| `DATABASE_URL` | 把密码同步进去，host 保持 `postgres:5432` | 容器网络内的服务名，**不是** localhost:5433 |
-| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | 两个随机串 | 生产拒绝字面量 `dev` |
-| `AI_BASE_URL` | `http://10.100.0.70:3010/v1` | 内网 LLM 网关 |
-| `AI_API_KEY` / `AI_MODEL` | 网关发的 key / `google/gemini-3-flash-preview` | 模型 id 以网关路由为准 |
-| `ALLMETA_BASE_URL` | `http://host.docker.internal:3500` | Allmeta 栈就在目标机本机 Docker 里 |
-| `ALLMETA_API_KEY` | Allmeta Studio `.env` 里的 token | 两边必须一致 |
+| `DATABASE_URL` | 把密码同步进去，host 保持 `postgres:5432` | 这是**新栈自己的** Postgres 服务名（project 前缀隔离，不会撞 RAAS 的 postgres 容器） |
+| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | 沿用老 env §3（`https://new-api.jointpilot.com/v1` + key + `kimi-k2.6`） | 或换成内网网关 `http://host.docker.internal:3010/v1`，二选一 |
+| `ALLMETA_BASE_URL` | `http://host.docker.internal:3500` | Allmeta 栈在目标机本机 Docker 里 |
+| `ALLMETA_API_KEY` | 沿用老 env §6 的 `oskey_*` | 与 Allmeta Studio 一致 |
 | `ALLMETA_DOMAIN` | `RAAS-v1` | 六函数验收用这个域 |
 | `ROBOHIRE_API_BASE_URL` | `https://api.gohire.top` | **不带 /v1**（client 自己拼 `/api/v1`） |
-| `ROBOHIRE_API_KEY` | RoboHire 发的 key | |
-| `ROBOHIRE_TIMEOUT_MS` | `300000` | match 实测 ~195s，120s 必超时 |
-| `RAAS_POSTGRES_URL` | 以勘察到的老 AO env 为准（当前为 `192.168.1.112:5432/raas_db`） | 七张表由 RAAS 方预建 |
-| `RAAS_DEFAULT_EMPLOYEE_ID` | 一个真实 recruiter id | 匹配结果归属兜底 |
-| `MINIO_ENDPOINT` / `MINIO_PORT` | 以勘察到的老 AO env 为准（当前为 `192.168.1.112` / `9000`） | endpoint 不带 scheme |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | partner 提供 | |
-| `AGENT_EXECUTION_API_KEY` / `FACTORY_ADMIN_TOKEN` | 两个长随机串 | 保护对外管理/执行 API |
+| `ROBOHIRE_API_KEY` | 沿用老 env §4 的 `rh_*` | |
+| `ROBOHIRE_TIMEOUT_MS` | `300000` | ⚠ 老 env 是 120000——那是坑：match 实测 ~195s 会被杀，必须用 300000 |
+| `RAAS_POSTGRES_URL` | 沿用老 env §5a：`postgresql://postgres:<密码URL编码>@postgres:5432/raas` | `postgres`=RAAS 栈容器名（shared overlay 可解析）；库名 `raas`；密码含 `@` 写成 `%40` |
+| `RAAS_DEFAULT_EMPLOYEE_ID` | `0000199059`（老 env §5b） | 匹配结果归属兜底 |
+| `MINIO_ENDPOINT` / `MINIO_PORT` | `host.docker.internal` / `9000` | 共享 MinIO 在目标机本机；endpoint 不带 scheme |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | 沿用老 env §8 | |
+| `AGENT_EXECUTION_API_KEY` / `FACTORY_ADMIN_TOKEN` | 两个长随机串（老 env 没有这两项，是新版本新增） | 保护对外管理/执行 API |
 
 安全闸门保持模板默认，不要动：`STUB_AGENTS=0`、`RULE_CHECK_BYPASS=false`、
 `AO_ENABLE_UNSAFE_DEV_ROUTES=0`、`RAAS_BRIDGE_ENABLED=0`。
@@ -188,6 +217,16 @@ docker run --rm --entrypoint node -v "$PWD:/kit" -w /kit \
 两个都通过（`[deploy-check] OK`）再继续；报错信息会指出具体哪个变量有问题。
 
 ### 5.5 启动
+
+模式 S（共享 Inngest，Mac Studio 主线）——叠加 shared overlay 加入 RAAS
+网络：
+
+```bash
+docker compose --env-file .env.deploy \
+  -f docker-compose.deploy.yml -f docker-compose.shared-inngest.yml up -d --wait
+```
+
+模式 B（自带 Inngest 的独立机器）只用主文件：
 
 ```bash
 docker compose --env-file .env.deploy -f docker-compose.deploy.yml up -d --wait
@@ -220,10 +259,13 @@ curl -fsS "http://localhost:3002/api/health?check=ready"   # 应含 ruleAuditSch
 curl -fsS "http://localhost:8288/health"
 ```
 
-**④ 六函数注册**：浏览器打开 `http://<目标机IP>:8288` → Apps → 应看到
-`agentic-operator-main` 同步无错误，函数列表包含六个核心 agent（createJd /
-resumeParser / candidateIdentity / ruleCheck / matchResume /
-interviewInviter）。函数缺失或 app unreachable，见第 10 节排查表首条。
+**④ 六函数注册**：浏览器打开 `http://<目标机IP>:8288`（共享模式下这就是
+raas-inngest 的 dashboard）→ Apps → 应看到 `agentic-operator-main` 同步无
+错误，函数列表包含六个核心 agent（createJd / resumeParser /
+candidateIdentity / ruleCheck / matchResume / interviewInviter）。
+共享模式升级后，老容器注册的旧条目（URL 指向老容器名）会变成
+unreachable——在 Inngest UI 里删除旧条目即可，新条目由新容器自动注册。
+函数缺失或 app unreachable，见第 10 节排查表首条。
 
 **⑤ 端到端测试事件**：测试路由在生产默认关闭，验收时临时开一个窗口：
 
@@ -255,7 +297,8 @@ docker compose --env-file .env.deploy -f docker-compose.deploy.yml up -d app
 目标机没有 npm，直接用 docker compose（在 `~/ao-deploy` 下执行）：
 
 ```bash
-alias aoc='docker compose --env-file .env.deploy -f docker-compose.deploy.yml'
+# 共享模式(Mac Studio)带 overlay;模式 B 去掉第二个 -f
+alias aoc='docker compose --env-file .env.deploy -f docker-compose.deploy.yml -f docker-compose.shared-inngest.yml'
 aoc ps                      # 状态
 aoc logs -f --tail=200      # 全部日志
 aoc logs -f app             # 单服务日志（app / inngest / archiver / monitor-sweeper / postgres）
@@ -333,6 +376,9 @@ aoc up -d --wait
 | 页面浏览器控制台请求打到 localhost / 打不开 Inngest dashboard 链接 | `NEXT_PUBLIC_*` 是 build-time 值，打包时 origin 填错 | 用正确的 `--public-origin/--inngest-origin` 重新打包镜像（改 env 重启无效） |
 | `up` 时报端口被占 | 老部署没停干净 | 勘察脚本第 5 节看占用者；`docker stop` 对应容器或改 `AO_PORT` 等 |
 | `up` 警告 orphan containers / 老容器被动到 | `COMPOSE_PROJECT_NAME` 与老部署撞名 | 换项目名（如 `ao-v2`）后重新 `up` |
+| `up` 报 `network raas-deploy-next_default ... not found` | 共享网络真名不同 | `docker network ls` 找含 raas 的真名，`.env.deploy` 设 `RAAS_SHARED_NETWORK=<真名>` |
+| Apps 页出现两个 `agentic-operator-main`，一个红 | 老容器的注册条目残留 | 在 Inngest UI 删除指向老容器 URL 的旧条目 |
+| partner 事件（RESUME_DOWNLOADED 等）触发不了新 AO | 错用了模式 B 自带 Inngest，partner 事件在共享实例上 | 按第 1 节切回模式 S：`COMPOSE_PROFILES=` + 指向共享实例 + shared overlay |
 | 重启 Docker Desktop 后什么都没起来 | Docker Desktop 未设开机自启 | 见 5.5 的 macOS 两项系统设置 |
 
 ## 11. 网络和安全

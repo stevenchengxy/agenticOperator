@@ -102,6 +102,25 @@ requireUrl("ALLMETA_BASE_URL", ["http:", "https:"]);
 requireUrl("ROBOHIRE_API_BASE_URL", ["http:", "https:"]);
 if (validValue("AI_BASE_URL")) requireUrl("AI_BASE_URL", ["http:", "https:"]);
 
+// Inngest mode sanity: without the bundled-inngest profile the compose file
+// starts NO event engine, so shared-instance URLs must be configured — a
+// missing COMPOSE_PROFILES otherwise silently drops the inngest service.
+const composeProfiles = (env.COMPOSE_PROFILES ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const bundledInngest = composeProfiles.includes("bundled-inngest");
+if (!bundledInngest && (!validValue("INNGEST_BASE_URL") || !validValue("INNGEST_SERVE_ORIGIN"))) {
+  errors.push(
+    "Inngest mode: COMPOSE_PROFILES lacks 'bundled-inngest' and INNGEST_BASE_URL/INNGEST_SERVE_ORIGIN are unset — no event engine would run. Set COMPOSE_PROFILES=bundled-inngest, or configure both shared-instance URLs.",
+  );
+}
+if (bundledInngest && (validValue("INNGEST_BASE_URL") || validValue("INNGEST_SERVE_ORIGIN"))) {
+  warnings.push(
+    "bundled-inngest profile is enabled but INNGEST_BASE_URL/INNGEST_SERVE_ORIGIN overrides are set; the overrides win — confirm this is intended",
+  );
+}
+
 if (env.INNGEST_EVENT_KEY?.trim().toLowerCase() === "dev") {
   errors.push("INNGEST_EVENT_KEY: literal 'dev' is rejected for production deployment");
 }

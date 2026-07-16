@@ -63,7 +63,7 @@ mkdir -p "$STAGE/scripts"
 docker save "$AO_IMAGE" "$POSTGRES_IMAGE" "$INNGEST_IMAGE" | gzip > "$STAGE/images.tar.gz"
 
 echo "==> [4/5] staging deploy kit"
-cp docker-compose.deploy.yml "$STAGE/"
+cp docker-compose.deploy.yml docker-compose.shared-inngest.yml "$STAGE/"
 cp docs/deployment.md "$STAGE/deployment-full-guide.md"
 cp scripts/deploy-preflight.mjs scripts/check-connectivity.sh scripts/survey-old-deployment.sh "$STAGE/scripts/"
 chmod +x "$STAGE"/scripts/*.sh
