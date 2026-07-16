@@ -34,7 +34,8 @@
 RESUME_DOWNLOADED 等事件直接进这个实例触发 AO 函数）。因此：
 
 - **模式 S · 共享 Inngest（Mac Studio 生产现状，本指南主线）**——机器上已
-  有 RAAS 栈的 `raas-inngest` 容器，AO **不再**自带 Inngest：
+  有共享实例（Mac Studio 上叫 `inngest-server`，带自己的 postgres/redis
+  持久化），AO **不再**自带 Inngest：
   `.env.deploy` 里 `COMPOSE_PROFILES=`（置空，bundled 服务不启动），
   `INNGEST_BASE_URL` / `INNGEST_SERVE_ORIGIN` 指向共享实例，并叠加
   `docker-compose.shared-inngest.yml` 加入 RAAS 的 Docker 网络。
@@ -98,11 +99,14 @@ bash scripts/survey-old-deployment.sh          # 在仓库里时
 # Mac Studio (10.100.0.70) 生产的实际命令:
 scripts/make-deploy-bundle.sh \
   --public-origin  http://10.100.0.70:3002 \
-  --inngest-origin http://10.100.0.70:8288 \
+  --inngest-origin http://localhost:8288 \
   --arch arm64
 ```
 
-两个 origin **必须**填目标机的真实内网 IP（操作员浏览器要能访问的地址）。
+两个 origin 填**操作员浏览器真正能访问的地址**：AO 发布在 `0.0.0.0:3002`
+→ 用 LAN IP；而这台机器的共享 `inngest-server` 只绑 `127.0.0.1:8288` →
+dashboard 只能在 Mac Studio 本机浏览器（ToDesk）打开，所以用 `localhost`。
+（将来若把 inngest-server 改绑 `0.0.0.0`，重新打包换成 LAN IP 即可。）
 它们是 Next.js build-time 值（`NEXT_PUBLIC_*`），烤进浏览器 bundle——将来
 IP 换了必须重新打包，改 env 重启不生效。
 
@@ -187,8 +191,9 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 | --- | --- | --- |
 | `COMPOSE_PROJECT_NAME` | `ao-v2` | 与老部署隔离（见 5.1 警告） |
 | `COMPOSE_PROFILES` | 置空（`COMPOSE_PROFILES=`） | 共享模式不起 bundled inngest（第 1 节模式 S） |
-| `INNGEST_BASE_URL` | `http://raas-inngest:8288` | 共享实例的容器名（走 shared overlay 网络） |
-| `INNGEST_SERVE_ORIGIN` | `http://ao-v2-app:3002` | overlay 给 app 起的网络别名，共享 Inngest 回调用 |
+| `INNGEST_BASE_URL` | `http://host.docker.internal:8288` | 共享实例 `inngest-server` 只发布在宿主 loopback（127.0.0.1:8288），容器经宿主桥访问（老部署同款写法） |
+| `INNGEST_SERVE_ORIGIN` | `http://host.docker.internal:3002` | Inngest 回调经宿主桥打到新 app 发布的 3002 端口 |
+| `AO_POSTGRES_PORT` | `5436` | 宿主 5433 已被占用、5434 是老 ao-postgres、5435 是 allmeta 的——避开 |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | 沿用老 env §9 的两个随机值 | 生产拒绝字面量 `dev` |
 | `AO_POSTGRES_PASSWORD` | 生成一个长随机串 | `openssl rand -hex 24` |
 | `DATABASE_URL` | 把密码同步进去，host 保持 `postgres:5432` | 这是**新栈自己的** Postgres 服务名（project 前缀隔离，不会撞 RAAS 的 postgres 容器） |
@@ -199,7 +204,7 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 | `ROBOHIRE_API_BASE_URL` | `https://api.gohire.top` | **不带 /v1**（client 自己拼 `/api/v1`） |
 | `ROBOHIRE_API_KEY` | 沿用老 env §4 的 `rh_*` | |
 | `ROBOHIRE_TIMEOUT_MS` | `300000` | ⚠ 老 env 是 120000——那是坑：match 实测 ~195s 会被杀，必须用 300000 |
-| `RAAS_POSTGRES_URL` | 沿用老 env §5a：`postgresql://postgres:<密码URL编码>@postgres:5432/raas` | `postgres`=RAAS 栈容器名（shared overlay 可解析）；库名 `raas`；密码含 `@` 写成 `%40` |
+| `RAAS_POSTGRES_URL` | 沿用老 env §5a：`postgresql://postgres:<密码URL编码>@postgres:5432/raas` | `postgres` 容器**未发布宿主端口**，必须靠 shared overlay 加入 `raas-deploy-next_default` 网络按容器名访问；库名 `raas`；密码含 `@` 写成 `%40` |
 | `RAAS_DEFAULT_EMPLOYEE_ID` | `0000199059`（老 env §5b） | 匹配结果归属兜底 |
 | `MINIO_ENDPOINT` / `MINIO_PORT` | `host.docker.internal` / `9000` | 共享 MinIO 在目标机本机；endpoint 不带 scheme |
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | 沿用老 env §8 | |
@@ -265,10 +270,11 @@ curl -fsS "http://localhost:3002/api/health?check=ready"   # 应含 ruleAuditSch
 curl -fsS "http://localhost:8288/health"
 ```
 
-**④ 六函数注册**：浏览器打开 `http://<目标机IP>:8288`（共享模式下这就是
-raas-inngest 的 dashboard）→ Apps → 应看到 `agentic-operator-main` 同步无
-错误，函数列表包含六个核心 agent（createJd / resumeParser /
-candidateIdentity / ruleCheck / matchResume / interviewInviter）。
+**④ 六函数注册**：在目标机本机浏览器打开 `http://localhost:8288`
+（Mac Studio 的共享 `inngest-server` 只绑 loopback，须在本机/ToDesk 里开）
+→ Apps → 应看到 `agentic-operator-main` 同步无错误，函数列表包含六个核心
+agent（createJd / resumeParser / candidateIdentity / ruleCheck /
+matchResume / interviewInviter）。
 共享模式升级后，老容器注册的旧条目（URL 指向老容器名）会变成
 unreachable——在 Inngest UI 里删除旧条目即可，新条目由新容器自动注册。
 函数缺失或 app unreachable，见第 10 节排查表首条。

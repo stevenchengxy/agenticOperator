@@ -1,7 +1,9 @@
 # Overlay for SHARED-Inngest deployments: attaches AO containers to an
 # existing external Docker network (default: the RAAS stack's
-# raas-deploy-next_default) so AO, the shared raas-inngest and the partner
-# postgres resolve each other by container/service name.
+# raas-deploy-next_default) so AO reaches services that publish no host
+# port — on the Mac Studio that is the partner `postgres` container — by
+# container name. (The shared inngest-server publishes 127.0.0.1:8288, so
+# it is reached via host.docker.internal instead; see .env.deploy.example.)
 #
 # Use together with the main file:
 #   docker compose --env-file .env.deploy \
