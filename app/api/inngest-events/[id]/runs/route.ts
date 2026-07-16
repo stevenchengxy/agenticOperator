@@ -1,18 +1,19 @@
 // /api/inngest-events/:id/runs
 //
-// Proxy to Inngest dev's `/v1/events/{event_id}/runs` — the canonical way
-// to ask "which Inngest function runs were spawned by this event, and
-// what's their status?". The /events fullscreen log modal uses it to show
-// completion lifecycle inline alongside the raw event.
+// "Which Inngest function runs were spawned by this event, and what's their
+// status?" — the /events fullscreen log modal uses it to show completion
+// lifecycle inline alongside the raw event.
 //
-// Empty data array = event was accepted by the bus but no function was
+// Reads via lib/inngest-source (live /v1/events/{id}/runs ∪ durable run
+// archive): the live buffer answers [] for any event that aged out of it, so
+// without the archive merge the modal shows nothing for historical events.
+//
+// Empty runs array = event was accepted by the bus but no function was
 // triggered (or none have been recorded yet — runs appear after Inngest
 // records them, which can lag the event by ~1s).
 
 import { NextResponse } from "next/server";
-import { getInngestUrl } from "@/lib/inngest-url";
-
-const LOCAL_INNGEST = getInngestUrl();
+import { getEventRuns } from "@/lib/inngest-source";
 
 export type EventRunRow = {
   run_id: string;
@@ -41,22 +42,9 @@ export async function GET(_req: Request, ctx: RouteCtx): Promise<Response> {
     );
   }
   try {
-    const upstream = `${LOCAL_INNGEST}/v1/events/${encodeURIComponent(id)}/runs`;
-    const r = await fetch(upstream, {
-      signal: AbortSignal.timeout(8_000),
-      cache: "no-store",
-    });
-    if (!r.ok) {
-      const body: EventRunsResponse = {
-        runs: [],
-        fetchedAt: new Date().toISOString(),
-        error: `${r.status} ${r.statusText}`,
-      };
-      return NextResponse.json(body);
-    }
-    const j = (await r.json()) as { data?: EventRunRow[] };
+    const runs = await getEventRuns(id);
     const body: EventRunsResponse = {
-      runs: j.data ?? [],
+      runs: runs as EventRunRow[],
       fetchedAt: new Date().toISOString(),
       error: null,
     };

@@ -73,7 +73,14 @@ export type RunSummary = {
   pendingHumanTasks: number;
   suspendedReason: string | null;
 };
-export type RunsResponse = { runs: RunSummary[]; total: number; meta: ApiMeta };
+export type RunsResponse = {
+  runs: RunSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  meta: ApiMeta;
+};
 
 export type StepDetail = {
   id: string;
@@ -286,8 +293,17 @@ export type Alert = {
   triggeredAt: string;
   acked: boolean;
   ackedBy: string | null;
+  resolved?: boolean;
+  resolvedAt?: string | null;
 };
-export type AlertsResponse = { alerts: Alert[]; meta: ApiMeta };
+export type AlertsResponse = {
+  alerts: Alert[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  meta: ApiMeta;
+};
 
 export type DataSource = {
   id: string;

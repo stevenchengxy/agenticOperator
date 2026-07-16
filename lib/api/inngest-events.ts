@@ -9,6 +9,8 @@ export type InngestEventRow = {
   ts?: number;
   received_at?: string;
   _source?: string;
+  domain?: string | null;
+  sourceApp?: string | null;
   /** EventInstance.source value — e.g. "raas-bridge", "rpa.matchResumeAgent", "manual.test-trigger".
    *  Populated by the API route when the event can be correlated to an EventInstance row. */
   source?: string | null;
@@ -35,6 +37,7 @@ export type UseInngestEventsOptions = {
   limit?: number;
   includeShared?: boolean;
   name?: string;
+  domain?: string;
 };
 
 /**
@@ -52,6 +55,7 @@ export function useInngestEvents(opts: UseInngestEventsOptions = {}): UseInngest
     limit = 100,
     includeShared = false,
     name,
+    domain,
   } = opts;
 
   const [events, setEvents] = React.useState<InngestEventRow[]>([]);
@@ -67,6 +71,7 @@ export function useInngestEvents(opts: UseInngestEventsOptions = {}): UseInngest
       try {
         const params = new URLSearchParams({ limit: String(limit) });
         if (name) params.set("name", name);
+        if (domain) params.set("domain", domain);
         if (includeShared) params.set("includeShared", "1");
         const r = await fetch(`/api/inngest-events?${params.toString()}`);
         if (cancelled) return;
@@ -95,7 +100,7 @@ export function useInngestEvents(opts: UseInngestEventsOptions = {}): UseInngest
       cancelled = true;
       clearInterval(id);
     };
-  }, [paused, intervalMs, limit, includeShared, name]);
+  }, [paused, intervalMs, limit, includeShared, name, domain]);
 
   return {
     events,

@@ -22,6 +22,7 @@
 import * as live from "./inngest-admin-client";
 import * as archive from "./inngest-archive/reader";
 import { isTerminalStatus } from "./inngest-archive/mappers";
+import { inferEventDomain, inferRunDomain } from "./events/domain-scope";
 
 type Source = "auto" | "postgres" | "live";
 
@@ -78,6 +79,60 @@ export async function listRecentRuns(
     (r) => startedMs(r.startedAt),
     args[0]?.limit ?? 50,
   );
+}
+
+export type PagedRead<T> = archive.PageResult<T> & { source: "postgres" | "live" };
+
+/**
+ * Stable numbered pagination is Postgres-first. The write-through middleware
+ * persists run start/finish synchronously, so the archive is current while its
+ * count/offset semantics stay deterministic. `auto` falls back to the live
+ * Inngest window only when Postgres is unavailable.
+ */
+export async function listRecentRunsPage(
+  opts: archive.RecentRunsPageOptions = {},
+): Promise<PagedRead<Awaited<ReturnType<typeof live.listRecentRuns>>[number]>> {
+  const s = source();
+  if (s !== "live") {
+    try {
+      return { ...(await archive.listRecentRunsPage(opts)), source: "postgres" };
+    } catch (error) {
+      if (s === "postgres") throw error;
+    }
+  }
+
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const pageSize = Math.min(500, Math.max(1, Math.floor(opts.pageSize ?? 50)));
+  const needed = Math.min(1000, page * pageSize);
+  const rows = await live.listRecentRuns({
+    limit: needed,
+    functionSlug: opts.functionSlug,
+    // Preserve the archive API's all-history default as far as the live store
+    // allows; this branch is degraded fallback only.
+    sinceHours: opts.sinceHours ?? 24 * 365 * 100,
+  });
+  const filtered = rows.filter((row) => {
+    if (opts.status?.length && !opts.status.includes(row.status)) return false;
+    if (opts.eventName && row.eventName !== opts.eventName) return false;
+    if (
+      opts.domain &&
+      inferRunDomain({
+        appId: row.function.appID,
+        functionSlug: row.function.slug,
+        eventName: row.eventName,
+      }) !== opts.domain
+    ) return false;
+    return true;
+  });
+  const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+  return {
+    items,
+    page,
+    pageSize,
+    total: filtered.length,
+    totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+    source: "live",
+  };
 }
 
 export async function getRunHistory(
@@ -166,10 +221,110 @@ export async function listEvents(
   );
 }
 
+/** Postgres-counted event pages with live fallback when the archive is down. */
+export async function listEventsPage(
+  opts: archive.EventsPageOptions = {},
+): Promise<PagedRead<Awaited<ReturnType<typeof live.listEvents>>[number]>> {
+  const s = source();
+  if (s !== "live") {
+    try {
+      return { ...(await archive.listEventsPage(opts)), source: "postgres" };
+    } catch (error) {
+      if (s === "postgres") throw error;
+    }
+  }
+
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const pageSize = Math.min(500, Math.max(1, Math.floor(opts.pageSize ?? 50)));
+  const needed = Math.min(1000, page * pageSize);
+  const fromMs =
+    opts.since && Number.isFinite(opts.since.getTime())
+      ? opts.since.getTime()
+      : typeof opts.sinceHours === "number" && opts.sinceHours > 0
+      ? Date.now() - opts.sinceHours * 3600_000
+      : null;
+  const rows = await live.listEvents(needed, opts.name);
+  const filtered = rows.filter((row) => {
+    if (opts.domain && inferEventDomain(row) !== opts.domain) return false;
+    if (fromMs !== null && eventMs(row) < fromMs) return false;
+    return true;
+  });
+  const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+  return {
+    items,
+    page,
+    pageSize,
+    total: filtered.length,
+    totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+    source: "live",
+  };
+}
+
+/**
+ * Replay = re-emit the trigger event (the send itself is always a live
+ * mutation). Payload lookup is live-first — but the dev server's event buffer
+ * is lossy/ephemeral, so any event older than the buffer window (e.g. every
+ * historical failed run after an Inngest restart) can only be replayed from
+ * the durable Postgres archive. Without this fallback the 监控页「重跑」and
+ * 事件页「重发」buttons fail with "event not found" on all history.
+ */
+export async function replayEvent(
+  eventId: string,
+): ReturnType<typeof live.replayEvent> {
+  const s = source();
+  if (s === "live") return live.replayEvent(eventId);
+  let liveError: unknown = null;
+  if (s === "auto") {
+    try {
+      return await live.replayEvent(eventId);
+    } catch (e) {
+      liveError = e;
+    }
+  }
+  const archived = await archive.getEventById(eventId).catch(() => null);
+  // Event archive can have gaps the run archive doesn't (the archiver polls
+  // the lossy live buffer) — a run row's eventName+eventPayload is the
+  // last-resort copy of its trigger event.
+  const replayable =
+    archived ?? (await archive.getTriggerEventFromRuns(eventId).catch(() => null));
+  if (!replayable) {
+    if (liveError) throw liveError;
+    throw new Error(`event ${eventId} not archived`);
+  }
+  const sent = await live.sendEvent(replayable.name, replayable.data, { replayOf: eventId });
+  return { newEventId: sent.id };
+}
+
+/**
+ * Runs triggered by one event. Live answers [] (not an error) for ids outside
+ * its buffer, so in auto mode we merge live ∪ archive — same durability story
+ * as the runs/events lists (the /events log modal stays useful on history).
+ */
+export async function getEventRuns(
+  eventId: string,
+): ReturnType<typeof live.getEventRuns> {
+  const s = source();
+  if (s === "live") return live.getEventRuns(eventId);
+  if (s === "postgres") return archive.listRunsByTriggerEvent(eventId);
+  const [liveRes, archiveRes] = await Promise.allSettled([
+    live.getEventRuns(eventId),
+    archive.listRunsByTriggerEvent(eventId),
+  ]);
+  const liveRows = liveRes.status === "fulfilled" ? liveRes.value : null;
+  const archiveRows = archiveRes.status === "fulfilled" ? archiveRes.value : null;
+  if (liveRows === null && archiveRows === null) {
+    throw (liveRes as PromiseRejectedResult).reason;
+  }
+  const byId = new Map<string, live.InngestRun>();
+  for (const r of archiveRows ?? []) byId.set(r.run_id, r);
+  for (const r of liveRows ?? []) byId.set(r.run_id, r); // live wins
+  return [...byId.values()].sort(
+    (a, b) => startedMs(b.run_started_at) - startedMs(a.run_started_at),
+  );
+}
+
 // ── Always live: registry metadata + mutations ───────────────────────
 export const listFunctions = live.listFunctions;
-export const getEventRuns = live.getEventRuns;
-export const replayEvent = live.replayEvent;
 export const sendEvent = live.sendEvent;
 
 // ── Pure helpers (no I/O) — re-exported unchanged ────────────────────

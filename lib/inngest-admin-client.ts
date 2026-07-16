@@ -13,7 +13,12 @@
 // `INNGEST_BASE_URL` controls the base URL.
 
 import { getInngestUrl } from './inngest-url';
-const BASE = getInngestUrl();
+
+function inngestAdminUrl(path: string): string {
+  const base = (getInngestUrl().trim() || 'http://localhost:8288').replace(/\/+$/, '');
+  const suffix = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${suffix}`;
+}
 
 // ★ Monitoring scope filter:
 //   AO 的监控页面关心所有 AO app —— 主招聘 app (agentic-operator-main) +
@@ -51,6 +56,9 @@ export type InngestEvent = {
   data: unknown;
   ts?: number;
   received_at?: string;
+  sourceApp?: string | null;
+  source_app?: string | null;
+  domain?: string | null;
 };
 
 export type InngestRun = {
@@ -84,8 +92,13 @@ function timeoutSignal(parent?: AbortSignal): AbortSignal {
 }
 
 async function restGet<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const url = `${BASE}${path}`;
-  const res = await fetch(url, { signal: timeoutSignal(signal) });
+  const url = inngestAdminUrl(path);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: timeoutSignal(signal) });
+  } catch (e) {
+    throw new Error(`Inngest REST fetch failed ${url}: ${(e as Error).message}`);
+  }
   if (!res.ok) {
     throw new Error(`Inngest REST ${res.status} ${path}`);
   }
@@ -109,12 +122,18 @@ export async function getEventRuns(eventId: string): Promise<InngestRun[]> {
 // ─────────────────────────────────────────────────────────────
 
 async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${BASE}/v0/gql`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
-    signal: timeoutSignal(),
-  });
+  const url = inngestAdminUrl('/v0/gql');
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables }),
+      signal: timeoutSignal(),
+    });
+  } catch (e) {
+    throw new Error(`Inngest GraphQL fetch failed ${url}: ${(e as Error).message}`);
+  }
   const body = await res.json();
   if (body.errors) {
     throw new Error(`Inngest GraphQL: ${JSON.stringify(body.errors)}`);
@@ -164,7 +183,7 @@ export async function listRecentRuns(opts: { limit?: number; functionSlug?: stri
     status: string;
     startedAt: string;
     finishedAt?: string;
-    function: { name: string; slug: string };
+    function: { name: string; slug: string; appID?: string };
     eventName?: string;
     /** Triggering event id — used by the Runs list "↺ rerun" button to call the replay endpoint. */
     eventId?: string;
@@ -188,7 +207,7 @@ export async function listRecentRuns(opts: { limit?: number; functionSlug?: stri
           node {
             id status startedAt endedAt eventName
             triggerIDs
-            function { name slug }
+            function { name slug appID }
           }
         }
       }
@@ -201,7 +220,7 @@ export async function listRecentRuns(opts: { limit?: number; functionSlug?: stri
     endedAt?: string | null;
     eventName?: string;
     triggerIDs?: string[] | null;
-    function: { name: string; slug: string };
+    function: { name: string; slug: string; appID?: string };
   }>;
   // ★ Scope filter: monitored app prefix only (drops raas-backend etc.).
   const monitored = runs.filter((r) => isMonitoredSlug(r.function?.slug));
@@ -665,26 +684,42 @@ export function groupRunsByFlow<T extends { flowId: string; startedAt: string }>
 export async function replayEvent(eventId: string): Promise<{ newEventId: string }> {
   // Inngest doesn't have a "replay" REST endpoint in dev server; the cleanest
   // way is to fetch the original event payload and re-send it via /e/test.
-  const evRes = await fetch(`${BASE}/v1/events/${encodeURIComponent(eventId)}`);
+  const evRes = await fetch(inngestAdminUrl(`/v1/events/${encodeURIComponent(eventId)}`), {
+    signal: timeoutSignal(),
+  });
   if (!evRes.ok) throw new Error(`event ${eventId} not found`);
-  const evBody = (await evRes.json()) as { data: InngestEvent };
+  const evBody = (await evRes.json()) as { data: InngestEvent | null };
   const orig = evBody.data;
-  const sendRes = await fetch(`${BASE}/e/test`, {
+  // The dev server answers 200 with data:null (an in-body error envelope) for
+  // ids that aged out of its lossy event buffer — treat that as not-found so
+  // callers (lib/inngest-source) can fall back to the durable archive.
+  if (!orig?.name) throw new Error(`event ${eventId} not found in live buffer`);
+  const sendRes = await fetch(inngestAdminUrl('/e/test'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: orig.name, data: orig.data, replay_of: eventId }),
+    signal: timeoutSignal(),
   });
+  if (!sendRes.ok) throw new Error(`Inngest replay send failed ${sendRes.status}`);
   const sendBody = (await sendRes.json()) as { ids?: string[] };
   return { newEventId: sendBody.ids?.[0] ?? '' };
 }
 
-/** Send a fresh event with arbitrary payload (used by /events page "Send Test"). */
-export async function sendEvent(name: string, data: unknown): Promise<{ id: string }> {
-  const res = await fetch(`${BASE}/e/test`, {
+/** Send a fresh event with arbitrary payload (used by /events page "Send Test").
+ *  `opts.replayOf` marks the emitted event as a replay of an existing one — the
+ *  archive-fallback replay path uses it so replays stay traceable either way. */
+export async function sendEvent(
+  name: string,
+  data: unknown,
+  opts: { replayOf?: string } = {},
+): Promise<{ id: string }> {
+  const res = await fetch(inngestAdminUrl('/e/test'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, data }),
+    body: JSON.stringify({ name, data, ...(opts.replayOf ? { replay_of: opts.replayOf } : {}) }),
+    signal: timeoutSignal(),
   });
+  if (!res.ok) throw new Error(`Inngest event send failed ${res.status}`);
   const body = (await res.json()) as { ids?: string[] };
   return { id: body.ids?.[0] ?? '' };
 }

@@ -63,6 +63,38 @@ describe("recordRunStart", () => {
     });
     expect(call.update).not.toHaveProperty("status"); // start must not downgrade a finished run
   });
+
+  it("idempotently archives an externally-triggered event and its run payload", async () => {
+    await recordRunStart({
+      runId: "r-external",
+      functionSlug: "agentic-operator-main-resume-parser-agent",
+      functionName: "Resume Parser",
+      appId: "agentic-operator-main",
+      startedAtIso: "2026-06-11T00:00:00.000Z",
+      event: {
+        id: "evt-external",
+        name: "RESUME_DOWNLOADED",
+        data: { upload_id: "u1" },
+        ts: 1781136000000,
+        sourceApp: "raas-backend",
+      },
+    });
+
+    expect(archiveEvents).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt-external",
+        name: "RESUME_DOWNLOADED",
+        data: { upload_id: "u1" },
+        sourceApp: "raas-backend",
+      }),
+    ]);
+    const call = (prisma.inngestRunArchive.upsert as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.create).toMatchObject({
+      appId: "agentic-operator-main",
+      eventPayload: JSON.stringify({ upload_id: "u1" }),
+      triggerEventIds: JSON.stringify(["evt-external"]),
+    });
+  });
 });
 
 describe("recordRunFinish", () => {

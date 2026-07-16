@@ -67,6 +67,11 @@ export const SYSTEM_FALLBACK_DOMAINS: ReadonlyArray<Domain> = [
 }));
 
 const STORAGE_KEY = "ao:domain";
+// /api/domains waits up to 8s for Allmeta Studio on a cold hit, then falls back
+// to its last-good cache. Keep the client-side timeout above that server budget
+// so the route can return its resilient fallback instead of tripping the dev
+// overlay during startup.
+export const DOMAIN_LIST_TIMEOUT_MS = 12_000;
 
 /** Now just "is a non-empty string" — runtime list of valid ids is dynamic and
  *  lives in the provider. Callers needing strict membership should consult
@@ -122,11 +127,17 @@ export function DomainProvider({ children }: { children: React.ReactNode }) {
 
   const reload = React.useCallback(async () => {
     try {
-      const res = await fetchJson<DomainListResponse>("/api/domains");
+      const res = await fetchJson<DomainListResponse>("/api/domains", {
+        cache: "no-store",
+        timeoutMs: DOMAIN_LIST_TIMEOUT_MS,
+      });
       if (res.ok) {
         setAll(res.domains);
       }
       // On error keep the existing list — never blank out the chrome.
+    } catch {
+      // Keep the fallback / last-good list. This fetch runs on mount, interval,
+      // focus, and visibilitychange, so callers should never see its rejection.
     } finally {
       setLoading(false);
     }

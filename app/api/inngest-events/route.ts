@@ -8,7 +8,8 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
-import { listEvents } from "@/lib/inngest-source";
+import { listEventsPage } from "@/lib/inngest-source";
+import { eventMatchesDomain, inferEventDomain } from "@/lib/events/domain-scope";
 
 const RAAS_INNGEST = process.env.RAAS_INNGEST_URL ?? "";
 
@@ -19,19 +20,36 @@ type InngestEvent = {
   data: unknown;
   ts?: number;
   received_at?: string;
+  sourceApp?: string | null;
+  domain?: string | null;
 };
 
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const nameFilter = url.searchParams.get("name");
-  const limitParam = Number(url.searchParams.get("limit") ?? 30);
-  const limit = Math.min(100, Math.max(1, Number.isFinite(limitParam) ? limitParam : 30));
+  const legacyLimit = positiveInt(url.searchParams.get("limit"), 30, 500);
+  const page = positiveInt(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positiveInt(url.searchParams.get("pageSize"), legacyLimit, 500);
   const includeShared = url.searchParams.get("includeShared") === "1";
+  const domain = url.searchParams.get("domain") ?? undefined;
+  const sinceHoursRaw = Number(url.searchParams.get("sinceHours"));
+  const sinceHours = Number.isFinite(sinceHoursRaw) && sinceHoursRaw > 0
+    ? sinceHoursRaw
+    : undefined;
+  const sinceRaw = url.searchParams.get("since");
+  const sinceDate = sinceRaw ? new Date(sinceRaw) : null;
+  const since = sinceDate && Number.isFinite(sinceDate.getTime()) ? sinceDate : undefined;
+  // Shared RAAS is an optional live-only overlay. To page a merged result we
+  // need the local prefix up to the requested page; the normal/local path does
+  // a direct Postgres skip/take query.
+  const localPageSize = includeShared ? Math.min(500, page * pageSize) : pageSize;
 
   const sourceLabels = ["local", ...(includeShared && RAAS_INNGEST ? ["shared"] : [])];
 
-  const all: Array<InngestEvent & { _source: string }> = [];
+  const all: Array<InngestEvent & { _source: string; domain: string }> = [];
   const errors: Array<{ source: string; message: string }> = [];
+  let localTotal = 0;
+  let localSource: "postgres" | "live" = "postgres";
 
   // Local events go through inngest-source: live Inngest ∪ durable Postgres
   // archive. The live /v1/events buffer is lossy/ephemeral (empties after quiet
@@ -39,8 +57,17 @@ export async function GET(req: Request): Promise<Response> {
   // frozen even though the archive has the history. nameFilter is passed
   // through so Inngest dev returns the right slice server-side.
   try {
-    const localEvents = await listEvents(limit, nameFilter ?? undefined);
-    for (const e of localEvents) all.push({ ...e, _source: "local" });
+    const local = await listEventsPage({
+      page: includeShared ? 1 : page,
+      pageSize: localPageSize,
+      name: nameFilter ?? undefined,
+      domain,
+      since,
+      sinceHours,
+    });
+    localTotal = local.total;
+    localSource = local.source;
+    for (const e of local.items) all.push({ ...e, _source: "local", domain: inferEventDomain(e) });
   } catch (e) {
     errors.push({ source: "local", message: (e as Error).message });
   }
@@ -51,24 +78,34 @@ export async function GET(req: Request): Promise<Response> {
   if (includeShared && RAAS_INNGEST) {
     try {
       const upstreamUrl = new URL(`${RAAS_INNGEST}/v1/events`);
-      upstreamUrl.searchParams.set("limit", String(limit));
+      upstreamUrl.searchParams.set("limit", String(Math.min(1000, page * pageSize)));
       if (nameFilter) upstreamUrl.searchParams.set("name", nameFilter);
       const r = await fetch(upstreamUrl, { signal: AbortSignal.timeout(8_000) });
       if (!r.ok) {
         errors.push({ source: "shared", message: `${r.status} ${r.statusText}` });
       } else {
         const body = (await r.json()) as { data?: InngestEvent[] };
-        for (const e of body.data ?? []) all.push({ ...e, _source: "shared" });
+        for (const e of body.data ?? []) all.push({ ...e, _source: "shared", domain: inferEventDomain(e) });
       }
     } catch (e) {
       errors.push({ source: "shared", message: (e as Error).message });
     }
   }
 
-  // Sort newest first by id (ULIDs sort chronologically)
-  all.sort((a, b) => (b.id > a.id ? 1 : -1));
+  const sinceMs = since?.getTime() ?? (sinceHours ? Date.now() - sinceHours * 3600_000 : null);
+  const scoped = all.filter((event) => {
+    if (domain && !eventMatchesDomain(event, domain)) return false;
+    if (sinceMs !== null && eventTime(event) < sinceMs) return false;
+    return true;
+  });
 
-  const sliced = all.slice(0, limit);
+  // Stable newest-first order. Not every upstream id is a ULID, so prefer its
+  // explicit timestamp and use id as the deterministic tie-breaker.
+  scoped.sort((a, b) => eventTime(b) - eventTime(a) || b.id.localeCompare(a.id));
+
+  const sliced = includeShared
+    ? scoped.slice((page - 1) * pageSize, page * pageSize)
+    : scoped.slice(0, pageSize);
 
   // Enrich with EventInstance.source so the UI can show direction badges.
   // We look up by externalEventId (= the Inngest event id) for RAAS-bridged
@@ -93,10 +130,50 @@ export async function GET(req: Request): Promise<Response> {
     // DB unavailable — silently continue without source enrichment
   }
 
+  const localIds = new Set(all.filter((event) => event._source === "local").map((event) => event.id));
+  const sharedObserved = includeShared
+    ? new Set(
+        scoped
+          .filter((event) => event._source === "shared" && !localIds.has(event.id))
+          .map((event) => event.id),
+      ).size
+    : 0;
+  const total = localTotal + sharedObserved;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
   return NextResponse.json({
     events: enriched,
+    page,
+    pageSize,
+    // Local history is exact and counted in Postgres. Shared rows are live-only
+    // and therefore contribute only the unique rows observed in this request.
+    total,
+    totalPages,
     sources: sourceLabels,
     errors,
     fetchedAt: new Date().toISOString(),
+    meta: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      source: localSource,
+      sharedTotalIsObserved: includeShared,
+      generatedAt: new Date().toISOString(),
+    },
   });
+}
+
+function positiveInt(raw: string | null, fallback: number, max: number): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(max, Math.max(1, Math.floor(n))) : fallback;
+}
+
+function eventTime(event: InngestEvent): number {
+  if (event.received_at) {
+    const n = new Date(event.received_at).getTime();
+    if (Number.isFinite(n)) return n;
+  }
+  return typeof event.ts === "number" ? event.ts : 0;
 }

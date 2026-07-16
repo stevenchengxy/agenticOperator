@@ -1,53 +1,61 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock('@/server/clients/ws', () => ({
-  wsClient: { fetchRuns: vi.fn() },
-  WsClientError: class extends Error {},
+const {
+  workflowFindMany,
+  workflowCount,
+  dlqFindMany,
+  dlqCount,
+  statusFindUnique,
+} = vi.hoisted(() => ({
+  workflowFindMany: vi.fn(),
+  workflowCount: vi.fn(),
+  dlqFindMany: vi.fn(),
+  dlqCount: vi.fn(),
+  statusFindUnique: vi.fn(),
 }));
-vi.mock('@/server/clients/em', () => ({
-  emClient: { fetchDLQ: vi.fn() },
-  EmClientError: class extends Error {},
+
+vi.mock("@/server/db", () => ({
+  prisma: {
+    workflowRun: { findMany: workflowFindMany, count: workflowCount },
+    dLQEntry: { findMany: dlqFindMany, count: dlqCount },
+    emSystemStatus: { findUnique: statusFindUnique },
+  },
 }));
 
-import { GET } from './route';
-import { wsClient } from '@/server/clients/ws';
-import { emClient } from '@/server/clients/em';
+import { GET } from "./route";
 
-describe('GET /api/alerts', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('synthesizes alerts from timed_out runs and dlq entries', async () => {
-    (wsClient.fetchRuns as any).mockResolvedValue({
-      runs: [
-        {
-          id: 'r1',
-          triggerEvent: 'X',
-          status: 'timed_out',
-          startedAt: '2026-01-01',
-          lastActivityAt: '2026-01-01',
-          suspendedReason: 'sla',
-        },
-      ],
-      total: 1,
-    });
-    (emClient.fetchDLQ as any).mockResolvedValue({
-      items: [{ id: 'd1', eventName: 'Y', reason: 'parse error', createdAt: '2026-01-01' }],
-      total: 1,
-    });
-    const res = await GET(new Request('http://x/api/alerts'));
-    const j = await res.json();
-    expect(res.status).toBe(200);
-    expect(j.alerts.find((a: any) => a.category === 'sla')).toBeTruthy();
-    expect(j.alerts.find((a: any) => a.category === 'dlq')).toBeTruthy();
+describe("GET /api/alerts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workflowFindMany.mockResolvedValue([]);
+    workflowCount.mockResolvedValue(0);
+    dlqFindMany.mockResolvedValue([]);
+    dlqCount.mockResolvedValue(0);
+    statusFindUnique.mockResolvedValue(null);
   });
 
-  it('partial when both upstreams down', async () => {
-    (wsClient.fetchRuns as any).mockRejectedValue(new Error('down'));
-    (emClient.fetchDLQ as any).mockRejectedValue(new Error('down'));
-    const res = await GET(new Request('http://x/api/alerts'));
-    const j = await res.json();
-    expect(res.status).toBe(200);
-    expect(j.alerts).toEqual([]);
-    expect(j.meta.partial).toEqual(expect.arrayContaining(['ws', 'em']));
+  it("reads durable timed-out runs and DLQ rows with numbered pagination", async () => {
+    workflowFindMany.mockResolvedValue([{ id: "r1", triggerEvent: "X", lastActivityAt: new Date("2026-01-02") }]);
+    workflowCount.mockResolvedValue(1);
+    dlqFindMany.mockResolvedValue([{ id: "d1", eventName: "Y", createdAt: new Date("2026-01-01"), resolvedAt: null }]);
+    dlqCount.mockResolvedValue(1);
+
+    const response = await GET(new Request("http://x/api/alerts?page=1&pageSize=1"));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.alerts).toHaveLength(1);
+    expect(body.total).toBe(2);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(1);
+    expect(body.totalPages).toBe(2);
+  });
+
+  it("marks persistent source failures as partial", async () => {
+    workflowFindMany.mockRejectedValue(new Error("db read failed"));
+    dlqFindMany.mockRejectedValue(new Error("db read failed"));
+    const response = await GET(new Request("http://x/api/alerts"));
+    const body = await response.json();
+    expect(body.alerts).toEqual([]);
+    expect(body.meta.partial).toEqual(expect.arrayContaining(["ws", "em"]));
   });
 });

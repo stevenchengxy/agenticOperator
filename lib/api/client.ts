@@ -13,15 +13,15 @@ export async function fetchJson<T>(
   path: string,
   init?: RequestInit & { timeoutMs?: number },
 ): Promise<T> {
-  const timeoutMs = init?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchInit } = init ?? {};
   const sig = AbortSignal.timeout(timeoutMs);
   const headers = {
     Accept: 'application/json',
-    ...((init?.headers as Record<string, string>) ?? {}),
+    ...((fetchInit.headers as Record<string, string>) ?? {}),
   };
   let res: Response;
   try {
-    res = await fetch(path, { ...init, headers, signal: sig });
+    res = await fetch(path, { ...fetchInit, headers, signal: sig });
   } catch (e: unknown) {
     if ((e as Error)?.name === 'TimeoutError') throw new ApiTimeoutError();
     throw e;

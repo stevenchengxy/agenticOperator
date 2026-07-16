@@ -98,9 +98,16 @@ describe("runToCreate / runToUpdate", () => {
       durationMs: 2500,
     });
   });
-  it("runToUpdate only carries mutable fields", () => {
+  it("runToUpdate carries mutable fields plus durable app/domain attribution", () => {
     const u = runToUpdate(run);
-    expect(Object.keys(u).sort()).toEqual(["durationMs", "endedAt", "eventName", "status"]);
+    expect(Object.keys(u).sort()).toEqual([
+      "appId",
+      "domain",
+      "durationMs",
+      "endedAt",
+      "eventName",
+      "status",
+    ]);
     expect(u.durationMs).toBe(2500);
   });
   it("null finishedAt → null endedAt/duration", () => {

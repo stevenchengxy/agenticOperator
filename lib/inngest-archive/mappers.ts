@@ -9,6 +9,11 @@ import {
   type InngestEvent,
   type RunStepDetail,
 } from "../inngest-admin-client";
+import {
+  eventSourceApp,
+  inferEventDomain,
+  inferRunDomain,
+} from "../events/domain-scope";
 
 const TERMINAL = new Set(["Completed", "Failed", "Cancelled"]);
 
@@ -52,9 +57,14 @@ export type EventRow = {
   data: string; // required column — JSON "null" when the event had no data
   ts: Date | null;
   receivedAt: Date | null;
+  sourceApp: string | null;
+  domain: string;
+  occurredAt: Date;
 };
 
 export function eventToRow(ev: InngestEvent): EventRow {
+  const sourceApp = eventSourceApp(ev);
+  const occurredAt = toDate(ev.received_at) ?? toDate(ev.ts) ?? new Date();
   return {
     id: ev.id,
     internalId: ev.internal_id ?? null,
@@ -62,6 +72,9 @@ export function eventToRow(ev: InngestEvent): EventRow {
     data: safeJson(ev.data) ?? "null",
     ts: toDate(ev.ts),
     receivedAt: toDate(ev.received_at),
+    sourceApp,
+    domain: inferEventDomain({ ...ev, sourceApp }),
+    occurredAt,
   };
 }
 
@@ -71,7 +84,7 @@ export type RecentRun = {
   status: string;
   startedAt: string;
   finishedAt?: string;
-  function: { name: string; slug: string };
+  function: { name: string; slug: string; appID?: string };
   eventName?: string;
   eventId?: string;
 };
@@ -80,6 +93,8 @@ export type RunCreate = {
   runId: string;
   functionSlug: string;
   functionName: string | null;
+  appId: string | null;
+  domain: string;
   status: string;
   startedAt: Date | null;
   endedAt: Date | null;
@@ -89,10 +104,17 @@ export type RunCreate = {
 };
 
 export function runToCreate(run: RecentRun): RunCreate {
+  const appId = run.function?.appID ?? null;
   return {
     runId: run.id,
     functionSlug: run.function?.slug ?? "",
     functionName: run.function?.name ?? null,
+    appId,
+    domain: inferRunDomain({
+      appId,
+      functionSlug: run.function?.slug,
+      eventName: run.eventName,
+    }),
     status: run.status,
     startedAt: toDate(run.startedAt),
     endedAt: toDate(run.finishedAt),
@@ -104,12 +126,21 @@ export function runToCreate(run: RecentRun): RunCreate {
 
 /** Mutable fields only — status / timing change as a run progresses. */
 export function runToUpdate(run: RecentRun): {
+  appId: string | null;
+  domain: string;
   status: string;
   endedAt: Date | null;
   durationMs: number | null;
   eventName: string | null;
 } {
+  const appId = run.function?.appID ?? null;
   return {
+    appId,
+    domain: inferRunDomain({
+      appId,
+      functionSlug: run.function?.slug,
+      eventName: run.eventName,
+    }),
     status: run.status,
     endedAt: toDate(run.finishedAt),
     durationMs: durationMs(run.startedAt, run.finishedAt),

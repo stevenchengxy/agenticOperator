@@ -24,6 +24,9 @@ vi.mock("./inngest-archive/reader", () => ({
   getRunHistory: vi.fn(),
   getRunStepOutputs: vi.fn(),
   listEvents: vi.fn(),
+  getEventById: vi.fn(),
+  getTriggerEventFromRuns: vi.fn(),
+  listRunsByTriggerEvent: vi.fn(),
 }));
 
 import * as live from "./inngest-admin-client";
@@ -33,6 +36,8 @@ import {
   listRunsWithEvents,
   getRunHistory,
   listEvents,
+  replayEvent,
+  getEventRuns,
 } from "./inngest-source";
 
 type Recent = Awaited<ReturnType<typeof live.listRecentRuns>>[number];
@@ -306,5 +311,104 @@ describe("inngest-source listEvents (auto = merge live + archive)", () => {
     await listEvents(200, "RESUME_PROCESSED");
     expect(live.listEvents).toHaveBeenCalledWith(200, "RESUME_PROCESSED");
     expect(archive.listEvents).toHaveBeenCalledWith(200, "RESUME_PROCESSED");
+  });
+});
+
+describe("inngest-source replayEvent (auto = live first, archive fallback)", () => {
+  it("uses the live replay when the event is still in the live buffer", async () => {
+    vi.mocked(live.replayEvent).mockResolvedValue({ newEventId: "live-new" });
+    await expect(replayEvent("ev-1")).resolves.toEqual({ newEventId: "live-new" });
+    expect(archive.getEventById).not.toHaveBeenCalled();
+  });
+
+  it("re-emits the archived payload when the event aged out of the live buffer", async () => {
+    // The dev server's event buffer is lossy — every historical failed run hits
+    // this path, which is exactly what 批量重试 exists for.
+    vi.mocked(live.replayEvent).mockRejectedValue(
+      new Error("event ev-1 not found in live buffer"),
+    );
+    vi.mocked(archive.getEventById).mockResolvedValue(
+      evt("ev-1", "2026-06-15T08:00:00Z", { candidate_id: "c1" }),
+    );
+    vi.mocked(live.sendEvent).mockResolvedValue({ id: "archived-new" });
+    await expect(replayEvent("ev-1")).resolves.toEqual({ newEventId: "archived-new" });
+    expect(live.sendEvent).toHaveBeenCalledWith(
+      "EVENT",
+      { candidate_id: "c1" },
+      { replayOf: "ev-1" },
+    );
+  });
+
+  it("falls back to the run archive's trigger copy when the event archive has a gap", async () => {
+    // The event archiver polls the lossy live buffer, so an event can be
+    // missing from the event archive while its run (with eventPayload) exists.
+    vi.mocked(live.replayEvent).mockRejectedValue(
+      new Error("event ev-2 not found in live buffer"),
+    );
+    vi.mocked(archive.getEventById).mockResolvedValue(null);
+    vi.mocked(archive.getTriggerEventFromRuns).mockResolvedValue({
+      name: "REQUIREMENT_LOGGED",
+      data: { entity_id: "REQ-1" },
+    });
+    vi.mocked(live.sendEvent).mockResolvedValue({ id: "run-copy-new" });
+    await expect(replayEvent("ev-2")).resolves.toEqual({ newEventId: "run-copy-new" });
+    expect(live.sendEvent).toHaveBeenCalledWith(
+      "REQUIREMENT_LOGGED",
+      { entity_id: "REQ-1" },
+      { replayOf: "ev-2" },
+    );
+  });
+
+  it("surfaces the live error when the event is not archived either", async () => {
+    vi.mocked(live.replayEvent).mockRejectedValue(new Error("event ev-x not found"));
+    vi.mocked(archive.getEventById).mockResolvedValue(null);
+    vi.mocked(archive.getTriggerEventFromRuns).mockResolvedValue(null);
+    await expect(replayEvent("ev-x")).rejects.toThrow("event ev-x not found");
+    expect(live.sendEvent).not.toHaveBeenCalled();
+  });
+
+  it("live mode never consults the archive", async () => {
+    process.env.MONITOR_READ_SOURCE = "live";
+    vi.mocked(live.replayEvent).mockRejectedValue(new Error("nope"));
+    await expect(replayEvent("ev-1")).rejects.toThrow("nope");
+    expect(archive.getEventById).not.toHaveBeenCalled();
+  });
+});
+
+type EventRun = Awaited<ReturnType<typeof live.getEventRuns>>[number];
+function evtRun(runId: string, status: EventRun["status"], startedAt: string): EventRun {
+  return { run_id: runId, status, run_started_at: startedAt };
+}
+
+describe("inngest-source getEventRuns (auto = merge live + archive)", () => {
+  it("returns archived runs when live answers [] for an aged-out event", async () => {
+    vi.mocked(live.getEventRuns).mockResolvedValue([]);
+    vi.mocked(archive.listRunsByTriggerEvent).mockResolvedValue([
+      evtRun("r1", "Failed", "2026-06-15T08:00:00Z"),
+    ]);
+    const rows = await getEventRuns("ev-1");
+    expect(rows.map((r) => r.run_id)).toEqual(["r1"]);
+  });
+
+  it("lets the live row win on run_id conflict and sorts newest-first", async () => {
+    vi.mocked(archive.listRunsByTriggerEvent).mockResolvedValue([
+      evtRun("r1", "Running", "2026-06-15T08:00:00Z"), // stale archive status
+      evtRun("r0", "Completed", "2026-06-15T07:00:00Z"),
+    ]);
+    vi.mocked(live.getEventRuns).mockResolvedValue([
+      evtRun("r1", "Completed", "2026-06-15T08:00:00Z"),
+    ]);
+    const rows = await getEventRuns("ev-1");
+    expect(rows.map((r) => r.run_id)).toEqual(["r1", "r0"]);
+    expect(rows[0].status).toBe("Completed");
+  });
+
+  it("falls back to the archive when live is unreachable", async () => {
+    vi.mocked(live.getEventRuns).mockRejectedValue(new Error("ECONNREFUSED"));
+    vi.mocked(archive.listRunsByTriggerEvent).mockResolvedValue([
+      evtRun("r1", "Failed", "2026-06-15T08:00:00Z"),
+    ]);
+    const rows = await getEventRuns("ev-1");
+    expect(rows.map((r) => r.run_id)).toEqual(["r1"]);
   });
 });

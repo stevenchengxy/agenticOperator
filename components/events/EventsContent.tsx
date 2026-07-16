@@ -4,33 +4,18 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AGENT_MAP, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
 import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
-import { useInngestEventsStream } from "@/lib/api/inngest-events-stream";
-import type { InngestEventRow } from "@/lib/api/inngest-events";
+import type { InngestEventRow, InngestEventsResponse } from "@/lib/api/inngest-events";
 import { useEmHealth } from "@/lib/api/em-health";
 import { fetchJson } from "@/lib/api/client";
 import type { EventsResponse, EventContract } from "@/lib/api/types";
+import { paginationFrom, readPage, readPageSize, setPaginationParams } from "@/lib/api/pagination";
 import { AllmetaSyncStrip } from "./AllmetaSyncStrip";
 import { useApp } from "@/lib/i18n";
 import { useDomain } from "@/lib/domains";
-import {
-  ENERGY_DOMAIN_ID,
-  ENERGY_EVENT_NS,
-  COST_CONTROL_DOMAIN_ID,
-  COST_CONTROL_EVENT_NS,
-  RECRUITMENT_DOMAIN_ID,
-} from "@/lib/domain-ids";
+import { eventLeafName, eventMatchesDomain } from "@/lib/events/domain-scope";
 import { classifyByPublishers, DIRECTION_META } from "@/lib/events/event-direction";
-
-/** Classify a LIVE event into a business domain by its name namespace —
- *  energy/… → 能源调度-v1, feikong/… → 费控-v1, everything else (recruitment
- *  events + inngest/* meta) → 招聘-v1. Lets the event stream scope to the active
- *  业务领域 the same way the monitor runs do (domain-app event names are ASCII-
- *  namespaced; recruitment events carry no namespace). */
-function eventDomainOf(name: string): string {
-  if (name.startsWith(`${ENERGY_EVENT_NS}/`)) return ENERGY_DOMAIN_ID;
-  if (name.startsWith(`${COST_CONTROL_EVENT_NS}/`)) return COST_CONTROL_DOMAIN_ID;
-  return RECRUITMENT_DOMAIN_ID;
-}
+import { HelpTip } from "@/components/shared/HelpTip";
+import { Pagination } from "@/components/shared/Pagination";
 
 // /events — 事件
 //
@@ -61,20 +46,107 @@ function subscribersOf(
   eventName: string,
   realnessMap: Map<string, DeploymentKind>,
 ): { short: string; isReal: boolean; kind: DeploymentKind }[] {
-  const list = EVENT_TO_SUBSCRIBERS[eventName] ?? [];
+  const list = EVENT_TO_SUBSCRIBERS[eventName] ?? EVENT_TO_SUBSCRIBERS[eventLeafName(eventName)] ?? [];
   return list.map((short) => {
     const kind = realnessMap.get(short) ?? "unbuilt";
     return { short, isReal: kind === "real", kind };
   });
 }
+
+type EventPageResponse = InngestEventsResponse & {
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
+  pagination?: { page?: number; pageSize?: number; total?: number; totalPages?: number };
+};
+
+function useEventPage({
+  active,
+  domain,
+  name,
+  windowId,
+  page,
+  pageSize,
+}: {
+  active: boolean;
+  domain: string;
+  name: string | null;
+  windowId: "1h" | "24h" | "7d" | "all";
+  page: number;
+  pageSize: number;
+}) {
+  const [events, setEvents] = React.useState<InngestEventRow[] | null>(null);
+  const [total, setTotal] = React.useState<number | null>(null);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [lastFetchAt, setLastFetchAt] = React.useState<Date | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    if (!active) return;
+    const params = new URLSearchParams({ domain });
+    setPaginationParams(params, page, pageSize);
+    if (name) params.set("name", name);
+    if (windowId !== "all") {
+      const windowMs = windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000;
+      params.set("since", new Date(Date.now() - windowMs).toISOString());
+    }
+    setLoading(true);
+    try {
+      const body = await fetchJson<EventPageResponse>(`/api/inngest-events?${params.toString()}`, {
+        cache: "no-store",
+        // The first read after upgrading an existing installation may perform
+        // a one-time domain/occurredAt backfill over the durable archive.
+        timeoutMs: 30_000,
+      });
+      const rows = Array.isArray(body.events) ? body.events : [];
+      const pagination = paginationFrom(body, { page, pageSize, rowCount: rows.length });
+      setEvents(rows);
+      setTotal(pagination.total);
+      setTotalPages(pagination.totalPages);
+      setLastFetchAt(new Date(body.fetchedAt || Date.now()));
+      setError(body.errors?.length
+        ? body.errors.map((item) => `${item.source}: ${item.message}`).join("; ")
+        : null);
+    } catch (cause) {
+      const message = cause && typeof cause === "object" && "message" in cause
+        ? String((cause as { message: unknown }).message)
+        : String(cause);
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [active, domain, name, windowId, page, pageSize]);
+
+  React.useEffect(() => {
+    if (!active) return;
+    void refresh();
+    const timer = setInterval(refresh, page === 1 ? 5_000 : 15_000);
+    return () => clearInterval(timer);
+  }, [active, page, refresh]);
+
+  return {
+    events,
+    total,
+    totalPages,
+    loading,
+    error,
+    lastFetchAt,
+    connected: events != null && error == null,
+    refresh,
+  };
+}
+
 export function EventsContent() {
   const router = useRouter();
   const sp = useSearchParams();
   const { t, lang } = useApp();
+  const { domain } = useDomain();
   const { realness: realnessMap } = useDeploymentMap();
 
   const filterName = sp.get("name");
-  const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d";
+  const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d" | "all";
   const selectedId = sp.get("id");
   const view = (sp.get("view") ?? "stream") as "stream" | "dlq";
   // registration filter — disabled in UI for now (development), but the
@@ -82,6 +154,8 @@ export function EventsContent() {
   // when the team's ready to QA it.
   const regFilter = (sp.get("reg") ?? "all") as "all" | "registered" | "unregistered";
   const dirFilter = (sp.get("dir") ?? "all") as "all" | "in" | "out";
+  const page = readPage(sp.get("page"));
+  const pageSize = readPageSize(sp.get("pageSize"), [20, 50, 100], 50);
 
   const setUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(sp.toString());
@@ -93,30 +167,33 @@ export function EventsContent() {
     setUrl((p) => {
       if (next === "all") p.delete("dir");
       else p.set("dir", next);
+      p.delete("page");
+      p.delete("id");
     });
   }, [setUrl]);
 
-  const { events: rawEvents, error, lastFetchAt, connected } = useInngestEventsStream();
-  // SSE stream doesn't accept a name param — filter client-side when active
-  const events = React.useMemo(() => {
-    if (!filterName) return rawEvents;
-    return rawEvents.filter((e) => e.name === filterName);
-  }, [rawEvents, filterName]);
+  const eventPage = useEventPage({
+    active: view === "stream",
+    domain,
+    name: filterName,
+    windowId,
+    page,
+    pageSize,
+  });
+  const events = eventPage.events ?? [];
+  const { error, lastFetchAt, connected } = eventPage;
   const emHealth = useEmHealth();
   const { registry, syncing, refreshRegistry, syncNow } = useEventRegistry();
-  const dlq = useDlq(view === "dlq");
-  const { domain } = useDomain();
+  const dlq = useDlq(view === "dlq", domain, page, pageSize);
 
   const filtered = React.useMemo(() => {
-    const windowMs = windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000;
-    const cutoff = Date.now() - windowMs;
+    const cutoff = windowId === "all"
+      ? null
+      : Date.now() - (windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000);
     return events.filter((e) => {
-      // Scope to the active 业务领域 — classify each event by its name namespace
-      // (energy/* → 能源调度, feikong/* → 费控, else 招聘) so switching the AppBar
-      // domain shows only that domain's events (matches the monitor runs).
-      if (eventDomainOf(e.name) !== domain) return false;
+      if (!eventMatchesDomain(e, domain)) return false;
       if (!e.received_at) return true;
-      if (new Date(e.received_at).getTime() < cutoff) return false;
+      if (cutoff !== null && new Date(e.received_at).getTime() < cutoff) return false;
       // Registration filter (logic wired but UI disabled for now)
       if (regFilter !== "all") {
         const isReg = registry.has(e.name);
@@ -135,8 +212,19 @@ export function EventsContent() {
 
   const selected = React.useMemo(() => {
     if (!selectedId) return filtered[0] ?? null;
-    return events.find((e) => (e.internal_id ?? e.id) === selectedId) ?? null;
-  }, [events, filtered, selectedId]);
+    return filtered.find((e) => (e.internal_id ?? e.id) === selectedId) ?? filtered[0] ?? null;
+  }, [filtered, selectedId]);
+
+  React.useEffect(() => {
+    const pages = view === "dlq" ? dlq.totalPages : eventPage.totalPages;
+    if (pages != null && page > pages) {
+      setUrl((params) => {
+        if (pages <= 1) params.delete("page");
+        else params.set("page", String(pages));
+        params.delete("id");
+      });
+    }
+  }, [dlq.totalPages, eventPage.totalPages, page, setUrl, view]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
@@ -146,11 +234,11 @@ export function EventsContent() {
       <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
         <div className="flex items-start gap-6">
           <div className="flex-1 min-w-0">
-            <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
-              {t("evx_page_title")}
-            </h1>
-            <div className="text-ink-2 mt-1.5" style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-              {t("evx_page_sub")}
+            <div className="flex items-center gap-2">
+              <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
+                {t("evx_page_title")}
+              </h1>
+              <HelpTip tip={t("evx_page_sub")} />
             </div>
           </div>
           <div className="flex items-center gap-3 mt-1">
@@ -163,7 +251,12 @@ export function EventsContent() {
           <ViewToggle
             value={view}
             dlqCount={dlq.total}
-            onChange={(v) => setUrl((p) => v === "stream" ? p.delete("view") : p.set("view", v))}
+            onChange={(v) => setUrl((p) => {
+              if (v === "stream") p.delete("view");
+              else p.set("view", v);
+              p.delete("page");
+              p.delete("id");
+            })}
             t={t}
           />
         </div>
@@ -178,14 +271,17 @@ export function EventsContent() {
         />
 
         <div className="flex items-center gap-x-7 gap-y-1.5 mt-4 flex-wrap">
-          <CountChip label={t("evx_count_events")} value={String(filtered.length)} />
+          <CountChip
+            label={t("evx_count_events")}
+            value={eventPage.total == null ? String(filtered.length) : `${filtered.length} / ${eventPage.total}`}
+          />
           {filterName && (
             <span
               className="inline-flex items-center gap-1.5 rounded border border-line bg-surface text-ink-2"
               style={{ padding: "3px 9px", fontSize: 12 }}
             >
               <span className="text-ink-3">{t("evx_name")}</span> {filterName}
-              <button onClick={() => setUrl((p) => p.delete("name"))} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
+              <button onClick={() => setUrl((p) => { p.delete("name"); p.delete("page"); p.delete("id"); })} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
             </span>
           )}
           {error && (
@@ -225,32 +321,56 @@ export function EventsContent() {
           )}
           <RegistrationFilter value={regFilter} disabled t={t} />
           <div className="w-px h-5 bg-line" />
-          <WindowSelector value={windowId} onChange={(v) => setUrl((p) => v === "1h" ? p.delete("window") : p.set("window", v))} t={t} />
+          <WindowSelector value={windowId} onChange={(v) => setUrl((p) => {
+            if (v === "1h") p.delete("window");
+            else p.set("window", v);
+            p.delete("page");
+            p.delete("id");
+          })} t={t} />
         </div>
       </div>
 
       {view === "dlq" ? (
-        <DlqView dlq={dlq} t={t} />
+        <DlqView
+          dlq={dlq}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={(nextPage) => setUrl((params) => {
+            if (nextPage <= 1) params.delete("page");
+            else params.set("page", String(nextPage));
+            params.delete("id");
+          })}
+          t={t}
+        />
       ) : (
       /* main split: list left, payload right */
       <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(380px, 520px)" }}>
-        <div className="overflow-auto border-r border-line">
-          <div
-            className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
-            style={{ gridTemplateColumns: "120px 76px minmax(0, 1.4fr) 84px minmax(0, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
-          >
-            <span>{t("evx_col_received_at")}</span>
-            <span>{t("evx_col_direction")}</span>
-            <span>{t("evx_col_event_name")}</span>
-            <span>{t("evx_col_registration")}</span>
-            <span>{t("evx_col_triggered_agents")}</span>
-          </div>
-          {filtered.length === 0 && (
-            <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
-              {connected ? t("evx_no_recent_events") : t("evx_connecting_inngest")}
+        <div className="border-r border-line flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto min-h-0">
+            <div
+              className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
+              style={{ gridTemplateColumns: "120px 76px minmax(0, 1.4fr) 84px minmax(0, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
+            >
+              <span>{t("evx_col_received_at")}</span>
+              <span>{t("evx_col_direction")}</span>
+              <span>{t("evx_col_event_name")}</span>
+              <span>{t("evx_col_registration")}</span>
+              <span>{t("evx_col_triggered_agents")}</span>
             </div>
-          )}
-          {filtered.map((e) => {
+            {eventPage.loading && eventPage.events == null && (
+              <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>{t("evx_loading")}</div>
+            )}
+            {!eventPage.loading && filtered.length === 0 && (
+              <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
+                {eventPage.error ? `${t("evx_load_failed")}: ${eventPage.error}` : t("evx_no_recent_events")}
+                {eventPage.error && (
+                  <div className="mt-3">
+                    <button className="text-accent hover:underline" onClick={() => void eventPage.refresh()}>{t("evx_retry")}</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {filtered.map((e) => {
             const id = e.internal_id ?? e.id;
             const isSelected = selected && (selected.internal_id ?? selected.id) === id;
             const subs = subscribersOf(e.name, realnessMap);
@@ -301,7 +421,27 @@ export function EventsContent() {
                 </span>
               </button>
             );
-          })}
+            })}
+          </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            rowCount={events.length}
+            total={eventPage.total}
+            totalPages={eventPage.totalPages}
+            loading={eventPage.loading}
+            onPageChange={(nextPage) => setUrl((params) => {
+              if (nextPage <= 1) params.delete("page");
+              else params.set("page", String(nextPage));
+              params.delete("id");
+            })}
+            onPageSizeChange={(nextSize) => setUrl((params) => {
+              if (nextSize === 50) params.delete("pageSize");
+              else params.set("pageSize", String(nextSize));
+              params.delete("page");
+              params.delete("id");
+            })}
+          />
         </div>
 
         <div className="overflow-auto">
@@ -409,7 +549,11 @@ function PayloadViewer({ event, contract, setUrl, t }: { event: InngestEventRow;
         )}
         <span className="text-ink-3">{t("evx_filter")}</span>
         <button
-          onClick={() => setUrl((p) => p.set("name", event.name))}
+          onClick={() => setUrl((p) => {
+            p.set("name", event.name);
+            p.delete("page");
+            p.delete("id");
+          })}
           className="text-left text-ink-2 hover:text-ink-1"
           style={{ fontSize: 12 }}
         >
@@ -417,11 +561,7 @@ function PayloadViewer({ event, contract, setUrl, t }: { event: InngestEventRow;
         </button>
       </div>
 
-      {contract?.desc && (
-        <div className="mt-4 text-ink-2 leading-relaxed" style={{ fontSize: 12.5 }}>
-          {contract.desc}
-        </div>
-      )}
+      {contract?.desc && <div className="mt-3"><HelpTip tip={contract.desc} /></div>}
 
       <div className="mt-5">
         <div className="text-ink-3 mb-2" style={{ fontSize: 12 }}>{t("evx_triggered_agents")}</div>
@@ -561,11 +701,12 @@ function CountChip({ label, value }: { label: string; value: string }) {
   );
 }
 
-function WindowSelector({ value, onChange, t }: { value: "1h" | "24h" | "7d"; onChange: (v: "1h" | "24h" | "7d") => void; t: (k: string) => string }) {
+function WindowSelector({ value, onChange, t }: { value: "1h" | "24h" | "7d" | "all"; onChange: (v: "1h" | "24h" | "7d" | "all") => void; t: (k: string) => string }) {
   const opts = [
     { id: "1h" as const, label: t("evx_window_1h") },
     { id: "24h" as const, label: t("evx_window_24h") },
     { id: "7d" as const, label: t("evx_window_7d") },
+    { id: "all" as const, label: t("evx_window_all") },
   ];
   return (
     <div className="flex items-center gap-1">
@@ -810,35 +951,48 @@ type DlqRow = {
   schemaVersionUsed: string | null;
   triedVersions: string[] | null;
   payloadSummary: string | null;
+  domain?: string | null;
   ts: string;
 };
 
 type DlqState = {
   rows: DlqRow[];
   total: number;
+  totalPages: number | null;
   loading: boolean;
+  error: string | null;
   refresh: () => Promise<void>;
 };
 
 const DLQ_STATUSES = "rejected_schema,rejected_filter,duplicate,meta_rejection,em_degraded";
 
-function useDlq(active: boolean): DlqState {
+function useDlq(active: boolean, domain: string, page: number, pageSize: number): DlqState {
   const [rows, setRows] = React.useState<DlqRow[]>([]);
   const [total, setTotal] = React.useState(0);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/em/event-instances?statusIn=${DLQ_STATUSES}&limit=200`);
-      if (!res.ok) return;
+      const params = new URLSearchParams({ statusIn: DLQ_STATUSES, domain });
+      setPaginationParams(params, page, pageSize);
+      const res = await fetch(`/api/em/event-instances?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json();
-      setRows(body.rows ?? []);
-      setTotal(body.total ?? 0);
-    } catch { /* soft */ } finally {
+      const nextRows = Array.isArray(body.rows) ? body.rows : [];
+      const pagination = paginationFrom(body, { page, pageSize, rowCount: nextRows.length });
+      setRows(nextRows);
+      setTotal(pagination.total ?? nextRows.length);
+      setTotalPages(pagination.totalPages);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
       setLoading(false);
     }
-  }, []);
+  }, [domain, page, pageSize]);
 
   React.useEffect(() => {
     refresh();
@@ -847,7 +1001,7 @@ function useDlq(active: boolean): DlqState {
     return () => clearInterval(t);
   }, [refresh, active]);
 
-  return { rows, total, loading, refresh };
+  return { rows, total, totalPages, loading, error, refresh };
 }
 
 function ViewToggle({
@@ -900,31 +1054,47 @@ function ViewToggle({
   );
 }
 
-function DlqView({ dlq, t }: { dlq: DlqState; t: (k: string) => string }) {
+function DlqView({
+  dlq,
+  page,
+  pageSize,
+  onPageChange,
+  t,
+}: {
+  dlq: DlqState;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  t: (k: string) => string;
+}) {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const selected = dlq.rows.find((r) => r.id === selectedId) ?? null;
 
   return (
     <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(380px, 520px)" }}>
-      <div className="overflow-auto border-r border-line">
-        <div
-          className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
-          style={{ gridTemplateColumns: "130px minmax(0, 1.2fr) 130px minmax(0, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
-        >
-          <span>{t("evx_col_time")}</span>
-          <span>{t("evx_col_event_name")}</span>
-          <span>{t("evx_col_reject_type")}</span>
-          <span>{t("evx_col_reason")}</span>
-        </div>
-        {dlq.loading && dlq.rows.length === 0 && (
-          <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>{t("evx_loading")}</div>
-        )}
-        {!dlq.loading && dlq.rows.length === 0 && (
-          <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
-            {t("evx_dlq_empty")}
+      <div className="border-r border-line flex flex-col min-h-0">
+        <div className="flex-1 overflow-auto min-h-0">
+          <div
+            className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
+            style={{ gridTemplateColumns: "130px minmax(0, 1.2fr) 130px minmax(0, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
+          >
+            <span>{t("evx_col_time")}</span>
+            <span>{t("evx_col_event_name")}</span>
+            <span>{t("evx_col_reject_type")}</span>
+            <span>{t("evx_col_reason")}</span>
           </div>
-        )}
-        {dlq.rows.map((r) => {
+          {dlq.loading && dlq.rows.length === 0 && (
+            <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>{t("evx_loading")}</div>
+          )}
+          {!dlq.loading && dlq.rows.length === 0 && (
+            <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
+              {dlq.error ? `${t("evx_load_failed")}: ${dlq.error}` : t("evx_dlq_empty")}
+              {dlq.error && (
+                <div className="mt-3"><button className="text-accent hover:underline" onClick={() => void dlq.refresh()}>{t("evx_retry")}</button></div>
+              )}
+            </div>
+          )}
+          {dlq.rows.map((r) => {
           const isSelected = r.id === selectedId;
           return (
             <button
@@ -952,7 +1122,17 @@ function DlqView({ dlq, t }: { dlq: DlqState; t: (k: string) => string }) {
               </span>
             </button>
           );
-        })}
+          })}
+        </div>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          rowCount={dlq.rows.length}
+          total={dlq.total}
+          totalPages={dlq.totalPages}
+          loading={dlq.loading}
+          onPageChange={onPageChange}
+        />
       </div>
       <div className="overflow-auto">
         {selected ? (

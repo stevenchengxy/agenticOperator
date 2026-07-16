@@ -10,17 +10,33 @@ import type { InngestEvent } from "../inngest-admin-client";
 import { getRunHistory } from "../inngest-admin-client";
 import { archiveEvents, archiveRunTrace } from "./writer";
 import { toDate, safeJson, type RunHistory } from "./mappers";
+import { inferRunDomain } from "../events/domain-scope";
+
+export type TriggerEventSnapshot = {
+  id?: string;
+  name?: string;
+  data?: unknown;
+  ts?: number;
+  received_at?: string;
+  sourceApp?: string | null;
+  source_app?: string | null;
+};
 
 /** Persist freshly-sent events. `ids` come from inngest.send()'s return value. */
 export async function recordSentEvents(
-  payloads: { name: string; data?: unknown; ts?: number }[],
+  payloads: { name: string; data?: unknown; ts?: number; sourceApp?: string | null }[],
   ids: string[],
 ): Promise<number> {
   const events: InngestEvent[] = [];
   payloads.forEach((p, i) => {
     const id = ids[i];
     if (!id) return;
-    const ev: InngestEvent = { id, name: p.name, data: p.data ?? null };
+    const ev: InngestEvent = {
+      id,
+      name: p.name,
+      data: p.data ?? null,
+      sourceApp: p.sourceApp ?? null,
+    };
     if (p.ts !== undefined) ev.ts = p.ts;
     events.push(ev);
   });
@@ -34,26 +50,61 @@ export async function recordRunStart(args: {
   functionSlug: string;
   functionName: string;
   startedAtIso: string;
+  appId?: string;
   eventName?: string;
   eventId?: string;
+  event?: TriggerEventSnapshot;
 }): Promise<void> {
   const startedAt = toDate(args.startedAtIso);
+  const eventId = args.event?.id ?? args.eventId;
+  const eventName = args.event?.name ?? args.eventName;
+  const eventPayload = args.event && "data" in args.event ? safeJson(args.event.data) : null;
+  const appId = args.appId ?? null;
+  const domain = inferRunDomain({
+    appId,
+    functionSlug: args.functionSlug,
+    eventName,
+  });
+
+  // Events entering Inngest from an external producer never pass AO's
+  // wrapSendEvent hook. Persist the triggering event from onRunStart as a
+  // second, idempotent write-through path so the polling window cannot lose it.
+  if (eventId && eventName) {
+    await archiveEvents([
+      {
+        id: eventId,
+        name: eventName,
+        data: args.event?.data ?? null,
+        ts: args.event?.ts,
+        received_at: args.event?.received_at ?? args.startedAtIso,
+        sourceApp: args.event?.sourceApp ?? args.event?.source_app ?? null,
+      },
+    ]);
+  }
   await prisma.inngestRunArchive.upsert({
     where: { runId: args.runId },
     create: {
       runId: args.runId,
       functionSlug: args.functionSlug,
       functionName: args.functionName,
+      appId,
+      domain,
       status: "Running",
       startedAt,
-      eventName: args.eventName ?? null,
-      triggerEventIds: args.eventId ? JSON.stringify([args.eventId]) : null,
+      eventName: eventName ?? null,
+      triggerEventIds: eventId ? JSON.stringify([eventId]) : null,
+      eventPayload,
     },
     // Row already exists (e.g. poller raced): refresh metadata, leave status alone.
     update: {
       functionSlug: args.functionSlug,
       functionName: args.functionName,
+      appId,
+      domain,
       startedAt,
+      ...(eventName ? { eventName } : {}),
+      ...(eventId ? { triggerEventIds: JSON.stringify([eventId]) } : {}),
+      ...(eventPayload !== null ? { eventPayload } : {}),
     },
   });
 }
@@ -66,6 +117,8 @@ export async function recordRunFinish(args: {
   status: "Completed" | "Failed" | "Cancelled";
   finishedAtIso: string;
   output: unknown;
+  appId?: string;
+  eventData?: unknown;
   eventName?: string;
   eventId?: string;
 }): Promise<void> {
@@ -81,20 +134,36 @@ export async function recordRunFinish(args: {
   const output = safeJson(args.output);
   const eventName = args.eventName ?? null;
   const triggerEventIds = args.eventId ? JSON.stringify([args.eventId]) : null;
+  const appId = args.appId ?? null;
+  const domain = inferRunDomain({ appId, functionSlug: args.functionSlug, eventName });
+  const eventPayload = safeJson(args.eventData);
   await prisma.inngestRunArchive.upsert({
     where: { runId: args.runId },
     create: {
       runId: args.runId,
       functionSlug: args.functionSlug,
       functionName: args.functionName,
+      appId,
+      domain,
       status: args.status,
       endedAt,
       durationMs,
       output,
       eventName,
       triggerEventIds,
+      eventPayload,
     },
-    update: { status: args.status, endedAt, durationMs, output, eventName },
+    update: {
+      status: args.status,
+      endedAt,
+      durationMs,
+      output,
+      eventName,
+      appId,
+      domain,
+      ...(triggerEventIds ? { triggerEventIds } : {}),
+      ...(eventPayload !== null ? { eventPayload } : {}),
+    },
   });
 }
 

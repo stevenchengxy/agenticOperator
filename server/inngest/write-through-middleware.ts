@@ -24,15 +24,32 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
     return `${this.client.id}-${fn.id()}`;
   }
 
+  private event(ctx: { event?: unknown }): {
+    id?: string;
+    name?: string;
+    data?: unknown;
+    ts?: number;
+    received_at?: string;
+    sourceApp?: string | null;
+    source_app?: string | null;
+  } | undefined {
+    return ctx.event && typeof ctx.event === "object"
+      ? (ctx.event as ReturnType<WriteThroughMiddleware["event"]>)
+      : undefined;
+  }
+
   async onRunStart({ ctx, fn }: Middleware.OnRunStartArgs): Promise<void> {
     try {
+      const event = this.event(ctx);
       await recordRunStart({
         runId: ctx.runId,
         functionSlug: this.slug(fn),
         functionName: fn.name,
         startedAtIso: new Date().toISOString(),
-        eventName: ctx.event?.name,
-        eventId: (ctx.event as { id?: string } | undefined)?.id,
+        appId: this.client.id,
+        eventName: event?.name,
+        eventId: event?.id,
+        event,
       });
     } catch (e) {
       warn("onRunStart", e);
@@ -42,6 +59,7 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
   async onRunComplete({ ctx, fn, output }: Middleware.OnRunCompleteArgs): Promise<void> {
     const finishedAtIso = new Date().toISOString();
     try {
+      const event = this.event(ctx);
       await recordRunFinish({
         runId: ctx.runId,
         functionSlug: this.slug(fn),
@@ -49,8 +67,10 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
         status: "Completed",
         finishedAtIso,
         output,
-        eventName: ctx.event?.name,
-        eventId: (ctx.event as { id?: string } | undefined)?.id,
+        appId: this.client.id,
+        eventName: event?.name,
+        eventId: event?.id,
+        eventData: event?.data,
       });
     } catch (e) {
       warn("onRunComplete", e);
@@ -67,6 +87,7 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
       error: { name: error?.name, message: error?.message, stack: error?.stack },
     };
     try {
+      const event = this.event(ctx);
       await recordRunFinish({
         runId: ctx.runId,
         functionSlug: this.slug(fn),
@@ -74,8 +95,10 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
         status: "Failed",
         finishedAtIso,
         output,
-        eventName: ctx.event?.name,
-        eventId: (ctx.event as { id?: string } | undefined)?.id,
+        appId: this.client.id,
+        eventName: event?.name,
+        eventId: event?.id,
+        eventData: event?.data,
       });
     } catch (e) {
       warn("onRunError", e);
@@ -92,7 +115,12 @@ export class WriteThroughMiddleware extends Middleware.BaseMiddleware {
     const out = await next();
     try {
       await recordSentEvents(
-        events.map((e) => ({ name: e.name, data: e.data, ts: e.ts })),
+        events.map((e) => ({
+          name: e.name,
+          data: e.data,
+          ts: e.ts,
+          sourceApp: this.client.id,
+        })),
         out?.ids ?? [],
       );
     } catch (e) {

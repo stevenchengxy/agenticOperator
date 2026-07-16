@@ -9,12 +9,61 @@
 import { prisma } from "../../server/db";
 import * as live from "../inngest-admin-client";
 import { deriveFlowId, flowLabel } from "../inngest-admin-client";
+import { inferEventDomain } from "../events/domain-scope";
+import {
+  ensureArchivedEventDomains,
+  ensureArchivedRunDomains,
+} from "../persistence/domain-backfill";
 
 type RecentRunResult = Awaited<ReturnType<typeof live.listRecentRuns>>;
 type RunHistoryResult = Awaited<ReturnType<typeof live.getRunHistory>>;
 type StepOutputsResult = Awaited<ReturnType<typeof live.getRunStepOutputs>>;
 type RunsWithEventsResult = Awaited<ReturnType<typeof live.listRunsWithEvents>>;
 type EventsResult = Awaited<ReturnType<typeof live.listEvents>>;
+
+export type PageResult<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export type RecentRunsPageOptions = {
+  page?: number;
+  pageSize?: number;
+  functionSlug?: string;
+  domain?: string;
+  status?: string[];
+  eventName?: string;
+  sinceHours?: number;
+};
+
+export type EventsPageOptions = {
+  page?: number;
+  pageSize?: number;
+  name?: string;
+  domain?: string;
+  sinceHours?: number;
+  since?: Date;
+};
+
+function normalizedPage(page = 1, pageSize = 50): { page: number; pageSize: number } {
+  return {
+    page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+    pageSize: Number.isFinite(pageSize) ? Math.min(500, Math.max(1, Math.floor(pageSize))) : 50,
+  };
+}
+
+function pageResult<T>(items: T[], total: number, page: number, pageSize: number): PageResult<T> {
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
 
 function parseMaybeJson(raw: string | null): unknown {
   if (raw == null) return null;
@@ -41,29 +90,102 @@ function stepIndex(id: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export async function listRecentRuns(
-  opts: { limit?: number; functionSlug?: string; sinceHours?: number } = {},
-): Promise<RecentRunResult> {
-  const limit = opts.limit ?? 50;
-  const sinceHours = opts.sinceHours ?? 24;
-  const from = new Date(Date.now() - sinceHours * 3600_000);
-  const rows = await prisma.inngestRunArchive.findMany({
-    where: {
-      startedAt: { gte: from },
-      ...(opts.functionSlug ? { functionSlug: opts.functionSlug } : {}),
-    },
-    orderBy: { startedAt: "desc" },
-    take: limit,
-  });
-  return rows.map((r) => ({
+function mapRunRow(r: {
+  runId: string;
+  status: string;
+  startedAt: Date | null;
+  endedAt: Date | null;
+  functionName: string | null;
+  functionSlug: string;
+  appId: string | null;
+  eventName: string | null;
+  triggerEventIds: string | null;
+}): RecentRunResult[number] {
+  return {
     id: r.runId,
     status: r.status,
     startedAt: r.startedAt?.toISOString() ?? "",
     finishedAt: r.endedAt?.toISOString() ?? undefined,
-    function: { name: r.functionName ?? r.functionSlug, slug: r.functionSlug },
+    function: {
+      name: r.functionName ?? r.functionSlug,
+      slug: r.functionSlug,
+      appID: r.appId ?? undefined,
+    },
     eventName: r.eventName ?? undefined,
     eventId: firstTriggerId(r.triggerEventIds),
-  }));
+  };
+}
+
+function mapEventRow(r: {
+  id: string;
+  internalId: string | null;
+  name: string;
+  data: string;
+  ts: Date | null;
+  receivedAt: Date | null;
+  sourceApp: string | null;
+  domain: string | null;
+  occurredAt?: Date | null;
+}): EventsResult[number] {
+  const data = parseMaybeJson(r.data);
+  return {
+    id: r.id,
+    internal_id: r.internalId ?? undefined,
+    name: r.name,
+    data,
+    ts: r.ts ? r.ts.getTime() : undefined,
+    received_at: r.receivedAt?.toISOString() ?? undefined,
+    sourceApp: r.sourceApp ?? undefined,
+    domain: r.domain ?? inferEventDomain({ name: r.name, data, sourceApp: r.sourceApp }),
+  };
+}
+
+export async function listRecentRuns(
+  opts: { limit?: number; functionSlug?: string; sinceHours?: number } = {},
+): Promise<RecentRunResult> {
+  const limit = opts.limit ?? 50;
+  const from =
+    typeof opts.sinceHours === "number" && Number.isFinite(opts.sinceHours) && opts.sinceHours > 0
+      ? new Date(Date.now() - opts.sinceHours * 3600_000)
+      : null;
+  const rows = await prisma.inngestRunArchive.findMany({
+    where: {
+      ...(from ? { startedAt: { gte: from } } : {}),
+      ...(opts.functionSlug ? { functionSlug: opts.functionSlug } : {}),
+    },
+    orderBy: [{ startedAt: "desc" }, { runId: "desc" }],
+    take: limit,
+  });
+  return rows.map(mapRunRow);
+}
+
+/** Exact Postgres pagination for the monitor run list. */
+export async function listRecentRunsPage(
+  opts: RecentRunsPageOptions = {},
+): Promise<PageResult<RecentRunResult[number]>> {
+  const { page, pageSize } = normalizedPage(opts.page, opts.pageSize);
+  if (opts.domain) await ensureArchivedRunDomains();
+  const from =
+    typeof opts.sinceHours === "number" && Number.isFinite(opts.sinceHours) && opts.sinceHours > 0
+      ? new Date(Date.now() - opts.sinceHours * 3600_000)
+      : null;
+  const where = {
+    ...(from ? { startedAt: { gte: from } } : {}),
+    ...(opts.functionSlug ? { functionSlug: opts.functionSlug } : {}),
+    ...(opts.domain ? { domain: opts.domain } : {}),
+    ...(opts.status?.length ? { status: { in: opts.status } } : {}),
+    ...(opts.eventName ? { eventName: opts.eventName } : {}),
+  };
+  const [rows, total] = await Promise.all([
+    prisma.inngestRunArchive.findMany({
+      where,
+      orderBy: [{ startedAt: "desc" }, { runId: "desc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.inngestRunArchive.count({ where }),
+  ]);
+  return pageResult(rows.map(mapRunRow), total, page, pageSize);
 }
 
 export async function getRunHistory(runId: string): Promise<RunHistoryResult | null> {
@@ -143,17 +265,38 @@ export async function getRunStepOutputs(runId: string): Promise<StepOutputsResul
 export async function listEvents(limit = 50, name?: string): Promise<EventsResult> {
   const rows = await prisma.inngestEventArchive.findMany({
     where: name ? { name } : {},
-    orderBy: { archivedAt: "desc" },
+    orderBy: [{ archivedAt: "desc" }, { id: "desc" }],
     take: limit,
   });
-  return rows.map((r) => ({
-    id: r.id,
-    internal_id: r.internalId ?? undefined,
-    name: r.name,
-    data: parseMaybeJson(r.data),
-    ts: r.ts ? r.ts.getTime() : undefined,
-    received_at: r.receivedAt?.toISOString() ?? undefined,
-  }));
+  return rows.map(mapEventRow);
+}
+
+/** Exact Postgres pagination for the durable Inngest event history. */
+export async function listEventsPage(
+  opts: EventsPageOptions = {},
+): Promise<PageResult<EventsResult[number]>> {
+  const { page, pageSize } = normalizedPage(opts.page, opts.pageSize);
+  await ensureArchivedEventDomains();
+  const from = opts.since && Number.isFinite(opts.since.getTime())
+    ? opts.since
+    : typeof opts.sinceHours === "number" && Number.isFinite(opts.sinceHours) && opts.sinceHours > 0
+      ? new Date(Date.now() - opts.sinceHours * 3600_000)
+      : null;
+  const where = {
+    ...(opts.name ? { name: opts.name } : {}),
+    ...(opts.domain ? { domain: opts.domain } : {}),
+    ...(from ? { occurredAt: { gte: from } } : {}),
+  };
+  const [rows, total] = await Promise.all([
+    prisma.inngestEventArchive.findMany({
+      where,
+      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.inngestEventArchive.count({ where }),
+  ]);
+  return pageResult(rows.map(mapEventRow), total, page, pageSize);
 }
 
 export async function listRunsWithEvents(
@@ -161,11 +304,13 @@ export async function listRunsWithEvents(
   opts: { limit?: number; sinceHours?: number } = {},
 ): Promise<RunsWithEventsResult> {
   const limit = opts.limit ?? 100;
-  const sinceHours = opts.sinceHours ?? 24;
-  const from = new Date(Date.now() - sinceHours * 3600_000);
+  const from =
+    typeof opts.sinceHours === "number" && Number.isFinite(opts.sinceHours) && opts.sinceHours > 0
+      ? new Date(Date.now() - opts.sinceHours * 3600_000)
+      : null;
   const rows = await prisma.inngestRunArchive.findMany({
-    where: { functionSlug, startedAt: { gte: from } },
-    orderBy: { startedAt: "desc" },
+    where: { functionSlug, ...(from ? { startedAt: { gte: from } } : {}) },
+    orderBy: [{ startedAt: "desc" }, { runId: "desc" }],
     take: limit,
   });
   return rows.map((r) => {
@@ -187,4 +332,66 @@ export async function listRunsWithEvents(
       label: flowLabel(eventPayload),
     };
   });
+}
+
+/**
+ * Single archived event by Inngest id — matches either the REST id or the
+ * internal ULID (callers pass whichever they have; runs carry the internal id
+ * in triggerEventIds while /v1/events rows key on the REST id).
+ *
+ * This is the replay fallback: the live /v1/events buffer is lossy/ephemeral,
+ * so "重跑/重发" on any event that aged out of it can only be served from here.
+ */
+export async function getEventById(eventId: string): Promise<EventsResult[number] | null> {
+  if (!eventId) return null;
+  const row = await prisma.inngestEventArchive.findFirst({
+    where: { OR: [{ id: eventId }, { internalId: eventId }] },
+  });
+  return row ? mapEventRow(row) : null;
+}
+
+/**
+ * Runs triggered by an event, from the durable run archive (matched via the
+ * triggerEventIds JSON string[] column). Shape mirrors the live client's
+ * getEventRuns (/v1/events/:id/runs) so the source resolver can merge them.
+ */
+export async function listRunsByTriggerEvent(eventId: string): Promise<live.InngestRun[]> {
+  if (!eventId) return [];
+  const rows = await prisma.inngestRunArchive.findMany({
+    where: { triggerEventIds: { contains: eventId } },
+    orderBy: [{ startedAt: "desc" }, { runId: "desc" }],
+    take: 50,
+  });
+  return rows.map((r) => ({
+    run_id: r.runId,
+    run_started_at: r.startedAt?.toISOString(),
+    ended_at: r.endedAt?.toISOString() ?? null,
+    status: r.status as live.InngestRun["status"],
+    output: parseMaybeJson(r.output),
+    function_id: r.functionSlug,
+    event_id: firstTriggerId(r.triggerEventIds),
+  }));
+}
+
+/**
+ * Last-resort replay source: the trigger event as captured on a run archive
+ * row (eventName + eventPayload = the event's data). Covers events that never
+ * made it into the event archive (archiver poll gap / outage) but whose runs
+ * did — without this, exactly those runs' "重跑" would be impossible.
+ */
+export async function getTriggerEventFromRuns(
+  eventId: string,
+): Promise<{ name: string; data: unknown } | null> {
+  if (!eventId) return null;
+  const row = await prisma.inngestRunArchive.findFirst({
+    where: {
+      triggerEventIds: { contains: eventId },
+      eventName: { not: null },
+      eventPayload: { not: null },
+    },
+    orderBy: [{ startedAt: "desc" }],
+    select: { eventName: true, eventPayload: true },
+  });
+  if (!row?.eventName || !row.eventPayload) return null;
+  return { name: row.eventName, data: parseMaybeJson(row.eventPayload) };
 }

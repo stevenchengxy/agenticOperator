@@ -29,11 +29,17 @@ describe('GET /api/runs (P3 prisma)', () => {
       },
     ]);
     (prisma.workflowRun.count as any).mockResolvedValue(1);
-    const res = await GET(new Request('http://x/api/runs?limit=10'));
+    const res = await GET(new Request('http://x/api/runs?page=2&pageSize=10'));
     const j = await res.json();
     expect(res.status).toBe(200);
     expect(j.runs[0].status).toBe('running');
     expect(j.total).toBe(1);
+    expect(j.page).toBe(2);
+    expect(j.pageSize).toBe(10);
+    expect(j.totalPages).toBe(1);
+    expect(prisma.workflowRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 10, take: 10, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] }),
+    );
   });
 
   it('502 when row carries invalid status enum', async () => {

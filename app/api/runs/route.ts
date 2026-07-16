@@ -15,8 +15,9 @@ import type { RunsResponse, RunSummary } from '@/lib/api/types';
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const status = url.searchParams.get('status')?.split(',');
-  const limitParam = Number(url.searchParams.get('limit') ?? 10);
-  const limit = Number.isFinite(limitParam) ? Math.min(50, Math.max(1, limitParam)) : 10;
+  const legacyLimit = positiveInt(url.searchParams.get('limit'), 10, 500);
+  const page = positiveInt(url.searchParams.get('page'), 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positiveInt(url.searchParams.get('pageSize'), legacyLimit, 500);
   const sinceParam = url.searchParams.get('since');
   const since = sinceParam ? new Date(sinceParam) : undefined;
   // New filters (added 2026-05-09): the /live left rail wires these as
@@ -44,19 +45,24 @@ export async function GET(req: Request): Promise<Response> {
       // surfaces here.
       where.steps = { some: { status: 'failed' } };
     }
-    // hasHitl is computed below from the HumanTask table — Prisma's
-    // WorkflowRun doesn't have a relation declared for HumanTask in the
-    // schema yet, so we filter post-fetch.
-
-    // Fetch a wider slice when hasHitl is set so that post-filter we still
-    // have ~limit rows. 3x is a reasonable heuristic for typical HITL rates.
-    const fetchLimit = hasHitl ? Math.min(150, limit * 3) : limit;
+    // HumanTask has no Prisma relation to WorkflowRun, so resolve the exact
+    // pending-run id set first and put it into the SQL run filter. This keeps
+    // total/page boundaries correct (the old 3x post-filter heuristic did not).
+    if (hasHitl) {
+      const pending = await prisma.humanTask.findMany({
+        where: { status: 'pending' },
+        select: { runId: true },
+        distinct: ['runId'],
+      });
+      where.id = { in: pending.map((row) => row.runId) };
+    }
 
     const [items, total] = await Promise.all([
       prisma.workflowRun.findMany({
         where,
-        orderBy: { startedAt: 'desc' },
-        take: fetchLimit,
+        orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       }),
       prisma.workflowRun.count({ where }),
     ]);
@@ -95,18 +101,12 @@ export async function GET(req: Request): Promise<Response> {
       suspendedReason: r.suspendedReason ?? null,
     }));
 
-    if (hasHitl) {
-      runs = runs.filter((r) => r.pendingHumanTasks > 0);
-    }
-
-    runs = runs.slice(0, limit);
-
     const body: RunsResponse = {
       runs,
-      // total counts the unfiltered (or where-filtered) set; hasHitl is
-      // post-filter so we don't try to recompute total under it. Fine for
-      // the UI which uses total as a "more data than shown" hint.
       total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
       meta: { generatedAt: new Date().toISOString() },
     };
     return NextResponse.json(body);
@@ -122,6 +122,12 @@ export async function GET(req: Request): Promise<Response> {
       { status: 500 },
     );
   }
+}
+
+function positiveInt(raw: string | null, fallback: number, max: number): number {
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(max, Math.max(1, Math.floor(n))) : fallback;
 }
 
 function parseTriggerData(s: unknown): { client: string; jdId: string } {
