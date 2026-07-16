@@ -7,6 +7,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "env:check": "tsx scripts/check-env.ts",
     "dev": "node scripts/dev-bootstrap.mjs && next dev -p 3002",
     "dev:next-only": "next dev -p 3002",
     "dev:demo": "node scripts/dev-bootstrap.mjs && STUB_AGENTS=1 next dev -p 3002",
@@ -38,11 +39,20 @@
     "simulate:rule-check": "tsx --env-file=.env.local scripts/simulate-rule-check-real-run.ts",
     "emit:real-run": "tsx --env-file=.env.local scripts/publish-real-run-event.ts",
     "raas-mirror:up": "tsx --env-file=.env.local scripts/raas-mirror-up.ts",
-    "raas-mirror:seed-demo": "tsx --env-file=.env.local scripts/raas-mirror-seed-demo.ts"
+    "raas-mirror:seed-demo": "tsx --env-file=.env.local scripts/raas-mirror-seed-demo.ts",
+    "deploy:check": "node scripts/deploy-preflight.mjs --env-file .env.deploy",
+    "deploy:config": "docker compose --env-file .env.deploy -f docker-compose.deploy.yml config --quiet",
+    "deploy:up": "node scripts/deploy-preflight.mjs --env-file .env.deploy && docker compose --env-file .env.deploy -f docker-compose.deploy.yml up -d --build --wait",
+    "deploy:ps": "docker compose --env-file .env.deploy -f docker-compose.deploy.yml ps",
+    "deploy:logs": "docker compose --env-file .env.deploy -f docker-compose.deploy.yml logs -f --tail=200",
+    "deploy:down": "docker compose --env-file .env.deploy -f docker-compose.deploy.yml down"
   },
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@monaco-editor/react": "^4.7.0",
     "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "eventsource-parser": "^3.0.8",
@@ -60,12 +70,12 @@
     "react-markdown": "^9.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "prisma": "^7.8.0",
+    "tsx": "^4.19.0",
     "unpdf": "^1.6.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@prisma/adapter-better-sqlite3": "^7.8.0",
-    "@prisma/client": "^7.8.0",
     "@tailwindcss/postcss": "^4.2.4",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.13",
@@ -76,14 +86,11 @@
     "@types/react-dom": "^19.0.0",
     "@vitest/ui": "^4.1.5",
     "autoprefixer": "^10.4.20",
-    "better-sqlite3": "^12.9.0",
     "concurrently": "^9.2.1",
     "happy-dom": "^20.9.0",
     "inngest-cli": "^1.19.2",
     "postcss": "^8.4.49",
-    "prisma": "^7.8.0",
     "tailwindcss": "^4.2.4",
-    "tsx": "^4.19.0",
     "typescript": "^5.6.3",
     "vitest": "^4.1.5"
   }
