@@ -34,6 +34,7 @@ import { fetchAction } from "../fetch";
 
 import { RUNTIME_INPUT_PLACEHOLDER } from "./assemble";
 import { assembleActionObjectV4_4 } from "./assemble-v4-4";
+import { RECRUITMENT_DOMAIN_ID } from "@/lib/domain-ids";
 import { fillRuntimeInput } from "./fill-runtime-input";
 import { findAdapterByAction } from "./runtime-adapters/registry";
 import type { RuntimeInputV4 } from "./runtime-adapters/types";
@@ -62,7 +63,7 @@ export interface GeneratePromptOptions {
   timeoutMs?: number;
 }
 
-const DEFAULT_DOMAIN = "RAAS-v1";
+const DEFAULT_DOMAIN = process.env.ALLMETA_DOMAIN ?? RECRUITMENT_DOMAIN_ID;
 
 export async function generatePrompt(
   opts: GeneratePromptOptions,
@@ -73,7 +74,7 @@ export async function generatePrompt(
     actionRef: opts.actionRef,
     domain,
     apiBase: opts.apiBase,
-    apiToken: opts.apiToken ?? process.env["ONTOLOGY_API_TOKEN"] ?? "",
+    apiToken: opts.apiToken ?? process.env["ALLMETA_API_KEY"] ?? "",
     timeoutMs: opts.timeoutMs,
   });
 

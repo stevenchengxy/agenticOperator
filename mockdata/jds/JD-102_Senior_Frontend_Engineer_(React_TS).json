@@ -1,0 +1,37 @@
+{
+  "id": "JD-102",
+  "title": "Senior Frontend Engineer (React/TS)",
+  "company": "Shein",
+  "department": "Growth · International Platform",
+  "location": "Singapore (Hybrid)",
+  "salary": "SGD 8K-13K monthly",
+  "type": "Full-time",
+  "experience": "4-7 years",
+  "education": "Bachelor's degree",
+  "headcount": 3,
+  "urgency": "高",
+  "description": "Build performant, accessible web apps that serve 30M+ international users. Own the design-system + checkout-flow modernization.",
+  "responsibilities": [
+    "Lead architecture and delivery of the next-gen checkout flow on React 19 + Next.js App Router",
+    "Drive Core Web Vitals improvements (LCP < 2s on emerging-market 3G)",
+    "Mentor 3-4 mid-level FE engineers, run code reviews & sprint planning",
+    "Partner with PM/Design on A/B experiments for conversion-rate uplift"
+  ],
+  "requirements": [
+    "4+ years building production React (or Vue) apps in TypeScript",
+    "Deep expertise in browser perf: bundle splitting, hydration, RUM",
+    "Comfortable with monorepo tooling (Nx/Turborepo) and CI/CD pipelines",
+    "Written communication good enough to land async PR reviews"
+  ],
+  "nice_to_have": [
+    "Experience with internationalization & RTL languages",
+    "Worked with edge runtimes (Cloudflare Workers, Vercel Edge)",
+    "Contributed to React/Next/Tailwind ecosystem"
+  ],
+  "benefits": [
+    "Relocation support to Singapore",
+    "13th-month bonus + RSU",
+    "20 days annual leave",
+    "Premium medical (family included)"
+  ]
+}

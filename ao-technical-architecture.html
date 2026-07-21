@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 工厂 · 详细技术架构 + 可行性判决</title>
+<style>
+  :root{
+    --bg:#0a0e14; --bg2:#0f1620; --panel:#111a26; --panel2:#16212f;
+    --line:#1f2c3d; --soft:#2a3a4f;
+    --ink:#e8eef6; --ink2:#9fb2c8; --ink3:#6b7f96;
+    --accent:#5bb8ff; --ok:#43d39e; --warn:#f5b556; --bad:#ff7a8a;
+    --build:#8b7dff; --product:#43d39e; --harness:#ff8db0; --meta:#b79bff; --tool:#7ad6ff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#13203010,transparent),var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
+  a{color:var(--accent);text-decoration:none}
+  code{font-family:var(--mono);font-size:.84em;background:#0c1622;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#c9dcf0}
+  header{padding:72px 0 44px;border-bottom:1px solid var(--line);background:radial-gradient(800px 360px at 20% 0%,#5bb8ff12,transparent)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin-bottom:18px}
+  h1{font-size:42px;line-height:1.12;margin:0 0 18px;letter-spacing:-.02em;font-weight:760}
+  h1 .grad{background:linear-gradient(100deg,var(--ok),var(--accent) 55%,var(--build));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:18px;color:var(--ink2);max-width:840px;margin:0}
+  .pills{display:flex;gap:9px;flex-wrap:wrap;margin-top:24px}
+  .pill{font-size:12.5px;font-family:var(--mono);border:1px solid var(--soft);border-radius:999px;padding:6px 13px;color:var(--ink2);background:#0d1622}
+  .pill b{color:var(--ink)} .pill.ok{border-color:#2a5a44;color:#9fe8c9} .pill.bad{border-color:#5a2a32;color:#ffb3bd}
+  .toc{display:flex;gap:8px;flex-wrap:wrap;margin-top:24px;font-family:var(--mono);font-size:12px}
+  .toc a{color:var(--ink3);border:1px solid var(--line);border-radius:7px;padding:4px 10px}
+  .toc a:hover{color:var(--ink);border-color:var(--soft)}
+  section{padding:50px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:13px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 6px}
+  h2 .n{color:var(--ink3);margin-right:10px}
+  .htitle{font-size:26px;font-weight:720;letter-spacing:-.01em;margin:0 0 14px}
+  p{color:var(--ink2);max-width:840px}
+  .lead{color:var(--ink);font-size:17px}
+  .grid{display:grid;gap:15px}.g3{grid-template-columns:repeat(3,1fr)}.g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:840px){.g3,.g2{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:13px;padding:18px}
+  .card h3{margin:0 0 8px;font-size:15.5px;display:flex;align-items:center;gap:8px}
+  .card p{font-size:14px;margin:0;color:var(--ink2)}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+  .b-build{background:var(--build)}.b-product{background:var(--product)}.b-harness{background:var(--harness)}.b-tool{background:var(--tool)}.b-meta{background:var(--meta)}.b-accent{background:var(--accent)}.b-bad{background:var(--bad)}.b-warn{background:var(--warn)}
+  .ex{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:4px;border:1px solid #2a5a44;color:#9fe8c9;background:#0c1a14}
+  .nw{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:4px;border:1px solid #5a4a2a;color:#ffd98a;background:#1a1408}
+  pre{background:#0a1320;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;color:#c6d9ef;margin:16px 0}
+  pre .c{color:#5b7088}.k{color:#8b7dff}.s{color:#7ad6ff}.o{color:#43d39e}.w{color:#f5b556}.r{color:#ff7a8a}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+  td b{color:var(--ink)}
+  .callout{border-left:3px solid var(--accent);background:#0d1424;border-radius:0 12px 12px 0;padding:14px 18px;margin:18px 0;font-size:14.5px}
+  .callout.ok{border-color:var(--ok)}.callout.bad{border-color:var(--bad);background:#180e12}.callout.warn{border-color:var(--warn)}.callout.core{border-color:var(--build)}
+  .callout b{color:var(--ink)}
+  .sev{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:5px}
+  .sev.bl{background:#3a1018;color:#ff9aa6;border:1px solid #5a2530}.sev.mj{background:#3a2810;color:#ffce8a;border:1px solid #5a4525}
+  .step{display:flex;gap:13px;padding:11px 0;border-bottom:1px solid var(--line)}.step:last-child{border-bottom:0}
+  .step .num{font-family:var(--mono);font-size:12px;color:var(--bg);background:var(--accent);width:46px;height:24px;border-radius:6px;display:grid;place-items:center;flex:none;font-weight:700}
+  .step .num.p0{background:var(--bad)}.step .num.p1{background:var(--warn)}.step .num.p2{background:var(--tool)}
+  .step b{color:var(--ink)}.step span{color:var(--ink2);font-size:14px}
+  svg{width:100%;height:auto;display:block}
+  .figcap{font-family:var(--mono);font-size:12px;color:var(--ink3);margin-top:9px;text-align:center}
+  .muted{color:var(--ink3);font-size:13.5px}
+  ul.tight{margin:8px 0;padding-left:20px}ul.tight li{color:var(--ink2);font-size:14.3px;margin:4px 0}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="kicker">AO · Agent 工厂 · 详细技术架构 + 对抗性可行性判决</div>
+  <h1>能实现,而且<span class="grad">大部分已 LIVE 跑通</span>。<br>架构 = 自由探索 + 确定性出口门(不是死板 FSM)。但有 2 个 blocker 必修。</h1>
+  <p class="lede">这份文档把你那三连问 ——「能不能实现 / 该怎么实现 / 对不对」—— 用<b>对抗性审查</b>认真回答(13 个 agent 接地真实代码、专门挑漏洞)。结论:<b>迭代系统(非线性跳回)+ 人随时介入 + AI 自行判断跳哪步</b>,三个核心诉求在代码里都成立、且招聘域已真生成 6 agent→真部署 Inngest→16 事件链到终态。但审查揪出 2 个 <span class="sev bl">BLOCKER</span> + 3 个 <span class="sev mj">MAJOR</span>,在它们被堵之前,"必须沙箱跑通才能部署" 这条命题只是"打算成立"。</p>
+  <div class="pills">
+    <span class="pill ok"><b>能不能</b> 能,大部分已 LIVE</span>
+    <span class="pill"><b>怎么做</b> 自由探索 + 确定性门混合</span>
+    <span class="pill bad"><b>对不对</b> 方向对,2 blocker 必修</span>
+    <span class="pill"><b>审查</b> 13 agent 接地代码 · 5 维对抗</span>
+  </div>
+  <div class="toc">
+    <a href="#a1">1 判决</a><a href="#a2">2 整体架构</a><a href="#a3">3 核心·迭代状态机</a><a href="#a4">4 事件流(双平面)</a>
+    <a href="#a5">5 人介入模型</a><a href="#a6">6 子系统详图</a><a href="#a7">7 必修缺口</a><a href="#a8">8 实施计划</a><a href="#a9">9 诚实局限</a>
+  </div>
+</div></header>
+
+<!-- 1 判决 -->
+<section id="a1"><div class="wrap">
+  <h2><span class="n">01</span>判决 · 你的三连问</h2>
+  <div class="htitle">能实现、已 LIVE 验证、方向对 —— 但有真缝隙</div>
+  <div class="grid g3" style="margin-top:18px">
+    <div class="card"><h3><span class="dot b-product"></span>能不能实现?</h3><p><b>能,且不是 PPT。</b>ReAct 循环、三层验收门、指纹防 stale-green、REFINE_BUDGET、mailbox 人介入、sandbox 真部署、跨次反思学习 —— 全部接地真实代码并有测试覆盖。招聘域<b>已 LIVE 跑通</b>:生成 6 agent → 真部署 Inngest → 16 事件链到终态。</p></div>
+    <div class="card"><h3><span class="dot b-build"></span>该怎么实现?</h3><p><b>自由探索 + 确定性出口门的混合,不是显式 FSM。</b>大脑(LLM)自由调工具、跳转、复用已验证部分(迭代价值);但"算不算跑通"从 LLM 手里夺走,交给 <code>finish</code> 里的纯代码三层门。人介入 = turn 边界 mailbox drain。</p></div>
+    <div class="card"><h3><span class="dot b-bad"></span>对不对?</h3><p><b>方向对(别上死板 FSM,那会杀掉迭代价值),但有 2 个 blocker。</b>① finish 行为门没用 <code>fullChainRan</code> → 断链也能部署;② v2 有一条 smoke-pass 即自动 ship-to-live 的后门。修完前,"必须沙箱跑通才能部署"只是"打算成立"。</p></div>
+  </div>
+  <div class="callout core"><b>一句话架构判断:</b>把"算不算通过"交给<b>确定性代码</b>而非 LLM 自觉 —— 这是健全的。给大脑<b>自由跳转</b>而非锁死流水线 —— 这保住了"迭代/跳回/复用已验证部分"的核心价值。两者的缝(确定性门)就是安全闸。<b>blocker 全在"门没拧紧",不在"架构错"。</b></div>
+</div></section>
+
+<!-- 2 整体架构 -->
+<section id="a2"><div class="wrap">
+  <h2><span class="n">02</span>整体技术架构 · 端到端</h2>
+  <div class="htitle">从「人说一句话」到「N 个真跑的 Inngest function」</div>
+  <p class="lead">人在 chatbot 说"给招聘域造一套 agent" → SSE 起 <code>runBrain</code> ReAct 循环 → 大脑 <code>read_ontology</code> 从 Neo4j 实时拉本体、把 <code>actor=Agent</code> 动作数当作 agent 数量权威源(招聘=6,不写死)→ 自由 design/codegen/validate/sandbox/inspect/refine → <code>finish</code> 三层确定性门通过才原子持久化为 Fleet draft → Operator 手动 flip 才真上线。</p>
+  <svg viewBox="0 0 1000 470" font-family="var(--mono)" font-size="12" style="margin-top:18px">
+    <defs><marker id="d" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#5b7088"/></marker></defs>
+    <rect x="20" y="16" width="960" height="42" rx="9" fill="#0d1622" stroke="#9fb2c8"/><text x="40" y="42" fill="#e8eef6" font-size="13">人 · chatbot</text><text x="170" y="42" fill="#9fb2c8">说意图 · 上传文档 · 随时介入(mailbox)· 采纳/重做</text><text x="945" y="42" fill="#6b7f96" text-anchor="end" font-size="10.5">SSE 双向</text>
+    <path d="M500,58 V74" stroke="#5b7088" marker-end="url(#d)"/>
+    <rect x="20" y="76" width="960" height="92" rx="11" fill="#19142e" stroke="#b79bff" stroke-width="1.3"/><text x="40" y="98" fill="#d6c8ff" font-size="13">共创大脑 · runBrain ReAct 循环(conductor.ts)</text><text x="945" y="98" fill="#6b7f96" text-anchor="end" font-size="10.5">内部事件平面</text>
+    <g font-size="10.5"><rect x="40" y="112" width="150" height="42" rx="7" fill="#0f1a2a" stroke="#5bb8ff"/><text x="115" y="132" fill="#cfe6ff" text-anchor="middle">read_ontology</text><text x="115" y="147" fill="#9fb2c8" text-anchor="middle" font-size="9">Neo4j→定 agent 数</text>
+      <rect x="198" y="112" width="150" height="42" rx="7" fill="#1a1530" stroke="#8b7dff"/><text x="273" y="132" fill="#cbbcff" text-anchor="middle">design+codegen</text><text x="273" y="147" fill="#9fb2c8" text-anchor="middle" font-size="9">写 prompt + .ts</text>
+      <rect x="356" y="112" width="150" height="42" rx="7" fill="#101b14" stroke="#43d39e"/><text x="431" y="132" fill="#9fe8c9" text-anchor="middle">validate+sandbox</text><text x="431" y="147" fill="#9fb2c8" text-anchor="middle" font-size="9">静态闭合+真跑</text>
+      <rect x="514" y="112" width="150" height="42" rx="7" fill="#1d1810" stroke="#f5b556"/><text x="589" y="132" fill="#ffd98a" text-anchor="middle">inspect+refine</text><text x="589" y="147" fill="#9fb2c8" text-anchor="middle" font-size="9">定位断点+改</text>
+      <rect x="672" y="112" width="150" height="42" rx="7" fill="#0c1c16" stroke="#43d39e" stroke-width="1.3"/><text x="747" y="132" fill="#9fe8c9" text-anchor="middle">finish 门</text><text x="747" y="147" fill="#9fb2c8" text-anchor="middle" font-size="9">三层确定性验收</text>
+      <rect x="830" y="112" width="110" height="42" rx="7" fill="#16212f" stroke="#2a3a4f"/><text x="885" y="132" fill="#9fb2c8" text-anchor="middle">BrainCtx</text><text x="885" y="147" fill="#6b7f96" text-anchor="middle" font-size="9">权威状态</text></g>
+    <path d="M500,168 V184" stroke="#5b7088" marker-end="url(#d)"/><text x="560" y="180" fill="#6b7f96" font-size="10">sandbox_run 桥接</text>
+    <rect x="20" y="186" width="960" height="76" rx="11" fill="#101b14" stroke="#43d39e" stroke-width="1.1"/><text x="40" y="208" fill="#9fe8c9" font-size="13">隔离沙箱 · sandbox-&lt;domain&gt; Inngest app(全程 dryRun,跑完即焚)</text><text x="945" y="208" fill="#6b7f96" text-anchor="end" font-size="10.5">业务平面的影子</text>
+    <text x="40" y="234" fill="#9fb2c8" font-size="11">真部署 6 个 function → fireAndObserve 发真入口事件 → 轮询 archive 看链路是否串通 → 把"链通没/谁 degraded/到没到终态"回灌 ctx</text>
+    <text x="40" y="252" fill="#6b7f96" font-size="10.5">关键隔离:只轮询 LIKE 'agentic-operator-sandbox-&lt;domain&gt;-' 的 run,物理够不到真实 domain app</text>
+    <path d="M500,262 V278" stroke="#5b7088" marker-end="url(#d)"/><text x="560" y="274" fill="#6b7f96" font-size="10">finish 通过 → 原子持久化</text>
+    <rect x="20" y="280" width="465" height="62" rx="10" fill="#16212f" stroke="#2a3a4f"/><text x="40" y="302" fill="#e8eef6" font-size="12.5">Fleet drafts(status=draft)</text><text x="40" y="322" fill="#9fb2c8" font-size="10.5">AgentVersion 落库 · 不自动上线</text>
+    <rect x="505" y="280" width="475" height="62" rx="10" fill="#1d1810" stroke="#f5b556"/><text x="525" y="302" fill="#ffd98a" font-size="12.5">⟶ Operator 人工 flip to active(有意的人工门)</text><text x="525" y="322" fill="#9fb2c8" font-size="10.5">v3 大脑够不到 live —— 翻真上线永不由大脑做</text>
+    <path d="M500,342 V358" stroke="#43d39e" marker-end="url(#d)"/>
+    <rect x="20" y="360" width="960" height="92" rx="12" fill="#0c1c16" stroke="#43d39e" stroke-width="1.5"/><text x="40" y="382" fill="#9fe8c9" font-size="13">真实 Inngest app · N 个 function 跑业务流(业务事件平面)</text><text x="945" y="382" fill="#6b7f96" text-anchor="end" font-size="10.5">招聘 v-1 = 6</text>
+    <text x="40" y="406" fill="#9fb2c8" font-size="10.5">executeGeneratedAgent:消费 domain 事件 → LLM 推理 + 调注册表真工具 → 按 decision 选 emit → sendEvent 下游 → 链式到终态</text>
+    <text x="500" y="436" fill="#6b7f96" text-anchor="middle" font-size="11">RESUME_DOWNLOADED → CANDIDATE_DEDUP_PASSED → RESUME_PROCESSED → MATCH_RULE_CHECK_PASSED → … → INTERVIEW_SENT | REJECTED</text>
+  </svg>
+  <div class="figcap">端到端:内部平面(大脑造)→ sandbox 桥接(真跑验证)→ Fleet draft → Operator 人工门 → 业务平面(真上线跑)。</div>
+</div></section>
+
+<!-- 3 核心 状态机 -->
+<section id="a3"><div class="wrap">
+  <h2><span class="n">03</span>核心 · 迭代状态机 <span style="color:var(--build)">(你最关心的)</span></h2>
+  <div class="htitle">隐式 FSM:大脑就是转移函数 —— 自由跳,但出口门是确定性的</div>
+  <p class="lead">"AI 自行判断从哪一步跳转"怎么实现?答案:<b>没有硬编码的 state→state 状态机。</b>每个 turn 大脑读 <code>BrainCtx</code> 全量结构化状态(<code>buildStateSummary</code> 编进消息当锚点),按"现在观察到什么缺什么"自由调任一工具,工具执行修改 ctx,下个 turn 看到新 ctx 再决定。<b>转移函数 = 大脑本身</b>。但"算不算到终态"不由大脑说了算 —— <code>finish</code> 工具里的纯代码门说了算。</p>
+  <svg viewBox="0 0 1000 430" font-family="var(--mono)" font-size="11.5" style="margin-top:18px">
+    <defs><marker id="j" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#8b7dff"/></marker>
+      <marker id="g" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#43d39e"/></marker>
+      <marker id="h" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#ff8db0"/></marker></defs>
+    <!-- ctx center -->
+    <rect x="400" y="180" width="200" height="66" rx="11" fill="#16212f" stroke="#5bb8ff" stroke-width="1.5"/><text x="500" y="206" fill="#cfe6ff" text-anchor="middle" font-size="13">BrainCtx · 权威状态</text><text x="500" y="226" fill="#9fb2c8" text-anchor="middle" font-size="9.5">specs/lastSandbox/lastValidation</text><text x="500" y="240" fill="#9fb2c8" text-anchor="middle" font-size="9.5">attemptHistory/humanDirectives</text>
+    <!-- states around -->
+    <g font-size="10.5">
+      <rect x="40" y="40" width="150" height="40" rx="8" fill="#0f1a2a" stroke="#5bb8ff"/><text x="115" y="64" fill="#cfe6ff" text-anchor="middle">理解 read_ontology</text>
+      <rect x="240" y="30" width="150" height="40" rx="8" fill="#0f1a2a" stroke="#5bb8ff"/><text x="315" y="54" fill="#cfe6ff" text-anchor="middle">规划 create_plan</text>
+      <rect x="440" y="26" width="150" height="40" rx="8" fill="#0d1a22" stroke="#7ad6ff"/><text x="515" y="50" fill="#bfe6ff" text-anchor="middle">备料 选真工具</text>
+      <rect x="640" y="30" width="150" height="40" rx="8" fill="#1a1530" stroke="#8b7dff"/><text x="715" y="54" fill="#cbbcff" text-anchor="middle">建造 design+codegen</text>
+      <rect x="810" y="120" width="150" height="40" rx="8" fill="#101b14" stroke="#43d39e"/><text x="885" y="144" fill="#9fe8c9" text-anchor="middle">验收 sandbox_run</text>
+      <rect x="810" y="250" width="150" height="40" rx="8" fill="#1d1810" stroke="#f5b556"/><text x="885" y="274" fill="#ffd98a" text-anchor="middle">迭代 refine/revert</text>
+    </g>
+    <!-- bidirectional free edges to ctx -->
+    <path d="M190,60 L398,196" stroke="#8b7dff" fill="none" opacity=".5" marker-end="url(#j)"/>
+    <path d="M315,70 L420,178" stroke="#8b7dff" fill="none" opacity=".5" marker-end="url(#j)"/>
+    <path d="M515,66 L505,178" stroke="#8b7dff" fill="none" opacity=".5" marker-end="url(#j)"/>
+    <path d="M715,70 L575,180" stroke="#8b7dff" fill="none" opacity=".5" marker-end="url(#j)"/>
+    <path d="M810,140 L602,196" stroke="#8b7dff" fill="none" opacity=".5" marker-end="url(#j)"/>
+    <path d="M810,270 L602,225" stroke="#8b7dff" fill="none" opacity=".5" marker-end="url(#j)"/>
+    <!-- non-linear jump highlights -->
+    <path d="M885,250 C760,200 920,170 885,162" stroke="#f5b556" fill="none" stroke-dasharray="4 3" marker-end="url(#j)" opacity=".8"/>
+    <text x="600" y="300" fill="#8b7dff" font-size="10">↑ 每条线双向:大脑读 ctx → 自由选工具 → 工具改 ctx → 下 turn 再读。无固定顺序。</text>
+    <text x="640" y="318" fill="#f5b556" font-size="10">非线性跳:验收失败 → 直接跳回迭代某 agent,不继续往下</text>
+    <!-- human inject -->
+    <rect x="40" y="180" width="150" height="50" rx="9" fill="#2a1626" stroke="#ff8db0"/><text x="115" y="201" fill="#ffc4d6" text-anchor="middle" font-size="11">人介入 mailbox</text><text x="115" y="218" fill="#9fb2c8" text-anchor="middle" font-size="9">turn 边界 drain</text>
+    <path d="M190,205 L398,213" stroke="#ff8db0" fill="none" marker-end="url(#h)"/>
+    <!-- finish gate absorbing -->
+    <rect x="330" y="330" width="340" height="80" rx="12" fill="#0c1c16" stroke="#43d39e" stroke-width="1.6"/><text x="500" y="354" fill="#9fe8c9" text-anchor="middle" font-size="13">finish 门 · 确定性吸收态(纯代码,不靠 LLM 自觉)</text>
+    <text x="500" y="376" fill="#9fb2c8" text-anchor="middle" font-size="10">①静态覆盖(每个 Agent 动作有 spec) ②全 AI 代码 ③行为真跑(指纹匹配+全链)</text>
+    <text x="500" y="394" fill="#6b7f96" text-anchor="middle" font-size="9.5">三层全过→原子持久化为 draft;任一 fail→ok:false 把大脑打回去修</text>
+    <path d="M500,246 V328" stroke="#43d39e" fill="none" marker-end="url(#g)"/>
+  </svg>
+  <div class="figcap">状态 = 工具;转移 = 大脑读 ctx 自由决策(双向、非线性);终态 = finish 确定性门(吸收态)。</div>
+
+  <div class="grid g2" style="margin-top:22px">
+    <div class="card"><h3><span class="dot b-build"></span>AI 自主跳转 · 真实例子(接地代码)</h3><ul class="tight">
+      <li><code>validate_graph</code> 返回 agentIssueMap → 大脑不继续 design 剩余的,直接 <code>refine</code> 那一个 → 再 validate</li>
+      <li><code>sandbox_run</code> reachedTerminal=false → 跳 <code>inspect_run</code> 查哪个 agent 没跑 → refine → 重 sandbox</li>
+      <li>refine 后 score.delta≤−10(回归)→ 主动 <code>revert_refine</code> 回上一好版,换角度</li>
+      <li>finish 被指纹门拒("上次沙箱是改动前版本")→ 被迫跳回 sandbox 重验,不能用旧绿证据</li>
+    </ul></div>
+    <div class="card"><h3><span class="dot b-ok" style="background:var(--ok)"></span>防循环 · 四道闸(已建,接地+测试)</h3><ul class="tight">
+      <li><code>MAX_TURNS=200</code> 硬终止 → 保证停机 <span class="ex">exists</span></li>
+      <li><code>REFINE_BUDGET=3</code>/agent,<b>不可被 re-design 绕过</b>(无 reset 点)→ 封死单 agent FlipFlop <span class="ex">exists</span></li>
+      <li>指纹失效:改 spec → 旧绿证据作废 → 强制重沙箱 <span class="ex">exists</span></li>
+      <li>子脑无法递归 spawn(只读工具集)→ 分形深度封在 1 层 <span class="ex">exists</span></li>
+    </ul></div>
+  </div>
+  <div class="callout warn"><b>诚实缺口(收敛):</b>这四闸防住了<b>单 agent FlipFlop / stale-green / degraded 伪装 / 分形爆炸</b> —— 真实成果别低估。但<b>不防跨 agent / replan / sandbox 的全局 churn</b>:6 个 agent 各 refine 3 次 + 反复 sandbox 完全可烧到 MAX_TURNS 才被砍断,且 <code>MAX_TOKENS=null</code>。<b>最坏 = 超时,不是收敛。</b>必修:加全局 <code>MAX_SANDBOX_RUNS</code> 预算 + 全局 refine 总数闸(见 §7 / §8)。</div>
+</div></section>
+
+<!-- 4 事件流 -->
+<section id="a4"><div class="wrap">
+  <h2><span class="n">04</span>事件流 · 两个平面 + sandbox 桥接</h2>
+  <div class="htitle">内部「大脑边想边做」流 ↕ 业务「Inngest function 链」,由 sandbox 生命周期桥接</div>
+  <svg viewBox="0 0 1000 360" font-family="var(--mono)" font-size="11.5" style="margin-top:16px">
+    <defs><marker id="e" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#5b7088"/></marker></defs>
+    <!-- internal plane -->
+    <rect x="20" y="20" width="960" height="92" rx="11" fill="#0f1a2a" stroke="#5bb8ff" stroke-width="1.1"/><text x="40" y="42" fill="#cfe6ff" font-size="13">内部平面 · BrainEvent 流(~21 种,SSE 实时渲染)</text>
+    <text x="40" y="66" fill="#9fb2c8" font-size="10.5">think · tool.call · tool.result · agent.created · validation · sandbox · sandbox.progress · inspect · refine · revert · score.delta · budget · message · done</text>
+    <text x="40" y="88" fill="#6b7f96" font-size="10">ctx.emit → buffer → runBrain drain → SSE controller.enqueue → 客户端;权威状态在 BrainCtx 不在消息历史</text>
+    <text x="945" y="42" fill="#6b7f96" text-anchor="end" font-size="10.5">工厂"造"的过程</text>
+    <!-- bridge -->
+    <rect x="350" y="138" width="300" height="58" rx="11" fill="#101b14" stroke="#43d39e" stroke-width="1.4"/><text x="500" y="162" fill="#9fe8c9" text-anchor="middle" font-size="12.5">sandbox_run · 桥</text><text x="500" y="182" fill="#9fb2c8" text-anchor="middle" font-size="9.5">部署 specs 到隔离影子 app → 真跑 → 证据回灌 ctx</text>
+    <path d="M500,112 V136" stroke="#5b7088" marker-end="url(#e)"/><text x="560" y="130" fill="#6b7f96" font-size="9.5">下发 specs</text>
+    <path d="M460,196 V230 M460,230 L455,224 M460,230 L465,224" stroke="#43d39e" fill="none"/><text x="372" y="218" fill="#43d39e" font-size="9.5">真部署+发事件</text>
+    <path d="M540,230 V196" stroke="#43d39e" fill="none" marker-end="url(#e)"/><text x="610" y="218" fill="#43d39e" font-size="9.5">链通没/degraded 回灌</text>
+    <!-- business plane -->
+    <rect x="20" y="232" width="960" height="106" rx="11" fill="#0c1c16" stroke="#43d39e" stroke-width="1.2"/><text x="40" y="254" fill="#9fe8c9" font-size="13">业务平面 · Inngest function 链(每个生成 agent = 一个 function)</text><text x="945" y="254" fill="#6b7f96" text-anchor="end" font-size="10.5">agent"跑"的过程</text>
+    <g font-size="9.5"><rect x="40" y="270" width="130" height="30" rx="6" fill="#13261f" stroke="#43d39e"/><text x="105" y="289" fill="#9fe8c9" text-anchor="middle">RESUME_DOWNLOADED</text>
+      <rect x="184" y="270" width="120" height="30" rx="6" fill="#13261f" stroke="#43d39e"/><text x="244" y="289" fill="#9fe8c9" text-anchor="middle">processResume</text>
+      <rect x="318" y="270" width="110" height="30" rx="6" fill="#13261f" stroke="#43d39e"/><text x="373" y="289" fill="#9fe8c9" text-anchor="middle">ruleCheck</text>
+      <rect x="442" y="270" width="120" height="30" rx="6" fill="#13261f" stroke="#43d39e"/><text x="502" y="289" fill="#9fe8c9" text-anchor="middle">matchResume</text>
+      <rect x="576" y="270" width="130" height="30" rx="6" fill="#13261f" stroke="#43d39e"/><text x="641" y="289" fill="#9fe8c9" text-anchor="middle">inviteInterview</text>
+      <rect x="720" y="270" width="100" height="30" rx="6" fill="#13261f" stroke="#43d39e"/><text x="770" y="289" fill="#9fe8c9" text-anchor="middle">createJD</text></g>
+    <text x="40" y="322" fill="#9fb2c8" font-size="10">executeGeneratedAgent:LLM 推理 + 调注册表真工具 + 按 decision 选 emit → sendEvent 下游。WriteThroughMiddleware 把每步落 archive,fireAndObserve 轮询 archive(非 Inngest API)拿真证据</text>
+  </svg>
+  <div class="figcap">内部平面 = 工厂造的过程(可观测流);业务平面 = agent 跑的过程(Inngest 事件链);sandbox_run 是唯一的桥(真跑出真证据回灌)。</div>
+  <div class="callout"><b>两平面的关键隔离:</b><code>sandbox-&lt;domain&gt;</code> 与真实 domain app 是<b>两个独立 Inngest app id</b>,fireAndObserve 只轮询 sandbox 前缀的 run。<b>翻到真实 app(业务平面真上线)永不由大脑做</b> —— 是 Operator 在 Fleet 的手动 flip。</div>
+</div></section>
+
+<!-- 5 人介入 -->
+<section id="a5"><div class="wrap">
+  <h2><span class="n">05</span>人介入模型 · 「随时」的真实粒度</h2>
+  <div class="htitle">人介入 = 一次自然的转移请求(非命令),turn 边界注入</div>
+  <p class="lead">路径:UI 调 <code>inject</code> route → <code>pushHumanMsg(runId,text)</code> 入 mailbox → conductor 每 turn 顶部 <code>drainHumanMsgs</code> 取出 → append 为 <code>{role:'user',content:'[人工介入]...'}</code> + 推进 <code>ctx.humanDirectives</code>(经 buildStateSummary 抗压缩)→ 大脑下一 turn 自由响应("好我改"/"先 inspect 看看再改"/"我已处理")。人不能直改 spec、不能强制 finish —— 原子单位是<b>一个完整 turn</b>。</p>
+  <div class="callout warn"><b>诚实的局限 ——「随时」被夸大了:</b>drain 只在 turn 边界。纯 LLM-reason turn 是秒级,边界 drain <b>完全够</b>。但两个长 side-effect 工具是真的洞:<br>· <code>sandbox_run</code> 阻塞 20~70s —— 你看着它跑偏想喊停,要等整轮 settle 完才被看到。<br>· <code>spawn_subagent</code> 可达数分钟,且<b>故意不转发 abort signal</b> —— 连断开都停不掉子脑。<br><b>修法(P2-1):</b>给这 2 个工具的轮询/turn 边界挂 cancellation 检查点,人发消息即提前返回。<b>不必给所有工具做通用抢占</b> —— 成本收敛到 2 个工具。</div>
+  <div class="callout bad"><b>更严重的正确性 bug(P2-3):</b>mailbox 是<b>模块级 in-process Map</b>。多 worker/serverless 下 inject 命中的进程 ≠ 跑 stream 的进程 → 人的介入<b>静默丢失且不报错</b>(MEMORY 里有"僵尸 dev 进程 env 漂移"先例)。修:换 Postgres 表 / pg LISTEN-NOTIFY,drainHumanMsgs 按 runId 查表。</div>
+</div></section>
+
+<!-- 6 子系统详图 -->
+<section id="a6"><div class="wrap">
+  <h2><span class="n">06</span>各子系统详细架构</h2>
+  <div class="htitle">六个子系统 · 组件 / 接口 / exists vs new</div>
+  <div class="grid g2">
+    <div class="card"><h3><span class="dot b-meta"></span>共创大脑 cocreation-brain</h3><p><code>streamTurn</code> 流式网关 + <code>runBrain</code> 无限 ReAct 循环 + <code>maybeCompact</code>(120k 自动压缩,buildStateSummary 当权威锚点)+ mailbox HITL turn 边界注入 + conversation-store 续接 + 跨次 FailureReflection 学习。<span class="ex">exists</span></p></div>
+    <div class="card"><h3><span class="dot b-tool"></span>能力 agent capability-agents</h3><p>Doc-Fetcher(read_ontology)/ Tool-Smith(从<b>人写注册表</b>选真工具,<b>无 create_tool</b>)/ Agent-Builder(design+codegen)/ Verifier(validate+sandbox+inspect)/ Researcher(web_search)。每个是会派 skill/sub-agent 的分形大脑(子脑只读、无法递归 spawn)。<span class="ex">exists</span> · create_tool <span class="nw">new</span></p></div>
+    <div class="card"><h3><span class="dot b-tool"></span>工具/文档管线 tool-doc</h3><p>工具库 = 人写 <code>ToolDescriptor</code>(parameters/returns/impl)。从文档生成 tool(Doc-Fetcher 爬 + Tool-Smith 写)+ 工具库持久化 + dry-run 测试 + 人审入库 —— <b>整条是 proposed</b>。<span class="nw">new</span></p></div>
+    <div class="card"><h3><span class="dot b-product"></span>验收 verification</h3><p>静态:validateSpecs(覆盖/闭合/幻觉事件)。动态:fireAndObserve 真部署隔离 app 跑、轮询 archive、读 per-agent degraded。对标:gold-standard 对招聘 v-1 答案键打分。finish 三层门收口。<span class="ex">exists</span></p></div>
+    <div class="card"><h3><span class="dot b-build"></span>统一接口 unified-interface</h3><p>AgentNode 描述符 + Runner.invoke 三底座(in-process=spawn_subagent / inngest=fireAndObserve / tool=execute)+ ctx.spawn 递归。<b>RegistryAgent 已 70%,差 kind/spawns/exec</b>。<span class="ex">RegistryAgent exists</span> · AgentNode/Runner <span class="nw">new</span></p></div>
+    <div class="card"><h3><span class="dot b-bad"></span>安全控制 safety-control</h3><p><b>头号原则:运行时绝不生成可执行代码</b>(create_tool 不实现、codegen 只读脚手架、真跑走固定 executor + 人写注册表)。v3 大脑物理够不到 live(只碰 sandbox-* dryRun)。<b>但有 v2 live ship 后门 + 写操作 gate 缺失</b>(见 §7)。<span class="ex">信任边界 exists</span></p></div>
+  </div>
+  <div class="callout core"><b>头号安全架构原则(必须写明,别误导):</b>工厂<b>不在运行时生成可执行代码</b> —— <code>create_tool</code> 刻意不实现,信任边界 = 人写的 <code>lib/tools/*</code> 注册表;<code>create_skill</code> 只产 prompt 散文;codegen 的 .ts 是<b>只读脚手架</b>,真跑走固定 executor 跑声明式 spec、工具只能命中注册表。<b>"不引入运行时 code-eval 沙箱" 是有意决策</b>(否则反成任意代码执行攻击面)。</div>
+</div></section>
+
+<!-- 7 必修缺口 -->
+<section id="a7"><div class="wrap">
+  <h2><span class="n">07</span>必修缺口 · 对抗审查揪出的真问题</h2>
+  <div class="htitle">2 个 BLOCKER + 3 个 MAJOR(全部接地真实代码行)</div>
+  <div class="callout bad"><span class="sev bl">BLOCKER 1</span> &nbsp;<b>finish 行为门用 <code>agentsRan===deployed</code> 而非 <code>fullChainRan</code> → 断链也能部署。</b><br>sandbox 的 coverage-pass(deploy.ts:269)会<b>直接喂每个未跑 agent 的 trigger</b> 把它单跑,于是一组事件链断裂的 agent(A emit FOO、B listen BAR、没人 emit BAR)照样凑满 agentsRan → 门通过。<code>fullChainRan</code> 值已算好(index.ts:748)却没接进门 —— <b>这正是你最担心的"绕过验收/链没真串通也能部署"的真实路径</b>,且与设计自称"要求 fullChainRan"直接矛盾。<br><b>修(P0-1,S/低):</b>finish 判据(index.ts:1623)加 <code>|| !sb.fullChainRan</code>(值现成);verify_chain 断点非空也阻断 finish。</div>
+  <div class="callout bad"><span class="sev bl">BLOCKER 2</span> &nbsp;<b>v2 conductor 有一条 smoke-pass 即自动 ship-to-live 的后门(无人工确认)。</b><br>conductor.ts:230 <code>if(opts.deployer &amp;&amp; smoke.passed) deployer.ship(domain,specs)</code> 用<b>真实 domain</b>(无 sandbox 前缀)→ status:'active' → 真发入口事件。门只有 smoke.passed,没有任何人类确认 —— 与 v3 "sandbox→draft→Operator 手动 flip" 的安全姿态<b>直接矛盾</b>,若真实域 registry 是 live 会触发真外部副作用。<br><b>修(P0-2,S/中):</b>加断言 deployDomain 必须 sandbox-* 或域必须 isForceDryRunDomain 否则 throw;或复用已有 <code>bus.emit({t:'needs-human'})</code> 把 live-ship 卡在人类批准后。</div>
+  <table>
+    <tr><th>级别</th><th>问题</th><th>修法</th></tr>
+    <tr><td><span class="sev mj">MAJOR</span></td><td><b>codegen stale-green 天窗</b> —— codegen 改代码<b>不 null lastSandbox</b>,specsFingerprint 又不含代码内容 → 改代码不改签名时,旧绿证据放行新代码。design/refine/revert 都记得 null,唯独最该的 codegen 漏了。</td><td>P1-1:codegen 设 generatedCode 后加 <code>ctx.lastSandbox=null</code>;把代码哈希纳入指纹。<span class="ex">2 行</span></td></tr>
+    <tr><td><span class="sev mj">MAJOR</span></td><td><b>收敛保证名不副实</b> —— 全局只有 MAX_TURNS 一根粗闸 + MAX_TOKENS=null,跨 agent/replan/sandbox churn 无界。最坏烧 200 个真 Inngest 部署 turn 后超时,这是超时不是收敛。</td><td>P1-2:加全局 <code>MAX_SANDBOX_RUNS≈8</code> + refine 总数闸;finishRefusals 改为"连续 N 次 sandbox 不绿也计数"并在阈值强制只暴露 analyze_failure。</td></tr>
+    <tr><td><span class="sev mj">MAJOR</span></td><td><b>写操作 sideEffect 标签纯元数据,不做运行时 gate</b> —— live 模式下 AI 编排的 agent 可<b>无确认</b>真发 inviteCandidate / 写 partner-pg 主表。dryRun 安全靠脆弱的域名匹配 + fail-open 默认(历史上 CJK id 真绕过过)。</td><td>P1-3:write/dual-write 工具 live 下需 allowlist 或人工确认 token;<b>反转默认为 fail-closed</b>(默认 dryRun,显式 LIVE_ALLOWLIST 才放行)。</td></tr>
+  </table>
+</div></section>
+
+<!-- 8 实施计划 -->
+<section id="a8"><div class="wrap">
+  <h2><span class="n">08</span>实施计划 · 先堵门,再补料,后做接口</h2>
+  <div style="margin-top:10px">
+    <div class="step"><div class="num p0">P0-1</div><div><b>堵 finish 行为门(fullChainRan)</b> <span class="ex">S/低·值现成</span><br><span>判据加 <code>|| !sb.fullChainRan</code>;补测"断链 agent 被 coverage 单跑"场景断言 finish 仍拒。</span></div></div>
+    <div class="step"><div class="num p0">P0-2</div><div><b>关掉 v2 live ship 后门</b> <span class="ex">S/中</span><br><span>加断言或接 needs-human 门;架构里把"谁能翻 live、在哪个确认门后"画成唯一显式通路。</span></div></div>
+    <div class="step"><div class="num p1">P1-1</div><div><b>堵 codegen stale-green 天窗</b> <span class="ex">S/低</span><br><span>codegen 清 lastSandbox + 代码哈希纳入指纹(与现有 invalidation 模式一致)。</span></div></div>
+    <div class="step"><div class="num p1">P1-2</div><div><b>加全局收敛闸</b> <span class="ex">M/中</span><br><span>MAX_SANDBOX_RUNS + 全局 refine 总数闸 + finishRefusals 升级。阈值先观测真实 run 分布再定。</span></div></div>
+    <div class="step"><div class="num p1">P1-3</div><div><b>写操作执行 gate + dryRun fail-closed</b> <span class="nw">M/中高</span><br><span>反转默认前要全量盘点哪些域真要 live 并显式加 allowlist,否则破坏现网。</span></div></div>
+    <div class="step"><div class="num p2">P2</div><div><b>长工具抢占点 + 可观测性 + mailbox 落库</b> <span class="nw">M</span><br><span>sandbox/subagent 挂 cancellation;per-slot 状态看板 + degraded 归因传 UI;mailbox 换持久后端(多 worker 正确性)。</span></div></div>
+    <div class="step"><div class="num p2">接口</div><div><b>扩 AgentNode + 抽 Runner + 串阶段机 + Tool-Smith</b> <span class="nw">见上一份蓝图</span><br><span>统一接口三件套 + 阶段流水线 + 文档→tool。这是能力扩展,P0/P1 是先堵安全门。</span></div></div>
+  </div>
+</div></section>
+
+<!-- 9 诚实局限 -->
+<section id="a9"><div class="wrap">
+  <h2><span class="n">09</span>诚实局限 · 别照不存在的东西建</h2>
+  <ul class="tight" style="max-width:840px">
+    <li><b>「收敛保证」名不副实:</b>系统<b>会终止</b>(MAX_TURNS 真有效),但全局只有 turn 一根粗闸,最坏是超时不是收敛。加全局预算前别宣传成"高效收敛"。</li>
+    <li><b>「必须沙箱跑通才能部署」当前有 2 道合法序列能绕过</b>(BLOCKER 1 + codegen stale-green)。设计意图成立,但代码漏了两刀,修完 P0-1/P1-1 前这条只是"打算成立"。</li>
+    <li><b>「人随时介入」被夸大:</b>sandbox/subagent 长工具期间人的消息要干等,且没有"已排队、正卡在沙箱"的即时可见性。</li>
+    <li><b>安全姿态强但靠几条未言明的隐式不变量:</b>v3 够不到 live 靠 sandbox 域硬钉 dryRun;写操作不发生靠单个 dryRun 布尔 + 脆弱域名匹配(fail-open)。新域接真 registry、摘 FORCE_DRYRUN、或走 v2 路径,安全会无声塌掉。</li>
+    <li><b>可观测性不支撑"看见每个槽进度":</b>UI 卡片硬编码静态 DRAFT 徽章,无 per-slot lifecycle,degraded 没传到 UI。"看得见才能精准介入"目前缺位。</li>
+    <li><b>⚠ 这些能力代码里【不存在】,别当已建:</b><code>ctx.pause/resume</code> · <code>t:human.required</code> · mailbox/conversation 落库 · mid-tool 暂停让人选分支 · <b>AI 自动造工具 impl 代码 + 其安全沙箱</b>。最后这条尤其危险 —— 照它建会引入当前不存在的<b>运行时任意代码执行攻击面</b>。当前 HITL = turn 边界粒度;信任边界 = 人写的 tool registry。</li>
+  </ul>
+  <div class="callout ok" style="margin-top:18px"><b>底线结论:</b>你想做的<b>能做、方向对、且核心已 LIVE 跑通</b>。"迭代 + 人介入 + AI 自主跳转"不是空想,是接地代码的现实。<b>把 §7 的 2 个 blocker 堵上</b>(都是小改、值现成),"必须沙箱跑通才能部署"这条命题就真正成立 —— 那时这套自由探索 + 确定性门的混合架构,才是经得起对抗审查的。</div>
+</div></section>
+
+<footer style="padding:36px 0;text-align:center"><div class="wrap">
+  <span class="muted" style="font-family:var(--mono)">AO · Agent 工厂 · 详细技术架构 + 对抗性可行性判决 · 13-agent 接地审查 · 2026-06</span>
+</div></footer>
+</body>
+</html>

@@ -1,944 +1,1368 @@
 "use client";
 import React from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AGENT_MAP, displayName as agentDisplayName, type DeploymentKind } from "@/lib/agent-mapping";
+import { useDeploymentMap } from "@/lib/hooks/useDeploymentMap";
+import type { InngestEventRow, InngestEventsResponse } from "@/lib/api/inngest-events";
+import { useEmHealth } from "@/lib/api/em-health";
+import { fetchJson } from "@/lib/api/client";
+import type { EventsResponse, EventContract } from "@/lib/api/types";
+import { paginationFrom, readPage, readPageSize, setPaginationParams } from "@/lib/api/pagination";
+import { AllmetaSyncStrip } from "./AllmetaSyncStrip";
 import { useApp } from "@/lib/i18n";
-import { Ic } from "@/components/shared/Ic";
-import { Badge, Btn, StatusDot } from "@/components/shared/atoms";
-import { EVENT_CATALOG, EventDef, kindDot, STAGE_LABELS } from "@/lib/events-catalog";
+import { useDomain } from "@/lib/domains";
+import { eventLeafName, eventMatchesDomain } from "@/lib/events/domain-scope";
+import { classifyByPublishers, DIRECTION_META } from "@/lib/events/event-direction";
+import { HelpTip } from "@/components/shared/HelpTip";
+import { Pagination } from "@/components/shared/Pagination";
+import { OutcomeBadges } from "@/components/monitor/OutcomeBadges";
+import { useDeepLinkFocus } from "@/lib/hooks/useDeepLinkFocus";
+
+// /events — 事件
+//
+// Job: "What events have flowed through the bus? What payload? What did each trigger?"
+// Inspired by the Inngest dev server's Events view (received_at · name · functions
+// triggered) — left list + right payload viewer.
+//
+// Per IA spec (2026-05-19):
+//   - Pure event-bus log (no agent identity, no run trace — those live elsewhere)
+//   - Functions-triggered pills are clickable → /monitor?event=<name>&agent=<short>
+//   - Click event row → right panel shows payload + functions triggered
+
+const SERIF = 'ui-serif, Charter, "Iowan Old Style", Palatino, "Times New Roman", serif';
+
+// Build reverse map: event_name → list of agent shorts that subscribe.
+const EVENT_TO_SUBSCRIBERS: Record<string, string[]> = (() => {
+  const map: Record<string, string[]> = {};
+  for (const a of AGENT_MAP) {
+    for (const ev of a.triggersEvents ?? []) {
+      if (!map[ev]) map[ev] = [];
+      map[ev].push(a.short);
+    }
+  }
+  return map;
+})();
+
+function subscribersOf(
+  eventName: string,
+  realnessMap: Map<string, DeploymentKind>,
+): { short: string; isReal: boolean; kind: DeploymentKind }[] {
+  const list = EVENT_TO_SUBSCRIBERS[eventName] ?? EVENT_TO_SUBSCRIBERS[eventLeafName(eventName)] ?? [];
+  return list.map((short) => {
+    const kind = realnessMap.get(short) ?? "unbuilt";
+    return { short, isReal: kind === "real", kind };
+  });
+}
+
+type EventPageResponse = InngestEventsResponse & {
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
+  pagination?: { page?: number; pageSize?: number; total?: number; totalPages?: number };
+};
+
+function useEventPage({
+  active,
+  domain,
+  name,
+  windowId,
+  page,
+  pageSize,
+}: {
+  active: boolean;
+  domain: string;
+  name: string | null;
+  windowId: "1h" | "24h" | "7d" | "all";
+  page: number;
+  pageSize: number;
+}) {
+  const [events, setEvents] = React.useState<InngestEventRow[] | null>(null);
+  const [total, setTotal] = React.useState<number | null>(null);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [lastFetchAt, setLastFetchAt] = React.useState<Date | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    if (!active) return;
+    const params = new URLSearchParams({ domain });
+    setPaginationParams(params, page, pageSize);
+    if (name) params.set("name", name);
+    if (windowId !== "all") {
+      const windowMs = windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000;
+      params.set("since", new Date(Date.now() - windowMs).toISOString());
+    }
+    setLoading(true);
+    try {
+      const body = await fetchJson<EventPageResponse>(`/api/inngest-events?${params.toString()}`, {
+        cache: "no-store",
+        // The first read after upgrading an existing installation may perform
+        // a one-time domain/occurredAt backfill over the durable archive.
+        timeoutMs: 30_000,
+      });
+      const rows = Array.isArray(body.events) ? body.events : [];
+      const pagination = paginationFrom(body, { page, pageSize, rowCount: rows.length });
+      setEvents(rows);
+      setTotal(pagination.total);
+      setTotalPages(pagination.totalPages);
+      setLastFetchAt(new Date(body.fetchedAt || Date.now()));
+      setError(body.errors?.length
+        ? body.errors.map((item) => `${item.source}: ${item.message}`).join("; ")
+        : null);
+    } catch (cause) {
+      const message = cause && typeof cause === "object" && "message" in cause
+        ? String((cause as { message: unknown }).message)
+        : String(cause);
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [active, domain, name, windowId, page, pageSize]);
+
+  React.useEffect(() => {
+    if (!active) return;
+    void refresh();
+    const timer = setInterval(refresh, page === 1 ? 5_000 : 15_000);
+    return () => clearInterval(timer);
+  }, [active, page, refresh]);
+
+  return {
+    events,
+    total,
+    totalPages,
+    loading,
+    error,
+    lastFetchAt,
+    connected: events != null && error == null,
+    refresh,
+  };
+}
 
 export function EventsContent() {
-  const { t } = useApp();
-  const [selectedName, setSelectedName] = React.useState("ANALYSIS_COMPLETED");
-  const [tab, setTab] = React.useState("overview");
-  const [query, setQuery] = React.useState("");
+  const router = useRouter();
+  const sp = useSearchParams();
+  const { t, lang } = useApp();
+  const { domain } = useDomain();
+  const { realness: realnessMap } = useDeploymentMap();
 
-  const selected = EVENT_CATALOG.find((e) => e.name === selectedName) || EVENT_CATALOG[0];
+  const filterName = sp.get("name");
+  const windowId = (sp.get("window") ?? "1h") as "1h" | "24h" | "7d" | "all";
+  const selectedId = sp.get("id");
+  const focusParam = sp.get("focus");
+  const view = (sp.get("view") ?? "stream") as "stream" | "dlq";
+  // registration filter — disabled in UI for now (development), but the
+  // URL state and filtering logic are wired so we can flip the disable bit
+  // when the team's ready to QA it.
+  const regFilter = (sp.get("reg") ?? "all") as "all" | "registered" | "unregistered";
+  const dirFilter = (sp.get("dir") ?? "all") as "all" | "in" | "out";
+  const page = readPage(sp.get("page"));
+  const pageSize = readPageSize(sp.get("pageSize"), [20, 50, 100], 50);
 
-  const grouped = React.useMemo(() => {
-    const groups: Record<string, EventDef[]> = {};
-    const q = query.trim().toUpperCase();
-    for (const e of EVENT_CATALOG) {
-      if (q && !e.name.includes(q)) continue;
-      (groups[e.stage] ||= []).push(e);
+  const setUrl = React.useCallback((mut: (p: URLSearchParams) => void) => {
+    const next = new URLSearchParams(sp.toString());
+    mut(next);
+    router.replace(`/events${next.toString() ? `?${next.toString()}` : ""}`);
+  }, [router, sp]);
+
+  const setDirFilter = React.useCallback((next: "all" | "in" | "out") => {
+    setUrl((p) => {
+      if (next === "all") p.delete("dir");
+      else p.set("dir", next);
+      p.delete("page");
+      p.delete("id");
+    });
+  }, [setUrl]);
+
+  const eventPage = useEventPage({
+    active: view === "stream",
+    domain,
+    name: filterName,
+    windowId,
+    page,
+    pageSize,
+  });
+  const events = eventPage.events ?? [];
+  const { error, lastFetchAt, connected } = eventPage;
+  const emHealth = useEmHealth();
+  const { registry, syncing, refreshRegistry, syncNow } = useEventRegistry();
+  const dlq = useDlq(view === "dlq", domain, page, pageSize);
+
+  const filtered = React.useMemo(() => {
+    const cutoff = windowId === "all"
+      ? null
+      : Date.now() - (windowId === "1h" ? 3600_000 : windowId === "24h" ? 86400_000 : 7 * 86400_000);
+    return events.filter((e) => {
+      if (!eventMatchesDomain(e, domain)) return false;
+      if (!e.received_at) return true;
+      if (cutoff !== null && new Date(e.received_at).getTime() < cutoff) return false;
+      // Registration filter (logic wired but UI disabled for now)
+      if (regFilter !== "all") {
+        const isReg = registry.has(e.name);
+        if (regFilter === "registered" && !isReg) return false;
+        if (regFilter === "unregistered" && isReg) return false;
+      }
+      // Direction filter — stream view only. Type-level: derive from the
+      // event's catalog publishers (see classifyByPublishers), not the
+      // per-instance source (which the firehose can't reliably join to).
+      if (dirFilter !== "all") {
+        if (classifyByPublishers(registry.get(e.name)?.publishers) !== dirFilter) return false;
+      }
+      return true;
+    });
+  }, [events, windowId, regFilter, registry, dirFilter, domain]);
+
+  const selected = React.useMemo(() => {
+    if (!selectedId) return filtered[0] ?? null;
+    return filtered.find((e) => (e.internal_id ?? e.id) === selectedId) ?? filtered[0] ?? null;
+  }, [filtered, selectedId]);
+  useDeepLinkFocus(focusParam, focusParam ? filtered.some((event) => `event-stream:${event.internal_id ?? event.id}` === focusParam) : true);
+
+  React.useEffect(() => {
+    const pages = view === "dlq" ? dlq.totalPages : eventPage.totalPages;
+    if (pages != null && page > pages) {
+      setUrl((params) => {
+        if (pages <= 1) params.delete("page");
+        else params.set("page", String(pages));
+        params.delete("id");
+      });
     }
-    return groups;
-  }, [query]);
+  }, [dlq.totalPages, eventPage.totalPages, page, setUrl, view]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <EMSubHeader />
-      <div className="flex-1 grid min-h-0" style={{ gridTemplateColumns: "300px 1fr 340px" }}>
-        <EventRegistry grouped={grouped} selectedName={selectedName} onSelect={setSelectedName} query={query} setQuery={setQuery} />
-        <EventDetail event={selected} tab={tab} setTab={setTab} />
-        <EventLiveStream />
-      </div>
-    </div>
-  );
-}
-
-function EMSubHeader() {
-  const { t } = useApp();
-  const stats = [
-    { label: "events · 1m", value: "4,827", delta: "+12%", tone: "up" },
-    { label: "functions", value: "28 / 29", delta: "1 paused", tone: "muted" },
-    { label: t("em_backlog"), value: "142", delta: "−38", tone: "up" },
-    { label: t("em_dlq"), value: "6", delta: "+2", tone: "down" },
-    { label: "P95 delivery", value: "84ms", delta: "→ SLA", tone: "muted" },
-    { label: "Inngest 连接", value: "OK", delta: "eu-west-1 · v1.4", tone: "up" },
-  ];
-  return (
-    <div className="border-b border-line bg-surface flex items-center gap-4.5" style={{ padding: "14px 22px", gap: 18 }}>
-      <div>
-        <div className="text-[15px] font-semibold tracking-tight">{t("em_title")}</div>
-        <div className="text-ink-3 text-[12px] mt-px">{t("em_sub")}</div>
-      </div>
-      <div className="flex-1 grid pl-4.5 border-l border-line" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 14, paddingLeft: 18 }}>
-        {stats.map((s, i) => (
-          <div key={i}>
-            <div className="hint">{s.label}</div>
-            <div className="text-[16px] font-semibold tracking-tight tabular-nums">{s.value}</div>
-            <div
-              className="mono text-[10.5px]"
-              style={{
-                color: s.tone === "up" ? "var(--c-ok)" : s.tone === "down" ? "var(--c-err)" : "var(--c-ink-4)",
-              }}
-            >
-              {s.delta}
+    <div className="flex-1 flex flex-col min-w-0 overflow-auto bg-bg">
+      {/* Allmeta sync state strip */}
+      <AllmetaSyncStrip />
+      {/* header */}
+      <div className="border-b border-line" style={{ padding: "28px 32px 18px" }}>
+        <div className="flex items-start gap-6">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="m-0 text-ink-1" style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 26, letterSpacing: "-0.015em", lineHeight: 1.15 }}>
+                {t("evx_page_title")}
+              </h1>
+              <HelpTip tip={t("evx_page_sub")} />
             </div>
           </div>
-        ))}
-      </div>
-      <Btn size="sm"><Ic.plus /> 新建事件</Btn>
-      <Btn size="sm" variant="primary"><Ic.bolt /> 发布事件</Btn>
-    </div>
-  );
-}
-
-function EventRegistry({
-  grouped,
-  selectedName,
-  onSelect,
-  query,
-  setQuery,
-}: {
-  grouped: Record<string, EventDef[]>;
-  selectedName: string;
-  onSelect: (n: string) => void;
-  query: string;
-  setQuery: (s: string) => void;
-}) {
-  const { t } = useApp();
-  const stageOrder = ["requirement", "jd", "resume", "match", "interview", "eval", "package", "submit", "system"];
-  const totalCount = Object.values(grouped).reduce((a, arr) => a + arr.length, 0);
-
-  return (
-    <aside className="border-r border-line bg-surface flex flex-col min-h-0">
-      <div className="border-b border-line" style={{ padding: "12px 14px" }}>
-        <div className="flex items-center mb-2">
-          <div className="text-[13px] font-semibold flex-1">{t("em_registry")}</div>
-          <Badge>{totalCount} · {EVENT_CATALOG.length}</Badge>
+          <div className="flex items-center gap-3 mt-1">
+            <LiveDot connected={connected} lastFetchAt={lastFetchAt} t={t} />
+          </div>
         </div>
-        <div className="relative">
-          <span className="absolute left-2 top-1.5 text-ink-4"><Ic.search /></span>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="EVENT_NAME_…"
-            className="w-full h-7 border border-line bg-panel rounded-sm mono text-[11.5px] text-ink-1 outline-none"
-            style={{ padding: "0 8px 0 28px" }}
+
+        {/* view toggle: stream vs DLQ */}
+        <div className="flex items-center gap-1 mt-4">
+          <ViewToggle
+            value={view}
+            dlqCount={dlq.total}
+            onChange={(v) => setUrl((p) => {
+              if (v === "stream") p.delete("view");
+              else p.set("view", v);
+              p.delete("page");
+              p.delete("id");
+            })}
+            t={t}
           />
         </div>
-      </div>
-      <div className="flex-1 overflow-auto">
-        {stageOrder.map((stage) => {
-          const items = grouped[stage];
-          if (!items || items.length === 0) return null;
-          return (
-            <div key={stage}>
-              <div
-                className="flex items-center uppercase tracking-[0.06em] text-[10.5px] text-ink-4 font-semibold bg-panel border-t border-b border-line"
-                style={{ padding: "8px 14px 4px" }}
-              >
-                <span className="flex-1">{t(STAGE_LABELS[stage])}</span>
-                <span className="mono text-ink-4 font-medium">{items.length}</span>
-              </div>
-              {items.map((e) => (
-                <RegistryRow key={e.name} event={e} active={e.name === selectedName} onClick={() => onSelect(e.name)} />
-              ))}
+
+        {/* Event Manager status bar */}
+        <EmStatusBar
+          emHealth={emHealth.data}
+          registryCount={registry.size}
+          onSync={async () => { await syncNow(); await refreshRegistry(); }}
+          syncing={syncing}
+          t={t}
+        />
+
+        <div className="flex items-center gap-x-7 gap-y-1.5 mt-4 flex-wrap">
+          <CountChip
+            label={t("evx_count_events")}
+            value={eventPage.total == null ? String(filtered.length) : `${filtered.length} / ${eventPage.total}`}
+          />
+          {filterName && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded border border-line bg-surface text-ink-2"
+              style={{ padding: "3px 9px", fontSize: 12 }}
+            >
+              <span className="text-ink-3">{t("evx_name")}</span> {filterName}
+              <button onClick={() => setUrl((p) => { p.delete("name"); p.delete("page"); p.delete("id"); })} className="text-ink-3 hover:text-ink-1 ml-1">×</button>
+            </span>
+          )}
+          {error && (
+            <span style={{ fontSize: 12, color: "var(--c-err)" }}>
+              {error}
+            </span>
+          )}
+          <div className="flex-1" />
+          {view === "stream" && (
+            <div className="flex items-center gap-1">
+              {(["all", "in", "out"] as const).map((d) => {
+                const active = dirFilter === d;
+                const label = d === "all"
+                  ? t("em_dir_all")
+                  : lang === "zh" ? DIRECTION_META[d].zh : DIRECTION_META[d].en;
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDirFilter(d)}
+                    className="cursor-pointer rounded-full transition-colors"
+                    style={{
+                      padding: "2px 9px",
+                      fontSize: 10.5,
+                      border: "1px solid",
+                      borderColor: active ? "var(--c-accent)" : "var(--c-line)",
+                      background: active ? "var(--c-accent-bg)" : "transparent",
+                      color: active ? "var(--c-accent)" : "var(--c-ink-3)",
+                    }}
+                    title={d !== "all" ? t(`em_dir_tip_${d}`) : undefined}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
-          );
-        })}
+          )}
+          <RegistrationFilter value={regFilter} disabled t={t} />
+          <div className="w-px h-5 bg-line" />
+          <WindowSelector value={windowId} onChange={(v) => setUrl((p) => {
+            if (v === "1h") p.delete("window");
+            else p.set("window", v);
+            p.delete("page");
+            p.delete("id");
+          })} t={t} />
+        </div>
       </div>
-    </aside>
+
+      {view === "dlq" ? (
+        <DlqView
+          dlq={dlq}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={(nextPage) => setUrl((params) => {
+            if (nextPage <= 1) params.delete("page");
+            else params.set("page", String(nextPage));
+            params.delete("id");
+          })}
+          t={t}
+        />
+      ) : (
+      /* main split: list left, payload right */
+      <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(380px, 520px)" }}>
+        <div className="border-r border-line flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto min-h-0">
+            <div
+              className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
+              style={{ gridTemplateColumns: "112px 70px minmax(0, 1.2fr) 80px minmax(140px, .8fr) minmax(190px, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
+            >
+              <span>{t("evx_col_received_at")}</span>
+              <span>{t("evx_col_direction")}</span>
+              <span>{t("evx_col_event_name")}</span>
+              <span>{t("evx_col_registration")}</span>
+              <span>{t("evx_col_triggered_agents")}</span>
+              <span>{lang === "zh" ? "处理 / 业务结果" : "Processing / business"}</span>
+            </div>
+            {eventPage.loading && eventPage.events == null && (
+              <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>{t("evx_loading")}</div>
+            )}
+            {!eventPage.loading && filtered.length === 0 && (
+              <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
+                {eventPage.error ? `${t("evx_load_failed")}: ${eventPage.error}` : t("evx_no_recent_events")}
+                {eventPage.error && (
+                  <div className="mt-3">
+                    <button className="text-accent hover:underline" onClick={() => void eventPage.refresh()}>{t("evx_retry")}</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {filtered.map((e) => {
+            const id = e.internal_id ?? e.id;
+            const isSelected = selected && (selected.internal_id ?? selected.id) === id;
+            const subs = subscribersOf(e.name, realnessMap);
+            const contract = registry.get(e.name) ?? null;
+            return (
+              <button
+                key={id}
+                data-focus-key={`event-stream:${id}`}
+                onClick={() => setUrl((p) => p.set("id", id))}
+                className="w-full grid items-center gap-4 border-b border-line transition-colors text-left"
+                style={{
+                  padding: "11px 24px",
+                  gridTemplateColumns: "112px 70px minmax(0, 1.2fr) 80px minmax(140px, .8fr) minmax(190px, 1fr)",
+                  background: isSelected ? "var(--c-panel)" : "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                <span className="text-ink-3 tabular-nums" style={{ fontSize: 11.5 }}>
+                  {fmtTime(e.received_at)}
+                </span>
+                <DirectionIndicator publishers={contract?.publishers} source={e.source} t={t} lang={lang} />
+                <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }}>
+                  {e.name}
+                </span>
+                <RegistrationBadge contract={contract} t={t} />
+                <span className="flex items-center gap-1.5 flex-wrap min-w-0">
+                  {subs.length === 0 && (
+                    <span className="text-ink-4" style={{ fontSize: 11.5 }}>{t("evx_no_subscribers")}</span>
+                  )}
+                  {subs.map((s) => (
+                    <Link
+                      key={s.short}
+                      href={`/monitor?agent=${encodeURIComponent(s.short)}&event=${encodeURIComponent(e.name)}`}
+                      onClick={(ev) => ev.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded border border-line bg-surface hover:bg-panel transition-colors"
+                      style={{
+                        padding: "2px 7px", fontSize: 11,
+                        color: s.kind === "unbuilt" ? "var(--c-ink-3)" : "var(--c-ink-1)",
+                        textDecoration: "none",
+                      }}
+                      title={s.kind === "unbuilt" ? `${s.short} — ${t("evx_pill_unbuilt_tip")}` : `${s.short} — ${t("evx_pill_real_tip")}`}
+                    >
+                      {s.kind !== "unbuilt" && (
+                        <span className="rounded-full" style={{ width: 5, height: 5, background: "var(--c-ok)" }} />
+                      )}
+                      {agentDisplayName(s.short)}
+                    </Link>
+                  ))}
+                </span>
+                <EventOutcomeCell event={e} lang={lang} />
+              </button>
+            );
+            })}
+          </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            rowCount={events.length}
+            total={eventPage.total}
+            totalPages={eventPage.totalPages}
+            loading={eventPage.loading}
+            onPageChange={(nextPage) => setUrl((params) => {
+              if (nextPage <= 1) params.delete("page");
+              else params.set("page", String(nextPage));
+              params.delete("id");
+            })}
+            onPageSizeChange={(nextSize) => setUrl((params) => {
+              if (nextSize === 50) params.delete("pageSize");
+              else params.set("pageSize", String(nextSize));
+              params.delete("page");
+              params.delete("id");
+            })}
+          />
+        </div>
+
+        <div className="overflow-auto">
+          {selected ? (
+            <PayloadViewer event={selected} contract={registry.get(selected.name) ?? null} setUrl={setUrl} t={t} />
+          ) : (
+            <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
+              {t("evx_pick_event_for_payload")}
+            </div>
+          )}
+        </div>
+      </div>
+      )}
+    </div>
   );
 }
 
-function RegistryRow({ event, active, onClick }: { event: EventDef; active: boolean; onClick: () => void }) {
+function PayloadViewer({ event, contract, setUrl, t }: { event: InngestEventRow; contract: EventContract | null; setUrl: (mut: (p: URLSearchParams) => void) => void; t: (k: string) => string }) {
+  const { realness: realnessMap } = useDeploymentMap();
+  const subs = subscribersOf(event.name, realnessMap);
+  const [showSchema, setShowSchema] = React.useState(false);
+  const [replayBusy, setReplayBusy] = React.useState(false);
+  const [replayMsg, setReplayMsg] = React.useState<string | null>(null);
+
+  async function handleReplay() {
+    const evId = event.internal_id ?? event.id;
+    if (!evId) {
+      setReplayMsg(t('evx_no_event_id'));
+      setTimeout(() => setReplayMsg(null), 2000);
+      return;
+    }
+    setReplayBusy(true);
+    setReplayMsg(null);
+    try {
+      const r = await fetch('/api/inngest-admin/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: evId }),
+      });
+      const b = await r.json();
+      setReplayMsg(b.ok ? `✓ ${t('evx_resent')} · ${t('evx_new_event')} ${b.new_event_id?.slice(0, 12)}…` : `✗ ${b.message ?? b.error ?? 'failed'}`);
+    } catch (err) {
+      setReplayMsg(`✗ ${(err as Error).message}`);
+    } finally {
+      setReplayBusy(false);
+      setTimeout(() => setReplayMsg(null), 4000);
+    }
+  }
+
   return (
-    <div
-      onClick={onClick}
-      className="flex items-center gap-2 cursor-pointer border-b border-line"
-      style={{
-        padding: "8px 14px",
-        background: active ? "var(--c-accent-bg)" : "transparent",
-        borderLeft: active ? "2px solid var(--c-accent)" : "2px solid transparent",
-      }}
-    >
-      <span
-        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-        style={{
-          background: kindDot(event.kind),
-          boxShadow: `0 0 0 3px color-mix(in oklab, ${kindDot(event.kind)} 18%, transparent)`,
-        }}
-      />
-      <div className="flex-1 min-w-0">
-        <div
-          className="mono text-[11px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis"
-          style={{ color: active ? "var(--c-accent)" : "var(--c-ink-1)" }}
+    <div style={{ padding: "20px 24px" }}>
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="flex items-baseline gap-3 flex-wrap min-w-0">
+          <h2 className="m-0 text-ink-1 break-all" style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: "-0.01em" }}>
+            {event.name}
+          </h2>
+          <RegistrationBadge contract={contract} large t={t} />
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleReplay}
+            disabled={replayBusy}
+            title={t("evx_resend_tip")}
+            className="text-[12px] px-2.5 py-1 rounded border border-accent text-accent hover:bg-accent-bg disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+          >
+            {replayBusy ? t("evx_sending") : `↺ ${t("evx_resend")}`}
+          </button>
+          <button onClick={() => setUrl((p) => p.delete("id"))} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 13 }}>×</button>
+        </div>
+      </div>
+      {replayMsg && (
+        <div className="mt-2 text-[11px]" style={{ color: replayMsg.startsWith('✓') ? 'var(--c-ok)' : 'var(--c-err)' }}>
+          {replayMsg}
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-y-1.5" style={{ gridTemplateColumns: "auto 1fr", columnGap: 16, fontSize: 12 }}>
+        {event.outcome && (
+          <>
+            <span className="text-ink-3">技术 / 业务</span>
+            <span className="flex items-center gap-2 flex-wrap">
+              <OutcomeBadges outcome={event.outcome} />
+              {event.processingRuns?.[0] && (
+                <Link
+                  href={`/monitor?run=${encodeURIComponent(event.processingRuns[0].runId)}&focus=${encodeURIComponent(`run:${event.processingRuns[0].runId}`)}`}
+                  className="text-accent hover:underline text-[11px]"
+                >
+                  查看处理 Run · {event.processingRuns[0].status} →
+                </Link>
+              )}
+            </span>
+          </>
+        )}
+        <span className="text-ink-3">{t("evx_event_id")}</span>
+        <code className="text-ink-2 tabular-nums break-all" style={{ fontFamily: "var(--f-mono)", fontSize: 11.5 }}>
+          {event.internal_id ?? event.id}
+        </code>
+        <span className="text-ink-3">{t("evx_received_at")}</span>
+        <span className="text-ink-2 tabular-nums" style={{ fontSize: 12 }}>
+          {fmtTimeFull(event.received_at)}
+        </span>
+        {contract && (
+          <>
+            <span className="text-ink-3">Stage / Kind</span>
+            <span className="text-ink-2" style={{ fontSize: 12 }}>
+              {contract.stage} · {contract.kind}
+            </span>
+            {contract.retiredAt && (
+              <>
+                <span className="text-ink-3">{t("evx_lifecycle")}</span>
+                <span style={{ fontSize: 12, color: "var(--c-warn)" }}>{t("evx_retired_full")}</span>
+              </>
+            )}
+            {contract.isBreakingChange && (
+              <>
+                <span className="text-ink-3">{t("evx_change")}</span>
+                <span style={{ fontSize: 12, color: "var(--c-err)" }}>Breaking change ⚠</span>
+              </>
+            )}
+          </>
+        )}
+        <span className="text-ink-3">{t("evx_filter")}</span>
+        <button
+          onClick={() => setUrl((p) => {
+            p.set("name", event.name);
+            p.delete("page");
+            p.delete("id");
+          })}
+          className="text-left text-ink-2 hover:text-ink-1"
+          style={{ fontSize: 12 }}
         >
-          {event.name}
-        </div>
-        <div className="mono text-[10px] text-ink-4 mt-px">
-          {event.rate.toLocaleString()}/h · {event.subscribers.length} sub
-          {event.err > 0 && <span style={{ color: "var(--c-err)" }}> · {event.err} err</span>}
-        </div>
+          {t("evx_only_show_pre")}{event.name}{t("evx_only_show_post")}
+        </button>
       </div>
-    </div>
-  );
-}
 
-function EventDetail({ event, tab, setTab }: { event: EventDef; tab: string; setTab: (t: string) => void }) {
-  return (
-    <div className="flex flex-col min-h-0 bg-panel">
-      <EventDetailHeader event={event} />
-      <EventDetailTabs tab={tab} setTab={setTab} />
-      <div className="flex-1 overflow-auto">
-        {tab === "overview" && <TabOverview event={event} />}
-        {tab === "schema" && <TabSchema event={event} />}
-        {tab === "subs" && <TabSubscribers event={event} />}
-        {tab === "runs" && <TabRuns event={event} />}
-        {tab === "history" && <TabHistory event={event} />}
-        {tab === "logs" && <TabLogs event={event} />}
+      {contract?.desc && <div className="mt-3"><HelpTip tip={contract.desc} /></div>}
+
+      <div className="mt-5">
+        <div className="text-ink-3 mb-2" style={{ fontSize: 12 }}>{t("evx_triggered_agents")}</div>
+        {subs.length === 0 ? (
+          <div className="text-ink-4" style={{ fontSize: 12 }}>{t("evx_no_agent_subscribes")}</div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {subs.map((s) => (
+              <Link
+                key={s.short}
+                href={`/monitor?agent=${encodeURIComponent(s.short)}&event=${encodeURIComponent(event.name)}`}
+                className="inline-flex items-center gap-1.5 rounded border border-line bg-surface hover:bg-panel transition-colors"
+                style={{ padding: "4px 10px", fontSize: 12, textDecoration: "none", color: s.kind === "unbuilt" ? "var(--c-ink-3)" : "var(--c-ink-1)" }}
+                title={s.short}
+              >
+                {s.kind !== "unbuilt" && <span className="rounded-full" style={{ width: 6, height: 6, background: "var(--c-ok)" }} />}
+                {agentDisplayName(s.short)}
+                {s.kind === "unbuilt" && <span className="text-ink-4" style={{ fontSize: 11 }}>{t("evx_blueprint")}</span>}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
 
-function EventDetailHeader({ event }: { event: EventDef }) {
-  const { t } = useApp();
-  const isError = event.kind === "error";
-  return (
-    <div className="bg-surface border-b border-line" style={{ padding: "16px 22px" }}>
-      <div className="flex items-center gap-2 mb-2">
-        <span
-          className="w-[30px] h-[30px] rounded-md grid place-items-center"
+      <div className="mt-6">
+        <div className="text-ink-3 mb-2" style={{ fontSize: 12 }}>Payload</div>
+        <pre
+          className="text-ink-1 whitespace-pre-wrap break-words"
           style={{
-            background: `color-mix(in oklab, ${kindDot(event.kind)} 14%, transparent)`,
-            border: `1px solid color-mix(in oklab, ${kindDot(event.kind)} 32%, transparent)`,
-            color: kindDot(event.kind),
+            fontFamily: "var(--f-mono)", fontSize: 11.5,
+            margin: 0, padding: "12px 14px",
+            background: "var(--c-surface)",
+            border: "1px solid var(--c-line)",
+            borderRadius: 6,
+            maxHeight: 460,
+            overflow: "auto",
+            lineHeight: 1.55,
           }}
         >
-          {event.kind === "error" ? <Ic.alert /> : event.kind === "gate" ? <Ic.branch /> : <Ic.bolt />}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="mono text-[15px] font-semibold tracking-tight" style={{ color: isError ? "var(--c-err)" : "var(--c-ink-1)" }}>
-            {event.name}
-          </div>
-          <div className="text-ink-3 text-[12px] mt-0.5">{event.desc}</div>
+          {safeJsonStringify(event.data)}
+        </pre>
+      </div>
+
+      {contract?.schema && (
+        <div className="mt-5">
+          <button
+            onClick={() => setShowSchema((s) => !s)}
+            className="flex items-center gap-1.5 text-ink-3 hover:text-ink-1"
+            style={{ fontSize: 12 }}
+          >
+            <span style={{ display: "inline-block", transition: "transform 0.15s", transform: showSchema ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
+            {t("evx_registered_schema")}
+          </button>
+          {showSchema && (
+            <pre
+              className="text-ink-1 whitespace-pre-wrap break-words mt-2"
+              style={{
+                fontFamily: "var(--f-mono)", fontSize: 11,
+                margin: 0, padding: "10px 12px",
+                background: "var(--c-surface)",
+                border: "1px solid color-mix(in oklab, var(--c-ok) 18%, var(--c-line))",
+                borderRadius: 6, maxHeight: 320, overflow: "auto", lineHeight: 1.55,
+              }}
+            >
+              {safeJsonStringify(contract.schema)}
+            </pre>
+          )}
         </div>
-        <Badge variant="info">v2 · schema</Badge>
-        <Badge variant={event.err > 0 ? "warn" : "ok"} dot>
-          {event.err > 0 ? `${event.err} err / 24h` : "healthy · 24h"}
-        </Badge>
-      </div>
-
-      <div className="flex gap-4.5 mt-3" style={{ gap: 18 }}>
-        <HeaderStat label="24h 发布" value={event.rate.toLocaleString()} />
-        <HeaderStat label="P95 投递" value="84ms" tone="ok" />
-        <HeaderStat label={t("em_subscribers")} value={event.subscribers.length.toString()} />
-        <HeaderStat label={t("em_retention")} value="90d" />
-        <HeaderStat label={t("em_persistence")} value="PostgreSQL + S3" muted />
-        <div className="flex-1" />
-        <Btn size="sm"><Ic.play /> {t("em_replay")}</Btn>
-        <Btn size="sm"><Ic.pause /> {t("em_pause")}</Btn>
-        <Btn size="sm" variant="ghost"><Ic.dots /></Btn>
-      </div>
+      )}
     </div>
   );
 }
 
-function HeaderStat({ label, value, tone, muted }: { label: string; value: string; tone?: "ok"; muted?: boolean }) {
-  const col = tone === "ok" ? "var(--c-ok)" : "var(--c-ink-1)";
+function EventOutcomeCell({ event, lang }: { event: InngestEventRow; lang: "zh" | "en" }) {
+  const runs = event.processingRuns ?? [];
+  const primary = runs.find((run) => run.outcome.technical === "failed") ?? runs[0];
+  const meaningful = event.outcome && event.outcome.business !== "not_applicable";
   return (
-    <div>
-      <div className="hint">{label}</div>
-      <div
-        className="mono text-[13.5px] font-semibold tabular-nums"
-        style={{ color: col, opacity: muted ? 0.75 : 1 }}
-      >
+    <span className="min-w-0 flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+      {event.outcome && (runs.length > 0 || meaningful) ? (
+        <OutcomeBadges outcome={event.outcome} compact />
+      ) : (
+        <span className="text-[10.5px] text-ink-4">{lang === "zh" ? "事件已记录" : "Recorded"}</span>
+      )}
+      {primary && (
+        <Link
+          href={`/monitor?run=${encodeURIComponent(primary.runId)}&focus=${encodeURIComponent(`run:${primary.runId}`)}`}
+          className="text-[10.5px] text-accent hover:underline whitespace-nowrap"
+        >
+          Run · {primary.status} →
+        </Link>
+      )}
+    </span>
+  );
+}
+
+// ── Direction indicator ───────────────────────────────────────────
+
+function DirectionIndicator({ publishers, source, t, lang }: { publishers: string[] | null | undefined; source?: string | null; t: (k: string) => string; lang: "zh" | "en" }) {
+  const dir = classifyByPublishers(publishers);
+  const meta = DIRECTION_META[dir];
+  const label = lang === "zh" ? meta.zh : meta.en;
+  const arrow = meta.arrow === "in" ? "↓" : meta.arrow === "out" ? "↑" : "·";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full"
+      style={{
+        padding: "1px 7px 1px 5px",
+        fontSize: 10,
+        color: meta.color,
+        background: "color-mix(in oklab, " + meta.color + " 12%, transparent)",
+        border: "1px solid color-mix(in oklab, " + meta.color + " 25%, transparent)",
+        fontWeight: 500,
+        flexShrink: 0,
+      }}
+      title={`${label} · publishers=${publishers?.length ? publishers.join(", ") : "—"}${source ? ` · source=${source}` : ""}`}
+    >
+      <span style={{ fontFamily: "var(--f-mono)", lineHeight: 1 }}>{arrow}</span>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+// ── helpers ──────────────────────────────────────────────────────
+
+function fmtTime(iso: string | undefined): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString("zh-CN", { hour12: false });
+  } catch { return "—"; }
+}
+
+function fmtTimeFull(iso: string | undefined): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("zh-CN", { hour12: false });
+  } catch { return "—"; }
+}
+
+function safeJsonStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+// ── controls ─────────────────────────────────────────────────────
+
+function CountChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-ink-4 uppercase tracking-[0.12em] font-medium" style={{ fontSize: 10.5 }}>{label}</span>
+      <span className="font-semibold tabular-nums text-ink-1" style={{ fontSize: 18, letterSpacing: "-0.015em" }}>
         {value}
-      </div>
+      </span>
     </div>
   );
 }
 
-function EventDetailTabs({ tab, setTab }: { tab: string; setTab: (t: string) => void }) {
-  const { t } = useApp();
-  const tabs = [
-    { id: "overview", label: t("em_tab_overview") },
-    { id: "schema", label: t("em_tab_schema") },
-    { id: "subs", label: t("em_tab_subs") },
-    { id: "runs", label: t("em_tab_runs") },
-    { id: "history", label: t("em_tab_history") },
-    { id: "logs", label: t("em_tab_logs") },
+function WindowSelector({ value, onChange, t }: { value: "1h" | "24h" | "7d" | "all"; onChange: (v: "1h" | "24h" | "7d" | "all") => void; t: (k: string) => string }) {
+  const opts = [
+    { id: "1h" as const, label: t("evx_window_1h") },
+    { id: "24h" as const, label: t("evx_window_24h") },
+    { id: "7d" as const, label: t("evx_window_7d") },
+    { id: "all" as const, label: t("evx_window_all") },
   ];
   return (
-    <div className="border-b border-line bg-surface flex gap-0.5" style={{ padding: "0 14px" }}>
-      {tabs.map((tb) => (
+    <div className="flex items-center gap-1">
+      {opts.map((o) => (
         <button
-          key={tb.id}
-          onClick={() => setTab(tb.id)}
-          className="bg-transparent border-0 cursor-pointer text-[12.5px]"
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          className="transition-colors rounded"
           style={{
-            padding: "10px 12px",
-            color: tab === tb.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
-            fontWeight: tab === tb.id ? 600 : 500,
-            borderBottom: tab === tb.id ? "2px solid var(--c-accent)" : "2px solid transparent",
+            padding: "3px 9px",
+            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
+            background: value === o.id ? "var(--c-panel)" : "transparent",
+            fontWeight: value === o.id ? 500 : 400,
+            fontSize: 12.5,
           }}
         >
-          {tb.label}
+          {o.label}
         </button>
       ))}
     </div>
   );
 }
 
-function DetailCard({ title, count, children, span }: { title: string; count?: number; children: React.ReactNode; span?: boolean }) {
+function LiveDot({ connected, lastFetchAt, t }: { connected: boolean; lastFetchAt: Date | null; t: (k: string) => string }) {
   return (
-    <div
-      className="border border-line rounded-lg bg-surface overflow-hidden"
-      style={{ gridColumn: span ? "1 / -1" : undefined }}
-    >
-      <div className="border-b border-line flex items-center gap-2" style={{ padding: "10px 14px" }}>
-        <div className="text-[12px] font-semibold flex-1 tracking-tight">{title}</div>
-        {count != null && <span className="mono text-[10.5px] text-ink-4">{count}</span>}
-      </div>
-      <div style={{ padding: 12 }}>{children}</div>
-    </div>
-  );
-}
-
-function TabOverview({ event }: { event: EventDef }) {
-  const { t } = useApp();
-  const emitsEvents = event.emits || [];
-  return (
-    <div className="grid gap-4.5" style={{ padding: 22, gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-      <DetailCard title={t("em_publishers")} count={event.publishers.length}>
-        {event.publishers.map((p, i) => (
-          <EntityRow key={i} icon={<Ic.cpu />} name={p} meta={i === 0 ? "primary" : "fallback"} tone="info" />
-        ))}
-      </DetailCard>
-      <DetailCard title={t("em_subscribers")} count={event.subscribers.length}>
-        {event.subscribers.map((s, i) => (
-          <EntityRow key={i} icon={<Ic.plug />} name={s} meta={`step.waitForEvent · #${i + 1}`} />
-        ))}
-      </DetailCard>
-
-      <DetailCard title={t("em_source_action")} span>
-        <EMKV rows={[
-          ["source.action", "analyzeRequirement"],
-          ["triggered_by", t("actor_agent") + " · ReqAnalyzer"],
-          ["idempotency_key", "req_id + analysis_nonce"],
-          ["dedupe_window", "60s"],
-        ]} />
-      </DetailCard>
-
-      <DetailCard title={t("em_triggers_workflow") + " · 下游"} count={emitsEvents.length} span>
-        <div className="flex flex-col gap-2">
-          {emitsEvents.length === 0 && <div className="text-ink-3 text-[12.5px] p-2">— 终端事件 · 无下游 —</div>}
-          {emitsEvents.map((ev, i) => {
-            const target = EVENT_CATALOG.find((x) => x.name === ev);
-            return (
-              <div
-                key={i}
-                className="flex items-center gap-2.5 rounded-sm bg-panel border border-line"
-                style={{ padding: "8px 10px" }}
-              >
-                <span className="mono text-[10.5px] text-ink-4">emit →</span>
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ background: kindDot(target?.kind || "domain") }}
-                />
-                <span className="mono text-[11.5px] font-semibold">{ev}</span>
-                <div className="flex-1" />
-                <span className="mono text-[10.5px] text-ink-4">{target ? `${target.rate}/h` : "—"}</span>
-              </div>
-            );
-          })}
-        </div>
-      </DetailCard>
-
-      <DetailCard title={t("em_mutations")} count={event.mutations.length} span>
-        {event.mutations.length === 0 && <div className="text-ink-3 text-[12.5px] p-2">— 该事件不修改状态 —</div>}
-        <div className="flex flex-wrap gap-1.5">
-          {event.mutations.map((m, i) => (
-            <Badge key={i} style={{ background: "var(--c-panel)", border: "1px solid var(--c-line)" }}>
-              <Ic.db /> {m}
-            </Badge>
-          ))}
-        </div>
-      </DetailCard>
-
-      <DetailCard title={t("em_delivery") + " · Inngest"}>
-        <EMKV rows={[
-          ["delivery", "at-least-once"],
-          ["concurrency", "25 / function"],
-          ["rate_limit", "500/min · per job_id"],
-          ["retries", "5 · exp. backoff 30s→30m"],
-          ["timeout", "30s"],
-        ]} />
-      </DetailCard>
-      <DetailCard title={t("em_persistence")}>
-        <EMKV rows={[
-          ["log_store", "PostgreSQL · events_log"],
-          ["payload_blob", "S3 · ao-events/2025-…"],
-          ["retention", "90 天 · WORM · 合规"],
-          ["index", "name + job_requisition_id + ts"],
-          ["GDPR", "PII 字段加密 · 字段级"],
-        ]} />
-      </DetailCard>
-    </div>
-  );
-}
-
-function EntityRow({ icon, name, meta, tone }: { icon: React.ReactNode; name: string; meta?: string; tone?: "info" }) {
-  return (
-    <div
-      className="flex items-center gap-2.5"
-      style={{ padding: "6px 4px", borderBottom: "1px dashed var(--c-line)" }}
+    <span
+      className="flex items-center gap-1.5 text-ink-3"
+      title={connected ? `${t("evx_last_refresh")} ${lastFetchAt?.toLocaleTimeString("zh-CN", { hour12: false }) ?? ""}` : t("evx_connecting_inngest")}
+      style={{ fontSize: 11.5 }}
     >
       <span
-        className="w-[22px] h-[22px] rounded-sm grid place-items-center border border-line"
+        className={connected ? "rounded-full anim-pulse" : "rounded-full"}
+        style={{ width: 6, height: 6, background: connected ? "var(--c-ok)" : "var(--c-ink-4)" }}
+      />
+      {connected ? t("evx_live") : t("evx_connecting")}
+    </span>
+  );
+}
+
+// ── Event registry (Ontology / Neo4j) ───────────────────────────
+
+function useEventRegistry() {
+  const { domain } = useDomain();
+  const [registry, setRegistry] = React.useState<Map<string, EventContract>>(new Map());
+  const [syncing, setSyncing] = React.useState(false);
+
+  const refreshRegistry = React.useCallback(async () => {
+    try {
+      const body = await fetchJson<EventsResponse>(
+        `/api/events?includeRetired=1&domain=${encodeURIComponent(domain)}`,
+      );
+      const m = new Map<string, EventContract>();
+      for (const e of body.events ?? []) m.set(e.name, e);
+      setRegistry(m);
+    } catch { /* soft */ }
+  }, [domain]);
+
+  const syncNow = React.useCallback(async () => {
+    setSyncing(true);
+    try {
+      await fetch("/api/em/sync-now", { method: "POST" });
+      await new Promise((r) => setTimeout(r, 1500)); // give the sync worker a moment
+    } catch { /* soft */ } finally {
+      setSyncing(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    refreshRegistry();
+    const t = setInterval(refreshRegistry, 60_000);
+    return () => clearInterval(t);
+  }, [refreshRegistry]);
+
+  return { registry, syncing, refreshRegistry, syncNow };
+}
+
+// ── EM status bar (Event Manager + Neo4j sync) ──────────────────
+
+function EmStatusBar({
+  emHealth, registryCount, onSync, syncing, t,
+}: {
+  emHealth: ReturnType<typeof useEmHealth>["data"];
+  registryCount: number;
+  onSync: () => Promise<void>;
+  syncing: boolean;
+  t: (k: string) => string;
+}) {
+  if (!emHealth) {
+    return (
+      <div className="mt-3 text-ink-4" style={{ fontSize: 12 }}>{t("evx_loading_em_status")}</div>
+    );
+  }
+  const emState = emHealth.em.state;
+  const emColor =
+    emState === "healthy"  ? "var(--c-ok)" :
+    emState === "degraded" ? "var(--c-warn)" :
+    "var(--c-err)";
+  const neo4jReachable = emHealth.neo4j.reachable;
+  const neo4jColor = neo4jReachable ? "var(--c-ok)" : "var(--c-err)";
+  const lastSync = emHealth.neo4j.lastSyncAt;
+  return (
+    <div
+      className="mt-3 flex items-center gap-x-5 gap-y-1 flex-wrap text-ink-2"
+      style={{
+        fontSize: 12,
+        padding: "10px 14px",
+        background: "var(--c-panel)",
+        border: "1px solid var(--c-line)",
+        borderRadius: 8,
+      }}
+    >
+      <span className="flex items-center gap-1.5">
+        <span className="rounded-full" style={{ width: 6, height: 6, background: emColor }} />
+        <span className="text-ink-3">{t("evx_event_manager")}</span>
+        <span className="text-ink-1">{stateZh(emState, t)}</span>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="rounded-full" style={{ width: 6, height: 6, background: neo4jColor }} />
+        <span className="text-ink-3">Ontology</span>
+        <span className="text-ink-1">{neo4jReachable ? t("evx_reachable") : t("evx_unreachable")}</span>
+      </span>
+      <span>
+        <span className="text-ink-3">{t("evx_registered_events")}</span>{" "}
+        <span className="text-ink-1 tabular-nums">{registryCount}</span>
+      </span>
+      <span>
+        <span className="text-ink-3">{t("evx_last_sync")}</span>{" "}
+        <span className="text-ink-1 tabular-nums">{lastSync ? relativeTimeZh(lastSync, t) : "—"}</span>
+      </span>
+      <span>
+        <span className="text-ink-3">{t("evx_24h_fallback")}</span>{" "}
+        <span
+          className="tabular-nums"
+          style={{ color: emHealth.em.fallbackCount24h > 0 ? "var(--c-warn)" : "var(--c-ink-1)" }}
+        >
+          {emHealth.em.fallbackCount24h}
+        </span>
+      </span>
+      <div className="flex-1" />
+      <button
+        onClick={() => onSync()}
+        disabled={syncing}
+        className="rounded border border-line bg-surface hover:bg-panel transition-colors"
         style={{
-          background: tone === "info" ? "var(--c-info-bg)" : "var(--c-panel)",
-          color: tone === "info" ? "var(--c-info)" : "var(--c-ink-2)",
+          padding: "3px 10px", fontSize: 12,
+          color: "var(--c-ink-1)",
+          cursor: syncing ? "wait" : "pointer",
+          opacity: syncing ? 0.6 : 1,
         }}
       >
-        {icon}
-      </span>
-      <span className="text-[12.5px] font-medium flex-1">{name}</span>
-      <span className="mono text-[10.5px] text-ink-4">{meta}</span>
+        {syncing ? t("evx_syncing") : `↻ ${t("evx_sync_ontology")}`}
+      </button>
     </div>
   );
 }
 
-function EMKV({ rows }: { rows: [string, string][] }) {
+function stateZh(s: string, t: (k: string) => string): string {
+  if (s === "healthy") return t("evx_em_healthy");
+  if (s === "degraded") return t("evx_em_degraded");
+  if (s === "down") return t("evx_em_down");
+  if (s === "unconfigured") return t("evx_em_unconfigured");
+  return s;
+}
+
+function relativeTimeZh(iso: string | null, t: (k: string) => string): string {
+  if (!iso) return "—";
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return "—";
+  const diffSec = Math.max(0, (Date.now() - ts) / 1000);
+  if (diffSec < 60) return `${Math.floor(diffSec)} ${t("evx_ago_sec")}`;
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} ${t("evx_ago_min")}`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} ${t("evx_ago_hour")}`;
+  return `${Math.floor(diffSec / 86400)} ${t("evx_ago_day")}`;
+}
+
+// ── Registration badge ──────────────────────────────────────────
+
+function RegistrationBadge({ contract, large, t }: { contract: EventContract | null; large?: boolean; t: (k: string) => string }) {
+  const padding = large ? "3px 9px" : "1px 6px";
+  const size = large ? 12 : 10.5;
+  if (contract) {
+    const retired = !!contract.retiredAt;
+    if (retired) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 rounded"
+          title={t("evx_badge_retired_tip")}
+          style={{
+            padding, fontSize: size,
+            background: "var(--c-warn-bg)",
+            color: "oklch(0.5 0.14 75)",
+            border: "1px solid color-mix(in oklab, var(--c-warn) 30%, transparent)",
+          }}
+        >
+          {t("evx_badge_retired")}
+        </span>
+      );
+    }
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded"
+        title={t("evx_badge_registered_tip")}
+        style={{
+          padding, fontSize: size,
+          background: "var(--c-ok-bg)",
+          color: "var(--c-ok)",
+          border: "1px solid color-mix(in oklab, var(--c-ok) 25%, transparent)",
+        }}
+      >
+        <span className="rounded-full" style={{ width: 4, height: 4, background: "var(--c-ok)" }} />
+        {t("evx_badge_registered")}
+      </span>
+    );
+  }
   return (
-    <div className="grid text-[12px]" style={{ gridTemplateColumns: "auto 1fr", columnGap: 14, rowGap: 6 }}>
-      {rows.map(([k, v], i) => (
-        <React.Fragment key={i}>
-          <div className="mono text-[11px] text-ink-4">{k}</div>
-          <div className="mono text-[11.5px] text-ink-1">{v}</div>
-        </React.Fragment>
+    <span
+      className="inline-flex items-center rounded"
+      title={t("evx_badge_unregistered_tip")}
+      style={{
+        padding, fontSize: size,
+        background: "transparent",
+        color: "var(--c-ink-3)",
+        border: "1px dashed var(--c-line-strong)",
+      }}
+    >
+      {t("evx_badge_unregistered")}
+    </span>
+  );
+}
+
+// ── DLQ (rejected events) ───────────────────────────────────────
+
+type DlqRow = {
+  id: string;
+  externalEventId: string | null;
+  name: string;
+  source: string;
+  status: string;
+  rejectionType: string | null;
+  rejectionReason: string | null;
+  schemaErrors: unknown | null;
+  schemaVersionUsed: string | null;
+  triedVersions: string[] | null;
+  payloadSummary: string | null;
+  domain?: string | null;
+  ts: string;
+};
+
+type DlqState = {
+  rows: DlqRow[];
+  total: number;
+  totalPages: number | null;
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+};
+
+const DLQ_STATUSES = "rejected_schema,rejected_filter,duplicate,meta_rejection,em_degraded";
+
+function useDlq(active: boolean, domain: string, page: number, pageSize: number): DlqState {
+  const [rows, setRows] = React.useState<DlqRow[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [totalPages, setTotalPages] = React.useState<number | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ statusIn: DLQ_STATUSES, domain });
+      setPaginationParams(params, page, pageSize);
+      const res = await fetch(`/api/em/event-instances?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      const nextRows = Array.isArray(body.rows) ? body.rows : [];
+      const pagination = paginationFrom(body, { page, pageSize, rowCount: nextRows.length });
+      setRows(nextRows);
+      setTotal(pagination.total ?? nextRows.length);
+      setTotalPages(pagination.totalPages);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, [domain, page, pageSize]);
+
+  React.useEffect(() => {
+    refresh();
+    // Keep DLQ count fresh in background even when not viewing it.
+    const t = setInterval(refresh, active ? 5000 : 30_000);
+    return () => clearInterval(t);
+  }, [refresh, active]);
+
+  return { rows, total, totalPages, loading, error, refresh };
+}
+
+function ViewToggle({
+  value, dlqCount, onChange, t,
+}: {
+  value: "stream" | "dlq";
+  dlqCount: number;
+  onChange: (v: "stream" | "dlq") => void;
+  t: (k: string) => string;
+}) {
+  const opts: { id: "stream" | "dlq"; label: string; count?: number }[] = [
+    { id: "stream", label: t("evx_view_stream") },
+    { id: "dlq", label: t("evx_view_dlq"), count: dlqCount },
+  ];
+  return (
+    <div className="flex items-center gap-1">
+      {opts.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          className="transition-colors rounded flex items-center gap-1.5"
+          style={{
+            padding: "5px 12px",
+            fontSize: 13,
+            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
+            background: value === o.id ? "var(--c-panel)" : "transparent",
+            fontWeight: value === o.id ? 500 : 400,
+            border: value === o.id ? "1px solid var(--c-line)" : "1px solid transparent",
+          }}
+        >
+          {o.label}
+          {typeof o.count === "number" && (
+            <span
+              className="tabular-nums"
+              style={{
+                fontSize: 11,
+                padding: "1px 6px",
+                borderRadius: 10,
+                background: o.count > 0 ? "var(--c-err-bg)" : "var(--c-panel)",
+                color: o.count > 0 ? "var(--c-err)" : "var(--c-ink-3)",
+                border: "1px solid var(--c-line)",
+              }}
+            >
+              {o.count}
+            </span>
+          )}
+        </button>
       ))}
     </div>
   );
 }
 
-function TabSchema({ event }: { event: EventDef }) {
-  const { t } = useApp();
-
-  const sampleFor = (key: string, type: string) => {
-    if (key.includes("_id")) return '"req_2041"';
-    if (key.includes("_url")) return '"s3://ao-events/resumes/8821.pdf"';
-    if (key === "confidence_rating" || key === "matching_score") return "0.83";
-    if (key === "complexity_score") return "0.74";
-    if (key === "extracted_skills") return '["Java","Spring Cloud","Kafka","MySQL"]';
-    if (key === "analysis_duration_ms") return "1820";
-    if (type === "Boolean") return "true";
-    if (type === "Integer") return "42";
-    if (type === "Float") return "0.92";
-    if (type.startsWith("List")) return '["…"]';
-    if (type === "Array") return "[]";
-    if (type === "Object") return "{}";
-    if (type === "Enum") return '"HIGH"';
-    if (type === "Date") return '"2025-02-10"';
-    return '"…"';
-  };
-  const jsonType = (tp: string) => {
-    if (tp === "Integer" || tp === "Float") return "number";
-    if (tp === "Boolean") return "boolean";
-    if (tp === "Array" || tp.startsWith("List")) return "array";
-    if (tp === "Object") return "object";
-    return "string";
-  };
+function DlqView({
+  dlq,
+  page,
+  pageSize,
+  onPageChange,
+  t,
+}: {
+  dlq: DlqState;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  t: (k: string) => string;
+}) {
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const selected = dlq.rows.find((r) => r.id === selectedId) ?? null;
 
   return (
-    <div className="grid items-start gap-4.5" style={{ padding: 22, gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-      <div>
-        <DetailCard title="event_data · payload fields" count={event.data.length}>
-          <div className="grid" style={{ gridTemplateColumns: "1fr auto" }}>
-            <div
-              className="mono text-[10.5px] text-ink-4 tracking-[0.04em] uppercase border-b border-line"
-              style={{ padding: "4px 6px" }}
-            >
-              field
-            </div>
-            <div
-              className="mono text-[10.5px] text-ink-4 tracking-[0.04em] uppercase border-b border-line text-right"
-              style={{ padding: "4px 6px" }}
-            >
-              type
-            </div>
-            {event.data.map(([k, tp], i) => (
-              <React.Fragment key={i}>
-                <div
-                  className="mono text-[11.5px]"
-                  style={{
-                    padding: "8px 6px",
-                    borderBottom: i === event.data.length - 1 ? 0 : "1px dashed var(--c-line)",
-                  }}
-                >
-                  {k}
-                </div>
-                <div
-                  className="text-right"
-                  style={{
-                    padding: "8px 6px",
-                    borderBottom: i === event.data.length - 1 ? 0 : "1px dashed var(--c-line)",
-                  }}
-                >
-                  <span
-                    className="mono text-[10.5px]"
-                    style={{
-                      color: "var(--c-info)",
-                      background: "var(--c-info-bg)",
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                      border: "1px solid color-mix(in oklab, var(--c-info) 20%, transparent)",
-                    }}
-                  >
-                    {tp}
-                  </span>
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
-        </DetailCard>
-
-        <div style={{ height: 14 }} />
-
-        <DetailCard title={t("em_mutations") + " · state_mutations"} count={event.mutations.length}>
-          {event.mutations.length === 0 && <div className="text-ink-3 text-[12.5px] p-1.5">无状态变更 · pure signal event</div>}
-          {event.mutations.map((m, i) => (
-            <div
-              key={i}
-              className="rounded-sm mb-1.5 bg-panel border border-line flex items-center gap-2"
-              style={{ padding: "8px 10px" }}
-            >
-              <Ic.db />
-              <span className="mono text-[12px] font-semibold">{m}</span>
-              <Badge variant="info" className="ml-auto">CREATE_OR_MODIFY</Badge>
-            </div>
-          ))}
-        </DetailCard>
-      </div>
-
-      <div>
-        <DetailCard title="Sample payload · JSON">
-          <pre
-            className="m-0 mono text-[11px] rounded-md overflow-auto"
-            style={{
-              padding: 14,
-              background: "oklch(0.22 0.01 260)",
-              color: "oklch(0.92 0.01 260)",
-              border: "1px solid oklch(0.28 0.01 260)",
-              lineHeight: 1.55,
-            }}
-          >
-{`{
-  "name": "${event.name}",
-  "ts":   "2025-01-14T14:06:04.812Z",
-  "id":   "evt_01HQ9K7MZE3XFN2P8T5RA6WQ0V",
-  "data": {
-${event.data.map(([k, tp]) => `    "${k}": ${sampleFor(k, tp)}`).join(",\n")}
-  },
-  "user": { "hsm_id": "u_482", "tenant": "icbc" },
-  "meta": {
-    "source":  "${event.publishers[0] || "system"}",
-    "trace_id":"tr_7b3c29e1d2",
-    "schema":  "v2"
-  }
-}`}
-          </pre>
-        </DetailCard>
-
-        <div style={{ height: 14 }} />
-
-        <DetailCard title="JSON Schema · validation">
-          <pre
-            className="m-0 mono text-[10.5px] rounded-md overflow-auto bg-panel text-ink-2"
-            style={{
-              padding: 14,
-              border: "1px solid var(--c-line)",
-              lineHeight: 1.5,
-            }}
-          >
-{`{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title":   "${event.name}",
-  "type":    "object",
-  "required":[${event.data.slice(0, 2).map(([k]) => `"${k}"`).join(",")}],
-  "properties": {
-${event.data.map(([k, tp]) => `    "${k}": { "type": "${jsonType(tp)}" }`).join(",\n")}
-  },
-  "additionalProperties": false
-}`}
-          </pre>
-        </DetailCard>
-      </div>
-    </div>
-  );
-}
-
-function TabSubscribers({ event }: { event: EventDef }) {
-  const allSubs = event.subscribers.map((s, i) => ({
-    fn: s,
-    match: "event.name == '" + event.name + "'" + (i === 0 ? "" : " && event.data.is_urgent == true"),
-    concurrency: [25, 12, 8, 4, 2][i] ?? 2,
-    runs24h: Math.max(0, event.rate - i * Math.round(event.rate * 0.15)),
-    success: 98.2 + (i % 3) * 0.4,
-    p95: 120 + i * 80,
-    status: i === 0 ? "active" : i === 1 ? "active" : i === 2 ? "active" : "paused",
-  }));
-  return (
-    <div style={{ padding: 22 }}>
-      <DetailCard title={"Inngest functions · 订阅 " + event.name} count={allSubs.length}>
-        <div>
+    <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(380px, 520px)" }}>
+      <div className="border-r border-line flex flex-col min-h-0">
+        <div className="flex-1 overflow-auto min-h-0">
           <div
-            className="grid items-center text-[10.5px] text-ink-4 tracking-[0.06em] uppercase font-semibold border-b border-line"
-            style={{
-              gridTemplateColumns: "1.4fr 1.6fr repeat(4, 0.8fr)",
-              padding: "6px 8px",
-            }}
+            className="grid gap-4 text-ink-4 uppercase tracking-[0.1em] font-medium border-b border-line sticky top-0 bg-bg z-10"
+            style={{ gridTemplateColumns: "130px minmax(0, 1.2fr) 130px minmax(0, 1fr)", padding: "10px 24px", fontSize: 10.5 }}
           >
-            <div>function</div><div>match · if</div>
-            <div className="text-right">conc.</div>
-            <div className="text-right">runs 24h</div>
-            <div className="text-right">success</div>
-            <div className="text-right">P95</div>
+            <span>{t("evx_col_time")}</span>
+            <span>{t("evx_col_event_name")}</span>
+            <span>{t("evx_col_reject_type")}</span>
+            <span>{t("evx_col_reason")}</span>
           </div>
-          {allSubs.map((s, i) => (
-            <div
-              key={i}
-              className="grid items-center tabular-nums text-[12px]"
+          {dlq.loading && dlq.rows.length === 0 && (
+            <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>{t("evx_loading")}</div>
+          )}
+          {!dlq.loading && dlq.rows.length === 0 && (
+            <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
+              {dlq.error ? `${t("evx_load_failed")}: ${dlq.error}` : t("evx_dlq_empty")}
+              {dlq.error && (
+                <div className="mt-3"><button className="text-accent hover:underline" onClick={() => void dlq.refresh()}>{t("evx_retry")}</button></div>
+              )}
+            </div>
+          )}
+          {dlq.rows.map((r) => {
+          const isSelected = r.id === selectedId;
+          return (
+            <button
+              key={r.id}
+              onClick={() => setSelectedId(r.id)}
+              className="w-full grid items-center gap-4 border-b border-line transition-colors text-left"
               style={{
-                gridTemplateColumns: "1.4fr 1.6fr repeat(4, 0.8fr)",
-                padding: "10px 8px",
-                borderBottom: i === allSubs.length - 1 ? 0 : "1px dashed var(--c-line)",
+                padding: "11px 24px",
+                gridTemplateColumns: "130px minmax(0, 1.2fr) 130px minmax(0, 1fr)",
+                background: isSelected ? "var(--c-panel)" : "transparent",
+                cursor: "pointer",
               }}
             >
-              <div className="flex items-center gap-2">
-                <StatusDot kind={s.status === "active" ? "ok" : "paused"} />
-                <span className="mono text-[11.5px] font-semibold">{s.fn}</span>
-                {s.status === "paused" && <Badge>paused</Badge>}
-              </div>
-              <div className="mono text-[10.5px] text-ink-3 overflow-hidden text-ellipsis whitespace-nowrap">{s.match}</div>
-              <div className="mono text-right text-[11px]">{s.concurrency}</div>
-              <div className="mono text-right text-[11px]">{s.runs24h.toLocaleString()}</div>
-              <div
-                className="mono text-right text-[11px]"
-                style={{ color: s.success >= 99 ? "var(--c-ok)" : "var(--c-ink-1)" }}
-              >
-                {s.success.toFixed(1)}%
-              </div>
-              <div className="mono text-right text-[11px]">{s.p95}ms</div>
-            </div>
-          ))}
-        </div>
-      </DetailCard>
-    </div>
-  );
-}
-
-function TabRuns({ event }: { event: EventDef }) {
-  const runs = [
-    { id: "run_01HQ…7MZE", fn: event.subscribers[0], state: "completed", took: "1.82s", started: "14:06:04", steps: 7, attempts: 1 },
-    { id: "run_01HQ…7MZF", fn: event.subscribers[0], state: "completed", took: "2.14s", started: "14:06:02", steps: 7, attempts: 1 },
-    { id: "run_01HQ…7MZG", fn: event.subscribers[1] || event.subscribers[0], state: "running", took: "0:01:04", started: "14:06:01", steps: 4, attempts: 1 },
-    { id: "run_01HQ…7MZH", fn: event.subscribers[0], state: "failed", took: "0.92s", started: "14:05:58", steps: 3, attempts: 2, error: "TOOL_TIMEOUT · llm.extract" },
-    { id: "run_01HQ…7MZJ", fn: event.subscribers[0], state: "completed", took: "1.68s", started: "14:05:52", steps: 7, attempts: 1 },
-    { id: "run_01HQ…7MZK", fn: event.subscribers[0], state: "waiting", took: "—", started: "14:05:44", steps: 2, attempts: 1, waitOn: "CLARIFICATION_RETRY" },
-  ] as { id: string; fn: string; state: string; took: string; started: string; steps: number; attempts: number; error?: string; waitOn?: string }[];
-
-  const stateDot: Record<string, string> = {
-    completed: "var(--c-ok)",
-    running: "var(--c-info)",
-    failed: "var(--c-err)",
-    waiting: "oklch(0.5 0.14 75)",
-    paused: "var(--c-ink-3)",
-  };
-
-  return (
-    <div style={{ padding: 22 }}>
-      <DetailCard title="Function runs · 最近 10 分钟" count={runs.length}>
-        <div>
-          <div
-            className="grid items-center text-[10.5px] text-ink-4 tracking-[0.06em] uppercase font-semibold border-b border-line"
-            style={{
-              gridTemplateColumns: "1.4fr 1.4fr 0.8fr 0.8fr 0.8fr 0.6fr 1.4fr",
-              padding: "6px 8px",
-            }}
-          >
-            <div>run</div><div>function</div><div>state</div>
-            <div className="text-right">took</div>
-            <div className="text-right">started</div>
-            <div className="text-right">steps</div>
-            <div>detail</div>
-          </div>
-          {runs.map((r, i) => (
-            <div
-              key={i}
-              className="grid items-center tabular-nums text-[11.5px]"
-              style={{
-                gridTemplateColumns: "1.4fr 1.4fr 0.8fr 0.8fr 0.8fr 0.6fr 1.4fr",
-                padding: "10px 8px",
-                borderBottom: i === runs.length - 1 ? 0 : "1px dashed var(--c-line)",
-              }}
-            >
-              <div className="mono text-[10.5px] text-ink-3">{r.id}</div>
-              <div className="mono text-[11px] font-medium">{r.fn}</div>
-              <div className="flex items-center gap-1.5">
-                <span
-                  className="w-[7px] h-[7px] rounded-full"
-                  style={{
-                    background: stateDot[r.state],
-                    boxShadow: `0 0 0 3px color-mix(in oklab, ${stateDot[r.state]} 18%, transparent)`,
-                  }}
-                />
-                <span className="mono text-[10.5px]">{r.state}</span>
-                {r.attempts > 1 && <span className="mono text-[10px] text-[color:var(--c-err)]">×{r.attempts}</span>}
-              </div>
-              <div className="mono text-right">{r.took}</div>
-              <div className="mono text-right text-ink-3">{r.started}</div>
-              <div className="mono text-right">{r.steps}</div>
-              <div
-                className="mono text-[10.5px] overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ color: r.error ? "var(--c-err)" : "var(--c-ink-3)" }}
-              >
-                {r.error || (r.waitOn ? `⏸ wait for ${r.waitOn}` : "—")}
-              </div>
-            </div>
-          ))}
-        </div>
-      </DetailCard>
-    </div>
-  );
-}
-
-function TabHistory({ event }: { event: EventDef }) {
-  const { t } = useApp();
-  const bars = Array.from({ length: 24 }, (_, i) => {
-    const base = event.rate / 24;
-    const noise = Math.sin(i * 0.8) * 0.45 + Math.cos(i * 1.3) * 0.25;
-    return Math.max(0, Math.round(base * (1 + noise)));
-  });
-  const errBars = bars.map((v) => Math.round(v * 0.004 * (event.err / Math.max(1, event.rate / 1000))));
-  const maxV = Math.max(...bars, 1);
-  return (
-    <div style={{ padding: 22 }}>
-      <DetailCard title="过去 24 小时 · 事件速率" count={event.rate}>
-        <div className="flex items-end gap-[3px] h-[140px]" style={{ padding: "6px 2px" }}>
-          {bars.map((v, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
-              <div
-                className="w-full rounded-t-[3px] relative"
-                style={{
-                  height: `${(v / maxV) * 110}px`,
-                  background: "color-mix(in oklab, var(--c-accent) 65%, transparent)",
-                }}
-              >
-                {errBars[i] > 0 && (
-                  <div
-                    className="absolute bottom-0 left-0 right-0 rounded-t-[3px] bg-[color:var(--c-err)]"
-                    style={{ height: `${Math.min(100, (errBars[i] / v) * 100)}%` }}
-                  />
-                )}
-              </div>
-              <span className="mono text-[8.5px] text-ink-4">{i}</span>
-            </div>
-          ))}
-        </div>
-      </DetailCard>
-
-      <div style={{ height: 14 }} />
-
-      <DetailCard title={t("em_versions") + " · schema evolution"}>
-        <div>
-          {[
-            { ver: "v2", date: "2025-01-08", by: "HSM·treasury", note: "add `confidence_rating` · breaking" },
-            { ver: "v1.4", date: "2024-11-22", by: "AI·schema-bot", note: "rename: `match_score`→`confidence_rating`" },
-            { ver: "v1.3", date: "2024-10-05", by: "HSM·ops", note: "add `analysis_duration_ms`" },
-            { ver: "v1.0", date: "2024-07-01", by: "初版", note: "initial" },
-          ].map((v, i) => (
-            <div
-              key={i}
-              className="grid text-[12px]"
-              style={{
-                gridTemplateColumns: "60px 100px 140px 1fr",
-                gap: 10,
-                padding: "8px 6px",
-                borderBottom: i === 3 ? 0 : "1px dashed var(--c-line)",
-              }}
-            >
-              <span
-                className="mono text-[11px] font-semibold"
-                style={{ color: i === 0 ? "var(--c-accent)" : "var(--c-ink-3)" }}
-              >
-                {v.ver}
+              <span className="text-ink-3 tabular-nums" style={{ fontSize: 11.5 }}>
+                {fmtTime(r.ts)}
               </span>
-              <span className="mono text-[10.5px] text-ink-4">{v.date}</span>
-              <span className="text-[11.5px]">{v.by}</span>
-              <span className="mono text-[10.5px] text-ink-3">{v.note}</span>
-            </div>
-          ))}
-        </div>
-      </DetailCard>
-    </div>
-  );
-}
-
-function TabLogs({ event }: { event: EventDef }) {
-  const logs = [
-    { t: "14:06:04.812", lv: "info", msg: `event.published ${event.name} · payload=1.4kb` },
-    { t: "14:06:04.814", lv: "info", msg: `→ dispatch to ${event.subscribers[0]} (conc 3/25)` },
-    { t: "14:06:04.816", lv: "info", msg: `→ persisted · S3 key ao-events/2025-01-14/${event.name.toLowerCase()}/01HQ7MZE` },
-    { t: "14:06:04.892", lv: "info", msg: `${event.subscribers[0]} step.run resolved in 68ms` },
-    { t: "14:06:04.910", lv: "warn", msg: `replay triggered for run_01HQ…7MZH · attempt 2` },
-    { t: "14:06:05.124", lv: "info", msg: `schema validated ok · v2` },
-    { t: "14:06:05.288", lv: "error", msg: `llm.extract timeout 30s · run_01HQ…7MZH FAILED` },
-    { t: "14:06:05.290", lv: "info", msg: `deadletter · 1 run → dlq.${event.name.toLowerCase()}` },
-    { t: "14:06:05.431", lv: "info", msg: `consumer lag = 0ms · P95 = 84ms` },
-    { t: "14:06:05.612", lv: "debug", msg: `event.data.job_requisition_id=JD-2041 tenant=icbc` },
-    { t: "14:06:05.842", lv: "info", msg: `audit trail committed · user=u_482 · tenant=icbc` },
-  ];
-  const lvCol: Record<string, string> = {
-    info: "var(--c-ink-2)",
-    warn: "oklch(0.5 0.14 75)",
-    error: "var(--c-err)",
-    debug: "var(--c-ink-4)",
-  };
-  return (
-    <div style={{ padding: 22 }}>
-      <DetailCard title="Runtime logs · structured · tail">
-        <div
-          className="mono text-[11px] rounded-md overflow-auto max-h-[360px]"
-          style={{
-            background: "oklch(0.22 0.01 260)",
-            border: "1px solid oklch(0.28 0.01 260)",
-            padding: "10px 12px",
-            lineHeight: 1.55,
-            color: "oklch(0.85 0.01 260)",
-          }}
-        >
-          {logs.map((l, i) => (
-            <div key={i} className="flex gap-2.5">
-              <span style={{ color: "oklch(0.6 0.02 260)" }}>{l.t}</span>
-              <span
-                className="uppercase"
-                style={{ width: 44, color: lvCol[l.lv], fontSize: 10 }}
-              >
-                {l.lv}
+              <span className="text-ink-1 truncate" style={{ fontSize: 13, fontWeight: 500 }}>
+                {r.name}
               </span>
-              <span>{l.msg}</span>
-            </div>
-          ))}
+              <span>
+                <RejectionBadge status={r.status} type={r.rejectionType} t={t} />
+              </span>
+              <span className="text-ink-3 truncate" style={{ fontSize: 12 }}>
+                {r.rejectionReason ?? "—"}
+              </span>
+            </button>
+          );
+          })}
         </div>
-      </DetailCard>
-    </div>
-  );
-}
-
-function EventLiveStream() {
-  const { t } = useApp();
-  const [paused, setPaused] = React.useState(false);
-  const [items, setItems] = React.useState<StreamItem[]>(() => seedStream());
-
-  React.useEffect(() => {
-    if (paused) return;
-    const id = setInterval(() => {
-      setItems((prev) => [randomEvent(), ...prev].slice(0, 20));
-    }, 1400);
-    return () => clearInterval(id);
-  }, [paused]);
-
-  return (
-    <aside className="border-l border-line bg-surface flex flex-col min-h-0">
-      <div className="border-b border-line flex items-center gap-2" style={{ padding: "12px 14px" }}>
-        <div className="text-[13px] font-semibold flex-1">{t("em_stream")}</div>
-        <Badge variant="info" dot>{paused ? "paused" : "live"}</Badge>
-        <Btn size="sm" variant="ghost" style={{ padding: "0 6px" }} onClick={() => setPaused((p) => !p)}>
-          {paused ? <Ic.play /> : <Ic.pause />}
-        </Btn>
-      </div>
-      <div className="border-b border-line flex gap-1.5" style={{ padding: "8px 10px" }}>
-        <input
-          placeholder="filter: name, job_id…"
-          className="flex-1 h-6 border border-line bg-panel rounded-sm mono text-[10.5px] text-ink-1 outline-none"
-          style={{ padding: "0 8px" }}
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          rowCount={dlq.rows.length}
+          total={dlq.total}
+          totalPages={dlq.totalPages}
+          loading={dlq.loading}
+          onPageChange={onPageChange}
         />
-        <Btn size="sm" variant="ghost" style={{ padding: "0 6px" }} title="filter"><Ic.grid /></Btn>
       </div>
-      <div className="flex-1 overflow-auto min-h-0">
-        {items.map((e, i) => (
-          <StreamRow key={e.id} e={e} isNew={i === 0 && !paused} />
-        ))}
+      <div className="overflow-auto">
+        {selected ? (
+          <DlqDetailViewer row={selected} onClose={() => setSelectedId(null)} t={t} />
+        ) : (
+          <div className="text-ink-3 text-center py-16" style={{ fontSize: 13 }}>
+            {t("evx_pick_rejected_for_detail")}
+          </div>
+        )}
       </div>
-      <div className="border-t border-line flex items-center text-[11px] text-ink-4" style={{ padding: "10px 14px" }}>
-        <span className="mono">{items.length} shown · 4,827/min</span>
-        <div className="flex-1" />
-        <Btn size="sm" variant="ghost" style={{ padding: "0 6px" }}>{t("em_replay")}</Btn>
-      </div>
-    </aside>
+    </div>
   );
 }
 
-type StreamItem = {
-  id: string;
-  name: string;
-  isErr: boolean;
-  t: string;
-  job: string;
-  tenant: string;
-  sub: string;
-};
+function RejectionBadge({ status, type, t }: { status: string; type: string | null; t: (k: string) => string }) {
+  const label =
+    status === "rejected_schema"  ? t("evx_rej_schema") :
+    status === "rejected_filter"  ? t("evx_rej_filter") :
+    status === "duplicate"        ? t("evx_rej_duplicate") :
+    status === "meta_rejection"   ? t("evx_rej_meta") :
+    status === "em_degraded"      ? t("evx_rej_em_degraded") :
+    status;
+  const color =
+    status === "duplicate"   ? "var(--c-ink-3)" :
+    status === "em_degraded" ? "oklch(0.5 0.14 75)" :
+    "var(--c-err)";
+  const bg =
+    status === "duplicate"   ? "var(--c-panel)" :
+    status === "em_degraded" ? "var(--c-warn-bg)" :
+    "var(--c-err-bg)";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded"
+      style={{
+        padding: "2px 7px",
+        fontSize: 11,
+        color,
+        background: bg,
+        border: "1px solid " + (status === "duplicate" ? "var(--c-line)" : `color-mix(in oklab, ${color} 25%, transparent)`),
+      }}
+      title={type ?? undefined}
+    >
+      {label}
+    </span>
+  );
+}
 
-function StreamRow({ e, isNew }: { e: StreamItem; isNew: boolean }) {
-  const [fresh, setFresh] = React.useState(isNew);
-  React.useEffect(() => {
-    if (!fresh) return;
-    const id = setTimeout(() => setFresh(false), 900);
-    return () => clearTimeout(id);
-  }, [fresh]);
-  const ev = EVENT_CATALOG.find((x) => x.name === e.name);
-  const dot = kindDot(ev?.kind || "domain");
+function DlqDetailViewer({ row, onClose, t }: { row: DlqRow; onClose: () => void; t: (k: string) => string }) {
+  return (
+    <div style={{ padding: "20px 24px" }}>
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="flex items-baseline gap-3 flex-wrap min-w-0">
+          <h2 className="m-0 text-ink-1 break-all" style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: "-0.01em" }}>
+            {row.name}
+          </h2>
+          <RejectionBadge status={row.status} type={row.rejectionType} t={t} />
+        </div>
+        <button onClick={onClose} className="text-ink-3 hover:text-ink-1" style={{ fontSize: 13 }}>×</button>
+      </div>
+
+      <div className="mt-3 grid gap-y-1.5" style={{ gridTemplateColumns: "auto 1fr", columnGap: 16, fontSize: 12 }}>
+        <span className="text-ink-3">{t("evx_instance_id")}</span>
+        <code className="text-ink-2 tabular-nums break-all" style={{ fontFamily: "var(--f-mono)", fontSize: 11.5 }}>{row.id}</code>
+        {row.externalEventId && (
+          <>
+            <span className="text-ink-3">External ID</span>
+            <code className="text-ink-2 tabular-nums break-all" style={{ fontFamily: "var(--f-mono)", fontSize: 11.5 }}>{row.externalEventId}</code>
+          </>
+        )}
+        <span className="text-ink-3">{t("evx_source")}</span>
+        <span className="text-ink-2" style={{ fontSize: 12 }}>{row.source || "—"}</span>
+        <span className="text-ink-3">{t("evx_reject_time")}</span>
+        <span className="text-ink-2 tabular-nums" style={{ fontSize: 12 }}>{fmtTimeFull(row.ts)}</span>
+        {row.schemaVersionUsed && (
+          <>
+            <span className="text-ink-3">{t("evx_tried_schema_version")}</span>
+            <span className="text-ink-2 tabular-nums" style={{ fontSize: 12 }}>
+              {row.schemaVersionUsed}
+              {row.triedVersions && row.triedVersions.length > 1 && (
+                <span className="text-ink-4 ml-2">({t("evx_tried_count_pre")}{row.triedVersions.length}{t("evx_tried_count_mid")}{row.triedVersions.join(", ")})</span>
+              )}
+            </span>
+          </>
+        )}
+      </div>
+
+      {row.rejectionReason && (
+        <div className="mt-5">
+          <div className="text-ink-3 mb-2" style={{ fontSize: 12 }}>{t("evx_reject_reason")}</div>
+          <pre
+            className="text-ink-1 whitespace-pre-wrap break-words"
+            style={{
+              fontFamily: "var(--f-mono)", fontSize: 11.5,
+              margin: 0, padding: "10px 12px",
+              background: "var(--c-surface)",
+              border: "1px solid color-mix(in oklab, var(--c-err) 18%, var(--c-line))",
+              borderRadius: 6,
+              maxHeight: 200, overflow: "auto", lineHeight: 1.55,
+            }}
+          >
+            {row.rejectionReason}
+          </pre>
+        </div>
+      )}
+
+      {row.schemaErrors != null && (
+        <div className="mt-5">
+          <div className="text-ink-3 mb-2" style={{ fontSize: 12 }}>{t("evx_schema_errors")}</div>
+          <pre
+            className="text-ink-1 whitespace-pre-wrap break-words"
+            style={{
+              fontFamily: "var(--f-mono)", fontSize: 11,
+              margin: 0, padding: "10px 12px",
+              background: "var(--c-surface)",
+              border: "1px solid var(--c-line)",
+              borderRadius: 6,
+              maxHeight: 280, overflow: "auto", lineHeight: 1.55,
+            }}
+          >
+            {safeJsonStringify(row.schemaErrors)}
+          </pre>
+        </div>
+      )}
+
+      {row.payloadSummary && (
+        <div className="mt-5">
+          <div className="text-ink-3 mb-2" style={{ fontSize: 12 }}>{t("evx_payload_summary")}</div>
+          <pre
+            className="text-ink-1 whitespace-pre-wrap break-words"
+            style={{
+              fontFamily: "var(--f-mono)", fontSize: 11,
+              margin: 0, padding: "10px 12px",
+              background: "var(--c-surface)",
+              border: "1px solid var(--c-line)",
+              borderRadius: 6,
+              maxHeight: 280, overflow: "auto", lineHeight: 1.55,
+            }}
+          >
+            {row.payloadSummary}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Registration filter (disabled for now per user request 2026-05-19) ──
+
+function RegistrationFilter({
+  value, disabled, t,
+}: {
+  value: "all" | "registered" | "unregistered";
+  disabled?: boolean;
+  t: (k: string) => string;
+}) {
+  const opts: { id: "all" | "registered" | "unregistered"; label: string }[] = [
+    { id: "all", label: t("evx_reg_all") },
+    { id: "registered", label: t("evx_reg_registered") },
+    { id: "unregistered", label: t("evx_reg_unregistered") },
+  ];
   return (
     <div
-      className="flex items-start gap-2 border-b border-line transition-colors"
-      style={{
-        padding: "8px 12px",
-        background: fresh ? "color-mix(in oklab, var(--c-accent) 10%, transparent)" : "transparent",
-      }}
+      className="flex items-center gap-1"
+      title={disabled ? t("evx_in_development") : ""}
+      style={{ opacity: disabled ? 0.45 : 1 }}
     >
-      <span
-        className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5"
-        style={{
-          background: dot,
-          boxShadow: `0 0 0 3px color-mix(in oklab, ${dot} 18%, transparent)`,
-        }}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 mb-0.5">
-          <span className="mono text-[10px] text-ink-4">{e.t}</span>
-          <span
-            className="mono text-[11px] font-semibold"
-            style={{ color: e.isErr ? "var(--c-err)" : "var(--c-ink-1)" }}
-          >
-            {e.name}
-          </span>
-        </div>
-        <div className="mono text-[10px] text-ink-4 overflow-hidden text-ellipsis whitespace-nowrap">
-          job={e.job} · tenant={e.tenant} · {e.sub}
-        </div>
-      </div>
+      <span className="text-ink-3" style={{ fontSize: 11.5 }}>{t("evx_col_registration")}</span>
+      {opts.map((o) => (
+        <button
+          key={o.id}
+          disabled={disabled}
+          className="transition-colors rounded"
+          style={{
+            padding: "3px 9px",
+            color: value === o.id ? "var(--c-ink-1)" : "var(--c-ink-3)",
+            background: value === o.id ? "var(--c-panel)" : "transparent",
+            fontWeight: value === o.id ? 500 : 400,
+            fontSize: 12.5,
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
-}
-
-function seedStream(): StreamItem[] {
-  const now = new Date();
-  const out: StreamItem[] = [];
-  for (let i = 0; i < 16; i++) {
-    const d = new Date(now.getTime() - i * 4200);
-    out.push(randomEvent(d));
-  }
-  return out;
-}
-
-let _ctr = 1000;
-function randomEvent(dateOverride?: Date): StreamItem {
-  const d = dateOverride || new Date();
-  const pool = EVENT_CATALOG.filter((e) => e.rate > 20);
-  const ev = pool[Math.floor(Math.random() * pool.length)];
-  const tenants = ["icbc", "ping-an", "weipinhui", "bytedance", "didi", "alibaba"];
-  const jobs = ["JD-2041", "JD-2039", "JD-2037", "JD-2033", "JD-2029", "JD-2024"];
-  _ctr += 1;
-  return {
-    id: "evt_" + _ctr,
-    name: ev.name,
-    isErr: ev.kind === "error" || ev.kind === "gate",
-    t: d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0"),
-    job: jobs[Math.floor(Math.random() * jobs.length)],
-    tenant: tenants[Math.floor(Math.random() * tenants.length)],
-    sub: ev.subscribers[0],
-  };
 }

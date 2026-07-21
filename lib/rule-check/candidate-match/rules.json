@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "project_name": "候选人归属规则 (Candidate Ownership Rules)",
+    "version": "0.1.0",
+    "last_updated": "2026-06-09",
+    "source": "snapshot",
+    "note": "P0: 规则以数据形式落在本体,不再硬编码在代码里。身份规则——比哪些字段、优先级、客户范围、是否需人工复核——完全数据驱动;归属规则的【启用与否】和【客户范围 applicableClient】也数据驱动(删掉某条即停用),但锁定状态阈值(黑名单>保护>锁定>空闲)与「客户关系优先于普通锁定」的先后次序是确定性业务逻辑,落在 ownership-engine.ts。字段的语义等价(如 清华 vs 清华大学、本科 vs Bachelor)由 AI 判断,见 ai-equivalence.ts;精确字段(手机号/邮箱/性别/毕业年)只做确定性比对。"
+  },
+  "identityRules": [
+    {
+      "id": "IDENTITY-1",
+      "businessLogicRuleName": "手机号一致",
+      "priority": 1,
+      "applicableClient": "通用",
+      "matchFields": ["phone"],
+      "fuzzyFields": [],
+      "needsHumanReview": false,
+      "standardizedLogicRule": "只要手机号相同,直接判定为同一人。",
+      "enforcementLevel": "mandatory"
+    },
+    {
+      "id": "IDENTITY-2",
+      "businessLogicRuleName": "姓名 + 邮箱一致",
+      "priority": 2,
+      "applicableClient": "通用",
+      "matchFields": ["name", "email"],
+      "fuzzyFields": ["name"],
+      "needsHumanReview": false,
+      "standardizedLogicRule": "手机号未命中时,姓名和邮箱同时相同则判定为同一人。",
+      "enforcementLevel": "mandatory"
+    },
+    {
+      "id": "IDENTITY-3",
+      "businessLogicRuleName": "姓名 + 性别 + 学校 + 专业 + 学历 + 毕业时间一致",
+      "priority": 3,
+      "applicableClient": "通用",
+      "matchFields": ["name", "gender", "school", "major", "degree", "graduationYear"],
+      "fuzzyFields": ["name", "school", "major", "degree"],
+      "needsHumanReview": true,
+      "standardizedLogicRule": "前两条未命中时,这 6 个字段全部相同则判定为同一人。弱信号,需人工复核。",
+      "enforcementLevel": "mandatory"
+    }
+  ],
+  "ownershipRules": [
+    {
+      "id": "OWN-LOCK-1",
+      "businessLogicRuleName": "候选人锁定归属",
+      "applicableClient": "通用",
+      "standardizedLogicRule": "候选人被他人锁定(LOCKED 且锁定人 ≠ 认领人)或处于受保护/黑名单状态 → 归属冲突,不可认领;空闲(FREE)或本人已锁定 → 可认领。",
+      "enforcementLevel": "mandatory"
+    },
+    {
+      "id": "OWN-TENCENT-1",
+      "businessLogicRuleName": "腾讯客户关系归属保护",
+      "applicableClient": "腾讯",
+      "standardizedLogicRule": "腾讯客户:候选人已与腾讯建立客户关系时,归属保护优先于普通锁定规则,非原归属人不可认领(命中即归属冲突)。",
+      "enforcementLevel": "mandatory"
+    }
+  ]
+}

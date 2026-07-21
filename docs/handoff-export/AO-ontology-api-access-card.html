@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh" xml:lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>AO Neo4j 本体 API 接入卡</title>
+  <style>
+
+html {
+color: #1a1a1a;
+background-color: #fdfdfd;
+}
+body {
+margin: 0 auto;
+max-width: 36em;
+padding-left: 50px;
+padding-right: 50px;
+padding-top: 50px;
+padding-bottom: 50px;
+hyphens: auto;
+overflow-wrap: break-word;
+text-rendering: optimizeLegibility;
+font-kerning: normal;
+}
+@media (max-width: 600px) {
+body {
+font-size: 0.9em;
+padding: 12px;
+}
+h1 {
+font-size: 1.8em;
+}
+}
+@media print {
+html {
+background-color: white;
+}
+body {
+background-color: transparent;
+color: black;
+font-size: 12pt;
+}
+p, h2, h3 {
+orphans: 3;
+widows: 3;
+}
+h2, h3, h4 {
+page-break-after: avoid;
+}
+}
+p {
+margin: 1em 0;
+}
+a {
+color: #1a1a1a;
+}
+a:visited {
+color: #1a1a1a;
+}
+img {
+max-width: 100%;
+}
+svg {
+height: auto;
+max-width: 100%;
+}
+h1, h2, h3, h4, h5, h6 {
+margin-top: 1.4em;
+}
+h5, h6 {
+font-size: 1em;
+font-style: italic;
+}
+h6 {
+font-weight: normal;
+}
+ol, ul {
+padding-left: 1.7em;
+margin-top: 1em;
+}
+li > ol, li > ul {
+margin-top: 0;
+}
+blockquote {
+margin: 1em 0 1em 1.7em;
+padding-left: 1em;
+border-left: 2px solid #e6e6e6;
+color: #606060;
+}
+code {
+white-space: pre-wrap;
+font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+font-size: 85%;
+margin: 0;
+hyphens: manual;
+}
+pre {
+margin: 1em 0;
+overflow: auto;
+}
+pre code {
+padding: 0;
+overflow: visible;
+overflow-wrap: normal;
+}
+.sourceCode {
+background-color: transparent;
+overflow: visible;
+}
+hr {
+border: none;
+border-top: 1px solid #1a1a1a;
+height: 1px;
+margin: 1em 0;
+}
+table {
+margin: 1em 0;
+border-collapse: collapse;
+width: 100%;
+overflow-x: auto;
+display: block;
+font-variant-numeric: lining-nums tabular-nums;
+}
+table caption {
+margin-bottom: 0.75em;
+}
+tbody {
+margin-top: 0.5em;
+border-top: 1px solid #1a1a1a;
+border-bottom: 1px solid #1a1a1a;
+}
+th {
+border-top: 1px solid #1a1a1a;
+padding: 0.25em 0.5em 0.25em 0.5em;
+}
+td {
+padding: 0.125em 0.5em 0.25em 0.5em;
+}
+header {
+margin-bottom: 4em;
+text-align: center;
+}
+#TOC li {
+list-style: none;
+}
+#TOC ul {
+padding-left: 1.3em;
+}
+#TOC > ul {
+padding-left: 0;
+}
+#TOC a:not(:hover) {
+text-decoration: none;
+}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+  <style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body {
+font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Helvetica, Arial, sans-serif;
+font-size: 14.5px; line-height: 1.7; color: #1c1f24; max-width: 920px;
+margin: 0 auto; padding: 40px 44px 80px;
+}
+h1 { font-size: 1.85em; border-bottom: 3px solid #2b6cb0; padding-bottom: .35em; margin: .2em 0 .6em; }
+h2 { font-size: 1.35em; margin-top: 1.8em; border-bottom: 1px solid #e2e8f0; padding-bottom: .25em; }
+h3 { font-size: 1.1em; margin-top: 1.4em; color: #2c5282; }
+blockquote {
+margin: 1em 0; padding: .6em 1em; background: #f0f7ff;
+border-left: 4px solid #2b6cb0; color: #2a4365; border-radius: 4px;
+}
+blockquote p { margin: .3em 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: .92em; }
+th, td { border: 1px solid #cbd5e0; padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: #2b6cb0; color: #fff; font-weight: 600; }
+tr:nth-child(even) td { background: #f7fafc; }
+code {
+font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+font-size: .88em; background: #edf2f7; padding: 1.5px 5px; border-radius: 4px; color: #c0392b;
+}
+pre {
+background: #1a202c; color: #e2e8f0; padding: 14px 16px; border-radius: 7px;
+overflow-x: auto; font-size: .85em; line-height: 1.55;
+}
+pre code { background: none; color: inherit; padding: 0; }
+a { color: #2b6cb0; }
+strong { color: #1a202c; }
+hr { border: none; border-top: 1px solid #e2e8f0; margin: 2em 0; }
+ul, ol { padding-left: 1.6em; }
+li { margin: .25em 0; }
+@page { margin: 14mm 12mm; }
+@media print { body { padding: 0; max-width: none; } pre { white-space: pre-wrap; word-break: break-word; } }
+</style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">AO Neo4j 本体 API 接入卡</h1>
+</header>
+<h1 id="ao-neo4j-本体-api--接入卡给付卓新">AO Neo4j 本体 API —
+接入卡(给付卓新)</h1>
+<blockquote>
+<p>这是 AO 的 <strong>Neo4j 本体只读接口</strong>(Allmeta Ontology
+API,直接背靠 Neo4j)。 你用它做:① 覆盖率分母(域内规则全集)②
+核对规则原文/版本指纹 ③ 归因第 5 步核对候选人/岗位权威数据。 完整
+endpoint 手册见同目录:<a href="./action_object_prompt/ONTOLOGY-API-USER-GUIDE-BASED-ON-NEO4J.md">ONTOLOGY-API-USER-GUIDE-BASED-ON-NEO4J.md</a>(本卡只给你联调最常用的几条
++ 真实连接参数)。</p>
+</blockquote>
+<hr />
+<h2 id="1-连接参数">1. 连接参数</h2>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Base URL</strong></td>
+<td><code>http://192.168.1.111:3500</code>(2026-06-23 实测纠正:旧卡写的
+<code>.104</code> 已失效/不可达,现为 <code>.111</code>)</td>
+</tr>
+<tr>
+<td><strong>鉴权</strong></td>
+<td><code>Authorization: Bearer abc123</code> 或
+<code>x-api-key: abc123</code>(:3500 本体 API 的 token,<strong>与 :3002
+执行 API 的 <code>aek_live_...</code> 不是同一把</strong>)</td>
+</tr>
+<tr>
+<td><strong>域(domain)</strong></td>
+<td><code>招聘-v1</code>(请求都要带
+<code>?domain=招聘-v1</code>;<code>RAAS-v1</code> / <code>raas</code>
+是历史别名,以 <code>招聘-v1</code> 为准)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ domain 含中文,URL 里要 percent-encode(curl 用
+<code>--data-urlencode &quot;domain=招聘-v1&quot;</code>)。</p>
+</blockquote>
+<hr />
+<h2 id="2-你联调最常用的-4-条">2. 你联调最常用的 4 条</h2>
+<h3 id="①-域内规则全集--覆盖率分母的正确来源">① 域内规则全集 ——
+覆盖率分母的正确来源</h3>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-G</span> <span class="st">&quot;http://192.168.1.111:3500/api/v1/ontology/rules&quot;</span> <span class="dt">\</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-urlencode</span> <span class="st">&quot;domain=招聘-v1&quot;</span> <span class="at">--data-urlencode</span> <span class="st">&quot;limit=1000&quot;</span> <span class="dt">\</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOK</span><span class="st">&quot;</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># → { &quot;items&quot;: [ {id, businessLogicRuleName, standardizedLogicRule, executor, enforcementLevel, failurePolicy, applicableClient, applicableDepartment, ...}, ... ] }</span></span></code></pre></div>
+<ul>
+<li>这是<strong>不预过滤</strong>的全集(含 <code>executor=Human</code> /
+<code>optional</code>)。算 Agent 覆盖率分母时,按
+<code>executor=&#39;Agent&#39;</code> 且
+<code>enforcementLevel=&#39;mandatory&#39;</code> 自行筛一遍(这是 AO
+执行引擎的评估口径)。</li>
+<li>支持 <code>?cursor=</code> 翻页;<code>?limit</code> 默认 100、最大
+1000。</li>
+</ul>
+<h3 id="②-执行引擎同款规则面matchresume-的-action-规则按步骤分组">②
+执行引擎同款规则面(matchResume 的 Action 规则,按步骤分组)</h3>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-G</span> <span class="st">&quot;http://192.168.1.111:3500/api/v1/ontology/actions/ruleCheckForMatchResume/rules&quot;</span> <span class="dt">\</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-urlencode</span> <span class="st">&quot;domain=招聘-v1&quot;</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOK</span><span class="st">&quot;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="co"># → { id, name, action_steps:[{id, order, name, rules:[...]}], rules:[...扁平去重...], ruleCount }</span></span></code></pre></div>
+<p>这是执行 API 评估时实际拉取规则的同一接口,适合和执行 API 返回的
+<code>retrievedRuleIds</code> 对账。</p>
+<h3 id="③-单条规则原文核对-ruletextsnapshot">③ 单条规则原文(核对
+ruleTextSnapshot)</h3>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-G</span> <span class="st">&quot;http://192.168.1.111:3500/api/v1/ontology/rules/10-5&quot;</span> <span class="dt">\</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-urlencode</span> <span class="st">&quot;domain=招聘-v1&quot;</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOK</span><span class="st">&quot;</span></span></code></pre></div>
+<p><code>standardizedLogicRule</code> 就是执行 API
+<code>ruleEvaluations[].ruleTextSnapshot.sha256</code>
+取哈希的那段全文。</p>
+<h3 id="④-候选人岗位实例读取归因第-5-步核对权威数据">④
+候选人/岗位实例读取(归因第 5 步核对权威数据)</h3>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-G</span> <span class="st">&quot;http://192.168.1.111:3500/api/v1/ontology/instances/Candidate/C_5eacb369&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-urlencode</span> <span class="st">&quot;domain=招聘-v1&quot;</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOK</span><span class="st">&quot;</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-G</span> <span class="st">&quot;http://192.168.1.111:3500/api/v1/ontology/instances/Job_Requisition/mock_jr_v0_1_010_1778766302725&quot;</span> <span class="dt">\</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--data-urlencode</span> <span class="st">&quot;domain=招聘-v1&quot;</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOK</span><span class="st">&quot;</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 列表查询(如某候选人名下简历):/api/v1/ontology/instances/Resume?domain=招聘-v1&amp;candidate_id=C-...</span></span></code></pre></div>
+<p>Label 取值:<code>Candidate</code> / <code>Resume</code> /
+<code>Job_Requisition</code> / <code>Application</code> /
+<code>Blacklist</code>;链接查询走
+<code>/api/v1/ontology/links?domain=招聘-v1&amp;from=&lt;id&gt;&amp;type=EMPLOYED_BY</code>。</p>
+<hr />
+<h2 id="3-约定--错误">3. 约定 &amp; 错误</h2>
+<ul>
+<li>节点是 property-bag 语义:嵌套对象/数组以 JSON 字符串存储,读出后按需
+<code>JSON.parse</code>。做 schema 校验请用&quot;允许未知字段&quot;模式。</li>
+<li>错误形状:<code>{ &quot;error&quot;: &quot;&lt;code&gt;&quot;, &quot;message&quot;: &quot;...&quot; }</code>。常见:<code>401 unauthorized</code>(token
+缺/错)、<code>400 missing-domain</code>、<code>404 node-not-found</code>
+/
+<code>action-not-found</code>、<code>502 neo4j-unavailable</code>(Neo4j
+不可达)。</li>
+<li>字段全集/schema
+自描述:<code>GET /api/v1/ontology/schema/rules?domain=招聘-v1</code>。</li>
+</ul>
+<hr />
+<h2 id="4-与执行-api-的关系">4. 与执行 API 的关系</h2>
+<ul>
+<li><strong>执行
+API</strong>(<code>http://192.168.1.111:3002/api/agent-execution</code>,见《调用指南》):你发用例,AO
+用生产引擎跑、回结论+trace。<strong>AO 自己会用本 Neo4j API
+取数</strong>,你不必代取。</li>
+<li><strong>本 Neo4j
+API</strong>:给你<strong>旁路</strong>核对用——覆盖率分母、规则原文指纹、归因第
+5 步的数据核对。两者 domain 一致(<code>招聘-v1</code>)、规则 id
+一致(<code>10-5</code> 这种本体原始 id),可直接 join。</li>
+</ul>
+</body>
+</html>

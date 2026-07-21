@@ -1,0 +1,36 @@
+{
+  "id": "JD-104",
+  "title": "数据分析师 - 用户增长",
+  "company": "小红书",
+  "department": "Growth · Data Science",
+  "location": "上海市黄浦区马当路388号",
+  "salary": "25K-40K · 14薪",
+  "type": "全职",
+  "experience": "3-5年",
+  "education": "本科及以上",
+  "headcount": 2,
+  "urgency": "中",
+  "description": "通过数据洞察驱动用户增长策略,从拉新到留存的全链路数据建设,支持 PM/Marketing 做决策。",
+  "responsibilities": [
+    "构建用户行为分析体系 (留存、转化漏斗、AARRR 指标)",
+    "设计并跟踪 A/B 实验,产出实验报告与下一步行动建议",
+    "搭建增长仪表盘,支撑日常运营决策",
+    "深入业务场景做用户分层、生命周期分析"
+  ],
+  "requirements": [
+    "3 年以上互联网数据分析经验",
+    "SQL / Python (Pandas) 熟练,熟悉 Hive / Spark 优先",
+    "熟悉至少一种可视化工具 (Tableau / PowerBI / Superset)",
+    "有完整 A/B 实验闭环经验"
+  ],
+  "nice_to_have": [
+    "Causal Inference / 因果推断知识",
+    "有海外社区/UGC 平台经验"
+  ],
+  "benefits": [
+    "六险一金",
+    "弹性工作",
+    "免费午餐",
+    "图书津贴"
+  ]
+}

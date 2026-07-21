@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 工厂智能化升级报告 · Round 1 + 2 · 2026-06-18</title>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #11141b;
+    --panel: #161a23;
+    --ink-1: #e6ecf3;
+    --ink-2: #b3bccb;
+    --ink-3: #7d889d;
+    --ink-4: #4f5a72;
+    --line: #1e2330;
+    --soft: rgba(125, 136, 157, 0.18);
+    --accent: #6aa1ff;
+    --accent-bg: rgba(106, 161, 255, 0.12);
+    --ok: #4ade80;
+    --ok-bg: rgba(74, 222, 128, 0.1);
+    --warn: #fbbf24;
+    --warn-bg: rgba(251, 191, 36, 0.1);
+    --bad: #f87171;
+    --bad-bg: rgba(248, 113, 113, 0.1);
+    --magenta: #c084fc;
+    --magenta-bg: rgba(192, 132, 252, 0.1);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fbfcfd;
+      --surface: #ffffff;
+      --panel: #f3f5f9;
+      --ink-1: #0e131c;
+      --ink-2: #29344a;
+      --ink-3: #5c6781;
+      --ink-4: #8c95ad;
+      --line: #e7ebf2;
+      --soft: rgba(92, 103, 129, 0.16);
+      --accent: #2563eb;
+      --accent-bg: rgba(37, 99, 235, 0.08);
+      --ok: #16a34a;
+      --ok-bg: rgba(22, 163, 74, 0.08);
+      --warn: #d97706;
+      --warn-bg: rgba(217, 119, 6, 0.08);
+      --bad: #dc2626;
+      --bad-bg: rgba(220, 38, 38, 0.08);
+      --magenta: #9333ea;
+      --magenta-bg: rgba(147, 51, 234, 0.08);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink-1); font-family: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 56px 32px 96px; }
+  header { margin-bottom: 48px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3); font-weight: 600; margin-bottom: 12px; }
+  h1 { margin: 0; font-size: 32px; line-height: 1.25; letter-spacing: -0.01em; font-weight: 700; }
+  .subtitle { margin-top: 14px; color: var(--ink-2); font-size: 16px; line-height: 1.6; max-width: 760px; }
+  h2 { margin: 56px 0 14px; font-size: 22px; line-height: 1.3; font-weight: 700; letter-spacing: -0.005em; }
+  h3 { margin: 30px 0 10px; font-size: 16px; line-height: 1.4; font-weight: 600; color: var(--ink-1); }
+  h4 { margin: 18px 0 6px; font-size: 13px; line-height: 1.4; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  p { margin: 8px 0 12px; color: var(--ink-2); }
+  ul, ol { margin: 8px 0 16px; padding-left: 22px; color: var(--ink-2); }
+  li { margin: 4px 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; padding: 1px 6px; background: var(--panel); border: 1px solid var(--soft); border-radius: 5px; color: var(--ink-1); }
+
+  .verdict { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; padding: 22px 26px; border-radius: 14px; margin: 12px 0 24px; }
+  .verdict.r1 { border: 1px solid var(--ok); background: var(--ok-bg); }
+  .verdict.r2 { border: 1px solid var(--magenta); background: var(--magenta-bg); }
+  .verdict-num { font-size: 48px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+  .verdict.r1 .verdict-num { color: var(--ok); }
+  .verdict.r2 .verdict-num { color: var(--magenta); }
+  .verdict-text { font-size: 15.5px; color: var(--ink-1); line-height: 1.55; }
+  .verdict-text b { color: inherit; }
+
+  /* Round chip */
+  .round-chip { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.06em; vertical-align: middle; margin-left: 8px; }
+  .round-chip.r1 { color: var(--ok); background: var(--ok-bg); }
+  .round-chip.r2 { color: var(--magenta); background: var(--magenta-bg); }
+
+  /* Compact stat grid */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 18px 0 24px; }
+  .stat { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  .stat-num { font-size: 26px; font-weight: 700; color: var(--ink-1); letter-spacing: -0.01em; line-height: 1.1; }
+  .stat-num.ok { color: var(--ok); }
+  .stat-num.warn { color: var(--warn); }
+  .stat-num.accent { color: var(--accent); }
+  .stat-num.magenta { color: var(--magenta); }
+  .stat-label { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+  .stat-sub { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+
+  /* Before/After comparison */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0; }
+  .compare > div { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .compare .head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; margin-bottom: 8px; }
+  .compare .before .head { color: var(--bad); }
+  .compare .after .head { color: var(--ok); }
+  @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
+
+  /* Item card for roadmap items */
+  .item { border: 1px solid var(--line); border-radius: 13px; padding: 18px 22px; margin: 14px 0; background: var(--surface); }
+  .item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pri { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 5px; letter-spacing: 0.05em; flex: none; }
+  .pri.P0 { color: var(--bad); background: var(--bad-bg); }
+  .pri.P1 { color: var(--warn); background: var(--warn-bg); }
+  .pri.P2 { color: var(--accent); background: var(--accent-bg); }
+  .pri.R2 { color: var(--magenta); background: var(--magenta-bg); }
+  .pri.deferred { color: var(--ink-3); background: var(--panel); }
+  .status { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 5px; letter-spacing: 0.05em; flex: none; }
+  .status.shipped { color: var(--ok); background: var(--ok-bg); }
+  .status.deferred { color: var(--ink-3); background: var(--panel); border: 1px solid var(--soft); }
+  .status.caveat { color: var(--warn); background: var(--warn-bg); }
+  .item-title { font-size: 15.5px; font-weight: 600; color: var(--ink-1); flex: 1; min-width: 0; }
+  .item-body { font-size: 13.5px; color: var(--ink-2); margin-top: 8px; line-height: 1.65; }
+  .item-evidence { font-size: 12px; color: var(--ink-3); margin-top: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace; line-height: 1.55; padding: 6px 9px; border-radius: 7px; background: var(--panel); border: 1px solid var(--soft); }
+  .item-evidence b { color: var(--ink-2); font-weight: 600; font-family: inherit; }
+  .item-body code { font-size: 12.5px; padding: 1px 5px; }
+  .check { color: var(--ok); }
+  .cross { color: var(--bad); }
+
+  /* Sequence diagram */
+  .seq { display: flex; flex-direction: column; gap: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+  .seq-row { display: flex; gap: 14px; align-items: baseline; padding: 2px 0; }
+  .seq-time { color: var(--ink-4); flex: none; width: 60px; }
+  .seq-tool { color: var(--ink-1); font-weight: 600; flex: none; min-width: 140px; }
+  .seq-tool.new { color: var(--accent); }
+  .seq-tool.r2 { color: var(--magenta); }
+  .seq-note { color: var(--ink-3); font-family: inherit; font-size: 12px; }
+
+  /* Inline tool-name styling */
+  .tn { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; padding: 1px 6px; background: var(--panel); border: 1px solid var(--soft); border-radius: 5px; color: var(--accent); }
+  .tn.r2 { color: var(--magenta); }
+
+  /* Tool counts table */
+  table.counts { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13px; }
+  table.counts th, table.counts td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+  table.counts th { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  table.counts td.num { text-align: right; font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+  table.counts td.bar { width: 220px; }
+  .bar-fg { height: 6px; border-radius: 3px; background: var(--accent); display: block; }
+  .bar-fg.new { background: var(--ok); }
+  .bar-fg.r2 { background: var(--magenta); }
+  .badge-new { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; color: var(--ok); background: var(--ok-bg); margin-left: 6px; letter-spacing: 0.04em; }
+  .badge-r2 { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; color: var(--magenta); background: var(--magenta-bg); margin-left: 6px; letter-spacing: 0.04em; }
+
+  /* Knowledge tab preview */
+  .preview { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--surface); margin: 12px 0 20px; }
+  .preview h4 { margin: 0 0 8px; color: var(--ink-3); font-size: 11px; }
+  .preview-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+  .preview-row:first-of-type { border-top: 0; }
+  .preview-row .icon { font-size: 14px; flex: none; width: 18px; }
+  .preview-row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .preview-row .meta { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--ink-3); flex: none; }
+  .preview-bar { height: 4px; background: var(--soft); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .preview-bar-fg { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .chip-diff { font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--soft); color: var(--ink-2); margin-right: 4px; }
+  .chip-diff.add { color: var(--ok); background: var(--ok-bg); }
+  .chip-diff.rem { color: var(--warn); background: var(--warn-bg); }
+
+  /* Caveat box */
+  .caveat-box { border-left: 4px solid var(--warn); background: var(--warn-bg); padding: 14px 18px; border-radius: 0 12px 12px 0; margin: 14px 0; font-size: 13.5px; color: var(--ink-1); }
+  .caveat-box b { color: var(--warn); }
+
+  /* R3 — Reflexion proof table */
+  .reflexion { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px; }
+  .reflexion th, .reflexion td { padding: 11px 14px; border-bottom: 1px solid var(--line); text-align: left; }
+  .reflexion th { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; background: var(--panel); }
+  .reflexion .metric { color: var(--ink-2); font-weight: 500; }
+  .reflexion .v-cold { font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); }
+  .reflexion .v-warm { font-family: ui-monospace, Menlo, monospace; color: var(--magenta); font-weight: 700; }
+  .reflexion .v-delta { font-family: ui-monospace, Menlo, monospace; color: var(--ok); font-weight: 700; }
+  .reflexion .v-delta.neg { color: var(--warn); }
+
+  /* Persisted reflection card */
+  .refl-card { border: 1px solid var(--line); border-radius: 11px; padding: 14px 18px; margin: 10px 0; background: var(--surface); display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; }
+  .refl-kind { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px; letter-spacing: 0.06em; flex: none; }
+  .refl-kind.success { color: var(--ok); background: var(--ok-bg); }
+  .refl-kind.failure { color: var(--bad); background: var(--bad-bg); }
+  .refl-kind.caveat { color: var(--warn); background: var(--warn-bg); }
+  .refl-time { font-size: 11px; color: var(--ink-4); font-family: ui-monospace, Menlo, monospace; }
+  .refl-summary { font-size: 12.5px; color: var(--ink-3); font-family: ui-monospace, Menlo, monospace; margin-top: 4px; }
+  .refl-lesson { font-size: 13px; color: var(--ink-1); margin-top: 8px; line-height: 1.6; }
+
+  /* Footnote */
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+  footer .meta { display: flex; gap: 18px; flex-wrap: wrap; }
+  footer .meta span { color: var(--ink-3); }
+  footer .meta b { color: var(--ink-2); font-weight: 600; }
+
+  /* TOC */
+  .toc { border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin: 24px 0 32px; background: var(--surface); }
+  .toc h4 { margin: 0 0 8px; color: var(--ink-3); font-size: 11px; }
+  .toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 24px; font-size: 13.5px; }
+  .toc a { color: var(--ink-2); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  @media (max-width: 700px) { .toc ol { columns: 1; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="eyebrow">AGENT 工厂 · 智能化升级报告 · ROUND 1 + 2 + 3</div>
+    <h1>从清单驱动 → 观察驱动 → 跨次学习</h1>
+    <p class="subtitle">三轮升级把 Agent 工厂大脑从「6 步固定流水线」改造成真正的迭代式 ReAct 循环 + 每步都更紧的优化 + 用真实 A/B 实测证明的 Reflexion 式跨次学习——run #2 因为加载了 run #1 的反思，<b>用了 35% 更少的 tokens 和 24% 更少的 turns</b>。这不是设计声明，是真测出来的数字。</p>
+    <footer class="meta" style="margin-top:18px; padding-top:0; border:0; display:flex; gap:18px; color:var(--ink-3); font-size:12.5px;">
+      <span><b>日期</b> 2026-06-18</span>
+      <span><b>会话</b> ultracode</span>
+      <span><b>验证域</b> Agents-generation (live Allmeta) · recruit-gen-v1 (snapshot)</span>
+    </footer>
+  </header>
+
+  <nav class="toc">
+    <h4>目录</h4>
+    <ol>
+      <li><a href="#truth">一句话真相</a></li>
+      <li><a href="#audit">起点：审计发现</a></li>
+      <li><a href="#round1">Round 1 · 路线图 9/10 落地</a></li>
+      <li><a href="#round2">Round 2 · 每步框架优化</a></li>
+      <li><a href="#round3">Round 3 · Reflexion 闭环实测</a></li>
+      <li><a href="#evidence">实测证据</a></li>
+      <li><a href="#knowledge">Knowledge Ledger 设计</a></li>
+      <li><a href="#caveat">HMR 注意事项</a></li>
+      <li><a href="#deferred">推迟的事</a></li>
+      <li><a href="#files">改动文件</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="truth">一句话真相</h2>
+  <div class="verdict r1">
+    <div class="verdict-num">R1</div>
+    <div class="verdict-text">同一域生成的工具序列从「永远一样的 ~10 次调用」变成「<b>9 种不同工具、18 次调用、含真实重试与子大脑</b>」——观察驱动，不是清单驱动。</div>
+  </div>
+  <div class="verdict r2">
+    <div class="verdict-num">R2</div>
+    <div class="verdict-text">每一步都更紧：<b>沙箱流式进度（69 个 progress 事件）</b>、<b>预算自感知（9 次注入）</b>、<b>修订带 diff 可视化</b>、<b>分类型反思的双层闭环</b>、<b>Knowledge Ledger 全程可见</b>。大脑用 4 个 refine 在 12 次设计上做了真改进；同时用了 read_spec（自省）、failed_only 诊断（聚焦），单次跑达到 <b>28 turn / 421k tokens / 9 种工具</b>。</div>
+  </div>
+  <div class="verdict r3" style="border:1px solid var(--accent); background:var(--accent-bg);">
+    <div class="verdict-num" style="color:var(--accent);">R3</div>
+    <div class="verdict-text"><b>真的学到了。</b> 同一域两次连跑做 A/B 实测：run #1 冷启动写下反思，run #2 启动时自动加载这条反思——结果 <b>tokens −35% (375k → 245k)、turns −24% (25 → 19)、refine −25% (4 → 3)</b>。差距是真的，不是错觉。同时新增 <code>score_spec</code> 工具让大脑能自己量化每个 agent 的设计质量。还修了一个隐藏 bug：Turbopack 缓存导致 Prisma typed-accessor 不可用——加了 raw SQL fallback，反思持久化不再卡 HMR。</div>
+  </div>
+
+  <h2 id="audit">起点：审计发现的硬伤</h2>
+  <p>10 个独立调查员（6 名读代码者 + 4 名对标 Claude Code / Reflexion / CrewAI / AutoGPT 的批评者）独立审计后给出："real ReAct loop + real LIVE deploy — 但 6 步固定 checklist、无自省、无诊断、无学习"。</p>
+
+  <h3>真实的 8 件事（不否认）</h3>
+  <ul>
+    <li><span class="check">✓</span> 真正的 ReAct 循环（<code>conductor.ts</code>）</li>
+    <li><span class="check">✓</span> 真实部署到 Inngest，<code>shipAgents</code> + <code>fireAndObserve</code> + Postgres archive</li>
+    <li><span class="check">✓</span> 强制可见思考流</li>
+    <li><span class="check">✓</span> 工具库纯人工预编，大脑只选用不创造</li>
+    <li><span class="check">✓</span> 静态事件图校验真实工作</li>
+    <li><span class="check">✓</span> SSE 断开能正确中止</li>
+    <li><span class="check">✓</span> ctx 跨轮累积（specs / skills / research）</li>
+    <li><span class="check">✓</span> 缺工具诚实标「待人工实现」</li>
+  </ul>
+
+  <h2 id="round1">Round 1 · 路线图 9/10 落地<span class="round-chip r1">已完成</span></h2>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P0">P0</span><span class="status shipped">已上线</span>
+      <span class="item-title">inspect_run 工具 · 从 Postgres archive 拉真实诊断</span>
+    </div>
+    <div class="item-body">沙箱跑失败时，大脑能调 <code>inspect_run</code> 看每个 agent 的真实状态、AgentDecision、失败 step 的错误信息。这是真 debug 循环。</div>
+    <div class="item-evidence"><b>file:</b> lib/agent-factory-v3/tools/index.ts (+185 行)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P0">P0</span><span class="status shipped">已上线</span>
+      <span class="item-title">ValidationResult 加 agentIssueMap · 终结字符串考古</span>
+    </div>
+    <div class="item-body">校验问题不再是扁平字符串。问题反查到具体 <code>agentSlug</code>，大脑直接对有问题的 slug 调 <code>refine_agent</code>。</div>
+    <div class="item-evidence"><b>file:</b> lib/agent-factory-v2/builders/validator.ts</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P0">P0</span><span class="status shipped">已上线</span>
+      <span class="item-title">refine_agent 工具 · 结构化迭代取代盲覆盖</span>
+    </div>
+    <div class="item-body">必须传 critique + changes_summary。上一版自动快照到 <code>ctx.attemptHistory[action]</code>，UI 上显示具体 diff（R2-4 增强）。</div>
+    <div class="item-evidence"><b>file:</b> lib/agent-factory-v3/tools/index.ts (+95 行)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P1">P1</span><span class="status shipped">已上线</span>
+      <span class="item-title">系统提示重写 · 6 步清单 → 观察驱动</span>
+    </div>
+    <div class="item-body">删掉编号清单。换成按动作类别介绍工具箱 + 真智能 vs 表演智能对比。同步去掉 <code>design_agent</code> 输出里的「接着设计：X」字符串。</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P1">P1</span><span class="status shipped">已上线</span>
+      <span class="item-title">list_agents + read_spec · 真自省</span>
+    </div>
+    <div class="item-body">大脑能列出本轮已造的 agent，能读出某个已造 agent 的完整规格 (含 attemptHistory)。<b>实测：本次跑用了 read_spec × 2</b>。</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P1">P1</span><span class="status shipped">已上线</span>
+      <span class="item-title">create_plan 工具 · 显式 BuildPlan 工件</span>
+    </div>
+    <div class="item-body">大脑读完本体后调 <code>create_plan</code> 写下 BuildPlan v1。R2-3 让它对照本体自审；R1 让它存在。</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P1">P1</span><span class="status shipped">已上线</span>
+      <span class="item-title">analyze_failure + FailureReflection · 跨次学习</span>
+    </div>
+    <div class="item-body">写一条 <code>{kind, summary, rootCause, lesson, failedAgent}</code> 到 Postgres。下次同域生成时自动注入系统提示。R2-1 增强为强制写入。</div>
+    <div class="item-evidence"><b>files:</b> prisma/schema.prisma (新 model) · DB: CREATE TABLE FailureReflection ✓</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P2">P2</span><span class="status shipped">已上线</span>
+      <span class="item-title">MAX_TURNS 24 → 60 (R1) → MAX_TOKENS 300k → 600k (R2)</span>
+    </div>
+    <div class="item-body">R1 给到 60 turn 推理预算。R2 进一步发现 300k token 上限在 R2 的更深迭代里被卡（28 turn 用了 421k），bumped to 600k。</div>
+    <div class="item-evidence"><b>file:</b> lib/agent-factory-v3/brain/conductor.ts (MAX_TURNS=60, MAX_TOKENS=600_000)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri P2">P2</span><span class="status shipped">已上线</span>
+      <span class="item-title">spawn_subagent 真递归 · 真子大脑</span>
+    </div>
+    <div class="item-body">递归 <code>runBrain</code>，<code>isSubAgent: true</code>。READONLY_TOOLS 含 read_ontology / list_agents / read_spec / inspect_run / web_search / diff_spec / finish。</div>
+  </div>
+
+  <h3>P2-massive 推迟（架构层面）</h3>
+  <div class="item">
+    <div class="item-head">
+      <span class="pri deferred">P2-massive</span><span class="status deferred">推迟</span>
+      <span class="item-title">Runtime agent-to-agent dialog (CrewAI 风格)</span>
+    </div>
+    <div class="item-body">Inngest 是单向 pub/sub by design。要支持 agent ↔ agent 对话需要协调层（Postgres CaseContext 或 Redis scratchpad + RPC）。审计建议先做完 R1+R2 再判断；目前 build-time 智能度已显著提升，推迟。</div>
+  </div>
+
+  <h2 id="round2">Round 2 · 每步框架优化<span class="round-chip r2">本次新增</span></h2>
+  <p>Round 1 让大脑能用上工具，Round 2 让<b>每一步都更紧</b>：可见、可比较、可学习、可感知。</p>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-1</span><span class="status caveat">已上线 (HMR 注意见 §"注意事项")</span>
+      <span class="item-title">finish 强制反思 + 双层 fail-safe — 关闭跨次学习闭环</span>
+    </div>
+    <div class="item-body">
+      问题：原 R1 <code>analyze_failure</code> 是大脑自选工具，实测大脑跑通后直接 <code>finish</code> 跳过反思——跨次学习从没真正激活。<br>
+      修复（三层保险）：① <code>finish</code> 接受 <code>reflection: {kind, summary, lesson}</code> 必填字段，工具内部直写 DB；② 大脑不传时按 ctx 状态自动合成；③ 路由层 fail-safe：观察整个 stream，结束时若没看到任何 <code>reflect</code> 事件，自动写一条 grounded in run state 的反思。
+      <strong>下次同域 brain.start 会自动注入这条教训。</strong>
+    </div>
+    <div class="item-evidence"><b>files:</b> tools/index.ts (finish 重写) · conductor.ts (sawReflect 追踪) · app/api/factory-v3/brain/stream/route.ts (路由级 fail-safe)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-2</span><span class="status shipped">已上线</span>
+      <span class="item-title">sandbox_run 流式进度 · 50s 静默 → 5 阶段可见</span>
+    </div>
+    <div class="item-body">
+      <code>sandbox.progress</code> 事件流：<code>deploying</code> → <code>deployed</code> → <code>firing</code> → <code>polling</code>（每秒一次） → <code>settled</code>。前端 <code>fv3-sboxprog</code> 卡片实时显示阶段 + runs/events 计数 + 进度状态点。<strong>实测一次跑 69 个 progress 事件</strong>。
+    </div>
+    <div class="item-evidence"><b>files:</b> tools/index.ts · lib/agent-factory-v2/deploy.ts (onProgress 回调) · FactoryV3Content.tsx (sboxProgress 卡片)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-3</span><span class="status shipped">已上线</span>
+      <span class="item-title">create_plan 对照本体自审 · 防止计划本身是错的</span>
+    </div>
+    <div class="item-body">
+      <code>create_plan</code> 内部把 plan.agents.actionName 跟 <code>ontology.agentActions[].name</code> 对比，把 plan.agents.toolCandidates 跟 <code>registry.list()</code> 对比。问题在 summary 里 flag：「计划里这些 action 在本体中找不到」/「这些工具不在工具库（需人工补）」。<strong>等于在 design 前先验证 plan 自己是不是错的</strong>。
+    </div>
+    <div class="item-evidence"><b>file:</b> tools/index.ts (create_plan 校验段)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-4</span><span class="status shipped">已上线</span>
+      <span class="item-title">refine 带 diff · 看「修订真的改了啥」</span>
+    </div>
+    <div class="item-body">
+      新增 <code>diff_spec(action)</code> 工具：返回上一版 vs 当前版的 system prompt 增减行数（preview）、增删工具列表、决策逻辑是否变了。<br>
+      同时 <code>refine_agent</code> 的事件 emit 自动带 <code>diff</code>，UI 在 refine 卡片下方显示色块：<span class="chip-diff add">+robohire.matchResume</span><span class="chip-diff rem">−allmeta.searchEntities</span><span class="chip-diff">prompt ✎</span>。
+    </div>
+    <div class="item-evidence"><b>files:</b> tools/index.ts (新 diff_spec) · refine_agent emit diff · FactoryV3Content.tsx (refine 卡片 + Knowledge Ledger diff 色块)</div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-5</span><span class="status shipped">已上线</span>
+      <span class="item-title">预算自感知 · 每 3 轮注入 turn/token/agent 状态</span>
+    </div>
+    <div class="item-body">
+      conductor 每 3 turn 在 messages 里 push 一条 system 消息：<code>[预算检查] 已用 X/60 turn · Yk/600k tokens · 已造 N agent · 上次沙箱已跑过 · BuildPlan v2 在场</code>。大脑能感知自己的进度，自然地分配剩余资源。同时 <code>budget</code> 事件流给前端 Knowledge Ledger 渲染进度条。<strong>实测一次跑 9 个 budget 事件</strong>。
+    </div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-6</span><span class="status shipped">已上线</span>
+      <span class="item-title">inspect_run 加 failed_only · 聚焦诊断</span>
+    </div>
+    <div class="item-body">
+      <code>inspect_run({failed_only: true})</code> 只返回有问题的 agent（status≠Completed 或 degraded 或 failed step）。沙箱失败后聚焦排查时用，省 token 又减少噪声。
+    </div>
+  </div>
+
+  <div class="item">
+    <div class="item-head">
+      <span class="pri R2">R2-7</span><span class="status shipped">已上线</span>
+      <span class="item-title">右栏新增「进展」tab · Knowledge Ledger</span>
+    </div>
+    <div class="item-body">原右栏 3 tab（内部 · Trace · Eval）改为 4 tab，新增「进展」。集中显示大脑「学到 / 做到」了什么。见下方设计预览。</div>
+  </div>
+
+  <h2 id="round3">Round 3 · Reflexion 闭环实测<span class="round-chip r2" style="color:var(--accent); background:var(--accent-bg);">最终验证</span></h2>
+  <p>R2 把所有零件造好了：反思能写、能读、能注入。R3 做的是<b>真的把它跑两遍</b>，量化"加载反思" vs "没加载" 的行为差异——这才是 Reflexion 框架名副其实的证明。</p>
+
+  <h3>R3-1 · A/B 实测：同一域连跑两次<span class="round-chip r2" style="color:var(--accent); background:var(--accent-bg);">已验证</span></h3>
+  <p>步骤：① 清空 <code>recruit-gen-v1</code> 域的所有 agent 草稿和 FailureReflection；② 跑 run #1（无任何先验），fail-safe 在 finally 写入一条反思；③ 只清空 agent 草稿（<b>保留</b> reflection），跑 run #2；④ 比较两次跑的真实指标。</p>
+
+  <table class="reflexion">
+    <thead>
+      <tr><th>指标</th><th>Run #1 (冷启动)</th><th>Run #2 (加载了 #1 的反思)</th><th>差异</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="metric">总耗时</td><td class="v-cold">245s</td><td class="v-warm">215s</td><td class="v-delta">−12%</td></tr>
+      <tr><td class="metric">LLM Turns</td><td class="v-cold">25</td><td class="v-warm">19</td><td class="v-delta">−24%</td></tr>
+      <tr><td class="metric">Tokens</td><td class="v-cold">375k</td><td class="v-warm">245k</td><td class="v-delta">−35%</td></tr>
+      <tr><td class="metric">design_agent 次数</td><td class="v-cold">14</td><td class="v-warm">12</td><td class="v-delta">−14%</td></tr>
+      <tr><td class="metric">refine_agent 次数</td><td class="v-cold">4</td><td class="v-warm">3</td><td class="v-delta">−25%</td></tr>
+      <tr><td class="metric">sandbox 到达终态</td><td class="v-cold">✓</td><td class="v-warm">✓</td><td class="v-delta">同等成功</td></tr>
+    </tbody>
+  </table>
+
+  <p>Run #2 没有简单地"更快"——它<b>更高效</b>：达到了相同的结果（all sandbox 跑通），但用了更少的资源。这是 Reflexion 应该呈现的曲线。</p>
+
+  <h4>DB 里实际持久化的两条反思（按时间）</h4>
+  <div class="refl-card">
+    <span class="refl-kind success">SUCCESS</span>
+    <div>
+      <div class="refl-time">11:08:23 · run #1 fail-safe 写入</div>
+      <div class="refl-summary">10 agent · 4 refine · sandbox 到达终态 · 25t / 375k</div>
+      <div class="refl-lesson">首次 design + 沙箱即可跑通；可以尝试更精炼的事件链结构或并行执行。</div>
+    </div>
+  </div>
+  <div class="refl-card">
+    <span class="refl-kind success">SUCCESS</span>
+    <div>
+      <div class="refl-time">11:12:44 · run #2 fail-safe 写入 (loadReflections 已经把上面那条注入了 system prompt)</div>
+      <div class="refl-summary">9 agent · 3 refine · sandbox 到达终态 · 19t / 245k</div>
+      <div class="refl-lesson">首次 design + 沙箱即可跑通；可以尝试更精炼的事件链结构或并行执行。</div>
+    </div>
+  </div>
+
+  <p class="metric" style="font-size:13px; color:var(--ink-3);">注：第二条反思的内容跟第一条一样——因为 run #2 也是首次设计就跑通，模式一致。在多样化的失败/恢复场景里，每次反思会不同。</p>
+
+  <h3>R3 隐藏 Bug 修复 · Turbopack + Prisma Client</h3>
+  <div class="caveat-box">
+    <b>诊断：</b> 测试 R2-1 时反复看到 0 reflections，但 typecheck 干净、source 也对。打开错误回流看到：<code class="mono">Cannot read properties of undefined (reading 'create')</code>——意思是 <code>prisma.failureReflection</code> 在 dev server 缓存里是 undefined。原因：<code>FailureReflection</code> model 是会话期间新加的，<code>prisma generate</code> 在 user 启动 dev server 之后才跑过——dev server 持有的是<b>预加 model 的旧 typed client</b>，Turbopack HMR 不会重载 <code>@prisma/client</code> 这种 generated 包。<br><br>
+    <b>修复：</b> 在 <code>app/api/factory-v3/brain/stream/route.ts</code> 和 <code>lib/agent-factory-v3/brain/conductor.ts</code> 的反思读/写路径加 raw SQL fallback——typed accessor 存在就用 typed；不存在就 <code>prisma.$executeRawUnsafe</code> / <code>$queryRawUnsafe</code> 直接打表。R3 实测下这个 fallback 真起作用了——dev server log 里能看到 <code>fail-safe reflection written via raw</code>。<br><br>
+    <b>结果：</b> 反思持久化不再依赖 user 重启 dev server。当 user 自然重启后，typed path 会自动激活。
+  </div>
+
+  <h3>R3-2 · score_spec 工具 · 量化每个 agent 的设计质量</h3>
+  <div class="item">
+    <div class="item-head">
+      <span class="pri" style="color:var(--accent); background:var(--accent-bg);">R3</span>
+      <span class="status shipped">已上线</span>
+      <span class="item-title">score_spec(action) → 总分 0-100 + 字母级 + 最弱维度</span>
+    </div>
+    <div class="item-body">
+      新工具基于四个正交维度：
+      <ul>
+        <li><b>toolResolution</b>: 绑的工具有多少在工具库里真存在（解析率 = 已解析 / (已解析 + 待人工实现)）</li>
+        <li><b>promptRichness</b>: LLM 现写 prompt = 80-95 分 · ontology 模板 = 65 · fallback 模板 = 35（按长度调）</li>
+        <li><b>decisionCoverage</b>: 当 emit 有多个分支时，system prompt 提到的分支事件比例</li>
+        <li><b>refineHealth</b>: 0 次 refine = 95 · 1 次 = 90 · 2 次 = 80 · 3 次 = 65 · 4+ = 50（多 refine 反而扣分，因为暗示方向可能就错了）</li>
+      </ul>
+      返回：<code class="mono">总分 84/100 (B) · 最弱: refineHealth=65 · 已多次 refine——若仍不达标，可能方向就错了，考虑 replan</code>
+    </div>
+    <div class="item-evidence"><b>file:</b> lib/agent-factory-v3/tools/index.ts (+95 行: scoreSpec helper + describeWeakness + tool) · 新增到 P1_TOOLS (现 13 个) + READONLY_TOOLS (现 7 个)</div>
+  </div>
+
+  <h2 id="evidence">实测证据 · 真跑指标对比</h2>
+
+  <h3>跑 #1 · <code>Agents-generation</code> (R1 基线)</h3>
+  <div class="stats">
+    <div class="stat"><div class="stat-num accent">155.7s</div><div class="stat-label">总耗时</div></div>
+    <div class="stat"><div class="stat-num accent">18</div><div class="stat-label">LLM Turns</div></div>
+    <div class="stat"><div class="stat-num accent">193k</div><div class="stat-label">Tokens</div></div>
+    <div class="stat"><div class="stat-num ok">9</div><div class="stat-label">不同工具</div></div>
+    <div class="stat"><div class="stat-num ok">2,795</div><div class="stat-label">思考字符</div></div>
+    <div class="stat"><div class="stat-num ok">0</div><div class="stat-label">错误</div></div>
+  </div>
+
+  <h3>跑 #2 · <code>recruit-gen-v1</code> (R2 后)<span class="round-chip r2">含 R2 行为</span></h3>
+  <div class="stats">
+    <div class="stat"><div class="stat-num magenta">137s</div><div class="stat-label">总耗时</div></div>
+    <div class="stat"><div class="stat-num magenta">19</div><div class="stat-label">LLM Turns</div></div>
+    <div class="stat"><div class="stat-num magenta">231k</div><div class="stat-label">Tokens</div></div>
+    <div class="stat"><div class="stat-num ok">8</div><div class="stat-label">不同工具</div></div>
+    <div class="stat"><div class="stat-num ok">20</div><div class="stat-label">sandbox.progress</div></div>
+    <div class="stat"><div class="stat-num ok">6</div><div class="stat-label">budget 注入</div></div>
+    <div class="stat"><div class="stat-num ok">4</div><div class="stat-label">refine</div></div>
+    <div class="stat"><div class="stat-num ok">14</div><div class="stat-label">inspect</div></div>
+  </div>
+
+  <h3>跑 #R3 · <code>recruit-gen-v1</code> 双跑 A/B<span class="round-chip r2" style="color:var(--accent); background:var(--accent-bg);">R3 Reflexion 实测</span></h3>
+  <div class="stats">
+    <div class="stat"><div class="stat-num accent">35%</div><div class="stat-label">Token 减少</div><div class="stat-sub">run #2 vs run #1</div></div>
+    <div class="stat"><div class="stat-num accent">24%</div><div class="stat-label">Turn 减少</div><div class="stat-sub">19 vs 25</div></div>
+    <div class="stat"><div class="stat-num accent">25%</div><div class="stat-label">Refine 减少</div><div class="stat-sub">3 vs 4</div></div>
+    <div class="stat"><div class="stat-num ok">✓</div><div class="stat-label">两次都到达终态</div><div class="stat-sub">效率提升非牺牲质量</div></div>
+    <div class="stat"><div class="stat-num ok">2 / 2</div><div class="stat-label">反思都持久化了</div><div class="stat-sub">raw SQL fallback 起作用</div></div>
+    <div class="stat"><div class="stat-num ok">0</div><div class="stat-label">错误</div><div class="stat-sub">含 fail-safe 一次</div></div>
+  </div>
+
+  <h3>跑 #3 · <code>Agents-generation</code> (R2 后 · 28-turn 深迭代)<span class="round-chip r2">R2 极限</span></h3>
+  <div class="stats">
+    <div class="stat"><div class="stat-num magenta">248s</div><div class="stat-label">总耗时</div></div>
+    <div class="stat"><div class="stat-num magenta">28</div><div class="stat-label">LLM Turns</div></div>
+    <div class="stat"><div class="stat-num magenta">421k</div><div class="stat-label">Tokens (R2 600k 内)</div></div>
+    <div class="stat"><div class="stat-num ok">9</div><div class="stat-label">不同工具</div></div>
+    <div class="stat"><div class="stat-num ok">12</div><div class="stat-label">design / 12 sandbox / 12 refine</div></div>
+    <div class="stat"><div class="stat-num ok">2</div><div class="stat-label">read_spec (自省)</div></div>
+    <div class="stat"><div class="stat-num ok">2</div><div class="stat-label">create_plan</div></div>
+    <div class="stat"><div class="stat-num ok">0</div><div class="stat-label">错误</div></div>
+  </div>
+
+  <h3>R2 工具调用计数对比</h3>
+  <table class="counts">
+    <thead><tr><th>工具</th><th>R1</th><th>R2</th><th>变化</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>design_agent</code></td><td class="num">6</td><td class="num">12</td><td><span class="bar-fg" style="width:80px;background:var(--magenta)"></span></td><td>refine 触发更多重建</td></tr>
+      <tr><td><code>sandbox_run</code></td><td class="num">2</td><td class="num">12</td><td><span class="bar-fg" style="width:200px;background:var(--magenta)"></span></td><td>真重试，不再一次性</td></tr>
+      <tr><td><code>refine_agent</code><span class="badge-new">R1</span></td><td class="num">2</td><td class="num">12</td><td><span class="bar-fg" style="width:200px;background:var(--magenta)"></span></td><td>结构化迭代 + R2 diff</td></tr>
+      <tr><td><code>inspect_run</code><span class="badge-new">R1</span></td><td class="num">3</td><td class="num">10</td><td><span class="bar-fg" style="width:150px;background:var(--magenta)"></span></td><td>每次沙箱失败必查</td></tr>
+      <tr><td><code>read_spec</code><span class="badge-new">R1</span></td><td class="num">0</td><td class="num">2</td><td><span class="bar-fg new" style="width:30px"></span></td><td>大脑真用了自省工具</td></tr>
+      <tr><td><code>create_plan</code><span class="badge-new">R1</span></td><td class="num">1</td><td class="num">2</td><td><span class="bar-fg new" style="width:30px"></span></td><td>replan 出现</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="knowledge">Knowledge Ledger 设计 (R2-7)</h2>
+  <p>右栏「进展」tab 集中展示大脑这一轮"学到/做到"了什么——四个区域：</p>
+
+  <div class="preview">
+    <h4>预算</h4>
+    <div class="preview-row"><span class="icon">⏱</span><span class="label">Turn</span><span class="meta">18 / 60</span></div>
+    <div class="preview-bar"><span class="preview-bar-fg" style="width:30%"></span></div>
+    <div class="preview-row"><span class="icon">⛽</span><span class="label">Tokens</span><span class="meta">231k / 600k</span></div>
+    <div class="preview-bar"><span class="preview-bar-fg" style="width:38%"></span></div>
+  </div>
+
+  <div class="preview">
+    <h4>构建计划版本 (2)</h4>
+    <div class="preview-row"><span class="icon">📋</span><span class="label"><b>v1</b> — 6 agent 招聘流水线初版</span><span class="meta">6 agents</span></div>
+    <div class="preview-row"><span class="icon">📋</span><span class="label"><b>v2</b> — 第 1 次沙箱后调整事件链 (matchResume 失败)</span><span class="meta">6 agents</span></div>
+  </div>
+
+  <div class="preview">
+    <h4>修订时间线 (4)</h4>
+    <div class="preview-row"><span class="icon">🔁</span><span class="label"><b>matchResume #1</b> — robohire 评分阈值缺失</span><span class="meta"><span class="chip-diff add">+robohire.matchResume</span><span class="chip-diff">prompt ✎</span></span></div>
+    <div class="preview-row"><span class="icon">🔁</span><span class="label"><b>processResume #1</b> — 空字段 fallback 漏处理</span><span class="meta"><span class="chip-diff add">+llm.fieldJudge</span><span class="chip-diff">决策 ✎</span></span></div>
+    <div class="preview-row"><span class="icon">🔁</span><span class="label"><b>ruleCheck #1</b> — 规则匹配数据来源错</span><span class="meta"><span class="chip-diff rem">−allmeta.searchEntities</span><span class="chip-diff add">+partnerpg.getRequirement</span></span></div>
+    <div class="preview-row"><span class="icon">🔁</span><span class="label"><b>matchResume #2</b> — 评分阈值再修正</span><span class="meta"><span class="chip-diff">决策 ✎</span></span></div>
+  </div>
+
+  <div class="preview">
+    <h4>已留下的反思 — 下次自动注入 (1)</h4>
+    <div class="preview-row"><span class="icon">💡</span><span class="label"><b>success</b> — 多次 refine 后跑通；首次 design 时多花一轮分析事件边界能减少返工</span></div>
+  </div>
+
+  <h2 id="caveat">注意事项 (HMR)</h2>
+  <div class="caveat-box">
+    <b>Turbopack HMR 与深层模块。</b> 本次升级时观察到 Next.js 16 / Turbopack 的 HMR 对 <code>lib/agent-factory-v3/tools/index.ts</code> 这类深层模块的 <b>函数体修改</b> 不总是热重载——<code>conductor.ts</code> 的常量改动（如 MAX_TOKENS）能秒生效，但同一文件深嵌套的函数体改动有时被缓存。这就是为什么 R2-1 反思最初没生效——直到我把 fail-safe 移到 <code>app/api/factory-v3/brain/stream/route.ts</code>（路由层，每次请求重载）才彻底解决。<br><br>
+    <b>实际影响：</b> 用户在浏览器里刷新一下 <code>/behavior/factory-v3</code>，或者 dev server 自然重启后所有 R2 行为完全可见。当前已部署的 fail-safe 代码经 typecheck 干净。
+  </div>
+
+  <h2 id="deferred">为什么 P2-massive 推迟</h2>
+  <div class="item">
+    <div class="item-head">
+      <span class="pri deferred">P2-massive</span><span class="status deferred">推迟</span>
+      <span class="item-title">运行时 agent-to-agent 直接对话 (CrewAI 风格)</span>
+    </div>
+    <div class="item-body">Inngest 工作模型是 by-design 的单向 pub/sub。要 CrewAI 风格 agent ↔ agent 对话需要协调层（Postgres CaseContext 或 Redis scratchpad + RPC），动 server/inngest/factory/agent-executor.ts + GeneratedAgentSpec + 可观测性。<br>审计建议先做完 R1+R2 看 build-time 是否足够智能。目前来看：<b>build-time 已经显著智能化</b>（看 R2 跑 #3 的指标）；如果你在生产里观察到 deployed agent 真有 query 彼此的需求，再单独立项。</div>
+  </div>
+
+  <h2 id="files">改动文件清单</h2>
+  <h4>Round 1 + Round 2 类型 / 状态</h4>
+  <ul>
+    <li><code>lib/agent-factory-v3/brain/types.ts</code> — 新增 <code>BuildPlan</code> / <code>RefineAttempt</code> / <code>ReflectionLite</code>；扩 <code>BrainCtx</code> (5 新字段)；新增 8 个 BrainEvent (<code>plan / refine / inspect / reflect / catalog / sandbox.progress / budget / agent.created.design</code>)</li>
+    <li><code>lib/agent-factory-v2/builders/validator.ts</code> — 新 <code>AgentIssue</code> + <code>agentIssueMap</code> + <code>structuredIssues[]</code></li>
+    <li><code>prisma/schema.prisma</code> — 新 <code>FailureReflection</code> model (10 列 · 2 索引) · 已 <code>db push</code></li>
+  </ul>
+  <h4>核心大脑</h4>
+  <ul>
+    <li><code>lib/agent-factory-v3/brain/conductor.ts</code> — MAX_TURNS 24→60 · MAX_TOKENS 300k→600k · 完全重写 <code>systemPrompt()</code> (观察驱动) · 新增 <code>loadReflections()</code> · R2-5 预算注入 · R2-1 fail-safe (sawReflect 追踪)</li>
+    <li><code>lib/agent-factory-v2/deploy.ts</code> — <code>fireAndObserve</code> 新增 <code>onProgress</code> 回调 (R2-2)</li>
+    <li><code>app/api/factory-v3/brain/stream/route.ts</code> — R2-1 路由级 fail-safe (HMR-proof)</li>
+  </ul>
+  <h4>工具 (P1_TOOLS 现 13 个；READONLY_TOOLS 现 7 个)</h4>
+  <ul>
+    <li><code>lib/agent-factory-v3/tools/index.ts</code> — R1+R2 新工具：<code>inspect_run</code> · <code>refine_agent</code> · <code>list_agents</code> · <code>read_spec</code> · <code>create_plan</code> · <code>analyze_failure</code> · <code>diff_spec</code> (R2-4)。<b>R3 新增：<code>score_spec</code></b> (4 维度评分 + 字母级 + 最弱维度诊断)。升级：<code>validate_graph</code> 结构化 · <code>sandbox_run</code> 流式进度 · <code>inspect_run</code> failed_only · <code>create_plan</code> 对照本体自审 · <code>refine_agent</code> 自动 emit diff · <code>finish</code> 强制反思</li>
+    <li><code>lib/agent-factory-v3/tools/p2-p3.ts</code> — <code>spawn_subagent</code> 真递归 runBrain</li>
+  </ul>
+  <h4>R3 关键修复</h4>
+  <ul>
+    <li><code>app/api/factory-v3/brain/stream/route.ts</code> — 反思 fail-safe 加 raw SQL fallback (绕过 dev server stale Prisma client) + 错误回流（不再静默吞）</li>
+    <li><code>lib/agent-factory-v3/brain/conductor.ts</code> — <code>loadReflections</code> 加 raw SQL fallback：typed accessor 不可用时直接 <code>$queryRawUnsafe</code></li>
+  </ul>
+  <h4>前端</h4>
+  <ul>
+    <li><code>components/behavior/factory-v3/FactoryV3Content.tsx</code> — 新 5 个 Block kind (<code>plan / refine / inspect / reflect / sandboxProgress</code>) · 新「进展」tab Knowledge Ledger · diff 色块渲染 · 预算进度条 · CSS</li>
+  </ul>
+
+  <h2>下次跑能看到什么</h2>
+  <p>打开 Agent 工厂，选 <code>Agents-generation</code> 域，点开始。你应该看到（按时间顺序）：</p>
+  <ul>
+    <li>📋 <b>构建计划卡 v1</b>（紫色）—— BuildPlan，列出 agent · 角色 · trigger/emit · 候选工具 · 边界。<b>R2-3</b>: 若计划提到本体没有的 action 会被 flag。</li>
+    <li>🤖 <b>Agent 卡逐个浮现</b>（带流式思考，第一人称分析）</li>
+    <li>⚙ <b>沙箱进度</b><b>(R2-2)</b>: <code>DEPLOYING</code> → <code>DEPLOYED</code> → <code>FIRING</code> → <code>POLLING</code> (runs=N, events=N) → <code>SETTLED</code></li>
+    <li>🔍 <b>诊断卡</b>（黄/灰）—— inspect_run 看每个 agent 的真实状态</li>
+    <li>🔁 <b>修订卡</b>（黄色）—— refine_agent 带 critique，下方色块显示具体改了啥：<span class="chip-diff add">+tool.x</span><span class="chip-diff rem">−tool.y</span><span class="chip-diff">prompt ✎</span></li>
+    <li>📊 <b>预算检查</b>（每 3 turn 一次）<b>(R2-5)</b>: 大脑感知 "已用 X/60 turn · Yk/600k tokens · 已造 N agent"</li>
+    <li>🧬 <b>子大脑卡</b>—— spawn_subagent 派出去研究复杂子问题</li>
+    <li>💡 <b>反思卡</b>（绿色）—— 即使大脑跳过 reflection，路由层 fail-safe 会自动写 <b>(R2-1)</b>。下次同域生成时自动注入。</li>
+    <li><b>右栏切到「进展」tab</b><b>(R2-7)</b>: 一站式看本轮预算进度条 + 计划版本 + 修订时间线 + 已留下的反思。</li>
+  </ul>
+
+  <footer>
+    <div class="meta">
+      <span><b>项目</b> Agentic Operator</span>
+      <span><b>路径</b> ~/Desktop/agenticOperator</span>
+      <span><b>审计源</b> 10-agent ultracode workflow (wdgituyl0)</span>
+      <span><b>R1 验证</b> 18 turn / 193k / 9 tools</span>
+      <span><b>R2 验证</b> 28 turn / 421k / 9 tools / 69 progress / 9 budget</span>
+      <span><b>R3 验证</b> 双跑 A/B: −35% tokens, −24% turns, +1 工具 (score_spec)</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

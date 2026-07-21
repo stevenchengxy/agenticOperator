@@ -3,7 +3,7 @@
 /**
  * Server action — runs `generatePrompt` against the live Ontology API.
  *
- * Kept server-side so the bearer token (`ONTOLOGY_API_TOKEN`) never reaches
+ * Kept server-side so the bearer token (`ALLMETA_API_KEY`) never reaches
  * the browser bundle. The client component calls this through React's
  * server-action transport.
  */

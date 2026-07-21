@@ -1,0 +1,175 @@
+name: ${COMPOSE_PROJECT_NAME:-agentic-operator}
+
+x-ao-service: &ao-service
+  image: ${AO_IMAGE:-agentic-operator:local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      NODE_VERSION: ${NODE_VERSION:-22.17.0}
+      NEXT_PUBLIC_BASE_URL: ${AO_PUBLIC_ORIGIN:-http://localhost:3002}
+      NEXT_PUBLIC_INNGEST_URL: ${INNGEST_PUBLIC_ORIGIN:-http://localhost:8288}
+      NEXT_PUBLIC_NEO4J_BROWSER_URL: ${NEXT_PUBLIC_NEO4J_BROWSER_URL:-}
+  env_file:
+    - ${AO_ENV_FILE:-.env.deploy}
+  environment: &ao-environment
+    NODE_ENV: production
+    PORT: 3002
+    HOSTNAME: 0.0.0.0
+    DATABASE_URL: ${DATABASE_URL}
+    AO_LOG_DIR: /app/persist/logs
+    AO_BASE_URL: http://app:3002
+    INNGEST_DEV: "1"
+    # Defaults target the bundled inngest service. For a SHARED Inngest
+    # (e.g. reusing an existing raas-inngest container on the same host),
+    # override both in .env.deploy and disable the bundled service by
+    # clearing COMPOSE_PROFILES. See docs/deployment.md.
+    INNGEST_BASE_URL: ${INNGEST_BASE_URL:-http://inngest:8288}
+    INNGEST_SERVE_ORIGIN: ${INNGEST_SERVE_ORIGIN:-http://app:3002}
+    INNGEST_SERVE_PATH: /api/inngest
+    NEXT_PUBLIC_BASE_URL: ${AO_PUBLIC_ORIGIN:-http://localhost:3002}
+    NEXT_PUBLIC_INNGEST_URL: ${INNGEST_PUBLIC_ORIGIN:-http://localhost:8288}
+    ARCHIVE_ENABLED: "1"
+    MONITOR_SWEEP: "1"
+    MONITOR_READ_SOURCE: postgres
+    STUB_AGENTS: "0"
+    RULE_CHECK_BYPASS: "false"
+  volumes:
+    # Mount the volume one level above the log directory. Docker copies the
+    # image's node-owned `logs/` child into a new volume, so the non-root app
+    # user can write without an unsafe root entrypoint.
+    - ao-logs:/app/persist
+    # Factory v3 writes AI-created skills/tools to these directories at
+    # runtime. Named volumes seed from the image on first use and survive
+    # container recreation.
+    - ao-skills:/app/skills-library
+    - ao-tools:/app/tools-library
+  # Lets containers reach services published on the host (e.g. an Allmeta
+  # stack on the same machine). Built into Docker Desktop; this line makes it
+  # work on Linux engines too.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  init: true
+  restart: unless-stopped
+
+services:
+  # Named ao-postgres (NOT plain "postgres") on purpose: shared-network
+  # deployments attach AO containers to an external network that may already
+  # have a container called "postgres" (on the Mac Studio it is new-api's DB
+  # holding the partner `raas` database). A same-name alias on two networks
+  # makes DNS resolution ambiguous — and silently cross-wires the databases.
+  ao-postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17.10-alpine}
+    environment:
+      POSTGRES_USER: ${AO_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AO_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${AO_POSTGRES_DB}
+    ports:
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${AO_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ao-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  app:
+    <<: *ao-service
+    command: ["web"]
+    ports:
+      - "${AO_BIND_ADDRESS:-0.0.0.0}:${AO_PORT:-3002}:3002"
+    depends_on:
+      ao-postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/api/health?check=ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 60s
+
+  inngest:
+    # Bundled event engine — only started when COMPOSE_PROFILES includes
+    # "bundled-inngest". Deployments that join an existing shared Inngest
+    # (AO + RAAS on one instance) leave the profile unset.
+    profiles: ["bundled-inngest"]
+    image: ${INNGEST_IMAGE:-inngest/inngest:v1.19.2}
+    working_dir: /var/lib/inngest
+    command:
+      - inngest
+      - dev
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8288"
+      - --persist
+      - --no-discovery
+      - -u
+      - http://app:3002/api/inngest
+    ports:
+      - "${INNGEST_BIND_ADDRESS:-0.0.0.0}:${INNGEST_PORT:-8288}:8288"
+      - "${INNGEST_BIND_ADDRESS:-0.0.0.0}:${INNGEST_CONNECT_PORT:-8289}:8289"
+    volumes:
+      # With working_dir=/var/lib/inngest, --persist writes
+      # /var/lib/inngest/.inngest/main.db into this named volume.
+      - ao-inngest-data:/var/lib/inngest/.inngest
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  archiver:
+    <<: *ao-service
+    command: ["archiver"]
+    # No hard dependency on the inngest service: the archiver is the
+    # compensating poller and must tolerate Inngest downtime by design —
+    # and in shared-Inngest mode the bundled service does not exist.
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/node_modules/.bin/tsx", "/app/scripts/deployment-health.ts", "archiver"]
+      interval: 30s
+      timeout: 10s
+      retries: 4
+      start_period: 90s
+
+  monitor-sweeper:
+    <<: *ao-service
+    command: ["monitor-sweeper"]
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/node_modules/.bin/tsx", "/app/scripts/deployment-health.ts", "monitor-sweeper"]
+      interval: 30s
+      timeout: 10s
+      retries: 4
+      start_period: 120s
+
+volumes:
+  ao-postgres-data:
+    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-postgres-data
+  ao-inngest-data:
+    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-inngest-data
+  ao-logs:
+    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-logs
+  ao-skills:
+    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-skills
+  ao-tools:
+    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-tools

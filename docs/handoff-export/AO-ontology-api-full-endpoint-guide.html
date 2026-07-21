@@ -1,0 +1,1857 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh" xml:lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>AO 本体 API 完整端点手册</title>
+  <style>
+
+html {
+color: #1a1a1a;
+background-color: #fdfdfd;
+}
+body {
+margin: 0 auto;
+max-width: 36em;
+padding-left: 50px;
+padding-right: 50px;
+padding-top: 50px;
+padding-bottom: 50px;
+hyphens: auto;
+overflow-wrap: break-word;
+text-rendering: optimizeLegibility;
+font-kerning: normal;
+}
+@media (max-width: 600px) {
+body {
+font-size: 0.9em;
+padding: 12px;
+}
+h1 {
+font-size: 1.8em;
+}
+}
+@media print {
+html {
+background-color: white;
+}
+body {
+background-color: transparent;
+color: black;
+font-size: 12pt;
+}
+p, h2, h3 {
+orphans: 3;
+widows: 3;
+}
+h2, h3, h4 {
+page-break-after: avoid;
+}
+}
+p {
+margin: 1em 0;
+}
+a {
+color: #1a1a1a;
+}
+a:visited {
+color: #1a1a1a;
+}
+img {
+max-width: 100%;
+}
+svg {
+height: auto;
+max-width: 100%;
+}
+h1, h2, h3, h4, h5, h6 {
+margin-top: 1.4em;
+}
+h5, h6 {
+font-size: 1em;
+font-style: italic;
+}
+h6 {
+font-weight: normal;
+}
+ol, ul {
+padding-left: 1.7em;
+margin-top: 1em;
+}
+li > ol, li > ul {
+margin-top: 0;
+}
+blockquote {
+margin: 1em 0 1em 1.7em;
+padding-left: 1em;
+border-left: 2px solid #e6e6e6;
+color: #606060;
+}
+code {
+white-space: pre-wrap;
+font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+font-size: 85%;
+margin: 0;
+hyphens: manual;
+}
+pre {
+margin: 1em 0;
+overflow: auto;
+}
+pre code {
+padding: 0;
+overflow: visible;
+overflow-wrap: normal;
+}
+.sourceCode {
+background-color: transparent;
+overflow: visible;
+}
+hr {
+border: none;
+border-top: 1px solid #1a1a1a;
+height: 1px;
+margin: 1em 0;
+}
+table {
+margin: 1em 0;
+border-collapse: collapse;
+width: 100%;
+overflow-x: auto;
+display: block;
+font-variant-numeric: lining-nums tabular-nums;
+}
+table caption {
+margin-bottom: 0.75em;
+}
+tbody {
+margin-top: 0.5em;
+border-top: 1px solid #1a1a1a;
+border-bottom: 1px solid #1a1a1a;
+}
+th {
+border-top: 1px solid #1a1a1a;
+padding: 0.25em 0.5em 0.25em 0.5em;
+}
+td {
+padding: 0.125em 0.5em 0.25em 0.5em;
+}
+header {
+margin-bottom: 4em;
+text-align: center;
+}
+#TOC li {
+list-style: none;
+}
+#TOC ul {
+padding-left: 1.3em;
+}
+#TOC > ul {
+padding-left: 0;
+}
+#TOC a:not(:hover) {
+text-decoration: none;
+}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+  <style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body {
+font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Helvetica, Arial, sans-serif;
+font-size: 14.5px; line-height: 1.7; color: #1c1f24; max-width: 920px;
+margin: 0 auto; padding: 40px 44px 80px;
+}
+h1 { font-size: 1.85em; border-bottom: 3px solid #2b6cb0; padding-bottom: .35em; margin: .2em 0 .6em; }
+h2 { font-size: 1.35em; margin-top: 1.8em; border-bottom: 1px solid #e2e8f0; padding-bottom: .25em; }
+h3 { font-size: 1.1em; margin-top: 1.4em; color: #2c5282; }
+blockquote {
+margin: 1em 0; padding: .6em 1em; background: #f0f7ff;
+border-left: 4px solid #2b6cb0; color: #2a4365; border-radius: 4px;
+}
+blockquote p { margin: .3em 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: .92em; }
+th, td { border: 1px solid #cbd5e0; padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: #2b6cb0; color: #fff; font-weight: 600; }
+tr:nth-child(even) td { background: #f7fafc; }
+code {
+font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+font-size: .88em; background: #edf2f7; padding: 1.5px 5px; border-radius: 4px; color: #c0392b;
+}
+pre {
+background: #1a202c; color: #e2e8f0; padding: 14px 16px; border-radius: 7px;
+overflow-x: auto; font-size: .85em; line-height: 1.55;
+}
+pre code { background: none; color: inherit; padding: 0; }
+a { color: #2b6cb0; }
+strong { color: #1a202c; }
+hr { border: none; border-top: 1px solid #e2e8f0; margin: 2em 0; }
+ul, ol { padding-left: 1.6em; }
+li { margin: .25em 0; }
+@page { margin: 14mm 12mm; }
+@media print { body { padding: 0; max-width: none; } pre { white-space: pre-wrap; word-break: break-word; } }
+</style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">AO 本体 API 完整端点手册</h1>
+</header>
+<h1 id="ontology-api--user-guide-neo4j-backed">Ontology API — User Guide
+(Neo4j-backed)</h1>
+<p>A central HTTP API at <code>/api/v1/ontology/</code> that exposes
+CRUD over the ontology graph stored in Neo4j. Hosted by the Studio app
+(<code>apps/studio</code>, port 3500). All five artifact kinds —
+DataObjects, Rules, Actions, Events, and Links (Neo4j relationships) —
+share one base URL, one auth scheme, and one error shape.</p>
+<p>This guide is for <strong>API consumers</strong> (link-generator,
+future builder apps, agents, ad-hoc scripts). For the architecture and
+rationale see <a href="./superpowers/specs/2026-04-29-ontology-api-design.md"><code>docs/superpowers/specs/2026-04-29-ontology-api-design.md</code></a>.</p>
+<hr />
+<h2 id="at-a-glance">At a glance</h2>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Path prefix</th>
+<th>Operations</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DataObjects</td>
+<td><code>/api/v1/ontology/objects</code></td>
+<td>C R U D (PUT, PATCH, DELETE)</td>
+<td>Node label <code>:DataObject</code></td>
+</tr>
+<tr>
+<td>Rules</td>
+<td><code>/api/v1/ontology/rules</code></td>
+<td>C R U D</td>
+<td>Node label <code>:Rule</code></td>
+</tr>
+<tr>
+<td>Actions</td>
+<td><code>/api/v1/ontology/actions</code></td>
+<td>C R U D</td>
+<td>Node label <code>:Action</code></td>
+</tr>
+<tr>
+<td>Events</td>
+<td><code>/api/v1/ontology/events</code></td>
+<td>C R U D</td>
+<td>Node label <code>:Event</code></td>
+</tr>
+<tr>
+<td>Links</td>
+<td><code>/api/v1/ontology/links</code></td>
+<td>C R U D</td>
+<td>Neo4j relationships, identified by <code>linkId</code></td>
+</tr>
+<tr>
+<td>Schema</td>
+<td><code>/api/v1/ontology/schema</code></td>
+<td>R</td>
+<td>Live property introspection</td>
+</tr>
+<tr>
+<td>Action sub-resources</td>
+<td><code>/api/v1/ontology/actions/{ref}/...</code></td>
+<td>composite (rules-by-action, steps-by-action, per-action result
+writers)</td>
+<td><code>{ref}</code> matches <code>Action.id</code> then
+<code>Action.name</code></td>
+</tr>
+<tr>
+<td>Instance data</td>
+<td><code>/api/v1/ontology/instances/{label}</code></td>
+<td>C R U D</td>
+<td>Records typed by a <code>:DataObject</code> schema (e.g.
+<code>:Candidate {candidate_id, …}</code>). PK field discovered from the
+schema; opt-in <code>?validate=strict</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Base URL</strong> — <code>http://localhost:3500</code> in
+dev. The <code>/api/v1/ontology</code> prefix is the API version path;
+future incompatible changes will land under
+<code>/api/v2/ontology</code>.</li>
+<li><strong>Content type</strong> — JSON. Every request and response
+body is <code>application/json</code> unless the response is empty (e.g.
+<code>204 No Content</code>).</li>
+<li><strong>Versioning</strong> — <code>/api/v1/ontology/...</code> is
+stable. Breaking changes ship behind a new path segment, never
+silently.</li>
+</ul>
+<hr />
+<h2 id="authentication">Authentication</h2>
+<p>All endpoints require a shared bearer token. Configure it on the host
+(Studio) via:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="va">ONTOLOGY_API_TOKEN</span><span class="op">=&lt;</span>your-strong-random-key<span class="op">&gt;</span></span></code></pre></div>
+<p>Send on every request via <strong>either</strong>:</p>
+<pre class="http"><code>Authorization: Bearer &lt;token&gt;</code></pre>
+<pre class="http"><code>x-api-key: &lt;token&gt;</code></pre>
+<p>Constant-time comparison server-side. Failure modes:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>HTTP</th>
+<th><code>error</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Server has no <code>ONTOLOGY_API_TOKEN</code></td>
+<td>500</td>
+<td><code>server-misconfigured</code></td>
+</tr>
+<tr>
+<td>Header missing</td>
+<td>401</td>
+<td><code>unauthorized</code></td>
+</tr>
+<tr>
+<td>Token present but wrong</td>
+<td>401</td>
+<td><code>unauthorized</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="common-conventions">Common conventions</h2>
+<h3 id="domain-scoping">Domain scoping</h3>
+<p>Every artifact is scoped to a domain (<code>RAAS-v1</code>,
+<code>R7-001</code>, …). Every endpoint takes the domain as
+<strong>either</strong> a <code>?domain=…</code> query param (reads,
+deletes, schema) <strong>or</strong> as a <code>domainId</code> field in
+the JSON body (writes). The server adds
+<code>WHERE n.domainId = $domain</code> to every Cypher match — there is
+no way to query across domains in v1.</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Where domain goes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /…</code></td>
+<td><code>?domain=RAAS-v1</code></td>
+</tr>
+<tr>
+<td><code>GET /…/{id}</code></td>
+<td><code>?domain=RAAS-v1</code></td>
+</tr>
+<tr>
+<td><code>DELETE /…/{id}</code></td>
+<td><code>?domain=RAAS-v1</code></td>
+</tr>
+<tr>
+<td><code>POST /…</code></td>
+<td>body: <code>{&quot;domainId&quot;: &quot;RAAS-v1&quot;, …}</code></td>
+</tr>
+<tr>
+<td><code>PUT /…/{id}</code></td>
+<td>body: <code>{&quot;domainId&quot;: &quot;RAAS-v1&quot;, …}</code></td>
+</tr>
+<tr>
+<td><code>PATCH /…/{id}</code></td>
+<td>body: <code>{&quot;domainId&quot;: &quot;RAAS-v1&quot;, …}</code></td>
+</tr>
+</tbody>
+</table>
+<p>A request without a domain returns
+<code>400 missing-domain</code>.</p>
+<h3 id="property-bag-semantics">Property-bag semantics</h3>
+<p>The API is <strong>schema-agnostic</strong>. It does not hardcode
+field lists for DataObject, Rule, Action, or Event. Whatever properties
+the client sends are stored on the node verbatim; reads return whatever
+is currently on the node. This is intentional — adding a new field in
+any builder requires zero API changes.</p>
+<p>Two consequences:</p>
+<ol type="1">
+<li><strong>No server-side field validation</strong> beyond
+<code>id</code> (string, required) and <code>domainId</code> (string,
+required). The server does not reject unknown keys.</li>
+<li><strong>Discover the actual fields</strong> in use via the schema
+endpoint
+(<code>GET /api/v1/ontology/schema/{resource}?domain=…</code>).</li>
+</ol>
+<h3 id="the-flatten-rule-writes-only">The flatten rule (writes
+only)</h3>
+<p>Neo4j only stores <strong>primitives and arrays of
+primitives</strong> as node properties. The API handles this on
+writes:</p>
+<ul>
+<li><code>string</code> / <code>number</code> / <code>boolean</code> /
+<code>null</code> → stored as-is</li>
+<li><code>string[]</code> / <code>number[]</code> /
+<code>boolean[]</code> → stored as-is</li>
+<li>nested objects (<code>{ … }</code>) → JSON-stringified to a single
+property</li>
+<li>arrays of objects (<code>[{…}, {…}]</code>) → JSON-stringified</li>
+</ul>
+<p><strong>Reads do not auto-inflate.</strong> What the server stored is
+what you get back. If you need the structured form,
+<code>JSON.parse()</code> the relevant property on the client. (A future
+<code>?inflate=true</code> query param may re-hydrate flattened
+properties; not in v1.)</p>
+<h3 id="pagination">Pagination</h3>
+<p>List endpoints accept <code>?limit=N</code> (default 100, max 1000)
+and <code>?cursor=…</code> (opaque token returned by the previous page).
+Iteration is stable as long as <code>domainId</code> is fixed.</p>
+<h3 id="error-shape">Error shape</h3>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;error&quot;</span><span class="fu">:</span>   <span class="st">&quot;&lt;machine-readable-code&gt;&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;human-readable detail&gt;&quot;</span><span class="fu">,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;details&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="er">/*</span> <span class="er">optional</span> <span class="er">context,</span> <span class="er">varies</span> <span class="er">by</span> <span class="er">error</span> <span class="er">*/</span> <span class="fu">}</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>HTTP</th>
+<th>When</th>
+<th><code>error</code> examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td>Invalid body, missing <code>id</code> / <code>domainId</code>,
+malformed query</td>
+<td><code>missing-domain</code>, <code>missing-id</code>,
+<code>invalid-json</code></td>
+</tr>
+<tr>
+<td>401</td>
+<td>Auth missing / invalid</td>
+<td><code>unauthorized</code></td>
+</tr>
+<tr>
+<td>404</td>
+<td>Resource not found</td>
+<td><code>node-not-found</code>, <code>link-not-found</code></td>
+</tr>
+<tr>
+<td>409</td>
+<td>Logical conflict (e.g. link references missing endpoint)</td>
+<td><code>endpoint-not-found</code>, <code>duplicate-id</code></td>
+</tr>
+<tr>
+<td>500</td>
+<td>Server misconfigured, unexpected programmer error</td>
+<td><code>server-misconfigured</code>, <code>internal-error</code></td>
+</tr>
+<tr>
+<td>502</td>
+<td>Neo4j unreachable / driver error</td>
+<td><code>neo4j-unavailable</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1-dataobjects-rules-actions-events-generic-node-crud">1.
+DataObjects, Rules, Actions, Events (generic node CRUD)</h2>
+<p>All four resources share an identical surface. Substitute
+<code>{resource}</code> with <code>objects</code>, <code>rules</code>,
+<code>actions</code>, or <code>events</code>.</p>
+<h3 id="get-apiv1ontologyresource--list"><code>GET /api/v1/ontology/{resource}</code>
+— list</h3>
+<pre class="http"><code>GET /api/v1/ontology/objects?domain=RAAS-v1&amp;limit=50 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;items&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;Job_Requisition&quot;</span><span class="fu">,</span> <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;招聘岗位&quot;</span><span class="fu">,</span> <span class="er">…</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;Candidate&quot;</span><span class="fu">,</span>       <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;候选人&quot;</span><span class="fu">,</span>   <span class="er">…</span> <span class="fu">}</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;nextCursor&quot;</span><span class="fu">:</span> <span class="kw">null</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Optional filters: <code>?id=…</code>, <code>?name=…</code> (top-level
+equality only in v1; each becomes
+<code>WHERE n.&lt;key&gt; = $&lt;key&gt;</code> in the underlying
+Cypher). Use the schema endpoint to discover legal property names.</p>
+<h3 id="post-apiv1ontologyresource--create-or-bulk-upsert"><code>POST /api/v1/ontology/{resource}</code>
+— create or bulk upsert</h3>
+<p>Single:</p>
+<pre class="http"><code>POST /api/v1/ontology/objects HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;: &quot;RAAS-v1&quot;,
+  &quot;id&quot;:       &quot;Job_Requisition&quot;,
+  &quot;name&quot;:     &quot;招聘岗位&quot;,
+  &quot;description&quot;: &quot;…&quot;,
+  &quot;fields&quot;:   [{ &quot;name&quot;: &quot;title&quot;, &quot;type&quot;: &quot;string&quot; }]
+}</code></pre>
+<p>Bulk (preferred for large imports):</p>
+<pre class="http"><code>POST /api/v1/ontology/objects HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;: &quot;RAAS-v1&quot;,
+  &quot;items&quot;: [
+    { &quot;id&quot;: &quot;A&quot;, &quot;name&quot;: &quot;…&quot; },
+    { &quot;id&quot;: &quot;B&quot;, &quot;name&quot;: &quot;…&quot; }
+  ]
+}</code></pre>
+<p>Semantics: <code>MERGE</code> on <code>(id, domainId)</code>. Every
+<code>POST</code> is idempotent — calling it twice with the same payload
+produces the same graph state. Properties of an existing node are
+<strong>fully replaced</strong> by the request body (same as
+<code>PUT</code>). Use <code>PATCH</code> for partial updates.</p>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;upserted&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;Job_Requisition&quot;</span><span class="ot">]</span><span class="fu">,</span> <span class="dt">&quot;count&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span></span></code></pre></div>
+<p>Bulk:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;upserted&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;A&quot;</span><span class="ot">,</span> <span class="st">&quot;B&quot;</span><span class="ot">]</span><span class="fu">,</span> <span class="dt">&quot;count&quot;</span><span class="fu">:</span> <span class="dv">2</span> <span class="fu">}</span></span></code></pre></div>
+<p>The <code>fields</code> array (and any other nested structure) is
+JSON-stringified on storage; the read response will return it as a
+string.</p>
+<h3 id="get-apiv1ontologyresourceref--read-one"><code>GET /api/v1/ontology/{resource}/{ref}</code>
+— read one</h3>
+<pre class="http"><code>GET /api/v1/ontology/objects/Job_Requisition?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p><code>{ref}</code> is matched first against the node&#39;s
+<code>id</code>, then any per-label id-aliases
+(<code>Action.action_id</code> only in v1 — historical legacy from older
+import pipelines), then the human-readable name field — so for callers
+that only know an artifact by name, <code>/{resource}/{name}</code>
+works too. The name field is per-resource: <code>name</code> for
+Objects, Actions, and Events; <code>businessLogicRuleName</code> for
+Rules. Id matches always win when both an id and a different artifact&#39;s
+name resolve to the same string; aliases rank between id and name.</p>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;id&quot;</span><span class="fu">:</span>       <span class="st">&quot;Job_Requisition&quot;</span><span class="fu">,</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;name&quot;</span><span class="fu">:</span>     <span class="st">&quot;招聘岗位&quot;</span><span class="fu">,</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;fields&quot;</span><span class="fu">:</span>   <span class="st">&quot;[{</span><span class="ch">\&quot;</span><span class="st">name</span><span class="ch">\&quot;</span><span class="st">:</span><span class="ch">\&quot;</span><span class="st">title</span><span class="ch">\&quot;</span><span class="st">,</span><span class="ch">\&quot;</span><span class="st">type</span><span class="ch">\&quot;</span><span class="st">:</span><span class="ch">\&quot;</span><span class="st">string</span><span class="ch">\&quot;</span><span class="st">}]&quot;</span><span class="fu">,</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;updatedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-04-29T13:42:11.728+08:00&quot;</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p><code>404 node-not-found</code> if no node matches
+<code>(ref, domainId)</code>.</p>
+<h3 id="put-apiv1ontologyresourceref--replace"><code>PUT /api/v1/ontology/{resource}/{ref}</code>
+— replace</h3>
+<pre class="http"><code>PUT /api/v1/ontology/objects/Job_Requisition HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;:    &quot;RAAS-v1&quot;,
+  &quot;name&quot;:        &quot;招聘岗位&quot;,
+  &quot;description&quot;: &quot;Replaced description&quot;
+}</code></pre>
+<p>Replaces <strong>all</strong> properties on the node. The URL
+<code>{ref}</code> is resolved to the node&#39;s actual <code>id</code>
+(id-then-name, id wins on ties); the body&#39;s <code>domainId</code> plus
+the resolved <code>id</code> are merged in automatically. Properties
+absent from the body are removed.</p>
+<p>Response — <code>200 OK</code>: the new node.</p>
+<h3 id="patch-apiv1ontologyresourceref--partial-update"><code>PATCH /api/v1/ontology/{resource}/{ref}</code>
+— partial update</h3>
+<pre class="http"><code>PATCH /api/v1/ontology/objects/Job_Requisition HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;:    &quot;RAAS-v1&quot;,
+  &quot;description&quot;: &quot;Updated description only&quot;
+}</code></pre>
+<p>Merges the supplied keys; leaves other properties untouched. To
+explicitly remove a property, set it to <code>null</code> in the
+body.</p>
+<p>Response — <code>200 OK</code>: the updated node.</p>
+<h3 id="delete-apiv1ontologyresourceref--delete"><code>DELETE /api/v1/ontology/{resource}/{ref}</code>
+— delete</h3>
+<pre class="http"><code>DELETE /api/v1/ontology/objects/Job_Requisition?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p>Uses <code>DETACH DELETE</code> — the node and <strong>all
+relationships touching it</strong> (in either direction) are removed.
+There is no soft-delete in v1.</p>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;deleted&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span></span></code></pre></div>
+<p><code>404 node-not-found</code> if <code>{ref}</code> resolves to
+neither an id nor a name in the requested domain — same as GET. (Earlier
+revisions returned <code>200 {deleted: 0}</code> for missing nodes; that
+idempotency promise was dropped on 2026-05-08 along with the
+name-fallback rollout, since returning 404 on a typo&#39;d ref is more
+useful than silent success. A <code>200 {deleted: 0}</code> response is
+still possible in the rare TOCTOU window where the node disappears
+between the resolver step and the delete step.)</p>
+<hr />
+<h2 id="2-schema-introspection">2. Schema introspection</h2>
+<p>Discover what properties currently exist on a label, sampled from
+live Neo4j. The API does not maintain a static schema — this endpoint
+<strong>is</strong> the schema.</p>
+<h3 id="get-apiv1ontologyschemadomain--all-four-labels"><code>GET /api/v1/ontology/schema?domain=…</code>
+— all four labels</h3>
+<pre class="http"><code>GET /api/v1/ontology/schema?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<div class="sourceCode" id="cb18"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;domain&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;labels&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;label&quot;</span><span class="fu">:</span> <span class="st">&quot;DataObject&quot;</span><span class="fu">,</span> <span class="dt">&quot;resource&quot;</span><span class="fu">:</span> <span class="st">&quot;objects&quot;</span><span class="fu">,</span> <span class="dt">&quot;sampledNodes&quot;</span><span class="fu">:</span> <span class="dv">100</span><span class="fu">,</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;properties&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;id&quot;</span><span class="fu">,</span>       <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">100</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;domainId&quot;</span><span class="fu">,</span> <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">100</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;name&quot;</span><span class="fu">,</span>     <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">98</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>        <span class="er">…</span></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>      <span class="ot">]</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;label&quot;</span><span class="fu">:</span> <span class="st">&quot;Rule&quot;</span><span class="fu">,</span>   <span class="dt">&quot;resource&quot;</span><span class="fu">:</span> <span class="st">&quot;rules&quot;</span><span class="fu">,</span>   <span class="er">…</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;label&quot;</span><span class="fu">:</span> <span class="st">&quot;Action&quot;</span><span class="fu">,</span> <span class="dt">&quot;resource&quot;</span><span class="fu">:</span> <span class="st">&quot;actions&quot;</span><span class="fu">,</span> <span class="er">…</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;label&quot;</span><span class="fu">:</span> <span class="st">&quot;Event&quot;</span><span class="fu">,</span>  <span class="dt">&quot;resource&quot;</span><span class="fu">:</span> <span class="st">&quot;events&quot;</span><span class="fu">,</span>  <span class="er">…</span> <span class="fu">}</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h3 id="get-apiv1ontologyschemaresourcedomain--one-label"><code>GET /api/v1/ontology/schema/{resource}?domain=…</code>
+— one label</h3>
+<pre class="http"><code>GET /api/v1/ontology/schema/rules?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<div class="sourceCode" id="cb20"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;label&quot;</span><span class="fu">:</span>        <span class="st">&quot;Rule&quot;</span><span class="fu">,</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;resource&quot;</span><span class="fu">:</span>     <span class="st">&quot;rules&quot;</span><span class="fu">,</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;domain&quot;</span><span class="fu">:</span>       <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sampledNodes&quot;</span><span class="fu">:</span> <span class="dv">100</span><span class="fu">,</span></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;properties&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;id&quot;</span><span class="fu">,</span>                       <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">100</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;domainId&quot;</span><span class="fu">,</span>                 <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">100</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;businessLogicRuleName&quot;</span><span class="fu">,</span>    <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">100</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;specificScenarioStage&quot;</span><span class="fu">,</span>    <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span> <span class="dv">100</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;applicableClient&quot;</span><span class="fu">,</span>         <span class="dt">&quot;occurrence&quot;</span><span class="fu">:</span>  <span class="dv">87</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a>    <span class="er">…</span></span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Sampling: the first 100 nodes (per Cypher&#39;s natural ordering — not
+deterministic, but adequate for &quot;which fields are commonly used&quot;). For
+exact occurrence counts increase the sample with <code>?sample=N</code>
+(max 1000).</p>
+<hr />
+<h2 id="3-links-neo4j-relationships">3. Links (Neo4j relationships)</h2>
+<p>Links are stored as <strong>edges</strong>, not nodes, between
+existing nodes (typically two <code>:DataObject</code>s, but any-to-any
+is supported). Each link is identified by a <code>linkId</code> property
+the server stores on the relationship; if a client doesn&#39;t supply one at
+create time, the server generates a UUID v4.</p>
+<h3 id="get-apiv1ontologylinks--list"><code>GET /api/v1/ontology/links</code>
+— list</h3>
+<pre class="http"><code>GET /api/v1/ontology/links?domain=RAAS-v1&amp;type=HAS_FIELD HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p>Optional filters: <code>?type=…</code>,
+<code>?from=&lt;sourceId&gt;</code>,
+<code>?to=&lt;targetId&gt;</code>.</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;items&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;linkId&quot;</span><span class="fu">:</span>   <span class="st">&quot;f3d1c8e2-…&quot;</span><span class="fu">,</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span>     <span class="st">&quot;HAS_FIELD&quot;</span><span class="fu">,</span></span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;fromId&quot;</span><span class="fu">:</span>   <span class="st">&quot;Job_Requisition&quot;</span><span class="fu">,</span></span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;fromLabel&quot;</span><span class="fu">:</span><span class="st">&quot;DataObject&quot;</span><span class="fu">,</span></span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;toId&quot;</span><span class="fu">:</span>     <span class="st">&quot;field_title&quot;</span><span class="fu">,</span></span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;toLabel&quot;</span><span class="fu">:</span>  <span class="st">&quot;DataObject&quot;</span><span class="fu">,</span></span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;confidence&quot;</span><span class="fu">:</span> <span class="fl">0.92</span><span class="fu">,</span></span>
+<span id="cb22-12"><a href="#cb22-12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;updatedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-04-29T13:42:11.728+08:00&quot;</span></span>
+<span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb22-14"><a href="#cb22-14" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb22-15"><a href="#cb22-15" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;nextCursor&quot;</span><span class="fu">:</span> <span class="kw">null</span></span>
+<span id="cb22-16"><a href="#cb22-16" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h3 id="post-apiv1ontologylinks--create"><code>POST /api/v1/ontology/links</code>
+— create</h3>
+<pre class="http"><code>POST /api/v1/ontology/links HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;:   &quot;RAAS-v1&quot;,
+  &quot;type&quot;:       &quot;HAS_FIELD&quot;,
+  &quot;fromId&quot;:     &quot;Job_Requisition&quot;,
+  &quot;toId&quot;:       &quot;field_title&quot;,
+  &quot;confidence&quot;: 0.92,
+  &quot;linkId&quot;:     &quot;optional-client-supplied-id&quot;
+}</code></pre>
+<p>Constraints:</p>
+<ul>
+<li><code>type</code> must match <code>^[A-Z][A-Z0-9_]{0,63}$</code>
+(Neo4j relationship type rule + an allowlist enforced by the server).
+Unknown types return <code>400 invalid-link-type</code>.</li>
+<li>The endpoint nodes (<code>fromId</code>, <code>toId</code>) must
+already exist in the domain. If either is missing the call returns
+<code>409 endpoint-not-found</code> with a <code>details.missing</code>
+array.</li>
+<li><code>linkId</code> is optional; when omitted the server generates a
+UUID v4.</li>
+</ul>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;linkId&quot;</span><span class="fu">:</span> <span class="st">&quot;f3d1c8e2-2a4b-4d8c-9f1d-7e6c5b4a3f2d&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h3 id="get-apiv1ontologylinkslinkid--read-one"><code>GET /api/v1/ontology/links/{linkId}</code>
+— read one</h3>
+<pre class="http"><code>GET /api/v1/ontology/links/f3d1c8e2-…?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<h3 id="put-apiv1ontologylinkslinkid--patch-linkid"><code>PUT /api/v1/ontology/links/{linkId}</code>
+/ <code>PATCH .../{linkId}</code></h3>
+<p>Same semantics as nodes (PUT replaces all properties; PATCH merges).
+You <strong>cannot</strong> change <code>type</code>,
+<code>fromId</code>, or <code>toId</code> on an existing link — delete
+and re-create instead.</p>
+<h3 id="delete-apiv1ontologylinkslinkid"><code>DELETE /api/v1/ontology/links/{linkId}</code></h3>
+<pre class="http"><code>DELETE /api/v1/ontology/links/f3d1c8e2-…?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb27"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;deleted&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span></span></code></pre></div>
+<hr />
+<h2 id="4-action-sub-resources">4. Action sub-resources</h2>
+<p>Composite endpoints under
+<code>/api/v1/ontology/actions/{ref}/...</code> that aren&#39;t generic CRUD
+— they assemble multi-node graph shapes in one call:</p>
+<ul>
+<li>two <strong>reads</strong> that traverse
+<code>(:Action)-[:HAS_STEP]-&gt;(:ActionStep)</code> (and, for
+<code>/rules</code>, the further
+<code>(:Rule)-[:GOVERNS]-&gt;(:ActionStep)</code>) to return either the
+steps or the steps + rules attached to an Action;</li>
+<li>a <strong>per-action write</strong> that records an instance of an
+action&#39;s outcome (currently only <code>matchResume</code>).</li>
+</ul>
+<p>All three endpoints accept <code>{ref}</code> as either the Action&#39;s
+<code>id</code> or its <code>name</code> (id wins on ties), and require
+<code>?domain=…</code>. The Action match itself is domain-scoped: an
+Action created in domain <code>RAAS-v1</code> is invisible from
+<code>?domain=other-domain</code>.</p>
+<h3 id="get-apiv1ontologyactionsrefrules"><code>GET /api/v1/ontology/actions/{ref}/rules</code></h3>
+<p>Returns the Action identified by <code>{ref}</code> (within the
+supplied domain) together with its <code>(:ActionStep)</code> children
+and the rules attached to each step. <code>{ref}</code> is matched
+against <code>Action.id</code> first, then
+<code>Action.action_id</code>, then <code>Action.name</code> — id wins
+on ties.</p>
+<p>Step discovery is dual-path: linked steps via
+<code>(:Action)-[:HAS_STEP]-&gt;(:ActionStep)</code> AND, when no linked
+steps exist, fallback steps whose <code>action_id</code> /
+<code>actionId</code> / <code>parentActionId</code> property matches the
+Action&#39;s id (or <code>action_id</code> alias). Some import pipelines
+stamp the parent ref on the step instead of creating the relationship;
+both shapes are surfaced.</p>
+<p>Rules attach to each step via two relationship directions —
+<code>(:Rule)-[:GOVERNS]-&gt;(:ActionStep)</code> AND
+<code>(:ActionStep)-[:CHECKS]-&gt;(:Rule)</code> — and via a
+JSON-stringified <code>step.rules_json</code> /
+<code>step.rulesJson</code> / <code>step.rules</code> property fallback.
+Ids found only in the JSON fallback are hydrated by a single batched
+follow-up query against <code>(:Rule)</code>.</p>
+<p>Steps + rules are scoped to the same <code>?domain=…</code>. Step
+order falls back through <code>coalesce(s.order, s.index, &quot;0&quot;)</code> to
+tolerate the inconsistent ordering schemas different import pipelines
+produce.</p>
+<p>Query params:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>domain</code></td>
+<td>yes</td>
+<td>Scopes the Action match, the steps list, and the rules list.</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb28"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="dt">\</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$ONTOLOGY_API_TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;http://localhost:3500/api/v1/ontology/actions/matchResume/rules?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span></code></pre></div>
+<p>Response — <code>200 OK</code>: a single Action object with nested
+<code>action_steps[]</code> (each step&#39;s rules in
+<code>step.rules</code>), a flattened deduped <code>rules[]</code> at
+the top level, a <code>ruleCount</code>, and a compiled
+<code>userPrompt</code> suitable for handing directly to an LLM:</p>
+<div class="sourceCode" id="cb29"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;id&quot;</span><span class="fu">:</span>          <span class="st">&quot;matchResume&quot;</span><span class="fu">,</span></span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;name&quot;</span><span class="fu">:</span>        <span class="st">&quot;matchResume&quot;</span><span class="fu">,</span></span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb29-5"><a href="#cb29-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;action_steps&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb29-6"><a href="#cb29-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb29-7"><a href="#cb29-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;id&quot;</span><span class="fu">:</span>    <span class="st">&quot;step-1&quot;</span><span class="fu">,</span></span>
+<span id="cb29-8"><a href="#cb29-8" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;name&quot;</span><span class="fu">:</span>  <span class="st">&quot;Hard requirements&quot;</span><span class="fu">,</span></span>
+<span id="cb29-9"><a href="#cb29-9" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;order&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb29-10"><a href="#cb29-10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;condition&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb29-11"><a href="#cb29-11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb29-12"><a href="#cb29-12" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span></span>
+<span id="cb29-13"><a href="#cb29-13" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;id&quot;</span><span class="fu">:</span>                       <span class="st">&quot;10-HARD-DEGREE&quot;</span><span class="fu">,</span></span>
+<span id="cb29-14"><a href="#cb29-14" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;businessLogicRuleName&quot;</span><span class="fu">:</span>    <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb29-15"><a href="#cb29-15" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;executor&quot;</span><span class="fu">:</span>                 <span class="st">&quot;Agent&quot;</span><span class="fu">,</span></span>
+<span id="cb29-16"><a href="#cb29-16" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;applicableClient&quot;</span><span class="fu">:</span>         <span class="st">&quot;通用&quot;</span><span class="fu">,</span></span>
+<span id="cb29-17"><a href="#cb29-17" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;applicableDepartment&quot;</span><span class="fu">:</span>     <span class="st">&quot;Recruitment&quot;</span><span class="fu">,</span></span>
+<span id="cb29-18"><a href="#cb29-18" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;businessBackgroundReason&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb29-19"><a href="#cb29-19" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span>                 <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb29-20"><a href="#cb29-20" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;relatedEntities&quot;</span><span class="fu">:</span>          <span class="ot">[</span><span class="st">&quot;Candidate&quot;</span><span class="ot">,</span> <span class="st">&quot;Job_Requisition&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb29-21"><a href="#cb29-21" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;specificScenarioStage&quot;</span><span class="fu">:</span>    <span class="st">&quot;hard-requirements&quot;</span><span class="fu">,</span></span>
+<span id="cb29-22"><a href="#cb29-22" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;version&quot;</span><span class="fu">:</span>                  <span class="st">&quot;1.0&quot;</span></span>
+<span id="cb29-23"><a href="#cb29-23" aria-hidden="true" tabindex="-1"></a>        <span class="fu">}</span></span>
+<span id="cb29-24"><a href="#cb29-24" aria-hidden="true" tabindex="-1"></a>      <span class="ot">]</span></span>
+<span id="cb29-25"><a href="#cb29-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb29-26"><a href="#cb29-26" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb29-27"><a href="#cb29-27" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb29-28"><a href="#cb29-28" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb29-29"><a href="#cb29-29" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;id&quot;</span><span class="fu">:</span>                       <span class="st">&quot;10-HARD-DEGREE&quot;</span><span class="fu">,</span></span>
+<span id="cb29-30"><a href="#cb29-30" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;businessLogicRuleName&quot;</span><span class="fu">:</span>    <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb29-31"><a href="#cb29-31" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;executor&quot;</span><span class="fu">:</span>                 <span class="st">&quot;Agent&quot;</span><span class="fu">,</span></span>
+<span id="cb29-32"><a href="#cb29-32" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;applicableClient&quot;</span><span class="fu">:</span>         <span class="st">&quot;通用&quot;</span><span class="fu">,</span></span>
+<span id="cb29-33"><a href="#cb29-33" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;applicableDepartment&quot;</span><span class="fu">:</span>     <span class="st">&quot;Recruitment&quot;</span><span class="fu">,</span></span>
+<span id="cb29-34"><a href="#cb29-34" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;businessBackgroundReason&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb29-35"><a href="#cb29-35" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span>                 <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb29-36"><a href="#cb29-36" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;relatedEntities&quot;</span><span class="fu">:</span>          <span class="ot">[</span><span class="st">&quot;Candidate&quot;</span><span class="ot">,</span> <span class="st">&quot;Job_Requisition&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb29-37"><a href="#cb29-37" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;specificScenarioStage&quot;</span><span class="fu">:</span>    <span class="st">&quot;hard-requirements&quot;</span><span class="fu">,</span></span>
+<span id="cb29-38"><a href="#cb29-38" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;version&quot;</span><span class="fu">:</span>                  <span class="st">&quot;1.0&quot;</span></span>
+<span id="cb29-39"><a href="#cb29-39" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb29-40"><a href="#cb29-40" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb29-41"><a href="#cb29-41" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;ruleCount&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb29-42"><a href="#cb29-42" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;userPrompt&quot;</span><span class="fu">:</span> <span class="st">&quot;# Ontology rules for Action matchResume (matchResume)</span><span class="ch">\n\n</span><span class="st">Use the following ontology rules ...&quot;</span></span>
+<span id="cb29-43"><a href="#cb29-43" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Each rule carries a curated subset of the <code>(:Rule)</code> node&#39;s
+properties — <code>id</code>, <code>businessLogicRuleName</code>,
+<code>standardizedLogicRule</code>, <code>submissionCriteria</code>,
+<code>executor</code>, <code>ruleSource</code>,
+<code>applicableClient</code>, <code>applicableDepartment</code>,
+<code>businessBackgroundReason</code>, <code>domainId</code>,
+<code>relatedEntities</code>, <code>specificScenarioStage</code>,
+<code>version</code>. For the full property catalog stored on the node,
+call the schema introspection endpoint
+(<code>GET /api/v1/ontology/schema/rules?domain=…</code>). Steps without
+an explicit <code>id</code> get a synthesized
+<code>${actionId}::${stepName}</code> so callers always have a stable
+handle.</p>
+<p>Errors:</p>
+<table>
+<thead>
+<tr>
+<th>HTTP</th>
+<th><code>error</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td><code>missing-domain</code></td>
+</tr>
+<tr>
+<td>401</td>
+<td><code>unauthorized</code></td>
+</tr>
+<tr>
+<td>404</td>
+<td><code>action-not-found</code></td>
+</tr>
+<tr>
+<td>500</td>
+<td><code>server-misconfigured</code></td>
+</tr>
+<tr>
+<td>502</td>
+<td><code>neo4j-unavailable</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="get-apiv1ontologyactionsrefsteps"><code>GET /api/v1/ontology/actions/{ref}/steps</code></h3>
+<p>Returns the Action together with its <code>(:ActionStep)</code>
+children, ordered by <code>step.order</code>. Same lookup and domain
+rules as <code>/rules</code>, but the response omits the per-step rule
+list — useful when you only need the step structure (e.g. rendering an
+Action&#39;s pipeline).</p>
+<p>Query params:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>domain</code></td>
+<td>yes</td>
+<td>Scopes both the Action match and the steps list.</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb30"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="dt">\</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$ONTOLOGY_API_TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;http://localhost:3500/api/v1/ontology/actions/matchResume/steps?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span></code></pre></div>
+<p>Response — <code>200 OK</code>: a single Action object with
+<code>action_steps[]</code> (no <code>rules</code> nesting):</p>
+<div class="sourceCode" id="cb31"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;id&quot;</span><span class="fu">:</span>          <span class="st">&quot;matchResume&quot;</span><span class="fu">,</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;name&quot;</span><span class="fu">:</span>        <span class="st">&quot;matchResume&quot;</span><span class="fu">,</span></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;action_steps&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;step-1&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;Hard requirements&quot;</span><span class="fu">,</span> <span class="dt">&quot;order&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;step-2&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;Conflict-of-interest checks&quot;</span><span class="fu">,</span> <span class="dt">&quot;order&quot;</span><span class="fu">:</span> <span class="dv">2</span> <span class="fu">}</span></span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Errors: same set as <code>/rules</code>.</p>
+<h3 id="post-apiv1ontologyactionsmatchresumeresults"><code>POST /api/v1/ontology/actions/matchResume/results</code></h3>
+<p>Persists a new <code>(:Candidate_Match_Result)</code> node, MERGE-ing
+<code>(:Candidate)</code> and <code>(:Job_Requisition)</code> stub nodes
+if they don&#39;t yet exist, then linking:</p>
+<pre><code>(:Candidate_Match_Result)-[:candidate_match_result_refers_to_candidate]-&gt;(:Candidate)
+(:Candidate_Match_Result)-[:candidate_match_result_refers_to_job_requisition]-&gt;(:Job_Requisition)</code></pre>
+<p>Every call adds a <strong>new</strong> history record — the endpoint
+never overwrites.</p>
+<p>Body:</p>
+<div class="sourceCode" id="cb33"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;candidateId&quot;</span><span class="fu">:</span>   <span class="st">&quot;C-100023&quot;</span><span class="fu">,</span></span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;jobPositionId&quot;</span><span class="fu">:</span> <span class="st">&quot;JR-50087&quot;</span><span class="fu">,</span></span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;result&quot;</span><span class="fu">:</span>        <span class="st">&quot;匹配&quot;</span><span class="fu">,</span></span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;reason&quot;</span><span class="fu">:</span>        <span class="st">&quot;…&quot;</span></span>
+<span id="cb33-6"><a href="#cb33-6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>All four fields are required strings.</p>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb34"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;candidateMatchResultId&quot;</span><span class="fu">:</span> <span class="st">&quot;f3d1c8e2-2a4b-4d8c-9f1d-7e6c5b4a3f2d&quot;</span><span class="fu">,</span></span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;createdAt&quot;</span><span class="fu">:</span>              <span class="st">&quot;2026-04-29T13:42:11.728+08:00&quot;</span></span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p><code>candidateMatchResultId</code> is a server-generated UUID v4
+stored as <code>Candidate_Match_Result.candidate_match_result_id</code>.
+<code>createdAt</code> is the node&#39;s <code>datetime()</code> rendered as
+ISO 8601 with offset.</p>
+<blockquote>
+<p><strong>Why per-action and not generic?</strong> Composite writes
+that MERGE foreign-key stubs (here: <code>Candidate</code>,
+<code>Job_Requisition</code>) and auto-link them are domain-shaped — the
+endpoint knows which input field maps to which target node and which
+relationship type to create. With a sample size of one, a generic
+<code>POST /instances/{label}</code> writer would have to encode that
+mapping in the request body and risks the wrong abstraction. Plan: keep
+per-action result writers for now; revisit a generic instance-writer
+once a second action (e.g. <code>scoreCandidate</code>,
+<code>generateOffer</code>) needs one and the shapes can be compared
+side-by-side.</p>
+</blockquote>
+<hr />
+<h2 id="5-instance-data-crud">5. Instance data CRUD</h2>
+<p>Endpoints under <code>/api/v1/ontology/instances/{label}/...</code>
+operate on <strong>instance-data nodes</strong> (records typed by a
+<code>:DataObject</code> schema), as opposed to §1 which operates on the
+schema definitions themselves. For example,
+<code>:DataObject {id: &quot;Candidate&quot;, primary_key: &quot;candidate_id&quot;}</code>
+defines the schema (managed by §1), while
+<code>:Candidate {candidate_id: &quot;C-100023&quot;, domainId: &quot;RAAS-v1&quot;, name: &quot;张三&quot;}</code>
+is one instance row (managed here).</p>
+<p><code>{label}</code> is the schema&#39;s <code>id</code> (e.g.
+<code>Candidate</code>, <code>Job_Requisition</code>,
+<code>Candidate_Match_Result</code>). Every request:</p>
+<ul>
+<li>Looks up <code>:DataObject {id: $label, domainId: $domain}</code> to
+discover the <strong>PK field name</strong> via its
+<code>primary_key</code> property. Cached in- process for ~30s; first
+call to a <code>(label, domain)</code> pair pays a one-shot read of the
+schema.</li>
+<li>Returns <code>404 schema-not-found</code> if the schema doesn&#39;t
+exist in the domain. Distinct from <code>instance-not-found</code> (the
+schema is fine, but no instance row matches the supplied PK).</li>
+<li>Requires <code>?domain=…</code> like the rest of the API. Instance
+data is <strong>domain-partitioned</strong>: a
+<code>(candidate_id, RAAS-v1)</code> row is a different node from
+<code>(candidate_id, other-domain)</code>.</li>
+<li>Default mode is property-bag-permissive (any properties accepted, no
+field-level type checking) — same posture as §1.
+<code>?validate=strict</code> opts in to schema validation against the
+<code>:DataObject</code> definition.</li>
+</ul>
+<p>The PK field is interpolated into Cypher (regex-gated by
+<code>safeProp</code>); the value is parameterized.</p>
+<h3 id="get-apiv1ontologyinstanceslabeldomain--list"><code>GET /api/v1/ontology/instances/{label}?domain=…</code>
+— list</h3>
+<pre class="http"><code>GET /api/v1/ontology/instances/Candidate?domain=RAAS-v1&amp;limit=50&amp;candidate_status=active HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb36"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;items&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;candidate_id&quot;</span><span class="fu">:</span> <span class="st">&quot;C-100023&quot;</span><span class="fu">,</span> <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;张三&quot;</span><span class="fu">,</span> <span class="dt">&quot;candidate_status&quot;</span><span class="fu">:</span> <span class="st">&quot;active&quot;</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;candidate_id&quot;</span><span class="fu">:</span> <span class="st">&quot;C-100024&quot;</span><span class="fu">,</span> <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;李四&quot;</span><span class="fu">,</span> <span class="dt">&quot;candidate_status&quot;</span><span class="fu">:</span> <span class="st">&quot;active&quot;</span> <span class="fu">}</span></span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb36-6"><a href="#cb36-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;nextCursor&quot;</span><span class="fu">:</span> <span class="kw">null</span></span>
+<span id="cb36-7"><a href="#cb36-7" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Top-level filter params become Cypher equality predicates (same as
+§1). Reserved keys: <code>domain</code>, <code>limit</code>,
+<code>cursor</code>, <code>validate</code> — anything else is forwarded
+as <code>WHERE n.&lt;key&gt; = $&lt;key&gt;</code>.</p>
+<h3 id="post-apiv1ontologyinstanceslabel--create-or-bulk-upsert"><code>POST /api/v1/ontology/instances/{label}</code>
+— create or bulk upsert</h3>
+<p>Single:</p>
+<pre class="http"><code>POST /api/v1/ontology/instances/Candidate HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;:     &quot;RAAS-v1&quot;,
+  &quot;candidate_id&quot;: &quot;C-100023&quot;,
+  &quot;name&quot;:         &quot;张三&quot;,
+  &quot;age&quot;:          29
+}</code></pre>
+<p>Bulk:</p>
+<div class="sourceCode" id="cb38"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span> <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;items&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;candidate_id&quot;</span><span class="fu">:</span> <span class="st">&quot;C-100023&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;张三&quot;</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;candidate_id&quot;</span><span class="fu">:</span> <span class="st">&quot;C-100024&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;李四&quot;</span> <span class="fu">}</span></span>
+<span id="cb38-6"><a href="#cb38-6" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb38-7"><a href="#cb38-7" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Semantics:
+<code>MERGE (n:{Label} {&lt;pk_field&gt;: $pkValue, domainId: $domain}) SET n = item</code>.
+Each item&#39;s PK comes from the body or — when absent — is
+server-generated via <code>randomUUID()</code>.</p>
+<p>Response — <code>200 OK</code>:</p>
+<div class="sourceCode" id="cb39"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;upserted&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;C-100023&quot;</span><span class="ot">,</span> <span class="st">&quot;C-100024&quot;</span><span class="ot">]</span><span class="fu">,</span> <span class="dt">&quot;count&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;generated&quot;</span><span class="fu">:</span> <span class="ot">[]</span> <span class="fu">}</span></span></code></pre></div>
+<p><code>upserted[]</code> carries the <strong>final</strong> PK of
+every row written, in input order. <code>generated[]</code> is the
+subset whose value the server filled in (callers can correlate
+position-by-position with <code>items[]</code>). When every item had a
+caller-supplied PK, <code>generated</code> is empty.</p>
+<p><strong>Idempotency:</strong> when every item has an explicit PK,
+retrying the same body produces the same graph state (<code>MERGE</code>
+is naturally idempotent). When the server generates IDs, retry is
+<strong>not</strong> idempotent — a network glitch + retry creates a
+second row. Callers that need retry-safety must supply PKs (or use
+<code>PUT</code> for known IDs).</p>
+<h3 id="get-apiv1ontologyinstanceslabelvaluedomain--read-one"><code>GET /api/v1/ontology/instances/{label}/{value}?domain=…</code>
+— read one</h3>
+<pre class="http"><code>GET /api/v1/ontology/instances/Candidate/C-100023?domain=RAAS-v1 HTTP/1.1
+Authorization: Bearer &lt;token&gt;</code></pre>
+<p>Response — <code>200 OK</code>: the property bag.</p>
+<div class="sourceCode" id="cb41"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;candidate_id&quot;</span><span class="fu">:</span>     <span class="st">&quot;C-100023&quot;</span><span class="fu">,</span></span>
+<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;domainId&quot;</span><span class="fu">:</span>         <span class="st">&quot;RAAS-v1&quot;</span><span class="fu">,</span></span>
+<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;name&quot;</span><span class="fu">:</span>             <span class="st">&quot;张三&quot;</span><span class="fu">,</span></span>
+<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;candidate_status&quot;</span><span class="fu">:</span> <span class="st">&quot;active&quot;</span><span class="fu">,</span></span>
+<span id="cb41-6"><a href="#cb41-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;age&quot;</span><span class="fu">:</span>              <span class="dv">29</span><span class="fu">,</span></span>
+<span id="cb41-7"><a href="#cb41-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;updatedAt&quot;</span><span class="fu">:</span>        <span class="st">&quot;2026-05-08T10:00:00.000+08:00&quot;</span></span>
+<span id="cb41-8"><a href="#cb41-8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p><code>404 instance-not-found</code> if no node matches
+<code>(value, domainId)</code> on the schema&#39;s PK field. <strong>No
+name-fallback</strong> — instance data has no parallel &quot;human-readable
+name&quot; convention; the PK value is the only handle.</p>
+<h3 id="put-apiv1ontologyinstanceslabelvalue--replace"><code>PUT /api/v1/ontology/instances/{label}/{value}</code>
+— replace</h3>
+<pre class="http"><code>PUT /api/v1/ontology/instances/Candidate/C-100023 HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{
+  &quot;domainId&quot;:         &quot;RAAS-v1&quot;,
+  &quot;name&quot;:             &quot;张三 (updated)&quot;,
+  &quot;candidate_status&quot;: &quot;interviewing&quot;
+}</code></pre>
+<p><code>MERGE (n:{Label} {&lt;pk_field&gt;: $value, domainId: $domain}) SET n = $props</code>
+— replaces all properties (the URL <code>{value}</code> and body
+<code>domainId</code> are merged in automatically). Properties absent
+from the body are removed. Idempotent. PUT on a non-existent row is
+functionally an upsert and returns <code>200</code>.</p>
+<h3 id="patch-apiv1ontologyinstanceslabelvalue--partial-update"><code>PATCH /api/v1/ontology/instances/{label}/{value}</code>
+— partial update</h3>
+<pre class="http"><code>PATCH /api/v1/ontology/instances/Candidate/C-100023 HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer &lt;token&gt;
+
+{ &quot;domainId&quot;: &quot;RAAS-v1&quot;, &quot;candidate_status&quot;: &quot;offer-extended&quot; }</code></pre>
+<p>Merges supplied keys; leaves others untouched. Set a key to
+<code>null</code> to remove a property.
+<code>404 instance-not-found</code> if no node matches.</p>
+<h3 id="delete-apiv1ontologyinstanceslabelvaluedomain"><code>DELETE /api/v1/ontology/instances/{label}/{value}?domain=…</code></h3>
+<p><code>DETACH DELETE</code> semantics: the node and all relationships
+touching it are removed. <code>404 instance-not-found</code> if no
+match.</p>
+<div class="sourceCode" id="cb44"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;deleted&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span></span></code></pre></div>
+<h3 id="validation">Validation</h3>
+<p><strong>Property-name validation runs on every write — default mode
+included.</strong> The schema&#39;s <code>properties[]</code> declaration is
+treated as the contract for the legal field set. A POST/PUT/PATCH body
+containing a key that isn&#39;t in <code>properties[]</code> (or the PK or
+<code>domainId</code>) is rejected with
+<code>400 validation-failed</code> and
+<code>details.unknown: [&lt;field-names&gt;]</code>. This is true
+whether or not <code>?validate=strict</code> is set; strict mode only
+adds required-field and type checks on top.</p>
+<p>For example, given a <code>:DataObject</code> Candidate schema with
+<code>properties: [ {name: &quot;candidate_id&quot;}, {name: &quot;name&quot;}, {name: &quot;gender&quot;}, {name: &quot;mobile&quot;}, {name: &quot;email&quot;} ]</code>,
+posting <code>{candidate_id: &quot;C-1&quot;, name: &quot;张三&quot;, age: 29}</code>
+returns 400 because <code>age</code> isn&#39;t declared. To accept
+<code>age</code>, add it to the schema first via §1&#39;s PATCH on
+<code>:DataObject</code>.</p>
+<h4 id="validatestrict"><code>?validate=strict</code></h4>
+<p>Available on <code>POST</code> / <code>PUT</code> /
+<code>PATCH</code>. When set, the request body is checked against the
+<code>:DataObject</code> schema&#39;s <code>properties[]</code>
+declaration:</p>
+<ul>
+<li><strong>Required fields</strong> — every property with
+<code>is_required: true</code> must be present (POST/PUT) or non-null
+(PATCH).</li>
+<li><strong>Type checks</strong> — scalar types (<code>string</code>,
+<code>integer</code>, <code>float</code>, <code>boolean</code>,
+<code>date</code>, <code>timestamp</code>) checked against the JSON
+value&#39;s type. List types (<code>List&lt;string&gt;</code>) checked for
+array shape.</li>
+<li><strong>Unknown fields</strong> — always rejected with
+<code>400 validation-failed</code>, regardless of
+<code>?validate=strict</code>. The schema&#39;s <code>properties[]</code> is
+the contract: any field on the body that isn&#39;t declared in the schema is
+invalid.</li>
+</ul>
+<p>Failure response — <code>400 Bad Request</code>:</p>
+<div class="sourceCode" id="cb45"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;error&quot;</span><span class="fu">:</span> <span class="st">&quot;validation-failed&quot;</span><span class="fu">,</span></span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;Required field `candidate_id` missing; field `age` expects integer, got string&quot;</span><span class="fu">,</span></span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;details&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;missing&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;candidate_id&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;type_errors&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span> <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;age&quot;</span><span class="fu">,</span> <span class="dt">&quot;expected&quot;</span><span class="fu">:</span> <span class="st">&quot;integer&quot;</span><span class="fu">,</span> <span class="dt">&quot;got&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span> <span class="fu">}</span><span class="ot">]</span></span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb45-8"><a href="#cb45-8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>On success — <code>200 OK</code> with the standard response (no
+<code>warnings</code> block). The <code>warnings.unknown_fields</code>
+field that earlier revisions emitted is no longer used: unknown fields
+are blocking, not advisory.</p>
+<h3 id="errors">Errors</h3>
+<table>
+<thead>
+<tr>
+<th>HTTP</th>
+<th><code>error</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td><code>missing-domain</code> — <code>?domain=</code> absent</td>
+</tr>
+<tr>
+<td>400</td>
+<td><code>invalid-json</code> — request body parse fail</td>
+</tr>
+<tr>
+<td>400</td>
+<td><code>unsafe-label</code> — <code>{label}</code> path segment fails
+the regex gate</td>
+</tr>
+<tr>
+<td>400</td>
+<td><code>validation-failed</code> — <code>?validate=strict</code> and
+the body has missing-required / type errors</td>
+</tr>
+<tr>
+<td>401</td>
+<td><code>unauthorized</code></td>
+</tr>
+<tr>
+<td>404</td>
+<td><code>schema-not-found</code> — <code>:DataObject</code> doesn&#39;t
+exist for <code>(label, domain)</code>. Caller must define the schema
+first</td>
+</tr>
+<tr>
+<td>404</td>
+<td><code>instance-not-found</code> — schema is fine, but no instance
+node matches <code>{value}</code></td>
+</tr>
+<tr>
+<td>500</td>
+<td><code>server-misconfigured</code></td>
+</tr>
+<tr>
+<td>502</td>
+<td><code>neo4j-unavailable</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="curl-recipes">Curl recipes</h2>
+<div class="sourceCode" id="cb46"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">TOKEN</span><span class="op">=</span><span class="va">$ONTOLOGY_API_TOKEN</span></span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BASE</span><span class="op">=</span>http://localhost:3500/api/v1/ontology</span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 1) List DataObjects in a domain</span></span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/objects?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-8"><a href="#cb46-8" aria-hidden="true" tabindex="-1"></a><span class="co"># 2) Discover the live property catalog for Rules</span></span>
+<span id="cb46-9"><a href="#cb46-9" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-10"><a href="#cb46-10" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/schema/rules?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-11"><a href="#cb46-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-12"><a href="#cb46-12" aria-hidden="true" tabindex="-1"></a><span class="co"># 3) Bulk-upsert two Events</span></span>
+<span id="cb46-13"><a href="#cb46-13" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> POST <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-14"><a href="#cb46-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-15"><a href="#cb46-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{</span></span>
+<span id="cb46-16"><a href="#cb46-16" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;domainId&quot;: &quot;RAAS-v1&quot;,</span></span>
+<span id="cb46-17"><a href="#cb46-17" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;items&quot;: [</span></span>
+<span id="cb46-18"><a href="#cb46-18" aria-hidden="true" tabindex="-1"></a><span class="st">          { &quot;id&quot;: &quot;ev-1&quot;, &quot;name&quot;: &quot;candidateCreated&quot;, &quot;description&quot;: &quot;…&quot; },</span></span>
+<span id="cb46-19"><a href="#cb46-19" aria-hidden="true" tabindex="-1"></a><span class="st">          { &quot;id&quot;: &quot;ev-2&quot;, &quot;name&quot;: &quot;candidateUpdated&quot;, &quot;description&quot;: &quot;…&quot; }</span></span>
+<span id="cb46-20"><a href="#cb46-20" aria-hidden="true" tabindex="-1"></a><span class="st">        ]</span></span>
+<span id="cb46-21"><a href="#cb46-21" aria-hidden="true" tabindex="-1"></a><span class="st">      }&#39;</span> <span class="dt">\</span></span>
+<span id="cb46-22"><a href="#cb46-22" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/events&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-23"><a href="#cb46-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-24"><a href="#cb46-24" aria-hidden="true" tabindex="-1"></a><span class="co"># 4) Patch a single Rule&#39;s description</span></span>
+<span id="cb46-25"><a href="#cb46-25" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> PATCH <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-26"><a href="#cb46-26" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-27"><a href="#cb46-27" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;domainId&quot;:&quot;RAAS-v1&quot;,&quot;businessBackgroundReason&quot;:&quot;new background&quot;}&#39;</span> <span class="dt">\</span></span>
+<span id="cb46-28"><a href="#cb46-28" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/rules/1-1-1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-29"><a href="#cb46-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-30"><a href="#cb46-30" aria-hidden="true" tabindex="-1"></a><span class="co"># 5) Create a HAS_FIELD link between two DataObjects</span></span>
+<span id="cb46-31"><a href="#cb46-31" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> POST <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-32"><a href="#cb46-32" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-33"><a href="#cb46-33" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{</span></span>
+<span id="cb46-34"><a href="#cb46-34" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;domainId&quot;: &quot;RAAS-v1&quot;,</span></span>
+<span id="cb46-35"><a href="#cb46-35" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;type&quot;:     &quot;HAS_FIELD&quot;,</span></span>
+<span id="cb46-36"><a href="#cb46-36" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;fromId&quot;:   &quot;Job_Requisition&quot;,</span></span>
+<span id="cb46-37"><a href="#cb46-37" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;toId&quot;:     &quot;field_title&quot;,</span></span>
+<span id="cb46-38"><a href="#cb46-38" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;confidence&quot;: 0.92</span></span>
+<span id="cb46-39"><a href="#cb46-39" aria-hidden="true" tabindex="-1"></a><span class="st">      }&#39;</span> <span class="dt">\</span></span>
+<span id="cb46-40"><a href="#cb46-40" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/links&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-41"><a href="#cb46-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-42"><a href="#cb46-42" aria-hidden="true" tabindex="-1"></a><span class="co"># 6) Delete a DataObject (DETACH DELETE — also removes its links)</span></span>
+<span id="cb46-43"><a href="#cb46-43" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> DELETE <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-44"><a href="#cb46-44" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/objects/Job_Requisition?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-45"><a href="#cb46-45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-46"><a href="#cb46-46" aria-hidden="true" tabindex="-1"></a><span class="co"># 7) Read the rules attached to an Action (matchResume here)</span></span>
+<span id="cb46-47"><a href="#cb46-47" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-48"><a href="#cb46-48" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/actions/matchResume/rules?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-49"><a href="#cb46-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-50"><a href="#cb46-50" aria-hidden="true" tabindex="-1"></a><span class="co"># 8) Read just the steps of an Action (no rule nesting)</span></span>
+<span id="cb46-51"><a href="#cb46-51" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-52"><a href="#cb46-52" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/actions/matchResume/steps?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-53"><a href="#cb46-53" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-54"><a href="#cb46-54" aria-hidden="true" tabindex="-1"></a><span class="co"># 9) Read an Action by name (id-then-name fallback works on bare GET too)</span></span>
+<span id="cb46-55"><a href="#cb46-55" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-56"><a href="#cb46-56" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/actions/matchResume?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-57"><a href="#cb46-57" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-58"><a href="#cb46-58" aria-hidden="true" tabindex="-1"></a><span class="co"># 10) Bulk-upsert Candidate instances (PK supplied — idempotent)</span></span>
+<span id="cb46-59"><a href="#cb46-59" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> POST <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-60"><a href="#cb46-60" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-61"><a href="#cb46-61" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{</span></span>
+<span id="cb46-62"><a href="#cb46-62" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;domainId&quot;: &quot;RAAS-v1&quot;,</span></span>
+<span id="cb46-63"><a href="#cb46-63" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;items&quot;: [</span></span>
+<span id="cb46-64"><a href="#cb46-64" aria-hidden="true" tabindex="-1"></a><span class="st">          { &quot;candidate_id&quot;: &quot;C-100023&quot;, &quot;name&quot;: &quot;张三&quot;,  &quot;candidate_status&quot;: &quot;active&quot; },</span></span>
+<span id="cb46-65"><a href="#cb46-65" aria-hidden="true" tabindex="-1"></a><span class="st">          { &quot;candidate_id&quot;: &quot;C-100024&quot;, &quot;name&quot;: &quot;李四&quot;,  &quot;candidate_status&quot;: &quot;active&quot; }</span></span>
+<span id="cb46-66"><a href="#cb46-66" aria-hidden="true" tabindex="-1"></a><span class="st">        ]</span></span>
+<span id="cb46-67"><a href="#cb46-67" aria-hidden="true" tabindex="-1"></a><span class="st">      }&#39;</span> <span class="dt">\</span></span>
+<span id="cb46-68"><a href="#cb46-68" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/instances/Candidate&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-69"><a href="#cb46-69" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-70"><a href="#cb46-70" aria-hidden="true" tabindex="-1"></a><span class="co"># 11) Create a Candidate instance and let the server pick the UUID</span></span>
+<span id="cb46-71"><a href="#cb46-71" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> POST <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-72"><a href="#cb46-72" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-73"><a href="#cb46-73" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{ &quot;domainId&quot;: &quot;RAAS-v1&quot;, &quot;name&quot;: &quot;王五&quot; }&#39;</span> <span class="dt">\</span></span>
+<span id="cb46-74"><a href="#cb46-74" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/instances/Candidate&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-75"><a href="#cb46-75" aria-hidden="true" tabindex="-1"></a><span class="co"># Response: { &quot;upserted&quot;: [&quot;&lt;uuid&gt;&quot;], &quot;count&quot;: 1, &quot;generated&quot;: [&quot;&lt;uuid&gt;&quot;] }</span></span>
+<span id="cb46-76"><a href="#cb46-76" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-77"><a href="#cb46-77" aria-hidden="true" tabindex="-1"></a><span class="co"># 12) Read one Candidate instance with strict-validation enabled</span></span>
+<span id="cb46-78"><a href="#cb46-78" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-79"><a href="#cb46-79" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/instances/Candidate/C-100023?domain=RAAS-v1&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-80"><a href="#cb46-80" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-81"><a href="#cb46-81" aria-hidden="true" tabindex="-1"></a><span class="co"># 13) Strict-validation write that surfaces a type error</span></span>
+<span id="cb46-82"><a href="#cb46-82" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-sS</span> <span class="at">-X</span> POST <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer </span><span class="va">$TOKEN</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-83"><a href="#cb46-83" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb46-84"><a href="#cb46-84" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{ &quot;domainId&quot;: &quot;RAAS-v1&quot;, &quot;candidate_id&quot;: &quot;C-bad&quot;, &quot;age&quot;: &quot;twenty-nine&quot; }&#39;</span> <span class="dt">\</span></span>
+<span id="cb46-85"><a href="#cb46-85" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;</span><span class="va">$BASE</span><span class="st">/instances/Candidate?validate=strict&quot;</span> <span class="kw">|</span> <span class="ex">jq</span></span>
+<span id="cb46-86"><a href="#cb46-86" aria-hidden="true" tabindex="-1"></a><span class="co"># Response: 400 validation-failed with details.type_errors populated</span></span></code></pre></div>
+<hr />
+<h2 id="server-configuration">Server configuration</h2>
+<p>Set on the Studio host (<code>apps/studio/.env.local</code> or via
+deployment environment):</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ONTOLOGY_API_TOKEN</code></td>
+<td>yes</td>
+<td>Shared bearer token for all <code>/api/v1/ontology/*</code>
+endpoints. No default — endpoints return <code>500</code> until
+set.</td>
+</tr>
+<tr>
+<td><code>NEO4J_URI</code></td>
+<td>yes</td>
+<td>Bolt endpoint, e.g. <code>bolt://localhost:7687</code></td>
+</tr>
+<tr>
+<td><code>NEO4J_USER</code></td>
+<td>yes</td>
+<td>Account</td>
+</tr>
+<tr>
+<td><code>NEO4J_PASSWORD</code></td>
+<td>yes</td>
+<td>Password</td>
+</tr>
+<tr>
+<td><code>NEO4J_DATABASE</code></td>
+<td>no</td>
+<td>Multi-db routing target (default: <code>neo4j</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The dev cluster default in this repo is
+<code>bolt://10.100.0.70:7687</code> — set <code>NEO4J_URI</code>
+accordingly.</p>
+<hr />
+<h2 id="caveats-and-known-limitations">Caveats and known
+limitations</h2>
+<h3 id="schema-agnostic-by-default--no-field-level-validation-on-schema-crud">Schema-agnostic
+by default = no field-level validation on schema CRUD</h3>
+<p>The API trusts the client by default. Sending
+<code>{&quot;id&quot;: &quot;x&quot;, &quot;domainId&quot;: &quot;y&quot;, &quot;randomTypo&quot;: 123}</code> will store
+<code>randomTypo</code> on the node. Use the schema endpoint (§2) to
+verify field names; consider adding a check in your client. The repo&#39;s
+TypeScript types in <code>@allmeta/ontology-core</code> are a good
+source of truth for what fields <em>should</em> exist on each artifact —
+but the API does not enforce them on schema CRUD (§1).</p>
+<p>Instance CRUD (§5) supports opt-in <code>?validate=strict</code>
+against the <code>:DataObject</code> schema definition. Schema CRUD has
+no equivalent — there&#39;s no meta-schema for what a
+<code>:DataObject</code> &quot;should&quot; look like.</p>
+<h3 id="reads-do-not-auto-inflate-json-stringified-properties">Reads do
+not auto-inflate JSON-stringified properties</h3>
+<p>If you POST <code>{&quot;fields&quot;: [{&quot;name&quot;: &quot;title&quot;}]}</code> you&#39;ll get
+back <code>&quot;fields&quot;: &quot;[{\&quot;name\&quot;:\&quot;title\&quot;}]&quot;</code>. Parse on the
+client. A future <code>?inflate=true</code> knob may add automatic
+re-hydration.</p>
+<h3 id="domain-isolation-is-a-hard-rail">Domain isolation is a hard
+rail</h3>
+<p>There is no cross-domain query in v1. Every Cypher includes
+<code>WHERE n.domainId = $domain</code>. To join across domains, the
+consumer must call the API once per domain and merge client-side. (This
+is a deliberate choice — most current consumers want
+one-domain-at-a-time semantics and accidental cross-domain reads are the
+most common bug class in the existing per-builder deploy routes.)</p>
+<h3 id="link-type-is-part-of-identity-cant-be-patched">Link type is part
+of identity, can&#39;t be PATCHed</h3>
+<p>Once a relationship has a type, you can&#39;t change it via PATCH — Neo4j
+relationships are typed at creation. <code>DELETE</code> the link and
+create a new one with the new type.</p>
+<h3 id="delete-on-missing-resources-returns-404-not-200"><code>DELETE</code>
+on missing resources returns <code>404</code>, not <code>200</code></h3>
+<p><code>DELETE /objects/foo?domain=…</code> returns
+<code>404 node-not-found</code> when the ref resolves to neither an id
+nor a name. Same shape as <code>GET</code>. (Up through 2026-05-07 this
+returned <code>200 {deleted: 0}</code> instead — see the 2026-05-08
+Changelog entry for the rationale.) A <code>200 {deleted: 0}</code>
+response is now only possible in the TOCTOU window between the resolver
+step and the delete itself.</p>
+<h3 id="no-bulk-delete-in-v1">No bulk DELETE in v1</h3>
+<p>Loop over single deletes, or call the underlying Neo4j directly for
+mass cleanup. A <code>?bulk=true&amp;where=…</code> deletion endpoint
+may follow once a real consumer needs it.</p>
+<h3 id="no-transactions-across-endpoints">No transactions across
+endpoints</h3>
+<p>Each HTTP call is its own Neo4j transaction. There is no
+<code>begin/commit/rollback</code> API. Multi-step graph mutations
+either go inside one <code>POST</code> (via the bulk-upsert body) or
+accept partial-failure risk between calls.</p>
+<h3 id="rate-limits--retries">Rate limits / retries</h3>
+<p>The dev cluster is small. Bulk-upsert in batches of ≤500 items per
+call. There is no server-side rate limit in v1, but Neo4j will reject
+oversized parameter blobs (~1 MB) with <code>502</code>.</p>
+<h3 id="whats-not-in-v1">What&#39;s <strong>not</strong> in v1</h3>
+<ul>
+<li>No Workflow CRUD (intentionally — only the 5 listed kinds).</li>
+<li>No <code>ActionStep</code> as a top-level resource (surfaced only
+via <code>/actions/{ref}/rules</code> and
+<code>/actions/{ref}/steps</code>).</li>
+<li>No raw-Cypher passthrough endpoint.</li>
+<li>The per-app deploy routes in objects-builder / rules-builder / etc.
+are not part of this API; they keep using their own Neo4j drivers.</li>
+<li>No auth scopes / per-caller API keys — one shared token gates the
+whole surface.</li>
+<li>No request body schema validation against TypeScript types.</li>
+</ul>
+<hr />
+<h2 id="quick-reference">Quick reference</h2>
+<pre><code># Generic node CRUD ({resource} ∈ objects, rules, actions, events)
+# {ref} matches the node&#39;s id, then falls back to its name field
+# (`name` for objects/actions/events; `businessLogicRuleName` for rules).
+GET    /api/v1/ontology/{resource}?domain=…[&amp;limit=&amp;cursor=&amp;id=&amp;name=]
+POST   /api/v1/ontology/{resource}                        body: {domainId, id, …} OR {domainId, items:[…]}
+GET    /api/v1/ontology/{resource}/{ref}?domain=…
+PUT    /api/v1/ontology/{resource}/{ref}                  body: {domainId, …allProps}
+PATCH  /api/v1/ontology/{resource}/{ref}                  body: {domainId, …partial}
+DELETE /api/v1/ontology/{resource}/{ref}?domain=…
+
+# Schema introspection
+GET    /api/v1/ontology/schema?domain=…
+GET    /api/v1/ontology/schema/{resource}?domain=…[&amp;sample=N]
+
+# Links (relationships)
+GET    /api/v1/ontology/links?domain=…[&amp;type=&amp;from=&amp;to=]
+POST   /api/v1/ontology/links                             body: {domainId, type, fromId, toId, …, [linkId]}
+GET    /api/v1/ontology/links/{linkId}?domain=…
+PUT    /api/v1/ontology/links/{linkId}                    body: {domainId, …allProps}
+PATCH  /api/v1/ontology/links/{linkId}                    body: {domainId, …partial}
+DELETE /api/v1/ontology/links/{linkId}?domain=…
+
+# Action sub-resources (composite — graph traversal / per-action writers)
+GET    /api/v1/ontology/actions/{ref}/rules?domain=…              # single object: {...action, action_steps:[{...step, rules:[…]}]}
+GET    /api/v1/ontology/actions/{ref}/steps?domain=…              # single object: {...action, action_steps:[…]} (no rule nesting)
+POST   /api/v1/ontology/actions/matchResume/results               body: {candidateId, jobPositionId, result, reason}
+
+# Instance data CRUD ({label} = a :DataObject id; PK field discovered from schema)
+# {value} = the PK value (e.g. candidate_id=&quot;C-100023&quot;). No name-fallback on instances.
+GET    /api/v1/ontology/instances/{label}?domain=…[&amp;limit=&amp;cursor=&amp;&lt;filter&gt;=]
+POST   /api/v1/ontology/instances/{label}                         body: {domainId, …props} OR {domainId, items:[…]}
+                                                                  # PK omitted → server-generated UUID (response.generated[])
+GET    /api/v1/ontology/instances/{label}/{value}?domain=…
+PUT    /api/v1/ontology/instances/{label}/{value}                 body: {domainId, …allProps}
+PATCH  /api/v1/ontology/instances/{label}/{value}                 body: {domainId, …partial}
+DELETE /api/v1/ontology/instances/{label}/{value}?domain=…
+# Add ?validate=strict on POST/PUT/PATCH to opt into schema-aware
+# required-field + scalar-type checks. Default mode is property-bag.
+
+Auth (every endpoint):
+  Authorization: Bearer ${ONTOLOGY_API_TOKEN}
+  # or:  x-api-key: ${ONTOLOGY_API_TOKEN}</code></pre>
+<hr />
+<h2 id="changelog">Changelog</h2>
+<h3 id="2026-05-08--always-on-unknown-property-rejection-on-instance-writes">2026-05-08
+— Always-on unknown-property rejection on instance writes</h3>
+<p>Tighten §5 instance CRUD: every POST/PUT/PATCH now validates body
+property names against the <code>:DataObject</code> schema&#39;s
+<code>properties[]</code> and rejects unknown keys with
+<code>400 validation-failed</code> — regardless of whether
+<code>?validate=strict</code> is set. The earlier
+<code>warnings.unknown_fields</code> soft-reporting on success was
+removed.</p>
+<p><strong>Behavior change:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Default (no <code>?validate=strict</code>)</td>
+<td>Any property bag accepted; unknown keys silently stored</td>
+<td>Unknown keys rejected with 400;
+<code>details.unknown: [&lt;names&gt;]</code></td>
+</tr>
+<tr>
+<td><code>?validate=strict</code></td>
+<td>Required + type checks block; unknown keys reported on
+<code>warnings.unknown_fields</code> of the success response</td>
+<td>Required + type + unknown checks all block; success response no
+longer carries <code>warnings</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why:</strong> the schema&#39;s <code>properties[]</code>
+declaration is the contract for what fields are legal on each
+<code>:DataObject</code>&#39;s instances. Allowing arbitrary keys silently
+lets typos (<code>age</code> vs <code>user_age</code>) and hallucinated
+fields land in the graph undetected. ETL drift — historically the
+case-for-permissive — is better handled by updating the schema
+definition explicitly via §1&#39;s PATCH on <code>:DataObject</code> than by
+silent acceptance of new keys.</p>
+<p><strong>Internal:</strong> the schema-cache module now eagerly loads
+the <code>properties[]</code> catalog on first lookup (was lazy under
+the previous strict-only validation). Single Cypher query per cache fill
+instead of two.</p>
+<p><strong>Migration:</strong> producers must align their writes with
+the schema&#39;s <code>properties[]</code>. To accept a new field, PATCH the
+<code>:DataObject</code> schema first to declare it.</p>
+<h3 id="2026-05-08--instance-data-crud-endpoints-apiv1ontologyinstanceslabel">2026-05-08
+— Instance data CRUD endpoints
+(<code>/api/v1/ontology/instances/{label}/...</code>)</h3>
+<p>A new top-level surface for <strong>instance data</strong> — Neo4j
+nodes typed by a <code>:DataObject</code> schema (e.g.
+<code>:Candidate</code>, <code>:Job_Requisition</code>,
+<code>:Candidate_Match_Result</code>). Parallels the existing
+schema-CRUD surface (§1) but operates on records rather than
+definitions.</p>
+<p><strong>New endpoints (six):</strong></p>
+<ul>
+<li><code>GET /instances/{label}?domain=…[&amp;filter=]</code> — list
+with pagination + top-level equality filters.</li>
+<li><code>POST /instances/{label}</code> — create one or bulk; PK comes
+from body or server-generated UUID.</li>
+<li><code>GET /instances/{label}/{value}?domain=…</code> — read one by
+PK value.</li>
+<li><code>PUT /instances/{label}/{value}</code> — replace all properties
+(idempotent upsert).</li>
+<li><code>PATCH /instances/{label}/{value}</code> — partial merge.</li>
+<li><code>DELETE /instances/{label}/{value}?domain=…</code> —
+<code>DETACH DELETE</code>.</li>
+</ul>
+<p><strong>Key shape decisions:</strong></p>
+<ul>
+<li>Domain-partitioned: every endpoint requires <code>?domain=…</code>.
+A <code>(candidate_id, RAAS-v1)</code> row is a different node from
+<code>(candidate_id, other-domain)</code>.</li>
+<li>PK field discovered at runtime by reading
+<code>:DataObject.primary_key</code> for <code>(label, domain)</code>.
+Cached in-process for ~30s. <code>404 schema-not-found</code> if the
+schema doesn&#39;t exist; distinct from
+<code>instance-not-found</code>.</li>
+<li>No name-fallback on instances — the PK value is the only path
+segment. Bare CRUD (§1) still has id-then-alias-then-name resolution,
+but instance data has no parallel name convention.</li>
+<li>POST may omit the PK; the server fills in a UUID and reports it in
+<code>response.generated[]</code>. <strong>POST loses idempotency on
+retry</strong> when the server generates IDs — callers needing
+retry-safety supply PKs or use PUT.</li>
+<li>Single-column primary keys only in v1.</li>
+<li>Property-name validation runs on every write — unknown fields (not
+declared in the schema&#39;s <code>properties[]</code>) are rejected with
+<code>400 validation-failed</code> regardless of
+<code>?validate=strict</code>. Default mode is otherwise
+property-bag-permissive (consistent with §1): missing-required and type
+checks remain opt-in via <code>?validate=strict</code>. (See the
+same-day &quot;Always-on unknown-property rejection on instance writes&quot; entry
+above for the rationale.)</li>
+</ul>
+<p><strong>Why a new surface (not a generalized §1):</strong></p>
+<ul>
+<li>§1 manages <code>:DataObject</code> / <code>:Rule</code> /
+<code>:Action</code> / <code>:Event</code> schema metadata — fixed set
+of four labels, slow rate of change. Instance data has open-ended labels
+(one per <code>:DataObject</code> schema) and high-frequency churn.
+Different rate-of-change patterns warrant different surfaces.</li>
+<li>§1 uses property-bag-permissive writes uniformly because there&#39;s no
+meta-schema to validate against. Instance writes have the
+<code>:DataObject</code> schema available and benefit from opt-in
+validation — the new surface is where that lives.</li>
+<li>Per-schema hand-coded endpoints (<code>POST /candidates</code>,
+<code>POST /job_requisitions</code>, …) don&#39;t scale; one generic surface
+dispatches by <code>{label}</code>.</li>
+</ul>
+<p><strong>Migration note for
+<code>/actions/matchResume/results</code>:</strong> The existing
+matchResume composite write MERGEs <code>:Candidate</code> and
+<code>:Job_Requisition</code> instance nodes <strong>without</strong>
+<code>domainId</code> — it predates the domain-partitioned model adopted
+here. Followup commit needed to align matchResume&#39;s MERGE Cypher with
+the new convention (or backfill <code>domainId</code> on existing rows).
+Tracked separately from the instance CRUD implementation.</p>
+<h3 id="2026-05-08--name-fallback-on-bare-crud-actionsrefsteps-rules-shape-change">2026-05-08
+— Name-fallback on bare CRUD; <code>/actions/{ref}/steps</code>;
+<code>/rules</code> shape change</h3>
+<p>Three coordinated changes that align all
+<code>/actions/{ref}/...</code> endpoints on the same lookup + scoping
+convention, and add a steps-only read.</p>
+<p><strong>Endpoint additions:</strong></p>
+<ul>
+<li><code>GET /api/v1/ontology/actions/{ref}/steps?domain=…</code> —
+Action plus ordered <code>action_steps[]</code>, no per-step rule
+nesting.</li>
+</ul>
+<p><strong>Endpoint behavior changes:</strong></p>
+<p><em>Bare CRUD (<code>/{resource}/{ref}</code>):</em></p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /{resource}/{id}</code>,
+<code>PUT/PATCH/DELETE /{resource}/{id}</code></td>
+<td>strict-id match</td>
+<td>id matched first, then resource&#39;s name field (<code>name</code> for
+objects/actions/events; <code>businessLogicRuleName</code> for rules);
+id wins on ties. URL param renamed <code>{id}</code> →
+<code>{ref}</code> in docs but path shape is unchanged.</td>
+</tr>
+<tr>
+<td><code>DELETE /{resource}/{id}</code> on missing node</td>
+<td><code>200 OK { &quot;deleted&quot;: 0 }</code> (idempotent silent
+success)</td>
+<td><code>404 node-not-found</code> (matches GET shape; surfaces typo&#39;d
+refs to the caller). A <code>200 {deleted: 0}</code> response is now
+only possible in the TOCTOU window between the internal resolver step
+and the actual delete.</td>
+</tr>
+</tbody>
+</table>
+<p><em>Action sub-resources (<code>/actions/{ref}/...</code>):</em></p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/v1/ontology/actions/{id}/rules</code></td>
+<td><code>?domainId=…</code> (optional, post-filter on rules; Action
+match was global)</td>
+<td><code>?domain=…</code> (required); Action match scoped by domain;
+steps + rules also filtered by domain. URL <code>{id}</code> becomes
+<code>{ref}</code> (id-then-name).</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/ontology/actions/{id}/rules</code> response</td>
+<td>array of one Action:
+<code>[{...action, action_steps: [...]}]</code></td>
+<td>single Action object:
+<code>{...action, action_steps: [...]}</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why:</strong></p>
+<ul>
+<li><code>/actions/{ref}/rules</code> was the only endpoint in the API
+where the base resource match was global (no domain scoping) and the
+param was spelled <code>?domainId=</code> instead of the
+<code>?domain=</code> used everywhere else. Aligning it pays the
+breaking-change tax once instead of twice.</li>
+<li>The array-of-one response shape on <code>/rules</code> was a
+historical artifact; <code>{ref}</code> always resolves to a single
+Action, so a single-object response matches the path semantics.
+<code>/steps</code> ships as single-object from day one to avoid
+carrying the same artifact forward.</li>
+<li>Bare CRUD callers regularly know an artifact only by name (e.g.
+<code>Job_Requisition</code> is the id, but <code>招聘岗位</code> is
+what humans use). Name-fallback removes the round-trip lookup callers
+had to do client- side, while keeping id matches deterministic on
+collisions.</li>
+</ul>
+<p><strong>Migration:</strong></p>
+<ul>
+<li>Callers of <code>/actions/{id}/rules</code> must:
+<ul>
+<li>rename <code>?domainId=</code> → <code>?domain=</code> (param is now
+required);</li>
+<li>replace <code>body[0]</code> indexing with direct field access on
+the response;</li>
+<li>if relying on cross-domain matching, query each domain
+explicitly.</li>
+</ul></li>
+<li>Callers of <code>/{resource}/{id}</code> GET see no behavioral
+change unless they pass a name where they used to pass an id — that case
+now succeeds instead of 404&#39;ing.</li>
+<li>Callers of <code>DELETE /{resource}/{id}</code> that depended on the
+old idempotent <code>200 {deleted: 0}</code> response on missing nodes
+must now expect <code>404 node-not-found</code>. If you were swallowing
+that response silently, you&#39;ll now see the 404 surface. (This is
+intentional — surfacing typo&#39;d refs is more useful than silent
+success.)</li>
+<li>No back-compat shim. Internal call sites update in lock-step with
+this doc; downstream adopters switch over the same revision.</li>
+</ul>
+<p><strong>Implementation notes:</strong></p>
+<ul>
+<li>Each bare-CRUD item operation now does two Cypher round-trips
+(resolver → main op). The resolver query is index-backed
+(<code>(:Label, id, domainId)</code>), so the latency delta is bounded —
+typically ~1ms on a hot index. Plan revisits this if the cost shows up
+in profiling.</li>
+<li>404 messages on action sub-resources are standardized to
+<code>Action not found for selector &quot;${ref}&quot; in domain ${domain}</code>.
+The TOCTOU branch (an Action that disappeared between the resolver and
+the main query) returns a distinct
+<code>Action ${actionId} disappeared between resolve and fetch</code> so
+log-grep can tell the two cases apart. Error codes are unchanged
+(<code>action-not-found</code> in both cases).</li>
+<li>The shared resolver lives at <code>handlers/nodes.ts</code> as
+<code>resolveIdFor(label, ref, domain): Promise&lt;string | null&gt;</code>,
+exported within the package and consumed by both
+<code>createNodeIdRoute</code> (bare CRUD) and the action sub-resource
+handlers. New action sub-resources should import it from there rather
+than reimplementing the id-then-name lookup.</li>
+</ul>
+<p><strong>Post-rebase port (later same day):</strong> when the branch
+was rebased onto a main that had independently expanded the legacy
+<code>match-resume</code> endpoint, the enhancements were merged forward
+into the new <code>/actions/{ref}/...</code> handlers rather than
+dropped. Specifically:</p>
+<ul>
+<li><code>buildResolveRef</code> generalized from a single name-field to
+an ordered <code>matchFields</code> list. A new
+<code>ID_ALIAS_FIELDS: Record&lt;NodeLabel, string[]&gt;</code> config
+lets each label declare extra id-like columns; only <code>Action</code>
+uses it (carrying <code>action_id</code> between <code>id</code> and
+<code>name</code> in resolver priority).</li>
+<li>The <code>/actions/{ref}/rules</code> Cypher gained dual step
+discovery (linked via <code>HAS_STEP</code> plus fallback via
+<code>step.action_id</code> / <code>step.actionId</code> /
+<code>step.parentActionId</code>), bidirectional rule traversal
+(<code>(:Rule)-[:GOVERNS]-&gt;(:ActionStep)</code> AND
+<code>(:ActionStep)-[:CHECKS]-&gt;(:Rule)</code>), and a
+<code>rules_json</code> / <code>rulesJson</code> / <code>rules</code>
+property fallback for rule ids not reachable via either relationship —
+enriched in a single batched follow-up query.</li>
+<li>Step ordering coalesces <code>s.order</code> → <code>s.index</code>
+→ <code>&quot;0&quot;</code>. Steps without an explicit <code>id</code> are
+synthesized as <code>${actionId}::${stepName}</code>.</li>
+<li>The <code>/actions/{ref}/rules</code> response gained three derived
+fields: a top-level deduped <code>rules[]</code>, a
+<code>ruleCount</code>, and a compiled <code>userPrompt</code>
+(multi-line markdown ready to hand to an LLM).</li>
+<li>The <code>/actions/{ref}/steps</code> Cypher picked up the same dual
+step discovery and <code>coalesce</code>-based ordering. Its response
+shape is unchanged otherwise (single object, no rule nesting).</li>
+</ul>
+<h3 id="2026-05-07--action-sub-resources-replace-match-resume">2026-05-07 —
+Action sub-resources replace <code>/match-resume/*</code></h3>
+<p>The two purpose-specific endpoints under
+<code>/api/v1/ontology/match-resume/*</code> are renamed to live under
+<code>/api/v1/ontology/actions/{id}/...</code> so they compose with
+future Actions instead of forcing a new top-level namespace per
+action.</p>
+<p><strong>Endpoint moves:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/v1/ontology/match-resume/rules?actionId=…&amp;actionName=…&amp;domainId=…</code></td>
+<td><code>GET /api/v1/ontology/actions/{id}/rules?domainId=…</code></td>
+</tr>
+<tr>
+<td><code>POST /api/v1/ontology/match-resume/result</code></td>
+<td><code>POST /api/v1/ontology/actions/matchResume/results</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Behavior changes:</strong></p>
+<ul>
+<li><code>actionId</code> / <code>actionName</code> query params on the
+rules read are folded into the path segment <code>{id}</code>, which is
+matched against <code>Action.id</code> first and falls back to
+<code>Action.name</code>. The implicit
+<code>actionName=matchResume</code> default no longer applies — the
+caller must name the action explicitly in the path. To migrate, replace
+<code>/match-resume/rules</code> (no params) with
+<code>/actions/matchResume/rules</code>.</li>
+<li>The result writer pluralizes <code>result</code> →
+<code>results</code> to match REST convention for create-on-collection
+(each call appends a new history record).</li>
+<li>Request body and response shapes are unchanged for both endpoints,
+so client code only updates URLs.</li>
+</ul>
+<p><strong>Why:</strong></p>
+<ul>
+<li>The original <code>/match-resume/*</code> namespace was a temporary
+lift from rules-builder. As more actions need similar endpoints (e.g.
+<code>scoreCandidate</code>, <code>generateOffer</code>), the per-action
+sub-resource shape (<code>/actions/{id}/rules</code>,
+<code>/actions/{id}/results</code>) scales without adding a new
+top-level path each time.</li>
+<li>Filtering rules by an action is a graph traversal
+(<code>(:Action)-[:HAS_STEP]-&gt;(:ActionStep)&lt;-[:GOVERNS]-(:Rule)</code>)
+which is meaningfully different from the property-equality filter on
+<code>GET /rules</code>. Keeping it on its own path (sub-resource of
+<code>/actions</code>) makes the distinction explicit instead of
+overloading <code>GET /rules</code> with a branch on
+<code>?actionId=</code>.</li>
+<li>A generic <code>POST /instances/{label}</code> writer was considered
+for the result endpoint but rejected at this stage. Composite writes
+that MERGE foreign-key stubs are domain-shaped (each action knows which
+inputs map to which target nodes / relationship types) and a one-sample
+generic body design risks the wrong abstraction. Keep per-action result
+writers for now; revisit when a second action needs one.</li>
+</ul>
+<p><strong>No back-compat:</strong> the old <code>/match-resume/*</code>
+paths are removed in this revision rather than aliased. Internal call
+sites update in lock-step with this doc; downstream adopters switch to
+the new paths. Search the repo for <code>match-resume</code> to find
+every site that needs updating.</p>
+</body>
+</html>

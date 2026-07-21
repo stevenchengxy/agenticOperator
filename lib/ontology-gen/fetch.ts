@@ -30,13 +30,13 @@ import { assertActionInvariants } from "./validate";
 export async function fetchAction(opts: FetchOptions): Promise<Action> {
   if (!opts.apiToken) {
     throw new OntologyContractError(
-      "fetchAction requires apiToken (set ONTOLOGY_API_TOKEN env or pass via opts)",
+      "fetchAction requires apiToken (set ALLMETA_API_KEY env or pass via opts)",
     );
   }
-  const apiBase = opts.apiBase ?? process.env["ONTOLOGY_API_BASE"];
+  const apiBase = opts.apiBase ?? process.env["ALLMETA_BASE_URL"];
   if (!apiBase) {
     throw new OntologyContractError(
-      "fetchAction requires apiBase (set ONTOLOGY_API_BASE env or pass via opts)",
+      "fetchAction requires apiBase (set ALLMETA_BASE_URL env or pass via opts)",
     );
   }
 

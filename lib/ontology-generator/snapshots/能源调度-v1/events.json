@@ -1,0 +1,1883 @@
+[
+  {
+    "name": "ARCHIVED",
+    "description": "调度辅助案件已通过完结校验并固化归档（状态置 ARCHIVED），全链路留痕不可删，案件生命周期闭环。",
+    "payload": {
+      "source_action": "archiveCase",
+      "event_data": [
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "closure_check_passed",
+          "type": "Boolean",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "event_type",
+            "actor_type",
+            "operator_id",
+            "event_time",
+            "from_status",
+            "to_status",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "AUDIT_COMPLETED",
+    "description": "运行稽核已完成，稽核底稿与逐条发现已生成并下达整改要求，驱动整改闭环跟踪与升级上报。",
+    "payload": {
+      "source_action": "runOperationAudit",
+      "event_data": [
+        {
+          "name": "audit_working_paper_id",
+          "type": "String",
+          "target_object": "Audit_Working_Paper"
+        },
+        {
+          "name": "sampled_cases",
+          "type": "Array",
+          "target_object": "Audit_Working_Paper"
+        },
+        {
+          "name": "finding_level",
+          "type": "String",
+          "target_object": "Audit_Finding"
+        },
+        {
+          "name": "rectification_close_rate",
+          "type": "Number",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Audit_Working_Paper",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "audit_working_paper_id",
+            "audit_time",
+            "auditor_id",
+            "sampled_cases",
+            "sampling_method",
+            "audit_basis",
+            "no_exception_note",
+            "rectification_summary"
+          ]
+        },
+        {
+          "target_object": "Audit_Finding",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "audit_finding_id",
+            "dispatch_case_id",
+            "key_control_point_id",
+            "working_paper_id",
+            "finding_level",
+            "finding_description",
+            "rectification_requirement",
+            "auditor_id",
+            "is_closed"
+          ]
+        },
+        {
+          "target_object": "Audit_Finding",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "is_closed",
+            "rectification_requirement"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "audit_event_id",
+            "event_type",
+            "actor_type",
+            "operator_id",
+            "event_time",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "CONSTRAINT_CONFIG_UPDATED",
+    "description": "约束规则配置已经业务复核并版本留痕生效（阈值/红线/默认动作更新），后续校验按新口径执行。",
+    "payload": {
+      "source_action": "maintainConstraintConfig",
+      "event_data": [
+        {
+          "name": "constraint_rule_id",
+          "type": "String",
+          "target_object": "Constraint_Rule"
+        },
+        {
+          "name": "threshold_value",
+          "type": "String",
+          "target_object": "Constraint_Rule"
+        },
+        {
+          "name": "is_redline",
+          "type": "Boolean",
+          "target_object": "Constraint_Rule"
+        },
+        {
+          "name": "default_action",
+          "type": "String",
+          "target_object": "Constraint_Rule"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Constraint_Rule",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "threshold_value",
+            "is_redline",
+            "default_action"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "event_type",
+            "actor_type",
+            "operator_id",
+            "event_time",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "CONSTRAINT_VALIDATED",
+    "description": "调度建议已完成五组约束校验（命中已记录、普通硬约束已钳制），驱动方案比选或硬红线命中转人工与升风险。",
+    "payload": {
+      "source_action": "validateConstraints",
+      "event_data": [
+        {
+          "name": "dispatch_suggestion_id",
+          "type": "String",
+          "target_object": "Dispatch_Suggestion"
+        },
+        {
+          "name": "constraint_hit_id",
+          "type": "String",
+          "target_object": "Constraint_Hit"
+        },
+        {
+          "name": "hard_soft",
+          "type": "String",
+          "target_object": "Constraint_Hit"
+        },
+        {
+          "name": "value_vs_limit",
+          "type": "String",
+          "target_object": "Constraint_Hit"
+        },
+        {
+          "name": "risk_raised",
+          "type": "Boolean",
+          "target_object": "Constraint_Hit"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Constraint_Hit",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "hard_soft",
+            "check_point",
+            "value_vs_limit",
+            "default_action",
+            "risk_raised",
+            "risk_event_id"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "station_output_96",
+            "unit_dispatch",
+            "outflow_ctrl",
+            "gate_output_96",
+            "gate_deviation"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "CURTAILMENT_HANDLED",
+    "description": "新能源弃风弃光/弃水消纳处置已完成（已调整出力与关口、弃量归因留痕），风险事件随之闭环或升级。",
+    "payload": {
+      "source_action": "handleRenewableCurtailment",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "station_output_96",
+          "type": "Array",
+          "target_object": "Dispatch_Plan"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "station_output_96",
+            "gate_curve",
+            "level_control"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "disposal_action",
+            "disposer_id",
+            "status",
+            "evidence",
+            "is_suspended",
+            "reported_up"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "DATA_INGESTED",
+    "description": "气象/水文/关口/市场批次已经慧采落库并完成 96 点时标对齐、新调度辅助案件已开（状态 DRAFT），驱动数据解释与质控。",
+    "payload": {
+      "source_action": "ingestAndOpenCase",
+      "event_data": [
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "cover_date",
+          "type": "Date",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "plan_type",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "superseded_by_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Business_System",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "data_ownership",
+            "role_in_flow"
+          ]
+        },
+        {
+          "target_object": "Weather_Data",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "weather_data_id",
+            "station_id",
+            "source",
+            "point_id",
+            "forecast_horizon"
+          ]
+        },
+        {
+          "target_object": "Hydrology_Data",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "hydrology_data_id",
+            "station_id",
+            "inflow",
+            "outflow",
+            "water_level",
+            "storage_energy"
+          ]
+        },
+        {
+          "target_object": "Grid_Interface_Plan",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "grid_interface_plan_id",
+            "target_date",
+            "interface_curve_96",
+            "total_daily_limit",
+            "issuing_authority",
+            "received_time"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_case_id",
+            "status",
+            "created_by",
+            "cover_date",
+            "plan_type",
+            "stations",
+            "operating_context_id",
+            "owner_id",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "superseded_by_id"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "DATA_INTERPRETED",
+    "description": "质控合格的气象/水文数据已解释为来水/资源信号（数据解释结果已生成），作为出力预测的直接输入。",
+    "payload": {
+      "source_action": "interpretData",
+      "event_data": [
+        {
+          "name": "interpretation_result_id",
+          "type": "String",
+          "target_object": "Interpretation_Result"
+        },
+        {
+          "name": "interpretation_type",
+          "type": "String",
+          "target_object": "Interpretation_Result"
+        },
+        {
+          "name": "inflow_trend",
+          "type": "String",
+          "target_object": "Interpretation_Result"
+        },
+        {
+          "name": "qc_status",
+          "type": "String",
+          "target_object": "Weather_Data"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Weather_Data",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "qc_status",
+            "confidence"
+          ]
+        },
+        {
+          "target_object": "Hydrology_Data",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "qc_status"
+          ]
+        },
+        {
+          "target_object": "Interpretation_Result",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "interpretation_type",
+            "station_id",
+            "weather_data_id",
+            "hydrology_data_id",
+            "signal_profile_96",
+            "inflow_trend",
+            "lag_time_setting",
+            "interpreted_by",
+            "interpreted_at"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "DEVIATION_ANALYZED",
+    "description": "执行反馈回采后已完成实际 vs 计划偏差复盘（偏差报告已生成、归因已定），结论反哺预测模型与约束阈值优化。",
+    "payload": {
+      "source_action": "analyzeDeviation",
+      "event_data": [
+        {
+          "name": "deviation_report_id",
+          "type": "String",
+          "target_object": "Deviation_Report"
+        },
+        {
+          "name": "gate_deviation_rate",
+          "type": "Number",
+          "target_object": "Deviation_Report"
+        },
+        {
+          "name": "deviation_cause",
+          "type": "String",
+          "target_object": "Deviation_Report"
+        },
+        {
+          "name": "analysis_conclusion",
+          "type": "String",
+          "target_object": "Deviation_Report"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Deviation_Report",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "deviation_report_id",
+            "dispatch_case_id",
+            "dispatch_plan_id",
+            "point_deviation_96",
+            "gate_deviation_rate",
+            "deviation_cause",
+            "analysis_conclusion",
+            "analyzed_at"
+          ]
+        },
+        {
+          "target_object": "Output_Forecast",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "accuracy_rate",
+            "deviation"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "risk_type",
+            "disposal_action",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "DISPATCHED",
+    "description": "调度计划经能控 EMS 生成并下发 AGC/AVC/开停机调度指令（案件转执行中），驱动机组执行与执行反馈回采。",
+    "payload": {
+      "source_action": "dispatchInstruction",
+      "event_data": [
+        {
+          "name": "dispatch_instruction_id",
+          "type": "String",
+          "target_object": "Dispatch_Instruction"
+        },
+        {
+          "name": "instruction_type",
+          "type": "String",
+          "target_object": "Dispatch_Instruction"
+        },
+        {
+          "name": "target_value",
+          "type": "String",
+          "target_object": "Dispatch_Instruction"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Instruction"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Instruction",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_instruction_id",
+            "dispatch_plan_id",
+            "power_station_id",
+            "equipment_id",
+            "instruction_type",
+            "issued_by_system_id",
+            "target_value",
+            "dispatched_at",
+            "status"
+          ]
+        },
+        {
+          "target_object": "Equipment",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "EQUIPMENT_FAULT_HANDLED",
+    "description": "机组故障/受阻已按设备通可用容量更新并重排出力（缺口报备草案已出），相关 T4 风险事件随之处置，衔接日内滚动修正。",
+    "payload": {
+      "source_action": "handleEquipmentFault",
+      "event_data": [
+        {
+          "name": "equipment_id",
+          "type": "String",
+          "target_object": "Equipment"
+        },
+        {
+          "name": "available_mw",
+          "type": "Number",
+          "target_object": "Equipment"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Equipment"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Equipment",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "available_mw",
+            "status",
+            "vibration_zone"
+          ]
+        },
+        {
+          "target_object": "Maintenance_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "available_mw_during",
+            "status"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "station_output_96",
+            "unit_onoff",
+            "version",
+            "status"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "risk_level",
+            "disposal_action",
+            "disposer_id",
+            "status",
+            "is_suspended",
+            "reported_up"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "EXECUTION_FEEDBACK",
+    "description": "机组执行后实际出力已由慧采/SCADA 回采并新建执行反馈记录，驱动偏差复盘与日内滚动修正判据。",
+    "payload": {
+      "source_action": "captureExecution",
+      "event_data": [
+        {
+          "name": "execution_feedback_id",
+          "type": "String",
+          "target_object": "Execution_Feedback"
+        },
+        {
+          "name": "actual_output_96",
+          "type": "Array",
+          "target_object": "Execution_Feedback"
+        },
+        {
+          "name": "actual_gate_energy",
+          "type": "Number",
+          "target_object": "Execution_Feedback"
+        },
+        {
+          "name": "source_system",
+          "type": "String",
+          "target_object": "Execution_Feedback"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Execution_Feedback",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "execution_feedback_id",
+            "dispatch_plan_id",
+            "power_station_id",
+            "equipment_id",
+            "actual_output_96",
+            "actual_gate_energy",
+            "feedback_time",
+            "source_system"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "FLOOD_CONTROL_HANDLED",
+    "description": "防洪风险已按逼近=L3/超汛限=L4 处置（预泄腾库与梯级配合方案已出、逐级审批留签），案件转暂缓并按等级上报。",
+    "payload": {
+      "source_action": "handleFloodControl",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "is_suspended",
+          "type": "Boolean",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "risk_level",
+            "disposal_action",
+            "disposer_id",
+            "status",
+            "is_suspended",
+            "reported_up"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "is_suspended",
+            "max_risk_level",
+            "owner_id",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Manual_Approval",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "stage",
+            "confirmer_id",
+            "conclusion",
+            "opinion",
+            "trace_before",
+            "trace_after",
+            "trace_reason",
+            "confirmed_at"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "FORECAST_ACCURACY_ASSESSED",
+    "description": "出力预测合格率/RMSE 已用实际出力逐点回评并回写，结论反哺预测模型阈值与置信度算法调优。",
+    "payload": {
+      "source_action": "assessForecastAccuracy",
+      "event_data": [
+        {
+          "name": "output_forecast_id",
+          "type": "String",
+          "target_object": "Output_Forecast"
+        },
+        {
+          "name": "accuracy_rate",
+          "type": "Number",
+          "target_object": "Output_Forecast"
+        },
+        {
+          "name": "deviation",
+          "type": "Number",
+          "target_object": "Output_Forecast"
+        },
+        {
+          "name": "forecast_model_id",
+          "type": "String",
+          "target_object": "Forecast_Model"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Output_Forecast",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "accuracy_rate",
+            "deviation"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "FORECAST_COMPLETED",
+    "description": "FC 批次出力预测已生成（P50/P90 96 点、置信度已写、超容量已钳制），驱动调度建议生成与分流直通条件③判定。",
+    "payload": {
+      "source_action": "forecastOutput",
+      "event_data": [
+        {
+          "name": "output_forecast_id",
+          "type": "String",
+          "target_object": "Output_Forecast"
+        },
+        {
+          "name": "accuracy_rate",
+          "type": "Number",
+          "target_object": "Output_Forecast"
+        },
+        {
+          "name": "time_scale",
+          "type": "String",
+          "target_object": "Output_Forecast"
+        },
+        {
+          "name": "confidence",
+          "type": "Number",
+          "target_object": "Dispatch_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Output_Forecast",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "output_forecast_id",
+            "dispatch_case_id",
+            "station_id",
+            "equipment_id",
+            "time_scale",
+            "forecast_mw_p50",
+            "forecast_mw_p90",
+            "forecast_model_id",
+            "accuracy_rate"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "fc_batch_id",
+            "confidence"
+          ]
+        },
+        {
+          "target_object": "Output_Forecast",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "forecast_mw_p50",
+            "forecast_mw_p90"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "GRID_SECURITY_HANDLED",
+    "description": "电网安全风险（T2 断面/关口越限）已处置（限出力压回与报备方案已出），L3/L4 时案件转暂缓并按等级上报省调。",
+    "payload": {
+      "source_action": "handleGridSecurity",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "is_suspended",
+          "type": "Boolean",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "reported_up",
+          "type": "Boolean",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "disposal_action",
+            "disposer_id",
+            "status",
+            "is_suspended",
+            "reported_up"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "is_suspended",
+            "owner_id",
+            "max_risk_level",
+            "trace_log"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MANUAL_REVIEW_DECIDED",
+    "description": "人工确认已按级出结论（采纳/退回/否决/暂缓）并留签，案件随结论流转，驱动定版或重生成或暂停。",
+    "payload": {
+      "source_action": "manualConfirm",
+      "event_data": [
+        {
+          "name": "manual_approval_id",
+          "type": "String",
+          "target_object": "Manual_Approval"
+        },
+        {
+          "name": "conclusion",
+          "type": "String",
+          "target_object": "Manual_Approval"
+        },
+        {
+          "name": "stage",
+          "type": "String",
+          "target_object": "Manual_Approval"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "owner_id",
+            "is_suspended",
+            "max_risk_level",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Manual_Approval",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "stage",
+            "confirmer_id",
+            "conclusion",
+            "opinion",
+            "trace_before",
+            "trace_after",
+            "trace_reason",
+            "confirmed_at"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "risk_level",
+            "disposal_action",
+            "disposer_id",
+            "status",
+            "is_suspended",
+            "reported_up"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "is_recommended"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "event_type",
+            "operator_id",
+            "from_status",
+            "to_status",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "MARKET_DECLARED",
+    "description": "市场申报量价已钳制到合规区间并经能控 EMS 报出交易中心（申报记录已生成），后续出清结果异步回写。",
+    "payload": {
+      "source_action": "declareMarket",
+      "event_data": [
+        {
+          "name": "market_declaration_id",
+          "type": "String",
+          "target_object": "Market_Declaration"
+        },
+        {
+          "name": "declaration_type",
+          "type": "String",
+          "target_object": "Market_Declaration"
+        },
+        {
+          "name": "bid_quantity_price",
+          "type": "String",
+          "target_object": "Market_Declaration"
+        },
+        {
+          "name": "declared_at",
+          "type": "Date",
+          "target_object": "Market_Declaration"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Market_Declaration",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "market_declaration_id",
+            "dispatch_plan_id",
+            "dispatch_case_id",
+            "declaration_type",
+            "bid_quantity_price",
+            "declared_at"
+          ]
+        },
+        {
+          "target_object": "Market_Declaration",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "clearing_result"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "OPERATING_MODE_SWITCHED",
+    "description": "运行方式已切换并经双人复核（季节/检修标识、水位参照点、目标优先级与检修编排已更新），通知下游链路按新口径运行。",
+    "payload": {
+      "source_action": "switchOperatingMode",
+      "event_data": [
+        {
+          "name": "operating_context_id",
+          "type": "String",
+          "target_object": "Operating_Context"
+        },
+        {
+          "name": "season_tag",
+          "type": "String",
+          "target_object": "Operating_Context"
+        },
+        {
+          "name": "is_maintenance_mode",
+          "type": "Boolean",
+          "target_object": "Operating_Context"
+        },
+        {
+          "name": "priority_order",
+          "type": "String",
+          "target_object": "Dispatch_Objective"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Operating_Context",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "season_tag",
+            "calendar_type",
+            "special_operating_mode",
+            "is_maintenance_mode"
+          ]
+        },
+        {
+          "target_object": "Constraint_Rule",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "threshold_value"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Objective",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "priority_order",
+            "hard_objectives",
+            "target_profile"
+          ]
+        },
+        {
+          "target_object": "Maintenance_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "available_mw_during",
+            "maintenance_type",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "PLAN_FINALIZED",
+    "description": "调度计划已定版锁定（关口对齐通过、96 点曲线固化、状态置 PLANNED），驱动回写能控 EMS 执行。",
+    "payload": {
+      "source_action": "finalizePlan",
+      "event_data": [
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "target_object": "Dispatch_Plan"
+        },
+        {
+          "name": "version",
+          "type": "String",
+          "target_object": "Dispatch_Plan"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Plan"
+        },
+        {
+          "name": "total_energy_mwh",
+          "type": "Number",
+          "target_object": "Dispatch_Plan"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Plan",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_plan_id",
+            "dispatch_case_id",
+            "plan_type",
+            "cover_date",
+            "station_output_96",
+            "unit_onoff",
+            "level_control",
+            "gate_curve",
+            "market_bid",
+            "total_energy_mwh",
+            "version",
+            "status",
+            "creation_time"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "dispatch_plan_id",
+            "selected_scheme_id",
+            "is_suspended",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "is_recommended"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "PLAN_ROLLED",
+    "description": "日内滚动修正已产出 DP 修正版本（计划号不变、version 递增、仅覆盖未来时段），驱动重新经能控 EMS 回写下发。",
+    "payload": {
+      "source_action": "rollingRevision",
+      "event_data": [
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "target_object": "Dispatch_Plan"
+        },
+        {
+          "name": "version",
+          "type": "String",
+          "target_object": "Dispatch_Plan"
+        },
+        {
+          "name": "plan_type",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "gate_deviation",
+          "type": "Number",
+          "target_object": "Dispatch_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "version",
+            "station_output_96",
+            "unit_onoff",
+            "level_control",
+            "gate_curve",
+            "market_bid",
+            "total_energy_mwh",
+            "status"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "station_output_96",
+            "unit_dispatch",
+            "water_level_ctrl",
+            "outflow_ctrl",
+            "gate_output_96",
+            "market_bid",
+            "confidence",
+            "gate_deviation",
+            "objective_score",
+            "is_recommended"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "plan_type",
+            "dispatch_plan_id",
+            "gate_deviation",
+            "confidence",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Output_Forecast",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "time_scale",
+            "forecast_mw_p50",
+            "forecast_mw_p90",
+            "accuracy_rate"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "event_type",
+            "actor_type",
+            "operator_id",
+            "event_time",
+            "from_status",
+            "to_status",
+            "trace_detail"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "POSTED_TO_EMS",
+    "description": "定版调度计划已回写能控 EMS 并通过二次校核（案件转 POSTED、控制权移交），驱动调度指令下发执行。",
+    "payload": {
+      "source_action": "postToEMS",
+      "event_data": [
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "target_object": "Dispatch_Plan"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "to_status",
+          "type": "String",
+          "target_object": "Audit_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "dispatch_plan_id",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Plan",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "event_type",
+            "actor_type",
+            "operator_id",
+            "from_status",
+            "to_status",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RISK_DISPOSED",
+    "description": "风险事件已按核闭环/误报关闭处置并解除案件暂缓，按载荷指引恢复（回定版/转日内滚动/维持暂缓）。",
+    "payload": {
+      "source_action": "resolveRiskAndResume",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "is_suspended",
+          "type": "Boolean",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "is_suspended",
+            "disposal_action",
+            "disposer_id",
+            "reported_up"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "is_suspended",
+            "status",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "event_type",
+            "actor_type",
+            "operator_id",
+            "from_status",
+            "to_status",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "RISK_EVENT_RAISED",
+    "description": "约束命中已立项为风险事件并双维定级（T1-T8×L1-L4），L3/L4 时案件转暂缓并改派，驱动实时处置扇出。",
+    "payload": {
+      "source_action": "raiseRiskEvent",
+      "event_data": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "risk_type",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "target_object": "Risk_Event"
+        },
+        {
+          "name": "is_suspended",
+          "type": "Boolean",
+          "target_object": "Risk_Event"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "risk_event_id",
+            "dispatch_case_id",
+            "dispatch_plan_id",
+            "risk_type",
+            "risk_level",
+            "hit_constraint_id",
+            "evidence",
+            "status",
+            "is_suspended",
+            "reported_up"
+          ]
+        },
+        {
+          "target_object": "Constraint_Hit",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "risk_raised",
+            "risk_event_id"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "max_risk_level",
+            "status",
+            "is_suspended",
+            "owner_id",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Manual_Approval",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_case_id",
+            "stage",
+            "confirmer_id",
+            "conclusion"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "ROUTING_DECIDED",
+    "description": "分流判定已完成（五条件全满足自动采纳，否则转人工），案件按结果置 AUTO_ADOPTED 或 MANUAL_REVIEW 并改派。",
+    "payload": {
+      "source_action": "triageScheme",
+      "event_data": [
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "selected_scheme_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "max_risk_level",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "status",
+            "owner_id",
+            "selected_scheme_id",
+            "trace_log"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "is_recommended"
+          ]
+        },
+        {
+          "target_object": "Manual_Approval",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_case_id",
+            "stage",
+            "confirmer_id"
+          ]
+        },
+        {
+          "target_object": "Audit_Event",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "event_type",
+            "actor_type",
+            "from_status",
+            "to_status",
+            "trace_detail"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "SCHEMES_COMPARED",
+    "description": "通过校验的多套候选建议已完成多维比选并标注风险（推荐方案与是否明显占优已定），驱动分流直通条件⑤判定。",
+    "payload": {
+      "source_action": "compareSchemes",
+      "event_data": [
+        {
+          "name": "scheme_comparison_id",
+          "type": "String",
+          "target_object": "Scheme_Comparison"
+        },
+        {
+          "name": "recommended_suggestion_id",
+          "type": "String",
+          "target_object": "Scheme_Comparison"
+        },
+        {
+          "name": "is_clearly_dominant",
+          "type": "Boolean",
+          "target_object": "Scheme_Comparison"
+        },
+        {
+          "name": "max_risk_level",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Scheme_Comparison",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "scheme_comparison_id",
+            "dispatch_case_id",
+            "compared_suggestions",
+            "comparison_matrix",
+            "recommended_suggestion_id",
+            "is_clearly_dominant",
+            "comparison_time"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "objective_score",
+            "is_recommended"
+          ]
+        },
+        {
+          "target_object": "Risk_Event",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "risk_event_id",
+            "dispatch_case_id",
+            "risk_type",
+            "risk_level",
+            "hit_constraint_id",
+            "evidence"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "max_risk_level"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "SHIFT_HANDED_OVER",
+    "description": "值班交接已完成五看五交并由接班人签收（在途案件 owner 移交、交接记录入留痕），责任移交接班人。",
+    "payload": {
+      "source_action": "handoverShift",
+      "event_data": [
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "owner_id",
+          "type": "String",
+          "target_object": "Dispatch_Case"
+        },
+        {
+          "name": "receiver_signoff",
+          "type": "Boolean",
+          "target_object": null
+        },
+        {
+          "name": "carried_over_items",
+          "type": "Array",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "CREATE_OR_MODIFY",
+          "impacted_properties": [
+            "trace_log",
+            "owner_id"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "SUGGESTION_GENERATED",
+    "description": "调度建议已按调度目标口径生成（96 点出力/水位/关口曲线、关口偏差与目标得分已写），驱动约束校验。",
+    "payload": {
+      "source_action": "generateSuggestion",
+      "event_data": [
+        {
+          "name": "dispatch_suggestion_id",
+          "type": "String",
+          "target_object": "Dispatch_Suggestion"
+        },
+        {
+          "name": "gate_deviation",
+          "type": "Number",
+          "target_object": "Dispatch_Suggestion"
+        },
+        {
+          "name": "objective_score",
+          "type": "String",
+          "target_object": "Dispatch_Suggestion"
+        },
+        {
+          "name": "target_profile",
+          "type": "String",
+          "target_object": "Dispatch_Objective"
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Dispatch_Objective",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "target_profile",
+            "priority_order",
+            "hard_objectives",
+            "description"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Suggestion",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_case_id",
+            "output_forecast_id",
+            "dispatch_objective_id",
+            "cover_date",
+            "station_output_96",
+            "unit_dispatch",
+            "water_level_ctrl",
+            "outflow_ctrl",
+            "gate_output_96",
+            "market_bid",
+            "gate_deviation",
+            "objective_score"
+          ]
+        },
+        {
+          "target_object": "Market_Declaration",
+          "mutation_type": "CREATE",
+          "impacted_properties": [
+            "dispatch_case_id",
+            "declaration_type",
+            "bid_quantity_price"
+          ]
+        },
+        {
+          "target_object": "Dispatch_Case",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "gate_deviation"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "SYSTEM_CHANGE_DEPLOYED",
+    "description": "系统变更已通过六段流水线走查与覆盖拦截并发布至生产（电站/设备基线已同步），智调运行态按新版生效。",
+    "payload": {
+      "source_action": "validateAndDeploySystemChange",
+      "event_data": [
+        {
+          "name": "deploy_decision",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "coverage_gate_result",
+          "type": "Boolean",
+          "target_object": null
+        },
+        {
+          "name": "test_case_set_version",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": [
+        {
+          "target_object": "Business_System",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "role_in_flow",
+            "data_ownership"
+          ]
+        },
+        {
+          "target_object": "Power_Station",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "station_name",
+            "capacity_mw",
+            "normal_level",
+            "flood_limit_level",
+            "dead_level",
+            "grid_section_id"
+          ]
+        },
+        {
+          "target_object": "Equipment",
+          "mutation_type": "MODIFY",
+          "impacted_properties": [
+            "rated_mw",
+            "min_tech_mw",
+            "vibration_zone",
+            "available_mw",
+            "agc_ramp_rate",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "OPERATING_MODE_CHANGE_DECLARED",
+    "description": "上游发布运行方式变更声明（汛期起止/特殊方式启停/检修方式），触发智调切换运行方式与约束阈值口径。",
+    "payload": {
+      "source_action": null,
+      "event_data": [
+        {
+          "name": "operating_context_id",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "season_tag",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "special_operating_mode",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "effective_date",
+          "type": "Date",
+          "target_object": null
+        },
+        {
+          "name": "declared_by",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "SHIFT_CHANGE_DUE",
+    "description": "值班交接时点已到（班次定时信号），触发值班调度员执行五看五交交接与责任移交。",
+    "payload": {
+      "source_action": null,
+      "event_data": [
+        {
+          "name": "shift_id",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "scheduled_time",
+          "type": "Date",
+          "target_object": null
+        },
+        {
+          "name": "outgoing_operator_id",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "incoming_operator_id",
+          "type": "String",
+          "target_object": null
+        }
+      ],
+      "state_mutations": []
+    }
+  },
+  {
+    "name": "SYSTEM_CHANGE_REQUESTED",
+    "description": "上游发起系统变更请求（软件版本/业务规则/阈值/新设备接入），触发六段流水线走查测试与覆盖拦截。",
+    "payload": {
+      "source_action": null,
+      "event_data": [
+        {
+          "name": "change_request_id",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "change_type",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "requested_by",
+          "type": "String",
+          "target_object": null
+        },
+        {
+          "name": "requested_at",
+          "type": "Date",
+          "target_object": null
+        }
+      ],
+      "state_mutations": []
+    }
+  }
+]

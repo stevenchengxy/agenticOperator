@@ -3,6 +3,8 @@ import React from "react";
 import { AppBar } from "./AppBar";
 import { LeftNav } from "./LeftNav";
 import { CommandPalette } from "./CommandPalette";
+import { GlobalChatBubble } from "@/components/chat/GlobalChatBubble";
+import { HelpTip } from "./HelpTip";
 
 export function Shell({
   crumbs = [],
@@ -31,13 +33,12 @@ export function Shell({
       <AppBar crumbs={crumbs} onOpenCmdK={() => setOpen(true)} />
       <div className="flex-1 flex min-h-0">
         <LeftNav />
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">{children}</div>
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">{children}</div>
       </div>
-      {directionTag && (
-        <div className="absolute right-3 bottom-3 text-[10.5px] mono text-ink-4 bg-[color:var(--c-surface)]/80 px-2 py-1 rounded-sm border border-line pointer-events-none z-[5]">
-          {directionTag}
-        </div>
+      {directionTag && process.env.NODE_ENV === "development" && (
+        <HelpTip tip={directionTag} placement="top" className="absolute left-3 bottom-3 z-[5]" />
       )}
+      <GlobalChatBubble />
       <CommandPalette open={open} onClose={() => setOpen(false)} />
     </div>
   );

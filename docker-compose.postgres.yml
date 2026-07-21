@@ -1,0 +1,45 @@
+# AO 本地 Postgres — 持久化业务库 + Inngest 镜像归档
+#
+# 为什么单独一个 compose 文件:docker-compose.inngest.yml 是"项目无关 event
+# bus",不该塞进 AO 专属的 DB。这个文件只起 AO 自己的 Postgres。
+#
+# ★ 端口用 5433(host)→ 5432(container):本机 5432 已被 raas-postgres-dev
+#   (partner RAAS pg)占用,AO 不能冲突。容器内仍是标准 5432。
+#
+# 数据持久化:named volume `ao-pgdata`。`down` 保留 volume(不丢数据),
+# `down -v` 才清。
+#
+# Usage:
+#   npm run pg:up      # docker compose -f docker-compose.postgres.yml up -d
+#   npm run pg:logs
+#   npm run pg:down    # 停容器,保留 volume
+#   docker compose -f docker-compose.postgres.yml down -v   # 清 volume
+#
+# 连接串(写进 .env.local 的 DATABASE_URL):
+#   postgresql://ao:ao_local_pw@localhost:5433/ao
+
+# Own compose project name so `pg:down` never touches the ao-inngest
+# container (which lives under the default `agenticoperator` project).
+name: ao-postgres
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: ao-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${AO_POSTGRES_USER:-ao}
+      POSTGRES_PASSWORD: ${AO_POSTGRES_PASSWORD:-ao_local_pw}
+      POSTGRES_DB: ${AO_POSTGRES_DB:-ao}
+    ports:
+      - "${AO_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ao-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AO_POSTGRES_USER:-ao} -d ${AO_POSTGRES_DB:-ao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ao-pgdata:

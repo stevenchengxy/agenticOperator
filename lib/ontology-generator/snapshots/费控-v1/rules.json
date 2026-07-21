@@ -1,0 +1,700 @@
+{
+  "metadata": {
+    "project_name": "FK-v1",
+    "document_type": "本体规则定义",
+    "version": "v0_1_001",
+    "last_updated": "2026-06-01",
+    "description": "本文档是费用管控（费控）业务的本体规则定义。"
+  },
+  "rules": [
+    {
+      "id": "RULE-INV-01",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "发票抬头 / 税号校验",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "报销单已提交立案、OCR 已结构化出发票购买方名称与购买方税号字段。",
+      "standardizedLogicRule": "系统取 OCR 结构化出的发票“购买方名称”与“购买方税号”，与智控维护的授权抬头/税号白名单（来源为集团法人清单）比对：抬头必须完全等于「启明数字科技集团股份有限公司」或在授权分/子公司抬头白名单内，且税号必须与抬头对应。抬头为个人、写错字漏字、税号填错或缺失，均判不通过。命中默认动作：退回修改（RETURNED），单子打回报销人重开正确抬头的票，并释放此前冻结的预算。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "抬头/税号错则该票在税务上不是开给本公司的，专票认证抵扣会被税局打回、普票入账也站不住脚，是票“姓不姓启明”的根本问题。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-01",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-INV-02",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "发票真伪查验（税局查验）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "OCR 已抽出发票代码、发票号码、开票日期、价税合计、校验码等查验要素。",
+      "standardizedLogicRule": "系统将 OCR 抽出的发票代码、发票号码、开票日期、价税合计、校验码发送至国家税务总局全国增值税发票查验平台，回写发票“查验状态”字段（已验真 / 存疑 / 未查）。返回“存疑”（查不到、信息不符、已作废等）即命中。命中默认动作：升风险 T6（票据不实 / 真伪存疑），转人工，生成风险事件 RK 号，初定 L2，可叠加其他命中升至 T2（虚开 / 套票）。“未查”不等于验真失败，系统挂起重试，多次仍未查到再转人工人工查验，绝不可当作验真通过放行。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "真伪存疑指向票据真实性问题，远比填错抬头严重，可能涉及虚开、买票冲账等主观舞弊，机器不敢自处理须立案转人工。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-02",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-INV-03",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "发票重复报销（票夹云票据池查重）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "发票已入票夹云票据池，具备发票代码与发票号码唯一标识。",
+      "standardizedLogicRule": "系统取本张发票唯一标识（发票代码 + 发票号码，数电票用 20 位发票号码），到票夹云票据池比对全集团已报、在报、归档票据。只要找到发票代码+号码完全相同的已存在记录即判重复，命中。退回重报的同一案件延续不算重复。命中默认动作：升风险 T1（重复报销），驳回该明细行（REJECTED 该行，不驳整张单），生成风险事件 RK 号。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "重复报销是“这笔钱已报过、不该再报第二遍”，不是改改就能救的填错，必须把无心或有意的重复挡在重复付款之前。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-03",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-INV-04",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "同一报销人多张连号发票预警",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "同一报销人在同一单或近期多单提交了多张发票，已抽出发票号码与销售方名称。",
+      "standardizedLogicRule": "系统在报销人维度对发票号码做连号聚合分析，同一开票方出现 3 张及以上号码连续或准连续（如尾号 0451、0452、0453）即触发预警。命中默认动作：提示（“检测到连号发票 N 张”）+ 转人工核查，由费控审核员核连号票真实性与消费场景合理性。连号是线索不是定罪，不直接升风险；人工核出套票嫌疑再手动升风险至 T2。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "连号本身不违规（小商户连开常见），但也是虚开/套票的典型特征，叠加大额、招待、客户名单含糊时套票嫌疑显著上升，须人工核“人、事、时、地”。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-04",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-INV-05",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "发票超期（> 90 天 / 跨年度）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "OCR 已抽出发票开票日期字段且置信度达标。",
+      "standardizedLogicRule": "系统用 OCR 抽出的开票日期与报销单提交时间作差：开票距提报 > 90 天命中“超期”；跨年度（上一年度开票本年度报）命中“跨期”，更需关注；90 天以内且同年度不命中。命中默认动作：提示（“已超期 N 天 / 属跨年度”）+ 要求报销人补说明 + 审批路由升级至经理审批。超期票不退回不核减，给条件放行；跨年度还须确认相关会计期间是否已结账封账，未关方可按发生期归集。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "费用须在合理期间入账以保证当期损益准确，跨期涉及计提/预提衔接；拖太久才报的票真实性与必要性打折扣，易混入私人消费。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-05",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-INV-06",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "发票类型与费用科目匹配",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细行已填费用科目 F，且 OCR 已抽出发票商品/服务名称与发票类型。",
+      "standardizedLogicRule": "系统用 OCR 抽出的票面“商品/服务名称”“发票类型”与报销人填写的“费用科目 F”，按智控维护的“科目-票型对应表”比对（如 F1020 住宿应配住宿票、F2010 招待应配餐饮票、F3010 办公应配办公用品/快递/印刷票）。票面内容与科目明显不属一类即判不匹配，命中。命中默认动作：退回修改（RETURNED），由报销人自行改对科目或把票挪到正确明细行。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "机器无法替报销人猜测意图（票贴错行还是科目选错），须退回由人改；该命中也是“借科目避标准/避审批”的第一个线索，需人工结合事由判断。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-06",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-INV-07",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "专票进项可抵扣识别",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "OCR 已抽出发票类型、税额、税率、销售方/购买方税号等字段。",
+      "standardizedLogicRule": "系统识别 OCR 抽出的“发票类型”是否为增值税专用发票或可抵扣数电专票，且销售方/购买方信息完整、税号正确、税额单独列示。满足即识别为“可抵扣专票”，命中。命中默认动作：触发 FA-06（进项税额认证抵扣）——这是识别+联动规则，不拦单，在回写 ERP 阶段勾选认证、做进项抵扣。带专票的大单须优先处理，避免错过认证抵扣时间窗。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "财务动作 (Financial_Action)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "专票进项税是真金白银可抵销项的税款，不识别不认证就白白损失抵扣，专门设此规则确保进项不漏抵。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-07",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-INV-08",
+      "specificScenarioStage": "票据组校验（第一道闸）",
+      "businessLogicRuleName": "发票金额与明细金额一致性",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细行已手填金额并关联发票，OCR 已抽出发票价税合计。",
+      "standardizedLogicRule": "系统拿明细行“金额”字段与所关联发票“价税合计”字段比对，完全一致（容差 0.01）通过，超出容差即命中。命中默认动作：以票面为准核减（PARTIAL）——机器信票面不信手填，手填高于票面按票面核减到票面，触发 FA-02（释放多占预算）/ FA-12（差额处理）。核减前须先排除“一行关联多票”或“一票被多行共用”导致的表象不一致，避免误核合计。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "财务动作 (Financial_Action)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "票面金额是硬证据无歧义，机器直接按票面纠正手填即可，无需退回让人改，从而杜绝多报。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-INV-08",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-STD-01",
+      "specificScenarioStage": "标准组校验（第二道闸）",
+      "businessLogicRuleName": "住宿超标",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细费用科目 = F1020（差旅-住宿），已取得发票城市、报销人职级与住宿天数。",
+      "standardizedLogicRule": "系统对每张住宿发票按“城市分级 × 报销人职级”比对住宿标准上限（价税合计 ÷ 住宿天数，每间每晚）。标准矩阵：员工/主管 一类500/二类400/三类300；经理 一类600/二类500/三类350；总监 一类800/二类600/三类450；VP及以上据实但需书面说明。城市分级由发票销售方所在地与出差编号 BTA 目的地双重判定，分级不一致时取低不取高。命中默认动作：超出部分核减（PARTIAL 降额核准），触发 FA-02 释放对应预算占用，不升风险不驳回。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "住宿标准须按城市与职级统一执行，超标部分由个人承担，避免费用失控并保证标准对所有人一致。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-STD-01",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-STD-02",
+      "specificScenarioStage": "标准组校验（第二道闸）",
+      "businessLogicRuleName": "出差补助 / 餐补超标",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细费用科目 = F1030（出差补助），已取得出差天数与出差城市分级。",
+      "standardizedLogicRule": "系统按“出差天数 × 该城市每天补助标准”算补助上限（补助含餐：一类120/天、二类100/天、三类80/天），超出核减到标准。补助已含餐，报了补助不得再单独报招待之外的正餐发票；同一天既领 F1030 补助又报招待外正餐票，与 RULE-INV-06 联动判冲突。命中默认动作：补助超标→核减到标准；补助与正餐票冲突→提示 + 转人工，由审核员二选一。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "出差补助是给出差人自己的定额（含餐、含市内零星），与请客户的业务招待须严格区分，否则要么重复拿钱要么招待标准卡不住。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-STD-02",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-STD-03",
+      "specificScenarioStage": "标准组校验（第二道闸）",
+      "businessLogicRuleName": "招待人均超标",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细费用科目 = F2010（业务招待费），已填我方陪同人数与被招待方人数。",
+      "standardizedLogicRule": "系统按“价税合计 ÷ 总人数（我方陪同 + 被招待方）”算人均，比对招待人均上限（一类300/人、二类200/人、三类150/人）。命中默认动作：人均超出部分核减 + 提示；若同时缺被招待方信息或人数填写存疑，叠加 RULE-STD-04 转人工。人数为报销人自填、最易注水，须与 RULE-STD-04 联看，人数明显不合理时转人工核。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "招待属敏感科目，人均上限按城市统一，超标核减并提示；仅看人均达标即放行等于没卡，必须配合陪同人数核验。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-STD-03",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-STD-04",
+      "specificScenarioStage": "标准组校验（第二道闸）",
+      "businessLogicRuleName": "招待陪同人数 > 被招待人数",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "F2010 招待单据已填我方陪同人数与被招待方人数。",
+      "standardizedLogicRule": "系统校验招待单据“我方陪同人数”是否超过“被招待方人数”，原则上我方陪同人数 ≤ 被招待方人数。我方人数明显多于对方（如我方5人请客户1人），存在借招待名义内部聚餐套报嫌疑。命中默认动作：升风险 T3（超标准报销 / 陪同人数异常）+ 转人工，由人定性是否属业务招待；核实非招待的整笔退回，改走团队建设费 F5010 并按团建标准与审批走。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "陪同人数倒挂是定性问题而非核减能解决，专防内部聚餐借招待名义报销，须人工定性后给员工讲清应走科目。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-STD-04",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-STD-05",
+      "specificScenarioStage": "标准组校验（第二道闸）",
+      "businessLogicRuleName": "交通舱位超职级标准",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细费用科目 = F1010（城市间交通），已取得机票行程单/高铁票舱位与报销人职级。",
+      "standardizedLogicRule": "系统按报销人职级比对舱位标准：经理及以下——高铁二等座/飞机经济舱；总监及以上——高铁一等座/经济舱（飞行 ≥ 4 小时或国际航线可商务舱，需事前审批）。舱位超标命中默认动作：按对应职级标准舱位的同日同航段经济舱合理可比价核减，差额自担。可比价取数须人工留痕（截图或询价记录 + 取数逻辑），是稽核重点盯防的自由裁量环节。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "舱位标准须按职级统一，超舱位差额由个人承担，可比价取数易生自由裁量问题须留证据备查。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-STD-05",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-STD-06",
+      "specificScenarioStage": "标准组校验（第二道闸）",
+      "businessLogicRuleName": "市内交通单日超限",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细费用科目 = F1011（市内交通，打车/网约车/租车），已按单日累计归集。",
+      "standardizedLogicRule": "系统对 F1011 市内交通按单日累计金额比对单日上限（单日累计 ≤ 200 元）。超出需报销人补说明（如机场往返、多点跑客户）。命中默认动作：无合理说明的超出部分核减；有说明的转人工，由审核员结合行程判是否全额放行，放行须留痕注明理由。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "市内交通单日定额防止零星打车失控，确有合理跑动理由的凭说明与行程放行，兼顾管控与实际业务需要。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-STD-06",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-CMP-01",
+      "specificScenarioStage": "合规组校验（第三道闸）",
+      "businessLogicRuleName": "大额拆分（绕审批阈值）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "存在同一报销人、同一商户（或同类消费）在同一天或相邻几天的多张报销单/多条明细。",
+      "standardizedLogicRule": "系统按 (报销人 E + 供应商 V + 7 天滑动时间窗) 聚合金额，若聚合金额跨过某审批档而每张单都贴着档下沿（如各 18,000～19,999、合计跨过 2 万经理权限），判拆分嫌疑。典型信号：两单合计 38,000、单张各 19,000 避开总监审批；或一张大额票要求开成两张小票分单报。命中默认动作：升风险 T4（拆分规避审批）+ 转人工 / 转稽核，金额大、规避明显的直接 L3、暂缓付款。须按“聚合后该走哪级审批”判定而非单看单据金额。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "拆分是主观规避审批权限的行为，指向故意而非超标，须按聚合金额还原应走审批级别识别，必要时转稽核。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-CMP-01",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-CMP-02",
+      "specificScenarioStage": "合规组校验（第三道闸）",
+      "businessLogicRuleName": "整数 / 凑数异常金额",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "明细金额异常规整（整百整千）或多张小票金额疑似为凑某数拼出。",
+      "standardizedLogicRule": "系统识别金额是否异常规整（连续整百、整千）或多张小票明显为凑到某数（凑满补贴上限、凑整报销、凑近某阈值）。命中默认动作：提示 + 转人工。该条单独命中证明力弱，主要配合其他信号使用，常见场景为金额规整且贴近直通阈值、票据由一堆小额拼出。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "金额过于规整或刻意凑数虽不必然违规但可疑，作为弱信号配合其他规则使用，由人工结合票据明细判断。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-CMP-02",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-CMP-03",
+      "specificScenarioStage": "合规组校验（第三道闸）",
+      "businessLogicRuleName": "节假日 / 非工作时间消费与事由不符",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "已取得消费发生时间与报销事由（出差申请、招待对象、工作安排）。",
+      "standardizedLogicRule": "系统判消费发生时间是否落在法定节假日、周末或深夜，且与报销事由对不上。命中默认动作：提示 + 需说明；说明不合理转人工。节假日/非工时消费不等于违规，关键看说明与证据（如客户周末才有空、当晚确有合作沟通并附记录），人工核实合理的放行并留痕注明。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "非工作时间消费与事由不符是弱信号（可牵 T8），多数有合理解释，须听员工说明、看证据，不可机器一报即当实锤。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-CMP-03",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-CMP-04",
+      "specificScenarioStage": "合规组校验（第三道闸）",
+      "businessLogicRuleName": "消费时间与出差行程不符",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "差旅类（F1010/F1011/F1020）明细已关联出差编号 BTA，BTA 起止日期与城市填写准确。",
+      "standardizedLogicRule": "系统判差旅类消费日期是否落在出差编号 BTA 的出差起止区间内、消费城市与行程是否一致。住宿/交通发票日期不在出差区间，或城市与行程对不上（如 BTA 写 5-12 至 5-14 去杭州却报 5-16 杭州住宿票），命中。命中默认动作：升风险 T8（时间地点矛盾）+ 转人工；核出私人多待/私行的退回删除该明细。该规则严重依赖 BTA 准确性，上游脏则下游失效。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "消费时间地点与行程矛盾指向私人消费混入公务报销，须以事前出差申请为基准比对、私行部分不由公司承担。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-CMP-04",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-CMP-05",
+      "specificScenarioStage": "合规组校验（第三道闸）",
+      "businessLogicRuleName": "同一商户高频消费",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "已按销售方税号识别商户，可统计报销人-商户消费频次。",
+      "standardizedLogicRule": "系统按销售方税号识别商户，判同一报销人在同一商户短期内是否高频消费，或多名员工是否集中在同一小众商户消费。命中默认动作：提示 + 转人工。高频商户单独看是中性信号，叠加关联方（RULE-CMP-06）则严重，稽核介入核出商户与员工存在关联（如亲属经营）的定性私人套利、移送。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "同一商户高频消费是弱信号（可牵 T7），单独中性，叠加关联方后指向私人套利，须配合人工与稽核核查。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-CMP-05",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "RULE-CMP-06",
+      "specificScenarioStage": "合规组校验（第三道闸）",
+      "businessLogicRuleName": "疑似私人消费 / 关联方",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "已取得发票商品/服务名称，可识别消费内容性质或商户与报销人关联关系。",
+      "standardizedLogicRule": "系统按商品名识别消费内容是否明显偏私人（母婴、奢侈品、个人电子产品混入办公采购），或商户是否与报销人存在关联关系。命中默认动作：升风险 T7（关联交易 / 私人消费）+ 转人工 / 转稽核，情节明显的定 L3/L4、暂停付款、移送；私人物品全额剔除，对员工批评教育并记录。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "发票 (Invoice)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)"
+      ],
+      "businessBackgroundReason": "私人消费或关联方交易是费控红线，指向不该由公司承担的支出或利益输送，须剔除并视情节移送稽核。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-CMP-06",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-BUD-01",
+      "specificScenarioStage": "预算组校验（第四道闸）",
+      "businessLogicRuleName": "预算科目错配",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "前三组规则已放行、取得核定后可报净额，明细已选费用科目 F 与成本中心 CC。",
+      "standardizedLogicRule": "系统校验明细所选费用科目 F 与该成本中心在预算通里有预算的科目是否对得上（如某成本中心本季度只编差旅与招待预算，却报培训费 F4010 挂该成本中心即错配）。命中默认动作：退回修改，由员工改对科目或改对成本中心，不核减不升风险——本质是填错了。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "预算 (Budget)",
+        "成本中心 (Cost_Center)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "科目错配下机器无法替员工猜对的科目或成本中心，须退回由人改，确保费用落到有预算的正确科目格子。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-BUD-01",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-BUD-02",
+      "specificScenarioStage": "预算组校验（第四道闸）",
+      "businessLogicRuleName": "预算余额不足（占用后超预算）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "已取得核定后可报净额，准备占用对应“成本中心 × 科目 × 期间”预算。",
+      "standardizedLogicRule": "系统将核定后可报净额占用对应“成本中心×科目×期间”预算，判占用后是否超过预算总额（可用余额 < 本次占用额）。命中默认动作：升风险 T5（预算超支）+ 转人工 + 审批建议升级（如由经理核准升为总监 + 财务 BP 会签）。处置三条路：①降额到可用余额内核准；②走预算调剂/追加后再占用；③驳回。预算超支须转人工由财务 BP 决定，审核员不得自行先斩后奏。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "预算 (Budget)",
+        "成本中心 (Cost_Center)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "超预算是需财务 BP 与管理层拍板的事，是预算组唯一升风险项，审核员既不可硬放穿底也不可擅自降额砍合理费用。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-BUD-02",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-BUD-03",
+      "specificScenarioStage": "预算组校验（第四道闸）",
+      "businessLogicRuleName": "成本中心归属错误",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "报销单已选成本中心 CC，可比对报销人启人 HR 主数据默认成本中心。",
+      "standardizedLogicRule": "系统比对报销单所选成本中心 CC 与报销人在启人 HR 主数据中的部门/默认成本中心，明显不符且无合理跨成本中心承担说明的，命中。命中默认动作：退回修改。确有“费用由他部门承担”的合理场景（如研发支持销售的差旅由销售出），须在说明栏写明并经被承担成本中心责任人确认，引擎放行转人工。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "成本中心 (Cost_Center)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "成本中心决定费用与预算归集，错挂会使预算占错口袋；合理跨部门承担须经被承担方责任人确认以防随意转嫁成本。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-BUD-03",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "RULE-BUD-04",
+      "specificScenarioStage": "预算组校验（第四道闸）",
+      "businessLogicRuleName": "预算期间错误（跨期）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "已取得费用发生日期与本次拟占用的预算期间。",
+      "standardizedLogicRule": "系统判费用发生日期所属预算期间与本次占用的预算期间是否一致（如拿二季度预算占一季度发生的费用，或反之）。命中默认动作：退回 / 需说明。跨期（尤其跨年度）须按权责发生制归到正确期间，可能走预提 FA-11；若对应期间预算已结已封账，则走当期预算 + 说明，必要时预提冲回，口径以预算管理与成本中心手册及总账组规定为准。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "预算 (Budget)",
+        "成本中心 (Cost_Center)",
+        "财务动作 (Financial_Action)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "费用须按权责发生制归到正确预算与账务期间，跨期占用会扰乱各期预算与损益，须确认期间是否已封账后再处理。",
+      "ruleSource": "费控规则与异常风险识别手册 RULE-BUD-04",
+      "executor": "Agent",
+      "enforcementLevel": "optional",
+      "failurePolicy": "warn"
+    },
+    {
+      "id": "PIPE-01",
+      "specificScenarioStage": "分流判断（直通自动核准）",
+      "businessLogicRuleName": "直通自动核准五条件",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "报销单状态已到 VALIDATED，已有规则校验结果、风险结论与预算占用结果。",
+      "standardizedLogicRule": "系统判定一单能否直通自动核准（AUTO_APPROVED，无人复核），须同时满足五个条件：①报销单合计可报金额 ≤ 20,000 元；②单张发票价税合计 ≤ 5,000 元；③无 L2 及以上风险事件；④OCR 关键字段（金额/发票号/税号/日期）置信度均 ≥ 0.95 且税局验真通过；⑤预算占用成功（未超）。五条件全满足才直通（事件 AUTO_APPROVED），按建议核准并推启流BPM；差一条即转人工（木桶效应，按最短板算）。金额判断一律用核减后“合计可报金额”，非员工填写的原始合计。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "发票 (Invoice)",
+        "风险事件 (Risk_Event)",
+        "预算 (Budget)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "五条件是 CFO 办公室签字的硬口径、系统写死，用于在保证内控的前提下让大多数干净小单零人工直通、把有疑点的单留给人。",
+      "ruleSource": "智控费控系统操作与数据填写规范 §9.3 分流判断口径",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "PIPE-02",
+      "specificScenarioStage": "规则校验引擎（执行顺序）",
+      "businessLogicRuleName": "四组规则固定执行顺序",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "OCR 结构化与票据查验均已出结果，进入 VALIDATING 状态。",
+      "standardizedLogicRule": "规则校验引擎按固定顺序跑四组规则：票据组（RULE-INV-*）→ 标准组（RULE-STD-*）→ 合规组（RULE-CMP-*）→ 预算组（RULE-BUD-*），从微观到宏观、从硬到软。票据组打头（票假/重复/抬头错则后续不必算），标准组算核减得出可报净额，合规组查动机，预算组押后用核减后净额占用。若前组退回（RETURNED）或驳回（REJECTED），引擎在前面截断、不再跑后组，故某组“未命中”须先确认引擎是否已跑到该组。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "发票 (Invoice)",
+        "审批规则 (Approval_Rule)"
+      ],
+      "businessBackgroundReason": "先把票本身有问题的拦在最前省去后续白算，先算清可报金额再占预算避免占多了又释放，顺序本身保证流水线高效且金额一致。",
+      "ruleSource": "智控费控系统操作与数据填写规范 / 费控规则手册 §1.2 执行顺序",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "PIPE-03",
+      "specificScenarioStage": "OCR 结构化（机器/人工边界）",
+      "businessLogicRuleName": "OCR 关键字段置信度 0.95 线",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "OCR 已对每张发票各字段打出置信度，已取得税局验真结果。",
+      "standardizedLogicRule": "OCR 四个关键字段——金额（价税合计）、发票号码、税号、开票日期——的置信度必须全部 ≥ 0.95 且税局验真通过，单子才有资格走自动核准（直通）；任一关键字段 < 0.95 或验真存疑，立即转人工，案件标注转入原因“低置信”。低置信转人工时人工重点核对影像逐字段标红/标黄字段，与金额超阈转人工（重点核金额与事由）的处理重点不同。置信度高不代表识别一定正确，转到人工的单关键字段须拿原票影像核一遍。",
+      "relatedEntities": [
+        "发票 (Invoice)",
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "四个关键字段任一识别错都会引发出钱事故、查重失准、抵扣出错或超期/跨期判错，故设机器谦虚线让其拿不准时闭嘴交人。",
+      "ruleSource": "智控费控系统操作与数据填写规范 §4.3 / 费控规则手册 §1.5",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "PIPE-04",
+      "specificScenarioStage": "命中动作合成（优先级与叠加）",
+      "businessLogicRuleName": "命中动作取最重且累加",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "一张单已命中多条规则，产生多个默认动作。",
+      "standardizedLogicRule": "一单命中多条规则时，按“取最重，且累加”合成：流转方向取最重动作（重量排序 升风险 > 转人工 > 退回 > 核减 > 提示）——含升风险(L4)→SUSPENDED 暂停付款转稽核（一票决定）、含升风险(L3)→转费控主管暂缓付款、含升风险(L2)或转人工或金额超阈→MANUAL_REVIEW、含退回→RETURNED 截断当前版本回 DRAFT 并释放冻结、含核减→累加所有核减走 PARTIAL（无更重动作可自动核准）、仅含提示→记录不影响去向。核减金额可累加（合计可报 = 合计 − 所有核减之和）；退回截断后续；提示永不改变去向；风险事件未闭环则付款冻结、下游动作皆白搭。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "风险事件 (Risk_Event)",
+        "财务动作 (Financial_Action)"
+      ],
+      "businessBackgroundReason": "一单常命中多条规则，须以确定的优先级与累加规则合成唯一去向与可报金额，避免动作冲突与金额算错。",
+      "ruleSource": "费控规则与异常风险识别手册 §1.4 优先级与叠加",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "ROUTE-01",
+      "specificScenarioStage": "分流判断（转人工复核）",
+      "businessLogicRuleName": "转人工复核阈值",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "报销单状态已到 VALIDATED，进入分流判断。",
+      "standardizedLogicRule": "满足任一即转人工复核（MANUAL_REVIEW，事件 ROUTED_TO_MANUAL）：合计可报 > 20,000；或单张发票 > 5,000；或命中 L2/L3 风险；或 OCR 关键字段置信度 < 0.95 / 验真存疑；或预算不足。系统按命中条件打转人工原因标签（金额超阈 / 命中风险 / 低置信 / 超预算，可同时多个），并进分案落到审核员名下。人工确认的主因是金额超阈（这类单多为干净大单，重点核金额与事由），其余为风险/置信度/预算兜底。特例 L4 不进普通人工池，直接转稽核、SUSPENDED 暂停付款。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "费控审核案件 (Audit_Case)",
+        "员工 (Employee)",
+        "风险事件 (Risk_Event)",
+        "预算 (Budget)"
+      ],
+      "businessBackgroundReason": "金额超阈/风险/低置信/超预算是把单子从自动流拦下交人兜底的四类原因，标签让审核员一眼知道卡在哪条、该重点看什么。",
+      "ruleSource": "智控费控系统操作与数据填写规范 §9.3 / §9.4 分流口径",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "ROUTE-02",
+      "specificScenarioStage": "审批建议生成（金额分档路由）",
+      "businessLogicRuleName": "金额分档审批权限矩阵",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "复核或直通后进入审批建议生成，已知报销单合计金额。",
+      "standardizedLogicRule": "系统按报销单合计金额分档生成逐级审批路由（高档含低档）：≤5,000 元→直接主管；>5,000 且 ≤20,000→主管→部门经理；>2万 且 ≤5万→主管→经理→总监；>5万 且 ≤20万→…→总监→VP；>20万 且 ≤50万→…→VP→CFO；>50万→…→CFO→CEO。审批为逐级、每级都须过。须与人工确认阈值区分：人工确认（费控审核员复核）解决“要不要人看”，逐级审批（启流BPM 出 AP 号）解决“业务批不批”，两道独立的关都过才进待付款。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "审批规则 (Approval_Rule)",
+        "员工 (Employee)",
+        "部门 (Department)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "审批级别按金额逐级升高以匹配授权额度，金额越大审批链越长，确保大额支出经更高层级业务领导把关。",
+      "ruleSource": "费用政策与报销标准手册 §7.2 金额分档审批权限矩阵",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "ROUTE-03",
+      "specificScenarioStage": "事前申请校验（先批后花）",
+      "businessLogicRuleName": "强制事前申请清单",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "报销单涉及差旅、招待、超标住宿/舱位、大额培训会议或超预算支出等需先批后花的费用。",
+      "standardizedLogicRule": "系统校验下列场景是否已有合规事前申请，未申请按对应后果处理：①凡产生差旅费（F1010/1011/1020/1030）须有出差编号 BTA，差旅类报销单无 BTA 号无法提交；②单次招待价税合计 > 2,000 元须事前招待申请 + 总监审批，否则转人工可能核减；③预计住宿超职级标准须书面说明 + 审批（VP 据实需书面说明），否则超出核减（RULE-STD-01）；④总监及以上坐商务舱（飞行≥4h/国际航线）须事前审批，否则超舱位核减（RULE-STD-05）；⑤大额培训/会议须事前申请 + 对应级别审批，否则转人工、审批升级；⑥占用后会超预算须预算追加申请（财务BP/总监），否则升风险 T5 转人工 + 审批升级（RULE-BUD-02）。事前申请同时触发预算冻结 FA-03、写明时间地点事由供 RULE-CMP-04 比对。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "审批规则 (Approval_Rule)",
+        "预算 (Budget)",
+        "员工 (Employee)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "事前申请让预算可控（先占坑防先花后报超预算）、真实性可查（写明事由供消费比对）、保护员工（公司先认这笔花费不白垫钱）。",
+      "ruleSource": "费用政策与报销标准手册 §7.4 事前申请清单 / §7.3 科目特殊审批",
+      "executor": "Agent",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "ROUTE-04",
+      "specificScenarioStage": "审批建议生成（升级叠加）",
+      "businessLogicRuleName": "风险 / 超预算审批升级",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "单子在金额分档基础上命中 L2 及以上风险或预算超支（RULE-BUD-02 T5）。",
+      "standardizedLogicRule": "系统在金额分档基础路由之上叠加升级：命中 L2+ 风险事件或超预算（RULE-BUD-02 T5），审批建议在金额档基础上升一级或加一个会签（如本应总监批升级为总监 + 财务 BP 会签）。科目特殊审批（招待 F2010 单次 > 2000、市场会议费 F2020、大额培训 F4010、超标住宿 F1020、超职级舱位 F1010）即便金额不大也叠加特定审批。审批升级是兜底叠加，不替代金额分档基础路由。",
+      "relatedEntities": [
+        "报销单 (Expense_Claim)",
+        "审批规则 (Approval_Rule)",
+        "风险事件 (Risk_Event)",
+        "预算 (Budget)",
+        "费控审核案件 (Audit_Case)"
+      ],
+      "businessBackgroundReason": "风险与超预算是性质或财务影响更重的情形，须在常规金额审批之上增加层级或会签，让更高权限或财务 BP 共同把关。",
+      "ruleSource": "费用政策与报销标准手册 §7.1 / §7.3 升级叠加",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "TRACE-01",
+      "specificScenarioStage": "数据修改留痕（全链路审计）",
+      "businessLogicRuleName": "数据修改留痕五要素",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "对关键数据字段发生任何修改（OCR 校正、核减额录入/调整、成本中心改派、案件改派、风险处置、阈值变更、红冲等）。",
+      "standardizedLogicRule": "任何对关键数据的修改，系统强制记五件事：①谁改的（操作人工号 E / “系统”）；②何时改的（精确时间戳）；③改的哪个字段（字段名，如价税合计、核减额、成本中心 CC）；④前值 → 后值（改前改后都记，缺一不可）；⑤为啥改（理由，人工修改必填，不写不让保存）。前值后值由系统在修改瞬间自动快照、理由栏不填则保存按钮点不动；留痕与操作绑死、当下强制、不可补不可改不可删（append-only），是全链路审计可追溯的最后一道闸。",
+      "relatedEntities": [
+        "费控审核案件 (Audit_Case)",
+        "财务动作 (Financial_Action)",
+        "报销单 (Expense_Claim)",
+        "风险事件 (Risk_Event)",
+        "员工 (Employee)"
+      ],
+      "businessBackgroundReason": "审计要的是修改当下的真相，事后补的理由可信度天差地别；留痕当下强制不可篡改才能保证顺着 FK 完整还原一单的一生、争议与移送时谁也赖不掉。",
+      "ruleSource": "智控费控系统操作与数据填写规范 §13.4 数据修改留痕",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    },
+    {
+      "id": "TRACE-02",
+      "specificScenarioStage": "规则与阈值配置维护",
+      "businessLogicRuleName": "阈值参数变更流程（配置权与决策权分离）",
+      "applicableClient": "通用",
+      "applicableDepartment": "N/A",
+      "submissionCriteria": "需变更智控硬阈值（合计 2 万 / 单票 5000 / 置信度 0.95）或调整规则配置。",
+      "standardizedLogicRule": "智控所有硬阈值（合计 2 万、单票 5000、置信度 0.95）是 CFO 办公室签字的内控参数，任何人不许在工作台私自改。变更须走流程：①业务侧（费控/预算/CFO 办公室）提变更申请，写明理由与影响评估；②CFO 办公室审批签字；③智控系统组在后台配置，配前备份旧值；④配置后留痕（变更项、前值、后值、变更依据审批单号、操作人、生效时间）；⑤通知全体审核员与主管；⑥内审备案。系统组只是配置执行方不是决策方（配置权 ≠ 决策权），无 CFO 签字即便主管口头要求也不动；新规则上线先灰度小范围跑、监控命中率与误报率。",
+      "relatedEntities": [
+        "审批规则 (Approval_Rule)",
+        "费控审核案件 (Audit_Case)",
+        "员工 (Employee)"
+      ],
+      "businessBackgroundReason": "阈值是内控防线，若技术人员可私自调等于一人捅穿内控、审计判重大缺陷；配置权与决策权分离确保规则改动可追溯、有授权。",
+      "ruleSource": "智控费控系统操作与数据填写规范 §13.2 / 费控规则手册 §9.1 规则配置与维护",
+      "executor": "Human",
+      "enforcementLevel": "mandatory",
+      "failurePolicy": "block"
+    }
+  ]
+}

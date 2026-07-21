@@ -1,0 +1,62 @@
+# Dockerized Inngest dev server — 项目无关 / 通用 event bus
+#
+# 这个容器**不绑定任何具体项目**：
+#   - 没有 -u 参数硬编码 SDK URL
+#   - 任何 SDK（AO / RAAS / partner）启动时自己 PUT 来 register
+#
+# 如要彻底关掉 Inngest 启动时对常见端口的扫描（autodiscovery），把
+# `--no-discovery` 加到 command 里。当前保留 autodiscovery，方便本机
+# Next dev 自动连。
+#
+# Usage:
+#   docker compose -f docker-compose.inngest.yml up -d
+#   docker compose -f docker-compose.inngest.yml logs -f
+#   docker compose -f docker-compose.inngest.yml restart
+#   docker compose -f docker-compose.inngest.yml down            # 保留 volume
+#   docker compose -f docker-compose.inngest.yml down -v         # 清 volume
+#
+# 保留 named volume `agenticoperator_inngest-data` —— 与之前手动 docker run
+# 同名，重建容器不丢历史事件 / runs。
+
+services:
+  inngest:
+    image: ${INNGEST_IMAGE:-inngest/inngest:v1.19.2}
+    container_name: ao-inngest
+    restart: unless-stopped
+    command:
+      - inngest
+      - dev
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8288"
+      # A volume alone is not enough: the dev server only writes its SQLite
+      # state when --persist is enabled.
+      - --persist
+      # 启动时主动 sync 本仓的 Next.js SDK:
+      #   AO main (端口 3002) 现在包含全部 agent runtime:
+      #     - resumeParserAgent  (RESUME_DOWNLOADED → RESUME_PROCESSED)
+      #     - createJdAgent      (REQUIREMENT_LOGGED → JD_GENERATED)
+      #     - matchResumeAgent   (RESUME_PROCESSED → MATCH_*)
+      # (p4 合并前 resume-parser-agent 在端口 3020 独立跑,合并后已删除)
+      # partner / 其他 SDK 不自动 sync — 用各自的 Inngest client 启动时
+      # 自己 PUT 注册到本 dev server 即可。
+      - -u
+      - "http://host.docker.internal:3002/api/inngest"
+    ports:
+      - "0.0.0.0:8288:8288"   # 显式 IPv4 绑定（避开 macOS Docker IPv6-only 行为）
+      - "0.0.0.0:8289:8289"   # connect-gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    working_dir: /var/lib/inngest
+    volumes:
+      - inngest-data:/var/lib/inngest/.inngest
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8288/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  inngest-data:

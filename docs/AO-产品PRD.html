@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agentic Operator 产品需求文档 PRD</title>
+<style>
+:root {
+  --page: #f2f0e9;
+  --paper: #fffdf8;
+  --ink: #26231f;
+  --ink-2: #49443c;
+  --muted: #756f64;
+  --line: #ded7c7;
+  --line-soft: #ebe4d6;
+  --brand: #8a6823;
+  --brand-soft: #f3ead4;
+  --ok: #54764b;
+  --warn: #9a6a17;
+  --risk: #b44433;
+  --info: #345f86;
+  --font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", ui-serif, Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  line-height: 1.72;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: 34px 24px 88px; }
+.cover, .card, .section {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 32px rgba(64, 55, 36, .06);
+}
+.cover {
+  border-radius: 16px;
+  padding: 42px 48px 38px;
+  margin-bottom: 18px;
+}
+.eyebrow {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+h1, h2, h3 { font-family: var(--font-serif); letter-spacing: .02em; }
+h1 { font-size: 34px; line-height: 1.22; margin: 14px 0 10px; }
+.subtitle { color: var(--ink-2); font-size: 17px; max-width: 760px; }
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: #fbf7ec;
+  border-radius: 999px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+.toc {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.toc a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fffaf0;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 13px;
+}
+.toc a:hover { border-color: var(--brand); color: var(--brand); }
+.section {
+  border-radius: 14px;
+  padding: 30px 34px 34px;
+  margin-bottom: 18px;
+}
+.section h2 {
+  font-size: 23px;
+  margin: 0 0 18px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--brand-soft);
+}
+.section h3 {
+  color: var(--brand);
+  font-size: 17px;
+  margin: 24px 0 8px;
+}
+p { color: var(--ink-2); margin: 10px 0; font-size: 14.6px; }
+.lead { font-size: 16px; color: var(--ink-2); }
+.grid-2, .grid-3, .grid-4 { display: grid; gap: 12px; margin: 14px 0; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.card {
+  border-radius: 12px;
+  padding: 15px 16px;
+  box-shadow: none;
+}
+.card h3, .card h4 {
+  margin: 0 0 7px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+.card p { font-size: 13.5px; margin: 0; }
+.metric {
+  color: var(--brand);
+  font-weight: 800;
+  font-size: 22px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+ul.clean { list-style: none; margin: 10px 0; padding: 0; }
+ul.clean li {
+  position: relative;
+  padding: 5px 0 5px 18px;
+  color: var(--ink-2);
+  font-size: 14.2px;
+}
+ul.clean li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 15px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--brand);
+}
+.callout {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 12px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  padding: 13px 15px;
+  margin: 14px 0;
+  background: #fbf7ec;
+}
+.callout b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: fit-content;
+  border-radius: 7px;
+  padding: 3px 8px;
+  color: #fff;
+  background: var(--brand);
+  font-size: 12px;
+}
+.callout .body { color: var(--ink-2); font-size: 14px; }
+.callout.ok { background: #f0f6ec; border-color: #d9e7d1; }
+.callout.ok b { background: var(--ok); }
+.callout.warn { background: #fbf2df; border-color: #edd8aa; }
+.callout.warn b { background: var(--warn); }
+.callout.risk { background: #fbefeb; border-color: #efcfc6; }
+.callout.risk b { background: var(--risk); }
+.callout.info { background: #edf4fa; border-color: #cbdae8; }
+.callout.info b { background: var(--info); }
+.tblwrap { overflow-x: auto; margin: 14px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 13.2px; }
+th, td { border: 1px solid var(--line-soft); padding: 9px 10px; vertical-align: top; }
+th {
+  background: var(--brand-soft);
+  color: var(--brand);
+  text-align: left;
+  font-weight: 800;
+  white-space: nowrap;
+}
+tr:nth-child(even) td { background: #fffaf1; }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.tag.ok { background: #e8f1e3; color: var(--ok); border-color: #d3e5cb; }
+.tag.warn { background: #faedd0; color: var(--warn); border-color: #efd4a0; }
+.tag.risk { background: #f7ded7; color: var(--risk); border-color: #edc0b6; }
+.tag.plan { background: #e8eef5; color: var(--info); border-color: #ccd9e7; }
+.tag.none { background: #eeeae1; color: var(--muted); border-color: #ddd5c5; }
+.flow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin: 16px 0;
+  overflow-x: auto;
+}
+.step {
+  min-width: 128px;
+  flex: 1;
+  border: 1px solid var(--line);
+  background: #fffaf0;
+  border-radius: 10px;
+  padding: 11px 12px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.step strong { display: block; color: var(--ink); margin-bottom: 4px; }
+.arrow {
+  display: flex;
+  align-items: center;
+  color: var(--brand);
+  font-weight: 900;
+}
+.req {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 16px 0;
+  background: #fffdf8;
+}
+.req-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  background: #fbf4e4;
+  border-bottom: 1px solid var(--line);
+}
+.req-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+}
+.req-body { padding: 14px 15px 16px; }
+.two-col { columns: 2; column-gap: 28px; }
+.small { color: var(--muted); font-size: 12.5px; }
+.footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 28px; }
+.visual-figure {
+  margin: 18px 0 22px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffaf0;
+}
+.visual-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line-soft);
+  background: #fffdf8;
+}
+.visual-figure figcaption {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+@media (max-width: 780px) {
+  .wrap { padding: 22px 14px 60px; }
+  .cover, .section { padding: 24px 20px; }
+  .toc, .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .callout { grid-template-columns: 1fr; }
+  .two-col { columns: 1; }
+}
+
+@page { size: A4; margin: 12mm 10mm; }
+@media print {
+  body { background: #fff; }
+  .wrap { max-width: none; padding: 0; }
+  .cover, .section, .card, .req { box-shadow: none; }
+  .cover { page-break-after: always; }
+  .toc { display: none; }
+  .section { break-inside: auto; margin-bottom: 10px; }
+  .section h2, .section h3, .req-head { break-after: avoid; }
+  .card, .callout, .req, tr { break-inside: avoid; }
+  .flow { break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="cover">
+    <div class="eyebrow">Agentic Operator · Product Requirements</div>
+    <h1>Agentic Operator 产品需求文档（PRD）</h1>
+    <p class="subtitle">AI 智能体操作中枢：把招聘智能体从“能跑”推进到“看得见、管得住、可追责、可扩展”。</p>
+    <div class="meta">
+    <span class="pill">版本 v0.4</span>
+      <span class="pill">重构日期 2026-06-12</span>
+      <span class="pill">目标读者：产品 / 研发 / 运维 / 合作方联调</span>
+      <span class="pill">交付形态：HTML 源 + PDF</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="目录">
+    <a href="#summary">1. 一页摘要</a>
+    <a href="#users">2. 用户与场景</a>
+    <a href="#scope">3. 范围与成熟度</a>
+    <a href="#flows">4. 核心流程与架构图</a>
+    <a href="#requirements">5. 功能需求</a>
+    <a href="#acceptance">6. 验收口径</a>
+    <a href="#data">7. 数据口径</a>
+    <a href="#nfr">8. 非功能需求</a>
+    <a href="#risks">9. 风险与决策</a>
+    <a href="#patents">10. 专利建议</a>
+  </nav>
+
+  <section class="section" id="summary">
+    <h2>1. 一页摘要</h2>
+    <p class="lead">AO 不是给候选人或普通 HR 使用的招聘系统，而是给“负责 AI 智能体稳定运行的人”使用的控制平面。它把一次招聘流程中的智能体、事件、运行记录、外部依赖、人工待办和审计结果集中管理。</p>
+
+    <div class="grid-4">
+      <div class="card">
+        <div class="metric">01</div>
+        <h3>看得见</h3>
+        <p>运行状态、任务链路、错误、超时、成本、供应商健康，统一进入监控视图。</p>
+      </div>
+      <div class="card">
+        <div class="metric">02</div>
+        <h3>分得清</h3>
+        <p>把“系统故障”和“业务不通过”分开，避免把宕机误读成候选人淘汰。</p>
+      </div>
+      <div class="card">
+        <div class="metric">03</div>
+        <h3>管得住</h3>
+        <p>关键节点可暂停等人决策，操作留痕；后续扩展到配置、版本、开关治理。</p>
+      </div>
+      <div class="card">
+        <div class="metric">04</div>
+        <h3>可外借</h3>
+        <p>通过 shadow / dry-run API 让合作方用固定规则版本测试，不碰生产副作用。</p>
+      </div>
+    </div>
+
+    <div class="callout ok">
+      <b>本版目标</b>
+      <div class="body">v0.3 PRD 先把“已经能承诺什么、还在做什么、各模块当前接入状态”讲清楚。产品开发目标聚焦三件事：可信监控、可追责执行、对外安全试用。</div>
+    </div>
+
+    <h3>1.1 版本成功标准</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>目标</th><th>成功标准</th><th>验收证据</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>监控不失明</td><td>Inngest live 源不可用时，监控仍能读取已归档 run / event / step trace。</td><td>`MONITOR_READ_SOURCE=postgres` 下 `/api/inngest-admin/*` 返回归档数据。</td></tr>
+          <tr><td>失败不误判</td><td>业务不通过不算系统失败；只有模型、数据、工具、超时等才进入故障口径。</td><td>运行详情和总结中展示四类状态：成功、重试后成功、系统故障、业务结论。</td></tr>
+          <tr><td>外部依赖可见</td><td>供应商欠费、故障、限流、认证异常不混进智能体自身质量分。</td><td>依赖健康卡片、通知和运行详情中能定位供应商、影响范围、建议动作。</td></tr>
+          <tr><td>人工把关可追责</td><td>关键决策可生成待办、暂停等待、收到人类决策后继续，并留下审计记录。</td><td>`/inbox`、`/api/human-tasks`、相关 run trace 可关联同一任务。</td></tr>
+          <tr><td>合作方安全试用</td><td>外部请求可用固定规则版本进行 shadow 执行；幂等、鉴权、限流、无生产副作用。</td><td>`/api/agent-execution/capabilities` 与 `/executions` 可跑通单条 matchResume。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="users">
+    <h2>2. 用户与场景</h2>
+    <p>本产品的主用户不是招聘候选人，也不是普通招聘业务系统用户，而是运营 AI 智能体的人。PRD 后续所有需求都围绕这些用户的日常问题展开。</p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>角色</th><th>核心问题</th><th>需要 AO 提供什么</th><th>主要入口</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>值班运维 / 平台工程师</td>
+            <td>半夜报警时，到底是系统坏了、供应商坏了，还是业务本来不通过？</td>
+            <td>监控总览、运行详情、错误归因、供应商健康、归档兜底。</td>
+            <td>`/monitor`、`/fleet`、`/alerts`、`/events`</td>
+          </tr>
+          <tr>
+            <td>业务运营 / 交付经理</td>
+            <td>AI 的判断能不能信？哪些任务需要人拍板？候选人为什么停在这里？</td>
+            <td>人工待办、规则校验详情、事实核查、候选人链路、追查助手。</td>
+            <td>`/inbox`、`/rule-check`、`/live`、`/correlations`</td>
+          </tr>
+          <tr>
+            <td>平台负责人</td>
+            <td>版本、成本、供应商风险、对外试用和新业务复制是否可控？</td>
+            <td>版本口径、用量台账、依赖状态、shadow API、扩展蓝图。</td>
+            <td>`/analytics`、`/settings`、`/agent-execution/*`、`/workflow-agents`</td>
+          </tr>
+          <tr>
+            <td>外部合作方 / 测试平台</td>
+            <td>能不能用固定规则版本跑回归测试，且不影响正式招聘流程？</td>
+            <td>鉴权 API、幂等执行、轮询结果、逐规则过程数据、无副作用声明。</td>
+            <td>`/api/agent-execution/*`</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>2.1 典型用户故事</h3>
+    <ul class="clean two-col">
+      <li>作为值班运维，我要在 1 分钟内判断一次失败是系统故障、供应商故障还是正常业务不通过。</li>
+      <li>作为业务运营，我要看到 AI 为什么判定候选人不匹配，并知道是否需要人工复核。</li>
+      <li>作为平台负责人，我要知道每个智能体最近的成本、错误率、外部依赖风险和版本状态。</li>
+      <li>作为合作方测试平台，我要用指定规则版本重复跑同一批用例，结果可复现且不污染生产。</li>
+    </ul>
+  </section>
+
+  <section class="section" id="scope">
+    <h2>3. 范围与成熟度</h2>
+
+    <h3>3.1 本版范围</h3>
+    <div class="grid-3">
+      <div class="card">
+        <h3>必须做清楚</h3>
+        <p>监控归档、运行追踪、故障归因、依赖健康、人工把关、规则校验审计、对外 shadow 执行。</p>
+      </div>
+      <div class="card">
+        <h3>可以部分交付</h3>
+        <p>追查助手、AI 事实核查、跨业务域监控、新智能体生成、成本分析。</p>
+      </div>
+      <div class="card">
+        <h3>明确不在本版</h3>
+        <p>候选人端产品、完整 ATS 替代、自动修复生产故障、完整多租户权限、正式计费系统。</p>
+      </div>
+    </div>
+
+    <h3>3.2 成熟度总表</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>能力</th><th>当前状态</th><th>数据口径</th><th>本版承诺</th><th>备注</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Postgres 持久化 + Inngest 归档</td><td><span class="tag ok">已可用</span></td><td>真实后端</td><td>是</td><td>监控读路径支持 PG 优先 / live 回退。</td></tr>
+          <tr><td>运行监控与 run 详情</td><td><span class="tag ok">已可用</span></td><td>真实为主</td><td>是</td><td>`/monitor`、`/live`、`/api/inngest-admin/*`。</td></tr>
+          <tr><td>系统故障 vs 业务结论分类</td><td><span class="tag ok">已可用</span></td><td>真实后端</td><td>是</td><td>业务 not_matched 不算 failed。</td></tr>
+          <tr><td>供应商 / 依赖健康</td><td><span class="tag ok">已可用</span></td><td>真实 + 聚合</td><td>是</td><td>欠费、故障、说不准需分档。</td></tr>
+          <tr><td>人工待办 / 人类决策</td><td><span class="tag warn">部分可用</span></td><td>真实后端，UI 持续完善</td><td>部分</td><td>已支持暂停等待与决策回写；批量治理、权限仍需补。</td></tr>
+          <tr><td>规则校验审计</td><td><span class="tag warn">部分可用</span></td><td>真实后端</td><td>部分</td><td>招聘域优先；跨域覆盖和人工校准待补。</td></tr>
+          <tr><td>AI 事实核查 / 多模型评审</td><td><span class="tag warn">部分可用</span></td><td>真实流程 + 待校准</td><td>部分</td><td>主流程可跑；人工标准答案和漂移监控未完整闭环。</td></tr>
+          <tr><td>对外 shadow 执行 API</td><td><span class="tag ok">第一版可用</span></td><td>真实 API</td><td>是</td><td>当前支持 matchResume，候选人 ref 优先，inline candidate 待开放。</td></tr>
+          <tr><td>追查助手 Chatbot</td><td><span class="tag warn">原型/部分可用</span></td><td>真实 trace + 工具查询</td><td>部分</td><td>需要明确可查询范围、证据展示和“不知道”策略。</td></tr>
+          <tr><td>新业务 / 新智能体生成</td><td><span class="tag plan">规划中</span></td><td>蓝图 + 局部工具</td><td>否</td><td>招聘最成熟，能源/费控以监控和触发为主。</td></tr>
+          <tr><td>远程配置、暂停、恢复、上线治理</td><td><span class="tag plan">规划中/开发中</span></td><td>接入中</td><td>否</td><td>当前不可对外承诺完整“管控台”。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn">
+      <b>阅读规则</b>
+      <div class="body">后续每个模块都必须标注“已可用 / 部分可用 / 规划中”。如果一个页面上存在不同接入范围的数据，UI 必须在 PRD 和交付说明中说明数据来源。</div>
+    </div>
+  </section>
+
+  <section class="section" id="flows">
+    <h2>4. 核心流程与架构图</h2>
+
+    <h3>4.1 产品能力地图</h3>
+    <figure class="visual-figure">
+      <img src="assets/ao-prd-capability-map.png" alt="Agentic Operator 产品能力地图：看得见、分得清、管得住、可扩展" />
+      <figcaption>AO 的核心价值不是替智能体干活，而是让智能体成为可运营、可追责、可扩展的生产系统。</figcaption>
+    </figure>
+
+    <h3>4.2 系统分层架构图</h3>
+    <figure class="visual-figure">
+      <img src="assets/ao-prd-architecture.png" alt="Agentic Operator 系统分层架构：用户层、界面层、接口层、执行层、监控层、数据与外部系统" />
+      <figcaption>执行层负责“干活”，监控层与数据层负责“留痕与可见”，两者解耦。</figcaption>
+    </figure>
+
+    <h3>4.3 招聘智能体执行流程</h3>
+    <figure class="visual-figure">
+      <img src="assets/ao-prd-recruiting-flow.png" alt="招聘智能体从事件进入、简历解析、规则预筛、岗位匹配、人工把关、结果输出到归档监控的流程" />
+      <figcaption>业务不通过是正常业务结论；系统、模型、工具、数据或供应商异常才进入故障口径。</figcaption>
+    </figure>
+    <div class="flow">
+      <div class="step"><strong>事件进入</strong>需求同步、简历下载或重匹配请求进入 AO。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>智能体接力</strong>JD、解析、规则预筛、匹配、邀约等 agent 分步骤执行。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>关键节点</strong>需要人工判断时暂停，生成待办。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>结果输出</strong>业务结论、事件、审计、外部回写按规则输出。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>监控归档</strong>run、event、step trace 进入 Postgres 归档。</div>
+    </div>
+
+    <h3>4.4 监控归档与容灾架构</h3>
+    <figure class="visual-figure">
+      <img src="assets/ao-prd-monitor-archive.png" alt="监控归档与容灾架构：Inngest Live 源、归档器、Postgres 归档库、监控读取层、监控页面" />
+      <figcaption>监控默认 Postgres 优先、live 补最新；运行引擎短暂不可用时，已归档历史仍可读。</figcaption>
+    </figure>
+    <div class="flow">
+      <div class="step"><strong>Live 源</strong>Inngest dev server 是实时运行源。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>归档器</strong>独立进程定时抓 events / runs / traces。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>Postgres</strong>长期保存 AO 业务表和 Inngest 镜像表。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>读取策略</strong>auto 模式下 PG 优先，live 补最新。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>监控页</strong>Inngest 抖动时仍能查看已归档历史。</div>
+    </div>
+
+    <h3>4.5 人工把关流程</h3>
+    <figure class="visual-figure">
+      <img src="assets/ao-prd-human-loop.png" alt="人工把关流程：AI 智能体运行、生成待办、人类决策、从断点继续、审计留痕" />
+      <figcaption>关键节点暂停等待人类决策，等待期间不空转、不丢上下文，所有人类动作可追溯。</figcaption>
+    </figure>
+
+    <h3>4.6 对外 shadow 执行架构</h3>
+    <figure class="visual-figure">
+      <img src="assets/ao-prd-shadow-api.png" alt="对外 Shadow 执行架构：合作方测试平台、AO 执行 API、规则版本锁定、Shadow Executor、执行台账、轮询结果" />
+      <figcaption>对外试用遵守“真执行、无副作用、固定版本、可复现、可审计”的原则。</figcaption>
+    </figure>
+    <div class="flow">
+      <div class="step"><strong>提交用例</strong>合作方带 API Key、clientRequestId、规则版本和输入。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>受理去重</strong>相同幂等键返回同一 executionId。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>真实计算</strong>生产同款规则校验，但副作用全部抑制。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>轮询结果</strong>返回业务结论、逐规则过程、trace、用量元数据。</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>留底</strong>单独台账保存，不污染正式招聘流水线。</div>
+    </div>
+  </section>
+
+  <section class="section" id="requirements">
+    <h2>5. 功能需求</h2>
+
+    <div class="req">
+      <div class="req-head"><h3>R1. 智能体舰队总览</h3><span class="tag warn">部分可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>让用户按业务域看到有哪些智能体、是否健康、最近是否异常、依赖是否正常。</p>
+        <ul class="clean">
+          <li>支持按业务域筛选：招聘、能源、费控等；招聘域为当前主交付域。</li>
+          <li>每个智能体显示状态、最近运行、错误率、耗时、用量、需关注原因。</li>
+          <li>点击智能体进入详情：运行历史、配置摘要、依赖、最近实体、相关告警。</li>
+          <li>页面或交付说明必须标明数据接入状态，避免把尚未接入的能力描述成实时监控。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R2. 运行监控与归档兜底</h3><span class="tag ok">已可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>即使运行引擎临时不可用，也能看到已发生的 run / event / step trace。</p>
+        <ul class="clean">
+          <li>默认读取策略为 `MONITOR_READ_SOURCE=auto`：Postgres 优先，live 补充。</li>
+          <li>支持 `postgres` 和 `live` 强制模式，用于离线排障和实时调试。</li>
+          <li>归档器独立于 Next.js 和 Inngest 调度器运行，失败时记录 cursor 和 lastError。</li>
+          <li>短任务允许存在最多约半分钟归档延迟，UI 应避免把延迟误报成数据丢失。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R3. Run 详情与故障归因</h3><span class="tag ok">已可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>单次任务失败后，用户能快速判断原因、影响和下一步动作。</p>
+        <ul class="clean">
+          <li>展示 run 基本信息：状态、触发事件、开始/结束时间、耗时、关联实体、函数名。</li>
+          <li>展示 step trace：每步输入、输出、错误、重试、耗时、被抑制副作用。</li>
+          <li>失败分类至少包括：系统故障、外部依赖故障、业务不通过、等待人工、已重试成功。</li>
+          <li>AI 自动总结必须遵守分类，不得把系统故障写成候选人不通过。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R4. 供应商与基础设施健康</h3><span class="tag ok">已可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>把外部服务问题从智能体质量问题中分离出来。</p>
+        <ul class="clean">
+          <li>供应商状态分为：正常、欠费/额度不足、故障/超时、说不准/需人工核查。</li>
+          <li>每个异常状态应显示供应商、业务域、首次出现时间、最近出现时间、影响任务。</li>
+          <li>可恢复故障进入挂起/重试策略；不可恢复故障才记为最终失败。</li>
+          <li>供应商统计读取失败时，页面局部降级，不应拖垮总览页。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R5. 人工待办与人类决策</h3><span class="tag warn">部分可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>让 AI 在关键决策点暂停，等待人类明确给出通过、退回、否决或补充信息。</p>
+        <ul class="clean">
+          <li>关键 step 触发待办，任务进入 `/inbox`，并关联 runId / traceId / entityId。</li>
+          <li>待办应展示上下文、AI 建议、证据、风险、截止时间、可选动作。</li>
+          <li>人类决策写入审计表，智能体从断点继续。</li>
+          <li>超时未处理时，任务按配置进入取消、升级或继续等待，不允许静默丢失。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R6. 规则校验审计与事实核查</h3><span class="tag warn">部分可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>让业务运营知道 AI 的判断是否有证据，规则是否被正确执行。</p>
+        <ul class="clean">
+          <li>规则校验展示逐规则结果：规则 ID、规则文本快照、证据、解释、结论、否决原因。</li>
+          <li>业务结论支持 matched、not_matched、needs_review；not_matched 是成功业务结论。</li>
+          <li>事实核查可抽查 AI 输出，并用不同模型或多模型投票给出风险提示。</li>
+          <li>事实核查只提示，不自动改写原业务结论；核查失败不应破坏原流程。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R7. 对外 shadow 执行 API</h3><span class="tag ok">第一版可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>外部测试平台可提交单条用例，用生产同款 agent 做无副作用执行。</p>
+        <ul class="clean">
+          <li>提供 capabilities 接口，返回支持场景、业务域、规则版本、agent 版本、限制和备注。</li>
+          <li>执行接口支持 API Key、clientRequestId 幂等、并发限制、固定规则版本。</li>
+          <li>shadow 模式中禁止发消息、写客户系统、触发正式业务事件；响应中要声明被抑制的副作用。</li>
+          <li>MVP 支持 matchResume；inline candidate、复杂 stepIds、正式计费口径后续开放。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R8. 追查助手 Chatbot</h3><span class="tag warn">原型/部分可用</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>用户可以用自然语言追问“这次为什么失败”“谁卡住了”“证据在哪里”。</p>
+        <ul class="clean">
+          <li>追查助手只能基于可查询数据回答，并附带证据来源：run、step、event、audit、rule。</li>
+          <li>当数据缺失或无法判断时，必须回答“不确定”，并说明缺哪类数据。</li>
+          <li>不得替用户执行有副作用动作；如需暂停、重试、通知，必须跳转到明确操作入口。</li>
+          <li>支持单 run 追查和全局追查两个形态，权限和可见数据范围后续补齐。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R9. 多业务域与新智能体扩展</h3><span class="tag plan">规划中</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>让招聘域沉淀出的监控、人工把关、故障归因、shadow 执行能力可以复制到能源、费控等业务域。</p>
+        <ul class="clean">
+          <li>业务域需要有统一描述：事件、agent、规则蓝图、外部依赖、人工节点、验收用例。</li>
+          <li>新业务接入前必须标注哪些能力复用、哪些能力缺失、哪些页面尚未完成接入。</li>
+          <li>新智能体生成不在本版承诺范围；本版只定义扩展所需的产品口径。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="req">
+      <div class="req-head"><h3>R10. 设置、权限与治理</h3><span class="tag plan">规划中/开发中</span></div>
+      <div class="req-body">
+        <p><strong>目标：</strong>把配置、版本、开关、密钥、审计和权限集中管理。</p>
+        <ul class="clean">
+          <li>系统配置页展示 Inngest、Postgres、Allmeta/Neo4j、RAAS、MinIO、LLM gateway 当前连接状态。</li>
+          <li>敏感配置只展示摘要和健康状态，不展示密钥原文。</li>
+          <li>后续需要支持角色权限：只读、运营处理、平台管理员、外部 API 调用方。</li>
+          <li>所有高风险动作必须二次确认并写入审计。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="acceptance">
+    <h2>6. 验收口径</h2>
+    <p>每个功能交付时，不只看页面是否存在，还要看数据是否真实、异常是否可解释、用户是否知道下一步怎么做。</p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>模块</th><th>P0 验收</th><th>P1 验收</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>监控归档</td><td>归档表有 events/runs/steps；Inngest 停止时 PG 模式仍能读历史。</td><td>UI 展示数据源状态和最近同步时间。</td></tr>
+          <tr><td>Run 详情</td><td>失败 step、错误、重试、业务结论能分开展示。</td><td>AI 总结附证据，不确定时明确说不确定。</td></tr>
+          <tr><td>供应商健康</td><td>欠费/故障/说不准三类能进入卡片或通知。</td><td>能按供应商、业务域、影响 run 过滤。</td></tr>
+          <tr><td>人工待办</td><td>任务可创建、可处理、可回写、可审计。</td><td>支持升级、超时策略和批量处理。</td></tr>
+          <tr><td>规则审计</td><td>单条规则校验可追到规则 ID、证据、结论。</td><td>可对比人工标准答案并形成质量趋势。</td></tr>
+          <tr><td>Shadow API</td><td>capabilities、POST、GET 轮询、幂等、鉴权、限流跑通。</td><td>支持更多输入形态、细分理由、计费口径。</td></tr>
+          <tr><td>追查助手</td><td>能回答单 run 的失败原因并附来源。</td><td>支持跨事件因果链、多数据源检索和权限收敛。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="data">
+    <h2>7. 数据口径</h2>
+
+    <h3>7.1 关键术语</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>术语</th><th>定义</th><th>使用规则</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>智能体 / AI 员工</td><td>负责一个或多个业务步骤的 agent，例如简历解析、规则校验、岗位匹配、邀约。</td><td>面向外部可用“AI 员工”做解释，PRD 和验收中统一称“智能体”。</td></tr>
+          <tr><td>运行引擎</td><td>承载事件、函数、step 的执行系统，当前主要是 Inngest。</td><td>它是 live 源，不是唯一历史源。</td></tr>
+          <tr><td>归档数据库</td><td>Postgres 中的 AO 业务表和 Inngest 镜像表。</td><td>监控默认优先读取归档，避免 live 源不可用时失明。</td></tr>
+          <tr><td>业务结论</td><td>业务规则自然给出的结果，如 matched、not_matched、needs_review。</td><td>业务 not_matched 不等于系统 failed。</td></tr>
+          <tr><td>系统故障</td><td>模型、工具、网络、数据缺失、超时、供应商异常等导致流程没能正确判断。</td><td>必须进入故障归因和通知口径。</td></tr>
+          <tr><td>Shadow / Dry-run</td><td>执行真实判断逻辑，但抑制生产副作用的测试模式。</td><td>对外 API 当前只承诺 shadow。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>7.2 页面数据源要求</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>页面 / 接口</th><th>主要数据源</th><th>要求</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>`/fleet`</td><td>`/api/agents`、依赖健康、最近活动</td><td>标注哪些字段已接入后端，哪些仍处于接入中。</td></tr>
+          <tr><td>`/monitor`</td><td>Postgres archive + Inngest live</td><td>展示源状态、同步延迟和空状态原因。</td></tr>
+          <tr><td>`/live` / run 详情</td><td>run、step、trace、summary、audit</td><td>错误、业务结论、人工待办分开展示。</td></tr>
+          <tr><td>`/rule-check`</td><td>rule-check audits、Neo4j 规则、本体版本</td><td>逐规则证据与结论必须可追溯。</td></tr>
+          <tr><td>`/inbox`</td><td>HumanTask、消息、审计</td><td>人类动作必须落审计。</td></tr>
+          <tr><td>`/api/agent-execution/*`</td><td>执行台账、规则引擎、Neo4j、trace</td><td>固定版本、幂等、无副作用声明。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="nfr">
+    <h2>8. 非功能需求</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>可靠性</h3>
+        <p>监控不依赖单一 live 源；归档器幂等；局部数据失败时页面局部降级。</p>
+      </div>
+      <div class="card">
+        <h3>安全</h3>
+        <p>外部 API 必须鉴权；密钥不明文展示；shadow 模式禁止生产副作用。</p>
+      </div>
+      <div class="card">
+        <h3>审计</h3>
+        <p>人工决策、外部执行、关键配置、高风险动作都要有可查询审计记录。</p>
+      </div>
+      <div class="card">
+        <h3>可解释性</h3>
+        <p>AI 总结必须引用证据；缺数据时承认不确定；业务结论和系统故障不能混写。</p>
+      </div>
+    </div>
+
+    <h3>8.1 性能与限制</h3>
+    <ul class="clean">
+      <li>监控页默认视图应在 3 秒内返回首屏可用信息；大量历史数据使用分页或时间窗口。</li>
+      <li>归档器默认 30 秒轮询，允许短任务存在同步延迟；异常时记录 lastError 而不是静默失败。</li>
+      <li>对外 API 单用例执行目标 ≤ 3 分钟；超过 timeoutMs 后返回 timeout 状态。</li>
+      <li>外部 API 并发限制第一版按全局上限实现，后续改为按调用方、业务域、版本维度限流。</li>
+    </ul>
+  </section>
+
+  <section class="section" id="risks">
+    <h2>9. 风险与待决策</h2>
+
+    <div class="callout risk">
+      <b>风险 1</b>
+      <div class="body"><strong>部分 UI 的数据接入范围仍需确认。</strong> 对外介绍“实时监控”前，必须逐页确认数据源；尚未接入的字段不能作为已交付能力承诺。</div>
+    </div>
+    <div class="callout risk">
+      <b>风险 2</b>
+      <div class="body"><strong>追踪编号仍有断点。</strong> 某些事实核查或旁路执行缺少可贯穿候选人、run、event、audit 的统一 traceId，完整因果链会断。</div>
+    </div>
+    <div class="callout risk">
+      <b>风险 3</b>
+      <div class="body"><strong>事实核查尚未形成质量闭环。</strong> 主流程可用，但人工标准答案、漂移监控、跨业务域覆盖仍需补齐。</div>
+    </div>
+    <div class="callout risk">
+      <b>风险 4</b>
+      <div class="body"><strong>AO 与合作方双写一致性待定。</strong> 涉及两边同时写数据、发消息、回写状态的场景，需要双方明确幂等键、顺序和补偿机制。</div>
+    </div>
+    <div class="callout risk">
+      <b>风险 5</b>
+      <div class="body"><strong>对外 API 的密钥和限流仍是 MVP。</strong> 当前可支持联调，但正式开放前需要按合作方发独立 key、支持轮换、细粒度限流和审计查询。</div>
+    </div>
+
+    <h3>9.1 待产品决策</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>问题</th><th>建议决策</th><th>影响</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PRD 是否继续叫“通俗版”</td><td>不建议。对外可另做一页纸，PRD 保持需求口径。</td><td>减少读者误以为这是营销材料。</td></tr>
+          <tr><td>“AI 员工”是否作为正式术语</td><td>对外介绍可用，需求和验收统一用“智能体”。</td><td>避免研发、测试和合作方理解偏差。</td></tr>
+          <tr><td>本版是否承诺完整“管得住”</td><td>不承诺。只承诺人工把关与审计；配置/暂停/恢复列为后续。</td><td>降低交付风险。</td></tr>
+          <tr><td>能源/费控是否作为本版主场景</td><td>不作为主场景，只保留监控和触发能力说明。</td><td>聚焦招聘域验收。</td></tr>
+          <tr><td>外部 API 是否进入正式生产 SLA</td><td>暂不进入；定位为联调和评估 API。</td><td>避免过早承担正式开放平台责任。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="patents">
+    <h2>10. 可推荐申请专利的方向</h2>
+    <p>以下是产品侧的专利申请候选清单，不等同于法律结论。正式申请前需要做新颖性检索、竞品和论文检索，并由专利代理人把技术方案改写成权利要求。</p>
+
+    <h3>10.1 优先推荐：发明专利候选</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>优先级</th><th>候选名称</th><th>可保护的技术点</th><th>建议准备材料</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>P0</td><td>一种面向智能体运行监控的归档优先读取与实时回退方法</td><td>live 运行源、独立归档器、Postgres 镜像表、PG 优先/live 回退、短任务延迟补偿的组合机制。</td><td>归档表结构、读取策略、异常降级流程、对比传统直接读 live 源的效果。</td></tr>
+          <tr><td>P0</td><td>一种区分业务结论与系统故障的智能体执行状态归因方法</td><td>把 not_matched 等业务结论与模型/工具/数据/超时/供应商异常分开，并约束 AI 总结不误报。</td><td>状态枚举、归因规则、错误样例、业务结论样例、告警抑制效果。</td></tr>
+          <tr><td>P0</td><td>一种面向外部测试平台的智能体 shadow 执行与副作用抑制方法</td><td>固定规则版本、幂等受理、真实计算、生产副作用抑制、轮询结果、独立台账。</td><td>API 协议、幂等键设计、版本锁定策略、副作用抑制清单、审计记录。</td></tr>
+          <tr><td>P1</td><td>一种智能体外部依赖健康识别与可恢复任务续跑方法</td><td>按供应商识别欠费/故障/不确定状态，影响任务挂起，恢复后续跑。</td><td>供应商错误分类、健康状态聚合、恢复策略、任务续跑时序图。</td></tr>
+          <tr><td>P1</td><td>一种人机协同智能体断点等待、决策回注与审计方法</td><td>关键 step 自动暂停、生成待办、等待人类决策、从断点恢复，并写入审计链路。</td><td>HITL 状态机、待办数据结构、审计字段、恢复执行过程。</td></tr>
+          <tr><td>P1</td><td>一种基于多模型交叉评审的智能体输出事实核查方法</td><td>原模型与评审模型分离，多模型投票，只提示不改写原结论，评审失败不影响主流程。</td><td>抽样策略、评审提示词、投票记录、人工标准答案校准方案。</td></tr>
+          <tr><td>P2</td><td>一种基于业务规则蓝图生成智能体运行配置的方法</td><td>从业务规则、事件、人工节点和外部依赖生成智能体配置、监控项和验收用例。</td><td>规则蓝图格式、生成链路、跨招聘/能源/费控复用案例。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>10.2 可考虑：外观设计或软件著作权</h3>
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr><th>方向</th><th>建议</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>外观设计</td><td>可考虑保护“智能体舰队控制台”“运行链路追踪页”“监控图谱视图”的成套界面。</td><td>重点在界面整体/局部视觉设计，而不是业务逻辑本身。</td></tr>
+          <tr><td>软件著作权</td><td>可同步准备 AO 平台软件、归档器、shadow 执行服务等软件著作权登记材料。</td><td>登记周期通常比发明专利短，适合作为交付和融资材料补充。</td></tr>
+          <tr><td>暂不建议作为专利主张</td><td>单纯“用 AI 做招聘推荐”“普通聊天查询运行记录”“普通仪表盘展示状态”。</td><td>这些更容易被认为是业务规则或常规展示，除非有明确技术改进。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <b>申请建议</b>
+      <div class="body">建议先打包 3 件 P0 发明专利：监控归档容灾、故障/业务结论归因、shadow 执行副作用抑制。它们最贴近 AO 的技术壁垒，也最容易从现有代码和文档中提取实施例。</div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    Agentic Operator 产品需求文档 · v0.4 · 2026-06-12 · 本文档用于产品、研发、测试和合作方联调对齐
+  </footer>
+</main>
+</body>
+</html>

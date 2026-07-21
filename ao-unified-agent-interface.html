@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 工厂 · 整体技术架构与统一接口蓝图</title>
+<style>
+  :root{
+    --bg:#0a0e14; --bg2:#0f1620; --panel:#111a26; --panel2:#16212f;
+    --line:#1f2c3d; --soft:#2a3a4f;
+    --ink:#e8eef6; --ink2:#9fb2c8; --ink3:#6b7f96;
+    --accent:#5bb8ff; --accent2:#8b7dff; --ok:#43d39e; --warn:#f5b556;
+    --build:#8b7dff; --product:#43d39e; --harness:#ff8db0; --meta:#b79bff; --tool:#7ad6ff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#13203010,transparent),var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
+  a{color:var(--accent);text-decoration:none}
+  code{font-family:var(--mono);font-size:.85em;background:#0c1622;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#c9dcf0}
+  header{padding:74px 0 46px;border-bottom:1px solid var(--line);background:radial-gradient(800px 360px at 20% 0%,#8b7dff14,transparent)}
+  .kicker{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--build);margin-bottom:18px}
+  h1{font-size:43px;line-height:1.1;margin:0 0 18px;letter-spacing:-.02em;font-weight:760}
+  h1 .grad{background:linear-gradient(100deg,var(--harness),var(--accent) 50%,var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:18.5px;color:var(--ink2);max-width:830px;margin:0}
+  .pills{display:flex;gap:9px;flex-wrap:wrap;margin-top:26px}
+  .pill{font-size:12.5px;font-family:var(--mono);border:1px solid var(--soft);border-radius:999px;padding:6px 13px;color:var(--ink2);background:#0d1622}
+  .pill b{color:var(--ink)}
+  .toc{display:flex;gap:8px;flex-wrap:wrap;margin-top:24px;font-family:var(--mono);font-size:12px}
+  .toc a{color:var(--ink3);border:1px solid var(--line);border-radius:7px;padding:4px 10px}
+  .toc a:hover{color:var(--ink);border-color:var(--soft)}
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:13px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 6px}
+  h2 .n{color:var(--ink3);margin-right:10px}
+  .htitle{font-size:27px;font-weight:720;letter-spacing:-.01em;margin:0 0 16px}
+  p{color:var(--ink2);max-width:830px}
+  .lead{color:var(--ink);font-size:17.5px}
+  .grid{display:grid;gap:16px}
+  .g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:820px){.g3,.g2{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:19px 19px 17px}
+  .card h3{margin:0 0 8px;font-size:16px;display:flex;align-items:center;gap:9px}
+  .card p{font-size:14.3px;margin:0;color:var(--ink2)}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+  .b-build{background:var(--build)} .b-product{background:var(--product)} .b-harness{background:var(--harness)} .b-tool{background:var(--tool)} .b-meta{background:var(--meta)} .b-accent{background:var(--accent)}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:5px;border:1px solid var(--soft);color:var(--ink2);background:#0c1622;white-space:nowrap}
+  pre{background:#0a1320;border:1px solid var(--line);border-radius:12px;padding:18px 20px;overflow:auto;font-family:var(--mono);font-size:13px;line-height:1.65;color:#c6d9ef;margin:18px 0}
+  pre .c{color:#5b7088} pre .k{color:#8b7dff} pre .s{color:#7ad6ff} pre .o{color:#43d39e} pre .w{color:#f5b556}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:13.8px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+  td b{color:var(--ink)}
+  .yes{color:var(--ok);font-weight:600} .no{color:var(--harness);font-weight:600} .partial{color:var(--warn);font-weight:600}
+  .callout{border-left:3px solid var(--build);background:#0d1424;border-radius:0 12px 12px 0;padding:15px 19px;margin:20px 0}
+  .callout.ok{border-color:var(--ok)} .callout.warn{border-color:var(--warn)} .callout.spine{border-color:var(--harness)} .callout.tool{border-color:var(--tool)}
+  .callout b{color:var(--ink)}
+  .step{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .step:last-child{border-bottom:0}
+  .step .num{font-family:var(--mono);font-size:13px;color:var(--bg);background:var(--accent);width:26px;height:26px;border-radius:7px;display:grid;place-items:center;flex:none;font-weight:700}
+  .step .num.b2{background:var(--ok)} .step .num.b3{background:var(--warn)} .step .num.b4{background:var(--harness)} .step .num.b5{background:var(--tool)}
+  .step b{color:var(--ink)} .step span{color:var(--ink2);font-size:14.3px}
+  svg{width:100%;height:auto;display:block}
+  .figcap{font-family:var(--mono);font-size:12px;color:var(--ink3);margin-top:9px;text-align:center}
+  .muted{color:var(--ink3);font-size:13.5px}
+  .flow{font-family:var(--mono);font-size:13px;color:var(--ink2);background:#0c1622;border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:14px 0;overflow:auto;white-space:nowrap}
+  .flow b{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="kicker">AO · Agent 工厂 · 整体技术架构 + 统一接口</div>
+    <h1>人机共创,<span class="grad">按本体分析出 agent 数量</span>,<br>造出来部署到 Inngest 跑业务流</h1>
+    <p class="lede">整个工厂是一套<b>人机共创系统</b>:人持续对话给意图;顶层 harness 大脑把"造 agent"拆成<b>阶段性、可迭代</b>的流水线,每阶段<b>挑选 + 组合</b>分形大脑能力 agent;所有 agent 共用一套<b>统一接口</b>和<b>共享底座</b>。<b>关键:agent 数量不写死</b> —— 大脑读某域本体、分析出该域需要的 <b>N 个 agent</b>(招聘 v-1=6 / energy=17 / feikong=10),收敛成 N 个 Inngest function。<b>造 agent 的两份料先备好:① action 定义在前(业务→本体);② 工具从开发文档生成入库(上传 / 爬网页 → AI 写 tool)。</b></p>
+    <div class="pills">
+      <span class="pill"><b>数量</b> 本体分析出 N,不写死</span>
+      <span class="pill"><b>料 1</b> action 先定义</span>
+      <span class="pill"><b>料 2</b> 文档 → AI 写 tool 入库</span>
+      <span class="pill"><b>接口</b> AgentNode · invoke · spawn</span>
+      <span class="pill"><b>逆向工程</b> 招聘 v-1(6 个)当答案键</span>
+    </div>
+    <div class="toc">
+      <a href="#a01">01 全景架构</a><a href="#a02">02 阶段流水线</a><a href="#a03">03 工具从文档生成</a>
+      <a href="#a04">04 分形大脑</a><a href="#a05">05 三类 agent</a><a href="#a06">06 统一三件套</a>
+      <a href="#a07">07 统一/不统一</a><a href="#a08">08 映射现有代码</a><a href="#a09">09 架构调整</a><a href="#a10">10 落地顺序</a>
+    </div>
+  </div>
+</header>
+
+<!-- 01 -->
+<section id="a01"><div class="wrap">
+  <h2><span class="n">01</span>全景 · 整体技术架构</h2>
+  <div class="htitle">五个平面,自上而下:人 → 大脑 → 能力 agent → 统一底座 → Inngest 产物</div>
+  <p class="lead">从人说一句话,到本体所定的 N 个 function 跑在 Inngest 上,整条链分五层。上面三层是"怎么造"(人机共创 + 调度 + 干活),下面两层是"靠什么造 / 造出什么"(统一接口+数据底座 / 部署产物)。</p>
+  <div class="callout"><b>"6"是怎么来的:</b>产物 agent 数量<b>不写死</b> —— 大脑读某域本体,把 <code>actor=Agent</code> 的动作分析出来,<b>有几个就造几个</b>。招聘 v-1=6、能源=17、费控=10。不同业务 = 不同本体 = 不同 N。</div>
+  <svg viewBox="0 0 1000 568" font-family="var(--mono)" font-size="12.5" style="margin-top:22px">
+    <defs><marker id="d" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#5b7088"/></marker></defs>
+    <rect x="20" y="18" width="960" height="48" rx="10" fill="#0d1622" stroke="#9fb2c8"/>
+    <text x="40" y="47" fill="#e8eef6" font-size="14">人</text><text x="120" y="47" fill="#9fb2c8">持续对话 · 给意图 · 上传文档 · 随时打断 · 补料/改逻辑 · 采纳/重做</text><text x="930" y="47" fill="#6b7f96" text-anchor="end" font-size="11">平面 0 · 入口</text>
+    <path d="M500,66 V84" stroke="#5b7088" marker-end="url(#d)"/><path d="M520,84 V66" stroke="#5b7088" marker-end="url(#d)" opacity=".5"/>
+    <rect x="20" y="86" width="960" height="58" rx="11" fill="#19142e" stroke="#b79bff" stroke-width="1.4"/>
+    <text x="40" y="110" fill="#d6c8ff" font-size="14">顶层 harness 大脑</text><text x="40" y="130" fill="#9fb2c8" font-size="11.5">持久对话 · 意图路由 · 阶段调度(挑选+组合) · 人在环路</text><text x="930" y="118" fill="#6b7f96" text-anchor="end" font-size="11">平面 1 · 共创大脑</text>
+    <path d="M500,144 V162" stroke="#5b7088" marker-end="url(#d)"/>
+    <rect x="20" y="164" width="960" height="92" rx="11" fill="#0f1a2a" stroke="#5bb8ff" stroke-width="1.2"/>
+    <text x="40" y="186" fill="#cfe6ff" font-size="13">能力 agent(每个=分形大脑,可派 skill/sub-agent)</text><text x="930" y="186" fill="#6b7f96" text-anchor="end" font-size="11">平面 2 · 干活的 agent</text>
+    <g font-size="10.5">
+      <rect x="40" y="200" width="146" height="44" rx="8" fill="#1a1530" stroke="#8b7dff"/><text x="113" y="220" fill="#cbbcff" text-anchor="middle">Researcher</text><text x="113" y="235" fill="#9fb2c8" text-anchor="middle" font-size="9">调研</text>
+      <rect x="194" y="200" width="146" height="44" rx="8" fill="#1a1530" stroke="#8b7dff"/><text x="267" y="220" fill="#cbbcff" text-anchor="middle">Orchestrator</text><text x="267" y="235" fill="#9fb2c8" text-anchor="middle" font-size="9">规划</text>
+      <rect x="348" y="200" width="146" height="44" rx="8" fill="#0d1a22" stroke="#7ad6ff"/><text x="421" y="220" fill="#bfe6ff" text-anchor="middle">Doc-Fetcher</text><text x="421" y="235" fill="#9fb2c8" text-anchor="middle" font-size="9">取/爬开发文档</text>
+      <rect x="502" y="200" width="146" height="44" rx="8" fill="#0d1a22" stroke="#7ad6ff"/><text x="575" y="220" fill="#bfe6ff" text-anchor="middle">Tool-Smith</text><text x="575" y="235" fill="#9fb2c8" text-anchor="middle" font-size="9">文档→写 tool</text>
+      <rect x="656" y="200" width="146" height="44" rx="8" fill="#1a1530" stroke="#8b7dff"/><text x="729" y="220" fill="#cbbcff" text-anchor="middle">Agent-Builder</text><text x="729" y="235" fill="#9fb2c8" text-anchor="middle" font-size="9">设计+写码</text>
+      <rect x="810" y="200" width="130" height="44" rx="8" fill="#1a1530" stroke="#8b7dff"/><text x="875" y="220" fill="#cbbcff" text-anchor="middle">Verifier</text><text x="875" y="235" fill="#9fb2c8" text-anchor="middle" font-size="9">验收/对标</text>
+    </g>
+    <path d="M500,256 V274" stroke="#5b7088" marker-end="url(#d)"/>
+    <rect x="20" y="276" width="960" height="98" rx="11" fill="#101b14" stroke="#43d39e" stroke-width="1.1"/>
+    <text x="40" y="298" fill="#9fe8c9" font-size="13">统一底座 — 一套接口 + 一套数据(action 定业务 · 工具定平台 I/O · 文档喂工具)</text><text x="930" y="298" fill="#6b7f96" text-anchor="end" font-size="11">平面 3 · 底座</text>
+    <g font-size="10.5">
+      <rect x="40" y="312" width="208" height="48" rx="8" fill="#0d1a22" stroke="#7ad6ff"/><text x="144" y="332" fill="#bfe6ff" text-anchor="middle" font-size="11">统一接口</text><text x="144" y="349" fill="#9fb2c8" text-anchor="middle" font-size="9.5">AgentNode·invoke·spawn</text>
+      <rect x="256" y="312" width="135" height="48" rx="8" fill="#101b14" stroke="#43d39e"/><text x="323" y="340" fill="#9fe8c9" text-anchor="middle">本体 Neo4j</text>
+      <rect x="399" y="312" width="120" height="48" rx="8" fill="#101b14" stroke="#43d39e"/><text x="459" y="340" fill="#9fe8c9" text-anchor="middle">工具库(持久)</text>
+      <rect x="527" y="312" width="130" height="48" rx="8" fill="#101b14" stroke="#43d39e"/><text x="592" y="340" fill="#9fe8c9" text-anchor="middle">API 文档库</text>
+      <rect x="665" y="312" width="120" height="48" rx="8" fill="#101b14" stroke="#43d39e"/><text x="725" y="340" fill="#9fe8c9" text-anchor="middle">技能库</text>
+      <rect x="793" y="312" width="147" height="48" rx="8" fill="#101b14" stroke="#43d39e"/><text x="866" y="340" fill="#9fe8c9" text-anchor="middle">Agent 注册表</text>
+    </g>
+    <path d="M500,374 V392" stroke="#43d39e" marker-end="url(#d)"/><text x="540" y="387" fill="#6b7f96" font-size="10.5">流水线收敛 → 部署</text>
+    <rect x="20" y="394" width="960" height="118" rx="12" fill="#0c1c16" stroke="#43d39e" stroke-width="1.5"/>
+    <text x="40" y="418" fill="#9fe8c9" font-size="14">Inngest app — 本体分析出的 N 个 function 跑业务流(招聘 v-1 = 6)</text><text x="930" y="418" fill="#6b7f96" text-anchor="end" font-size="11">平面 4 · 产物</text>
+    <g font-size="10.5">
+      <rect x="40" y="432" width="146" height="32" rx="7" fill="#13261f" stroke="#43d39e"/><text x="113" y="452" fill="#9fe8c9" text-anchor="middle">deduplicate</text>
+      <rect x="196" y="432" width="146" height="32" rx="7" fill="#13261f" stroke="#43d39e"/><text x="269" y="452" fill="#9fe8c9" text-anchor="middle">processResume</text>
+      <rect x="352" y="432" width="146" height="32" rx="7" fill="#13261f" stroke="#43d39e"/><text x="425" y="452" fill="#9fe8c9" text-anchor="middle">ruleCheck</text>
+      <rect x="508" y="432" width="146" height="32" rx="7" fill="#13261f" stroke="#43d39e"/><text x="581" y="452" fill="#9fe8c9" text-anchor="middle">matchResume</text>
+      <rect x="664" y="432" width="146" height="32" rx="7" fill="#13261f" stroke="#43d39e"/><text x="737" y="452" fill="#9fe8c9" text-anchor="middle">inviteInterview</text>
+      <rect x="820" y="432" width="120" height="32" rx="7" fill="#13261f" stroke="#43d39e"/><text x="880" y="452" fill="#9fe8c9" text-anchor="middle">createJD</text>
+    </g>
+    <text x="500" y="494" fill="#6b7f96" text-anchor="middle" font-size="11">事件链:RESUME_DOWNLOADED → CANDIDATE_DEDUP_PASSED → RESUME_PROCESSED → MATCH_RULE_CHECK_PASSED → … → JD_GENERATED</text>
+  </svg>
+  <div class="figcap">五平面全景。平面 2 新增 Doc-Fetcher / Tool-Smith;平面 3 底座新增"API 文档库"+ 工具库持久化。</div>
+  <div class="callout ok"><b>逆向工程方法论(为什么有招聘 v-1 和 Agents-generation 两个域):</b>要造并验证这套"任意本体 → agent"的系统,需要一个<b>已知正确答案</b>对照。<br>· <b>招聘 v-1</b> = 线上真实生产域,6 个手写 agent 在跑 = <b>答案键 / 黄金标准</b>。<br>· <b>Agents-generation</b> = 工厂的开发测试域,喂同一套招聘本体让工厂自动生成。<br>· <b>对照</b>:生成的 agent vs 招聘 v-1 的 6 个真 agent(签名/分支/工具)打分 → 分高 = 造得对。<br>验证通过后推广到没答案键的别的域(能源/费控)。</div>
+</div></section>
+
+<!-- 02 -->
+<section id="a02"><div class="wrap">
+  <h2><span class="n">02</span>阶段流水线 <span style="color:var(--harness)">· 脊柱</span></h2>
+  <div class="htitle">分阶段跑,每阶段挑选+组合,失败就回环迭代</div>
+  <p class="lead">这是整套系统<b>最重要</b>的部分。顶层大脑把"造 agent"拆成阶段,每阶段只做两件事:<b>挑选</b>(用哪些能力 agent)+ <b>组合</b>(怎么协作)。阶段之间能<b>回环</b>(验收不过 → 退回备料/建造)。人可在<b>任一阶段</b>打断、补料、改方向。</p>
+  <div class="callout"><b>入口前提 —— action 先定义(你的工作流):</b>业务需求 → 流程 → 在本体里定义好 <code>action</code>(及其事件/规则/DataObject)。<b>工厂只读 action 生成 agent</b>;业务变更先改 action,再触发重新生成。所以"理解/规划"之前,action 是人主导备好的料(料 1)。</div>
+  <svg viewBox="0 0 1000 340" font-family="var(--mono)" font-size="12" style="margin-top:18px">
+    <defs><marker id="s" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#5bb8ff"/></marker>
+      <marker id="sb" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#f5b556"/></marker></defs>
+    <g>
+      <rect x="14" y="40" width="150" height="74" rx="10" fill="#0f1a2a" stroke="#5bb8ff"/><text x="89" y="66" fill="#cfe6ff" text-anchor="middle" font-size="13">1 理解</text><text x="89" y="86" fill="#9fb2c8" text-anchor="middle" font-size="10">Researcher</text><text x="89" y="102" fill="#6b7f96" text-anchor="middle" font-size="9.5">读本体/事件/规则</text>
+      <rect x="178" y="40" width="150" height="74" rx="10" fill="#0f1a2a" stroke="#5bb8ff"/><text x="253" y="66" fill="#cfe6ff" text-anchor="middle" font-size="13">2 规划</text><text x="253" y="86" fill="#9fb2c8" text-anchor="middle" font-size="10">Orchestrator</text><text x="253" y="102" fill="#6b7f96" text-anchor="middle" font-size="9.5">逐动作 build-vs-reuse</text>
+      <rect x="342" y="40" width="150" height="74" rx="10" fill="#0d1a22" stroke="#7ad6ff"/><text x="417" y="66" fill="#bfe6ff" text-anchor="middle" font-size="13">3 备料</text><text x="417" y="86" fill="#9fb2c8" text-anchor="middle" font-size="10">Doc-Fetcher+Tool-Smith</text><text x="417" y="102" fill="#6b7f96" text-anchor="middle" font-size="9.5">缺工具→文档→造+入库</text>
+      <rect x="506" y="40" width="150" height="74" rx="10" fill="#1a1530" stroke="#8b7dff"/><text x="581" y="66" fill="#cbbcff" text-anchor="middle" font-size="13">4 建造</text><text x="581" y="86" fill="#9fb2c8" text-anchor="middle" font-size="10">Agent-Builder</text><text x="581" y="102" fill="#6b7f96" text-anchor="middle" font-size="9.5">设计+AI 写码</text>
+      <rect x="670" y="40" width="150" height="74" rx="10" fill="#101b14" stroke="#43d39e"/><text x="745" y="66" fill="#9fe8c9" text-anchor="middle" font-size="13">5 验收</text><text x="745" y="86" fill="#9fb2c8" text-anchor="middle" font-size="10">Verifier</text><text x="745" y="102" fill="#6b7f96" text-anchor="middle" font-size="9.5">链校验+沙箱+对标</text>
+      <rect x="834" y="40" width="152" height="74" rx="10" fill="#0c1c16" stroke="#43d39e" stroke-width="1.4"/><text x="910" y="66" fill="#9fe8c9" text-anchor="middle" font-size="13">6 部署</text><text x="910" y="86" fill="#9fb2c8" text-anchor="middle" font-size="10">→ Inngest</text><text x="910" y="102" fill="#6b7f96" text-anchor="middle" font-size="9.5">注册 N 个 function</text>
+    </g>
+    <path d="M164,77 H176" stroke="#5bb8ff" marker-end="url(#s)"/><path d="M328,77 H340" stroke="#5bb8ff" marker-end="url(#s)"/><path d="M492,77 H504" stroke="#5bb8ff" marker-end="url(#s)"/><path d="M656,77 H668" stroke="#5bb8ff" marker-end="url(#s)"/><path d="M820,77 H832" stroke="#5bb8ff" marker-end="url(#s)"/>
+    <path d="M745,114 V150 H430 V114" stroke="#f5b556" fill="none" stroke-dasharray="5 4" marker-end="url(#sb)"/><text x="588" y="143" fill="#f5b556" text-anchor="middle" font-size="11">↩ 验收不过 → 回备料/建造,迭代</text>
+    <path d="M745,114 V190 H581 V114" stroke="#f5b556" fill="none" stroke-dasharray="3 4" opacity=".6"/>
+    <rect x="14" y="222" width="972" height="40" rx="9" fill="#0d1622" stroke="#9fb2c8" stroke-dasharray="4 4"/><text x="500" y="247" fill="#9fb2c8" text-anchor="middle" font-size="11.5">人可在任一阶段打断:补信息 / 改某 agent 逻辑 / 上传文档让 Tool-Smith 造工具 → 大脑保留上下文,只重做受影响的那格(对话持久化已支持)</text>
+    <rect x="14" y="282" width="972" height="44" rx="9" fill="#0c1c16" stroke="#43d39e"/><text x="500" y="309" fill="#9fe8c9" text-anchor="middle" font-size="12">收敛判据:本体分析出的【全部】Agent 动作都有 exec=inngest 的 node 部署+链路跑通(招聘 v-1 = 6)</text>
+  </svg>
+  <div class="figcap">6 阶段流水线 + 迭代回环 + 任一阶段人可介入 → 收敛成本体所定的 N 个 Inngest function。</div>
+  <table style="margin-top:22px">
+    <tr><th>阶段</th><th>挑选+组合</th><th>这一格能力 agent 自己派的 skill/sub-agent(例)</th><th>产出</th></tr>
+    <tr><td><b>1 理解</b></td><td>Researcher 们</td><td>派 sub-agent 看别域相似本体</td><td>域的世界模型</td></tr>
+    <tr><td><b>2 规划</b></td><td>Orchestrator</td><td>—</td><td>N 槽建造计划(复用/生成)</td></tr>
+    <tr><td><b>3 备料</b></td><td>Doc-Fetcher + Tool-Smith</td><td>Doc-Fetcher 派 sub 爬/取 API 文档 → Tool-Smith 写 tool</td><td>工具库齐活(契约+impl)</td></tr>
+    <tr><td><b>4 建造</b></td><td>Agent-Builder 们</td><td>派 skill「三级去重」「动态抓规则」织进 prompt</td><td>N 份 spec + AI 写的 .ts</td></tr>
+    <tr><td><b>5 验收</b></td><td>Verifier 们</td><td>派 sub 多视角对抗复核</td><td>通过 / 打回(↩ 迭代)</td></tr>
+    <tr><td><b>6 部署</b></td><td>大脑收口</td><td>—</td><td><b>本体所定的 N 个 Inngest function</b></td></tr>
+  </table>
+  <div class="callout spine"><b>关键:</b>阶段流水线 = 把已有的 <code>selection</code>(挑)+ <code>orchestrator</code>(组合)+ <code>meta-brain</code>(流式调度)串成阶段、加回环。<b>不是新机制,是把 select+compose 排成有阶段、能回退的过程。</b></div>
+</div></section>
+
+<!-- 03 工具从文档生成 -->
+<section id="a03"><div class="wrap">
+  <h2><span class="n">03</span>工具从文档生成 <span style="color:var(--tool)">· Doc-Fetcher + Tool-Smith</span></h2>
+  <div class="htitle">上传 / 爬网页拿开发文档 → AI 写 tool → 入库 —— 就是和 Claude 对话让它写 tool</div>
+  <p class="lead">这是"备料"阶段的核心,也是把工具库从<b>人手写</b>变成<b>AI 可填</b>的那一跃。外部平台的 I/O(RoboHire 等)定义在工具库里;它们的 API 契约从<b>开发文档</b>来。文档有两条进料路径,Tool-Smith 把文档变成可用工具。</p>
+  <svg viewBox="0 0 1000 360" font-family="var(--mono)" font-size="12" style="margin-top:18px">
+    <defs><marker id="t" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#7ad6ff"/></marker>
+      <marker id="tw" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#f5b556"/></marker></defs>
+    <!-- inputs -->
+    <rect x="20" y="40" width="190" height="48" rx="9" fill="#0d1622" stroke="#9fb2c8"/><text x="115" y="60" fill="#e8eef6" text-anchor="middle" font-size="12">① 人上传 API 文档</text><text x="115" y="78" fill="#9fb2c8" text-anchor="middle" font-size="10">PDF/MD/OpenAPI</text>
+    <rect x="20" y="104" width="190" height="58" rx="9" fill="#0d1a22" stroke="#7ad6ff"/><text x="115" y="126" fill="#bfe6ff" text-anchor="middle" font-size="12">② Doc-Fetcher</text><text x="115" y="144" fill="#9fb2c8" text-anchor="middle" font-size="10">给 URL→取 / 必要时爬网页</text><text x="115" y="157" fill="#6b7f96" text-anchor="middle" font-size="9">(RoboHire 这类网页文档)</text>
+    <path d="M210,64 H300 V120 H300" stroke="#7ad6ff" fill="none" marker-end="url(#t)"/>
+    <path d="M210,133 H300" stroke="#7ad6ff" fill="none" marker-end="url(#t)"/>
+    <!-- tool-smith -->
+    <rect x="304" y="64" width="210" height="100" rx="11" fill="#0d1a22" stroke="#7ad6ff" stroke-width="1.5"/><text x="409" y="92" fill="#bfe6ff" text-anchor="middle" font-size="14">Tool-Smith(大脑)</text><text x="409" y="114" fill="#9fb2c8" text-anchor="middle" font-size="10">读文档 → 抽 API 契约</text><text x="409" y="131" fill="#9fb2c8" text-anchor="middle" font-size="10">(endpoint/参数/返回/auth)</text><text x="409" y="150" fill="#9fb2c8" text-anchor="middle" font-size="10">→ 写 tool(impl + 契约)</text>
+    <path d="M514,114 H600" stroke="#7ad6ff" fill="none" marker-end="url(#t)"/>
+    <!-- validate -->
+    <rect x="604" y="64" width="170" height="100" rx="11" fill="#101b14" stroke="#43d39e"/><text x="689" y="92" fill="#9fe8c9" text-anchor="middle" font-size="13">校验</text><text x="689" y="114" fill="#9fb2c8" text-anchor="middle" font-size="10">TS 编译 + import 白名单</text><text x="689" y="132" fill="#9fb2c8" text-anchor="middle" font-size="10">+ dry-run 试调</text><text x="689" y="150" fill="#6b7f96" text-anchor="middle" font-size="9.5">不过 → 退回 Tool-Smith 改</text>
+    <path d="M774,114 H840" stroke="#43d39e" fill="none" marker-end="url(#t)"/>
+    <!-- human gate -->
+    <rect x="844" y="64" width="136" height="100" rx="11" fill="#1d1810" stroke="#f5b556"/><text x="912" y="92" fill="#ffd98a" text-anchor="middle" font-size="13">人审 ✓</text><text x="912" y="116" fill="#9fb2c8" text-anchor="middle" font-size="10">检查点</text><text x="912" y="134" fill="#6b7f96" text-anchor="middle" font-size="9.5">写操作/有副作用</text><text x="912" y="148" fill="#6b7f96" text-anchor="middle" font-size="9.5">尤其要人点头</text>
+    <path d="M912,164 V200 H500 V220" stroke="#f5b556" fill="none" stroke-dasharray="5 4" marker-end="url(#tw)"/>
+    <rect x="360" y="222" width="280" height="46" rx="10" fill="#101b14" stroke="#43d39e" stroke-width="1.3"/><text x="500" y="250" fill="#9fe8c9" text-anchor="middle" font-size="13">入【工具库(持久)】+ 版本号</text>
+    <!-- conversational loop -->
+    <path d="M409,164 C300,210 300,300 460,300" stroke="#8b7dff" fill="none" stroke-dasharray="4 4" marker-end="url(#t)" opacity=".7"/>
+    <rect x="360" y="286" width="500" height="46" rx="10" fill="#19142e" stroke="#b79bff" stroke-dasharray="4 4"/><text x="610" y="314" fill="#cbbcff" text-anchor="middle" font-size="11.5">全程在对话里:人可追问「这个工具返回啥」/「再加个 X 端点」→ Tool-Smith 改了重审</text>
+  </svg>
+  <div class="figcap">两条进料(上传 / Doc-Fetcher 爬取)→ Tool-Smith 写 tool → 校验 + dry-run → 人审 → 入库;全程对话式可改。</div>
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card"><h3><span class="dot b-tool"></span>Doc-Fetcher · 取文档</h3><p>用户<b>给 URL / 上传</b>,必要时<b>爬网页</b>(静态页 fetch+正文抽取;要 JS/登录的用无头浏览器)。专治"文档只在网页上"的平台(如 RoboHire 的网页 API 说明)。<b>不自主乱爬</b> —— 只取用户授权的源。</p></div>
+    <div class="card"><h3><span class="dot b-tool"></span>Tool-Smith · 写 tool</h3><p>读文档 → 抽 endpoint/参数/返回/auth → 写 <code>ToolDescriptor</code>(parameters/returns/impl/sideEffect/requiredEnv)+ impl 代码 → TS 校验 + dry-run。它是个 <code>kind:builder</code> 的分形大脑,能派 sub 去读多页文档。</p></div>
+    <div class="card"><h3><span class="dot b-harness"></span>安全检查点</h3><p>上传/爬来的文档 = <b>数据,不是指令</b>(防注入)。生成的工具<b>人审后才入库</b>,<b>有写操作/副作用的尤其要人点头</b>。爬网页要<b>用户授权 URL</b>。这是"自动执行"的护栏。</p></div>
+  </div>
+  <div class="callout tool"><b>回答你的两个问题:</b>① "要不要内部 agent 爬网页取文档" → <b>要,就是 Doc-Fetcher</b>。② "能不能上传文档让 AI 写 tool 入库" → <b>能,就是 Tool-Smith,且全程对话式</b>(像和 Claude 聊着把 tool 写出来)。两者合起来 = "备料"阶段的工具供给。</div>
+</div></section>
+
+<!-- 04 分形大脑 -->
+<section id="a04"><div class="wrap">
+  <h2><span class="n">04</span>分形大脑 · 每个 agent 也是大脑</h2>
+  <div class="htitle">大脑性是递归的:顶层是大脑,被它挑中的每个能力 agent 也是大脑</div>
+  <p class="lead">被挑中运行时,一个能力 agent 不是"死函数",它能<b>动态生成 SKILL 或 sub-agent</b> 辅助自己完成那一格的活。系统在每一层都"会思考"。</p>
+  <svg viewBox="0 0 1000 300" font-family="var(--mono)" font-size="12" style="margin-top:18px">
+    <defs><marker id="r" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#ff8db0"/></marker></defs>
+    <rect x="380" y="20" width="240" height="50" rx="11" fill="#19142e" stroke="#b79bff" stroke-width="1.4"/><text x="500" y="42" fill="#d6c8ff" text-anchor="middle" font-size="13">顶层 harness 大脑</text><text x="500" y="60" fill="#9fb2c8" text-anchor="middle" font-size="10">挑选+组合能力 agent</text>
+    <path d="M440,70 C300,100 250,110 200,132" stroke="#ff8db0" fill="none" marker-end="url(#r)"/><path d="M500,70 V132" stroke="#ff8db0" fill="none" marker-end="url(#r)"/><path d="M560,70 C700,100 750,110 800,132" stroke="#ff8db0" fill="none" marker-end="url(#r)"/>
+    <rect x="90" y="134" width="220" height="50" rx="10" fill="#1a1530" stroke="#8b7dff"/><text x="200" y="156" fill="#cbbcff" text-anchor="middle" font-size="12.5">Agent-Builder(ruleCheck)</text><text x="200" y="173" fill="#9fb2c8" text-anchor="middle" font-size="9.5">也是大脑</text>
+    <rect x="390" y="134" width="220" height="50" rx="10" fill="#0d1a22" stroke="#7ad6ff"/><text x="500" y="156" fill="#bfe6ff" text-anchor="middle" font-size="12.5">Tool-Smith</text><text x="500" y="173" fill="#9fb2c8" text-anchor="middle" font-size="9.5">也是大脑</text>
+    <rect x="690" y="134" width="220" height="50" rx="10" fill="#1a1530" stroke="#8b7dff"/><text x="800" y="156" fill="#cbbcff" text-anchor="middle" font-size="12.5">Verifier</text><text x="800" y="173" fill="#9fb2c8" text-anchor="middle" font-size="9.5">也是大脑</text>
+    <path d="M150,184 V214" stroke="#ff8db0" fill="none" marker-end="url(#r)"/><path d="M250,184 V214" stroke="#ff8db0" fill="none" marker-end="url(#r)"/><path d="M460,184 V214" stroke="#ff8db0" fill="none" marker-end="url(#r)"/><path d="M540,184 V214" stroke="#ff8db0" fill="none" marker-end="url(#r)"/><path d="M800,184 V214" stroke="#ff8db0" fill="none" marker-end="url(#r)"/>
+    <g font-size="10.5">
+      <rect x="92" y="216" width="120" height="34" rx="7" fill="#2a1626" stroke="#ff8db0"/><text x="152" y="237" fill="#ffc4d6" text-anchor="middle">skill 动态抓规则</text>
+      <rect x="218" y="216" width="110" height="34" rx="7" fill="#2a1626" stroke="#ff8db0"/><text x="273" y="237" fill="#ffc4d6" text-anchor="middle">sub 查规则schema</text>
+      <rect x="400" y="216" width="110" height="34" rx="7" fill="#2a1626" stroke="#ff8db0"/><text x="455" y="237" fill="#ffc4d6" text-anchor="middle">sub 读 API 文档</text>
+      <rect x="518" y="216" width="100" height="34" rx="7" fill="#2a1626" stroke="#ff8db0"/><text x="568" y="237" fill="#ffc4d6" text-anchor="middle">dry-run 测试</text>
+      <rect x="742" y="216" width="116" height="34" rx="7" fill="#2a1626" stroke="#ff8db0"/><text x="800" y="237" fill="#ffc4d6" text-anchor="middle">sub 对抗复核</text>
+    </g>
+    <text x="500" y="285" fill="#6b7f96" text-anchor="middle" font-size="10.5">递归就是 ctx.spawn —— 同一个 invoke,从一个 agent 内部发起;有预算+深度上限,不会无限派</text>
+  </svg>
+  <div class="figcap">分形:顶层大脑 → 能力 agent(也是大脑)→ 各自派 skill / sub-agent 完成自己那一格。</div>
+  <div class="callout"><b>为什么:</b>把"会思考"下放到每个能力 agent,顶层大脑只管<b>挑选+组合+阶段推进</b>;每格"怎么干"由那个能力大脑临场决定。可扩展(加一类能力 agent 不动顶层)且更聪明。<b>技术上递归 = <code>ctx.spawn</code> = 同一个 <code>invoke</code></b>(§06),带预算/深度上限。</div>
+</div></section>
+
+<!-- 05 三类 agent -->
+<section id="a05"><div class="wrap">
+  <h2><span class="n">05</span>三类 agent · 为什么必须统一</h2>
+  <div class="htitle">同样叫 agent,生命周期天差地别 —— 各搞各接口 = N×M 接线地狱</div>
+  <div class="grid g3" style="margin-top:18px">
+    <div class="card"><h3><span class="dot b-build"></span>能力 agent(内部辅助)</h3><p>平面 2 那些:Researcher/Orchestrator/<b>Doc-Fetcher</b>/<b>Tool-Smith</b>/Agent-Builder/Verifier。<b>按能力分、跨域复用</b>(域作参数:同一个 Agent-Builder 吃招聘本体造招聘 agent、吃能源本体造能源 agent)。被函数式调用,产 artifact,临时。</p></div>
+    <div class="card"><h3><span class="dot b-harness"></span>会派子的 harness</h3><p>上面每个能力 agent 运行时<b>派 skill/sub-agent</b>(§04)。"会派子"不是第三种实体,是一种<b>能力位</b>(<code>spawns:true</code>)—— 顶层大脑、能力 agent 都打开它。</p></div>
+    <div class="card"><h3><span class="dot b-product"></span>产物 agent(Inngest)</h3><p>平面 4 那些(招聘 v-1 是 6 个,数量由本体定):事件触发、持久、产业务事件。流水线的<b>收敛物</b>。绑本体事件签名、调工具库。</p></div>
+  </div>
+  <div class="callout warn"><b>不统一的代价:</b>大脑要用三套接口调度、注册表存三种形状、选择器写三套打分;加一类 agent 就改一圈。<b>所以要在"调度/编排/观测"面统一 —— 见 §06。</b></div>
+</div></section>
+
+<!-- 06 统一三件套 -->
+<section id="a06"><div class="wrap">
+  <h2><span class="n">06</span>统一三件套 · AgentNode / invoke / spawn</h2>
+  <div class="htitle">统一 ≠ 都一样。统一 = 一个描述符 + 一个调用 + 一个递归</div>
+  <p>三类 agent 都被同一描述符装下、同一调用驱动、同一递归组合。<code>kind</code> 说它是什么、<code>exec</code> 说怎么跑它 —— 唯一的底座差异都收在 <code>exec</code>。</p>
+  <pre><span class="c">// ① 一个描述符,装下 能力 agent / 会派子的 / Inngest 产物</span>
+<span class="k">interface</span> <span class="o">AgentNode</span> {
+  id; kind:<span class="s">"builder"</span>|<span class="s">"harness"</span>|<span class="s">"product"</span>; capability
+  input; output                 <span class="c">// product=事件签名; builder=入参/artifact schema</span>
+  tools:string[]; spawns:bool    <span class="c">// 能调的工具 / 会不会派子</span>
+  exec:                          <span class="c">// ★ 怎么跑它 —— 底座差异只在这</span>
+    | { substrate:<span class="s">"in-process"</span>, brainRef }   <span class="c">// 派一个 ReAct 子大脑</span>
+    | { substrate:<span class="s">"inngest"</span>, fnId }         <span class="c">// 发触发事件 + 观测 run</span>
+    | { substrate:<span class="s">"tool"</span>, toolRef }          <span class="c">// 直接调一个工具</span>
+  source:<span class="s">"preset"</span>|<span class="s">"generated"</span>|<span class="s">"human"</span>; version; status; proven
+}
+<span class="c">// ② 一个调用,藏起底座    ③ 一个递归(= §04 分形)</span>
+runner.<span class="o">invoke</span>(node,input,ctx): AsyncStream&lt;AgentEvent&gt;
+ctx.<span class="o">spawn</span>(childRef,input) === runner.invoke(...)  <span class="c">// 带父 ctx+预算+中断信号</span></pre>
+  <div class="callout ok"><b>已有 70%:</b> <code>agent-harness/types.ts · RegistryAgent</code> 已带 id/capability/io/tools/source/proven,只差 <b>kind / spawns / exec</b>。扩成 <code>AgentNode</code> 即可。</div>
+</div></section>
+
+<!-- 07 统一/不统一 -->
+<section id="a07"><div class="wrap">
+  <h2><span class="n">07</span>统一什么 · 故意不统一什么</h2>
+  <div class="htitle">最关键的工程判断:别把两个底座硬捏成一个</div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card" style="border-color:#2a4a3a"><h3><span class="dot b-product"></span>统一(一个接口)</h3><p style="margin-top:6px"><span class="yes">✓</span> AgentNode 描述符 —— 注册/选择/编排一视同仁<br><span class="yes">✓</span> invoke —— 调用方不关心底座<br><span class="yes">✓</span> ctx.spawn 递归 —— 任何 agent 能派子<br><span class="yes">✓</span> AgentEvent 流 —— 一套 UI 渲染所有 agent</p></div>
+    <div class="card" style="border-color:#4a3a2a"><h3><span class="dot b-build"></span>故意不统一(两个底座)</h3><p style="margin-top:6px"><span class="no">✗</span> 运行时 in-process ReAct ≠ Inngest 持久函数<br><span class="no">✗</span> 触发 函数调用 ≠ 事件触发<br><span class="no">✗</span> 生命周期 临时 ≠ 部署持久<br><span class="no">✗</span> 产物 artifact ≠ 业务事件</p></div>
+  </div>
+  <div class="callout"><b>判据一句话:</b>"谁来调度、怎么编排、怎么观测" → 统一;"实际在哪跑、被什么触发、活多久" → 让 <code>exec.substrate</code> 去分。这条缝守住,加第四类 agent 也只是多一个 substrate 分支。</div>
+</div></section>
+
+<!-- 08 映射现有代码 -->
+<section id="a08"><div class="wrap">
+  <h2><span class="n">08</span>映射现有代码 · 收编不重写</h2>
+  <div class="htitle">阶段、能力 agent、统一接口 —— 现有零件几乎都对得上</div>
+  <table>
+    <tr><th>蓝图概念</th><th>现有代码</th><th>要做的</th></tr>
+    <tr><td><b>AgentNode</b></td><td><code>agent-harness/types.ts · RegistryAgent</code></td><td>加 kind/spawns/exec</td></tr>
+    <tr><td><b>invoke · in-process</b></td><td><code>tools/p2-p3.ts · spawn_subagent</code></td><td>抽成 Runner 分支</td></tr>
+    <tr><td><b>invoke · inngest</b></td><td><code>inngest · createFunction</code> + <code>deploy.ts · fireAndObserve</code></td><td>抽成 Runner 分支</td></tr>
+    <tr><td><b>阶段 1-2 理解/规划</b></td><td><code>read_ontology · selection · orchestrator · meta-brain</code></td><td>串成阶段 + 回环</td></tr>
+    <tr><td><b>阶段 4-5 建造/验收</b></td><td><code>design/codegen/sandbox · gold-standard</code></td><td>收编成 Agent-Builder / Verifier node</td></tr>
+    <tr><td><b>阶段 3 备料 · Tool-Smith</b></td><td>—(工具只能人写)+ <code>create_skill</code> 落盘范式可借</td><td><b>新写 Tool-Smith + 工具库持久化</b></td></tr>
+    <tr><td><b>阶段 3 备料 · Doc-Fetcher</b></td><td>—(无)</td><td><b>新写;爬网页用 fetch+正文抽取 / 无头浏览器</b></td></tr>
+    <tr><td><b>顶层大脑 + 对话</b></td><td><code>brain/conductor.ts</code>(对话持久化已做)</td><td>登记为 kind:builder, spawns:true 的 node</td></tr>
+  </table>
+  <div class="callout ok"><b>红利:</b>注册/选择/meta-brain 已全 over RegistryAgent 编排。扩成 AgentNode 后,这些 harness <b>一行不改</b>就能同时调度三类 agent。</div>
+</div></section>
+
+<!-- 09 架构调整与优化 -->
+<section id="a09"><div class="wrap">
+  <h2><span class="n">09</span>架构调整与优化 · 深度思考</h2>
+  <div class="htitle">这套设计要求工厂在 5 个地方调整</div>
+  <div class="grid g2" style="margin-top:18px">
+    <div class="card"><h3><span class="dot b-tool"></span>A1 · 工具库:静态数组 → AI 可填的持久库</h3><p>现在 <code>RECRUITMENT_TOOLS</code> 是硬编码数组。改成<b>可持久化</b>(DB 或 <code>tools-library/&lt;slug&gt;</code> 文件,仿 skills-library),让 Tool-Smith 写进去、可版本/回滚。这是"AI 造工具"的落点。</p></div>
+    <div class="card"><h3><span class="dot b-tool"></span>A2 · 底座加"API 文档库" + 文档进料</h3><p>新增文档存储(上传 + Doc-Fetcher 爬取的开发文档),作为 Tool-Smith 的接地源。文档是<b>工具侧</b>的料,和<b>业务侧</b>的 action/本体并列。</p></div>
+    <div class="card"><h3><span class="dot b-build"></span>A3 · action-first 作为硬前提</h3><p>工厂只读 action 生成;<b>业务变更先改 action 再重生成</b>。建议在"理解"前加一个轻量<b>action 对齐</b>检查(本体里的 action 是否覆盖当前业务),人主导。料 1 备好才进流水线。</p></div>
+    <div class="card"><h3><span class="dot b-harness"></span>A4 · 安全/检查点策略(配合"自动执行")</h3><p>爬取/上传内容 = <b>数据非指令</b>(防注入);生成的<b>工具/agent 人审后才入库/部署</b>,写操作/destructive 尤其要人点头;爬网页要授权 URL。把"自动 AI 执行"关进护栏。</p></div>
+    <div class="card"><h3><span class="dot b-accent"></span>A5 · 把 select+compose 升成阶段机 + 版本化</h3><p>meta-brain 之上加<b>阶段状态机</b>(理解→…→部署 + 回环);工具/agent 都<b>版本化</b>(AgentVersion 已有,工具补上),迭代可回退、可对照。</p></div>
+    <div class="card"><h3><span class="dot b-meta"></span>不用动的</h3><p>对话持久化(刚做)、读本体喂全(刚做)、黄金标准对标(刚做)、注册/选择/编排 over RegistryAgent —— 这些都复用,扩 AgentNode 后直接吃三类 agent。</p></div>
+  </div>
+</div></section>
+
+<!-- 10 落地顺序 -->
+<section id="a10"><div class="wrap">
+  <h2><span class="n">10</span>落地顺序</h2>
+  <div class="htitle">先钉接口,再串阶段,最后补两大缺口(造工具 + 取文档)</div>
+  <div style="margin-top:12px">
+    <div class="step"><div class="num">1</div><div><b>扩 RegistryAgent → AgentNode</b> <span class="tag">~半天</span><br><span>加 kind/spawns/exec;现有 preset/生成的/子大脑自动归类。注册/选择/meta-brain 不动。</span></div></div>
+    <div class="step"><div class="num b2">2</div><div><b>抽 AgentRunner.invoke + ctx.spawn</b> <span class="tag">~1 天</span><br><span>三分支(in-process/inngest/tool),统一回 AgentEvent 流;spawn=invoke,带预算/深度上限。</span></div></div>
+    <div class="step"><div class="num b3">3</div><div><b>把 select+compose 串成阶段流水线 + 回环</b> <span class="tag">~1-2 天</span><br><span>meta-brain 之上加阶段机:理解→规划→备料→建造→验收→部署,验收不过回退;收敛判据=本体全部 Agent 动作都有 inngest node 部署+链路跑通。收编 Agent-Builder/Verifier。</span></div></div>
+    <div class="step"><div class="num b5">4</div><div><b>工具库持久化 + Tool-Smith(文档→tool)</b> <span class="tag">最大缺口</span><br><span>工具落库(仿 skills-library);Tool-Smith 读上传文档 → 写 tool(impl+契约)→ TS 校验+dry-run → 人审 → 入库。对话式。解锁"人说一句,AI 造工具"。</span></div></div>
+    <div class="step"><div class="num b5">5</div><div><b>Doc-Fetcher(取/爬开发文档)</b> <span class="tag">配套</span><br><span>给 URL→取、上传→读、必要时爬网页(fetch+正文抽取 / 无头浏览器)。喂给 Tool-Smith。授权 URL + 内容当数据。</span></div></div>
+  </div>
+  <div class="callout spine"><b>一句话总览:</b>整个工厂 = 人机共创的<b>阶段流水线</b>,大脑每阶段<b>挑选+组合分形大脑能力 agent</b>,跑在<b>统一接口 + 共享底座</b>之上;<b>两份料</b>(action 先定义 · 文档→AI 写 tool 入库)先备好,读本体<b>分析出 N 个 agent</b>、迭代收敛成 N 个 Inngest function(招聘 v-1=6,用作逆向工程答案键)。</div>
+  <p class="muted" style="margin-top:18px">建议 ①②先钉接口(低风险高红利)→ ③串阶段 → ④⑤造工具/取文档。Tool-Smith 还要一份细设计(落库形状/impl 安全沙箱/dry-run/版本回滚),要的话我接着出。</p>
+</div></section>
+
+<footer style="padding:38px 0;text-align:center"><div class="wrap">
+  <span class="muted" style="font-family:var(--mono)">AO · Agent 工厂 · 整体技术架构 + 统一接口蓝图 · 2026-06</span>
+</div></footer>
+</body>
+</html>

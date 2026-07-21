@@ -1,14 +1,7 @@
-"use client";
-import React from "react";
-import { Shell } from "@/components/shared/Shell";
-import { AlertsContent } from "@/components/alerts/AlertsContent";
-import { useApp } from "@/lib/i18n";
+import { redirect } from "next/navigation";
 
+// /alerts was the old P1–P4 alert page. It is superseded by the unified
+// 消息通知 (notification) center at /notifications.
 export default function AlertsPage() {
-  const { t } = useApp();
-  return (
-    <Shell crumbs={[t("nav_group_operate"), t("nav_alerts"), "AL-1042"]} directionTag={t("al_title") + " · Alerts"}>
-      <AlertsContent />
-    </Shell>
-  );
+  redirect("/notifications");
 }

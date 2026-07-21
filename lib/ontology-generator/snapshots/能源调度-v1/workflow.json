@@ -1,0 +1,1695 @@
+{
+  "metadata": {
+    "version_number": 4,
+    "created_at": "2026-06-01T00:00:00.000Z",
+    "created_by": "authoring",
+    "source": "authoring",
+    "parent_version": 3,
+    "message": "v4 · 能源调度辅助决策(智调/“非控 feikong”决策支持域)事件驱动工作流模型,自《00》端到端用例集与《01》—《07》七本规程/手册逆向梳理、并以《00》Happy Path 交叉校验。采用与 workflow.json 同构的单产出事件模型:每个 workflow 由 trigger 事件触发,内部执行有序 actions(type=tool 系统操作/录入 · logic 自动判定计算校验 · manual 人工决策),完成后恰好 emit 一个事件(triggered_event);分支结果写入事件载荷,由下游按 action.condition 订阅(扇出),允许孤岛终点、无流程断路。【域边界】智调(非控)域“管想”——数据解释→出力预测→建议生成→约束校验→比选+风险标注→分流+人工确认→定版,出口仅在 OP-07 回写 POSTED_TO_EMS 交接给能控EMS(控制)域“管做”(OP-08 DISPATCHED 起为控制域,慧采 OP-09 回采再回流智调做偏差复盘/归档);dispatchInstruction/captureExecution 标注为控制域交接以保证事件链不断路;市场申报 OP-12 的回写同样经能控EMS转交易中心(智调不直连交易中心,能控EMS 为唯一对外出口)。三道防线:第一道一线值班自查贯穿六段(嵌于各 Agent 流水线工作流中的人工自查,与第二道复核须不同人不同视角)、第二道 manualConfirm(方式与安全复核)、第三道 runOperationAudit(运行稽核与全链路审计)。【分支建模】CONSTRAINT_VALIDATED 载荷含 校验通过/命中硬约束红线(吸收 CONSTRAINT_VIOLATED);triageScheme 产出单一事件 ROUTING_DECIDED,载荷=AUTO_ADOPTED|ROUTED_TO_MANUAL;manualConfirm 产出单一事件 MANUAL_REVIEW_DECIDED,载荷=MANUAL_CONFIRMED(采纳)|RETURNED_FOR_REVISION(退回→回 DRAFT 重算)|REJECTED(否决→重新生成方案)|SUSPENDED(暂缓→等风险闭环)。【命名·v3 已严格对齐 objects_v0_1_003 与 rules_v0_1_003 两权威文件,抛弃先前自造命名】objects 引用 objects_v0_1_003 的 30 个实体 id(下划线式,全部被引用):Power_Station/Equipment/Weather_Data/Hydrology_Data/Output_Forecast/Interpretation_Result/Forecast_Model/Dispatch_Objective/Dispatch_Suggestion/Scheme_Comparison/Constraint_Rule/Constraint_Hit/Risk_Event/Manual_Approval/Dispatch_Case/Dispatch_Plan/Grid_Interface_Plan(关口送出计划 GZL)/Grid_Section/Dispatch_Instruction/Execution_Feedback/Deviation_Report/Market_Declaration/Maintenance_Plan/Operating_Context/Business_System/Role/Audit_Finding/Audit_Event/Audit_Working_Paper/Key_Control_Point。rules 引用 rules_v0_1_003 的整数规则 id(1~81):约束库 CR-UNIT-01~05=16~20、CR-HYD-01~06=21~26、CR-GRID-01~04=27~30、CR-SAFE-01~02=31~32、CR-MKT-01~02=33~34;数据接入质控=1~5、数据解释=6~7、出力预测与模型=8~11、建议生成=12~14、五组校验顺序与留痕=15/35/36、异常识别定级=37~40;直通五条件(AND)=41、分流转人工=42~46、权限分级/暂缓 SUSPENDED/上报省调=47/48/49、退回否决区分=50、逐级审批=53~55;OP-06~12 定版回写执行=56~61、指令纪律/全自动链=62/63;偏差复盘 OP-10/三弃/准确率=64/65/66;留痕三件套/审计不可删/越权八红线/稽核底稿与整改闭环=67/74/73/76~77。五条红线=CR-HYD-03(23)生态/CR-HYD-05(25)防洪/CR-GRID-01(27)断面/CR-GRID-03(29)关口/CR-SAFE-02(32)大坝闸门;直通条件④仅判前四条(不含 CR-SAFE-02)。规则 78~81(系统测试与部署走查)属运维域、不在本运行流程内故未引用。原 T1~T8/L1~L4 不再作 rules 引用(风险类型/等级为 Risk_Event 实体属性,其判定归入规则 37/38/47/48/49)。OP 动作编号写入 action 描述,不另设字段。 【v2 交叉审查修订(对 00-07 四视角:反幻觉/用例覆盖/内部一致/格式保真)】反幻觉视角确认主链路阈值/事件/OP/规则/actor 零杜撰;据用例覆盖与一致性视角补齐三条回流链使全状态机走通:①风险闭环恢复——新增 resolveRiskAndResume(wf27,承接 FLOOD_CONTROL_HANDLED/GRID_SECURITY_HANDLED/EQUIPMENT_FAULT_HANDLED/CURTAILMENT_HANDLED,核 RK 闭环/误报、解除 SUSPENDED 暂缓)产出 RISK_DISPOSED,finalizePlan(载荷=风险闭环可恢复)与 rollingRevision(载荷=需滚动修正)订阅之,打通 SUSPENDED→闭环→恢复定版(TC-029、DA-006/007);②退回/否决重入——MANUAL_REVIEW_DECIDED 载荷=RETURNED_FOR_REVISION 由 interpretData(回 DRAFT 重走数据解释)、=REJECTED 由 generateSuggestion(重新生成方案)承接(TC-027/028);③设备安全紧急停机——handleEquipmentFault 增 CR-SAFE-01/CR-UNIT-02 群发振动紧急停机分支(DA-023)。另:validateConstraints 五组校验 rules 补全四条红线;raiseRiskEvent 补 REDLINE-5、T7 有意孤岛说明、防洪 L4 报防汛指挥部门;handleGridSecurity 入口显式 T2∨T8;各 workflow 首动作 condition 统一点名 trigger 事件。现共 27 个 workflow、新增事件 RISK_DISPOSED。 【第二轮·流程专项审查(仅审 workflow 流程定义 vs 文档描述,不审 object/规则目录)】对 27 个 workflow 分五段核流程时序/actor/触发产出事件/分支:wf1-4(数据→预测→建议)、wf17-21/27(风险→四类应急→暂缓闭环恢复)、wf22-26(方式/交接/考核/稽核/配置)三段流程忠实——防洪先预泄后梯级守生态、弃能先压水电后弃风光、设备先改可用容量再排、越限先限出力后补痕、暂缓经 wf27 解除恢复、分流系统自判人只在转人工后、退回/否决/暂缓三出口 等时序均与 01/03/07/00 一致;仅就 wf8(确认须本级权限拍板、需上行者经审批链由上级拍板;超时升级为自分派起并行计时的横切)、wf13(执行三看监盘为值班调度员人工动作、type 改 manual,回采仍系统)、wf22(切换定点/检修会签为人工)三处 action 措辞与 actor/type 归属做澄清,流程实质未变。 【v3 对象与规则对齐】依据 objects_v0_1_003_能源调度.json(30 实体)与 rules_v0_1_003_能源调度.json(81 规则)重写全部 27 个 workflow、71 个 action 的 objects[] 与 rules[],抛弃先前自造的对象名与 CR-*/T*/L*/政策项 ID;仅替换 objects/rules 两字段,workflow 流程(name/description/condition/trigger/triggered_event/actor/order/动作序列)一字未改(仅作参考对齐)。30 个对象全部被引用;81 条规则引用 77 条,仅系统测试部署类 78~81 因属运维域未引用。 【v4 补全测试与部署流程】依据用户确认,新增 wf28 validateAndDeploySystemChange(actor=Human)覆盖此前未引用的规则 78~81(智调系统变更上线测试/SDLC 治理):4 个 action 依次对应 78 六段走查测试→80 失败退回开发回归→81 测试用例与电站设备基线同步→79 缺覆盖拦截部署;trigger=SYSTEM_CHANGE_REQUESTED(外部:软件升级/接入新电站机组)+ CONSTRAINT_CONFIG_UPDATED(运行流程 maintainConstraintConfig 改动阈值/规则须走查),emit SYSTEM_CHANGE_DEPLOYED(孤岛终点)。由此规则覆盖达 81/81 全覆盖,并消费原孤岛事件 CONSTRAINT_CONFIG_UPDATED;现共 28 个 workflow,运行流程(1~27)未改动。"
+  },
+  "workflows": [
+    {
+      "id": "1",
+      "name": "ingestAndOpenCase",
+      "description": "调度辅助决策主链路起点。慧采作为唯一入口接入 SCADA 实测、气象 NWP、水文来水、省调关口计划(GZL)、市场出清并落库、96 点时标对齐;智调按定时(日前 D-1)/数据驱动/人工三种方式开调度辅助案件(DS),状态置 DRAFT;值班调度员班前“四看”(来水/设备可用容量/关口 GZL/市场出清)人工打底。智调不直连任何外部源,数据不对先查慧采。(本 workflow 单产出事件取数据接入产物 DATA_INGESTED,开案、置 DRAFT 为同流程内副作用。)",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [],
+      "actions": [
+        {
+          "order": "1",
+          "name": "ingestSourceData",
+          "description": "慧采接入 SCADA 实时量测、气象批次(WX)、水文批次(HY)、省调关口计划(GZL)、市场出清结果,落库并按 96 点逐时段时标对齐(DATA_INGESTED)。",
+          "type": "tool",
+          "condition": "进入日前 D-1 编制窗口或数据驱动批次到达",
+          "objects": [
+            "Business_System",
+            "Weather_Data",
+            "Hydrology_Data",
+            "Grid_Interface_Plan",
+            "Power_Station"
+          ],
+          "rules": [
+            "1",
+            "2"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "shiftPreReview",
+          "description": "值班调度员班前“四看”:气象水文来水、设备可用容量、省调关口 GZL、市场出清,凭现场常识为后续辅助决策人工打底。",
+          "type": "manual",
+          "condition": "接班或开案前",
+          "objects": [
+            "Weather_Data",
+            "Hydrology_Data",
+            "Grid_Interface_Plan",
+            "Equipment",
+            "Role"
+          ],
+          "rules": []
+        },
+        {
+          "order": "3",
+          "name": "openDispatchCase",
+          "description": "智调开调度辅助案件得 DS 号,填覆盖日期、计划类型(日前 D-1/日内滚动/实时)、关联 WX/HY/GZL 批次与目标口径,状态置 DRAFT;同覆盖时段同电站重复开案时前一未确认案被标 superseded 转 VOID。",
+          "type": "tool",
+          "condition": "数据接入与时标对齐完成",
+          "objects": [
+            "Dispatch_Case",
+            "Operating_Context"
+          ],
+          "rules": []
+        }
+      ],
+      "triggered_event": [
+        "DATA_INGESTED"
+      ]
+    },
+    {
+      "id": "2",
+      "name": "interpretData",
+      "description": "主链路第①段·数据解释。对气象批次(WX 六道质控关卡)与水文批次(HY 七道质控关卡)质控,标质控状态合格/存疑/不合格;不合格拦截不进解释并知会预测组(不报 DATA_INTERPRETED)。合格数据解释为“风光资源信号”(资源等级高/中/低/无+资源置信度+爬坡/极端/拐点标记)与“来水信号”(来水量级+趋势+蓄能态势+防洪态势+置信度),梯级按上级出库=下级入库+区间+滞时对齐。资源置信度一路传导决定下游能否直通。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "DATA_INGESTED",
+        "MANUAL_REVIEW_DECIDED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "runDataQC",
+          "description": "气象 WX 走六道质控关卡(时标时效/缺测中断/物理范围/多源一致性/时间连续性/完整性与置信度评定)、水文 HY 走七道质控(较气象多出水量平衡 入库=出库±蓄变、梯级水力一致性 上级出库≈下级入库±区间±滞时[CR-HYD-04] 两道物理硬校验),标质控状态合格/存疑/不合格;不合格批次拦截、不进解释、知会预测组(赵敏),水文不合格还需主动预警(可能是探头被洪水杂物挡/断面冲毁的异常前兆)。",
+          "type": "logic",
+          "condition": "收到 DATA_INGESTED,或 MANUAL_REVIEW_DECIDED 载荷=退回 RETURNED_FOR_REVISION(案件回 DRAFT、改数据/参数重走数据解释起)",
+          "objects": [
+            "Weather_Data",
+            "Hydrology_Data",
+            "Business_System",
+            "Interpretation_Result"
+          ],
+          "rules": [
+            "3",
+            "4"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "interpretResourceSignal",
+          "description": "质控合格气象数据解释为风光资源信号:按订正风速/辐照算资源等级(高/中/低/无)、综合质控与多源一致性给逐时段资源置信度、标爬坡/极端/拐点(T1 弃风弃光、T5 资源偏差、T6 预测偏差的早期线索)。",
+          "type": "logic",
+          "condition": "气象质控合格",
+          "objects": [
+            "Weather_Data",
+            "Power_Station",
+            "Interpretation_Result"
+          ],
+          "rules": [
+            "7"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "interpretInflowSignal",
+          "description": "质控合格水文数据解释为来水信号(来水量级+趋势+蓄能态势+防洪态势+置信度);梯级按上级出库=下级入库+区间来水+水流滞时对齐(CR-HYD-04),汛期防洪态势为最金贵输出。",
+          "type": "logic",
+          "condition": "水文质控合格",
+          "objects": [
+            "Hydrology_Data",
+            "Power_Station",
+            "Interpretation_Result"
+          ],
+          "rules": [
+            "6",
+            "7"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "DATA_INTERPRETED"
+      ]
+    },
+    {
+      "id": "3",
+      "name": "forecastOutput",
+      "description": "主链路第②段·出力预测(OP-01)。取设备通机组可用容量(CR-UNIT-04)为上限,水电(来水+水头+可用容量)、风电(风资源+风机可用)、光伏(辐照+逆变器可用)逐 96 点出力预测,出 P50 中值/P90 保守区间,生成 FC 批次;计算置信度(P50 合格率),<0.9 标低置信(直通条件③依据)。预测发布即 OP-01。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "DATA_INTERPRETED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "fetchAvailableCapacity",
+          "description": "取设备通机组可用容量(检修/受阻状态以设备通为准,CR-UNIT-04)作为各机组预测出力上限;可用容量同步滞后会导致预测虚高,须核同步心跳。",
+          "type": "tool",
+          "condition": "收到 DATA_INTERPRETED(资源/来水信号就绪)",
+          "objects": [
+            "Equipment",
+            "Maintenance_Plan",
+            "Business_System"
+          ],
+          "rules": [
+            "5"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "computeOutputForecast",
+          "description": "按电站类型分别预测各电站机组次日 96 点(或日内 0-4h 超短期 15min)出力,输出 P50/P90 两条带,生成 FC 批次(例 FC202605300012)。",
+          "type": "logic",
+          "condition": "可用容量已取",
+          "objects": [
+            "Output_Forecast",
+            "Power_Station",
+            "Equipment",
+            "Weather_Data",
+            "Hydrology_Data",
+            "Forecast_Model"
+          ],
+          "rules": [
+            "8"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "evaluateConfidence",
+          "description": "评定置信度(发布前,P50 合格率,由输入信号置信度+P50/P90 区间宽度+历史同工况合格率综合而成),<0.9 标低置信并必转人工;预测出力超机组可用容量则钳制并核(CR-UNIT-04);置信度是质控客观结论,禁止为“省一道人工”人工手调(事后回评/准确率考核见 assessForecastAccuracy)。",
+          "type": "logic",
+          "condition": "FC 批次已生成",
+          "objects": [
+            "Output_Forecast",
+            "Forecast_Model"
+          ],
+          "rules": [
+            "8",
+            "11",
+            "19"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "FORECAST_COMPLETED"
+      ]
+    },
+    {
+      "id": "4",
+      "name": "generateSuggestion",
+      "description": "主链路第③段·调度建议生成(OP-02)。按运行方式与三大目标优先级(汛期 防洪>电网安全>清洁能源消纳>经济;非汛期 电网安全>经济/消纳>蓄能)设定目标,自上而下电量分解编制 96 点出力建议曲线(关口送出贴 GZL 留约 2% 余量→梯级/新能源→电站→机组),新能源 P50 先占额度水电填空,编开停机(CR-UNIT-03)与龙头 ST0101 水位控制曲线(出力↔出库↔水位联编自洽),并换算市场申报量价。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "FORECAST_COMPLETED",
+        "MANUAL_REVIEW_DECIDED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "setDispatchObjective",
+          "description": "按当前运行方式季节/特殊标识与三大目标优先级设定本案目标口径(汛期防洪压一切;非汛期电网安全优先、经济与消纳同档)。",
+          "type": "logic",
+          "condition": "收到 FORECAST_COMPLETED,或 MANUAL_REVIEW_DECIDED 载荷=否决 REJECTED(推翻、重新生成方案)",
+          "objects": [
+            "Dispatch_Objective",
+            "Operating_Context",
+            "Dispatch_Suggestion"
+          ],
+          "rules": [
+            "12"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "decomposeEnergyAndBuildCurve",
+          "description": "自上而下电量分解并编 96 点出力曲线:关口送出贴 GZL 留约 2% 余量、新能源 P50 先占额度水电填空、机组级先扣检修占用、开停机安排(CR-UNIT-03)、龙头 ST0101 水位控制曲线按水量平衡联编自洽(守 CR-HYD-01)。",
+          "type": "logic",
+          "condition": "目标口径已设",
+          "objects": [
+            "Dispatch_Suggestion",
+            "Output_Forecast",
+            "Grid_Interface_Plan",
+            "Power_Station",
+            "Equipment",
+            "Grid_Section"
+          ],
+          "rules": [
+            "13",
+            "14",
+            "18",
+            "21"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "deriveMarketBid",
+          "description": "把出力曲线换算成市场申报量(现货申报量=关口送出−中长期合约分解电量)并把中长期合约电量按月→日→96 点分解,量价落在合规区间(CR-MKT-01)。",
+          "type": "tool",
+          "condition": "出力建议曲线已编成",
+          "objects": [
+            "Dispatch_Suggestion",
+            "Dispatch_Plan",
+            "Market_Declaration"
+          ],
+          "rules": [
+            "33"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "SUGGESTION_GENERATED"
+      ]
+    },
+    {
+      "id": "5",
+      "name": "validateConstraints",
+      "description": "主链路第④段·五组约束校验(OP-03)。按“硬约束优先、机组 CR-UNIT→水库水调 CR-HYD→电网 CR-GRID→安全 CR-SAFE→市场 CR-MKT”顺序逐条校验:软约束(振动区/偏差考核带)提示+优化;普通硬约束自动钳制到限内;命中硬约束红线(CR-HYD-05/CR-HYD-03/CR-GRID-01/CR-GRID-03/CR-SAFE-02)在事件载荷标记越限(吸收 CONSTRAINT_VIOLATED),不可钳制消除者强制转人工并交下游立风险。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "SUGGESTION_GENERATED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "runConstraintEngine",
+          "description": "五组约束按硬约束优先、机组→水库→电网→安全→市场固定顺序逐条跑:机组(出力上下限/振动区/最小开停机/可用容量/爬坡)、水库水调(水位三线/出库/生态/梯级平衡/防洪/通航供水保障 CR-HYD-06)、电网(断面/母线电压无功/上级关口/N-1 校核 CR-GRID-04)、安全(温升过载/大坝闸门)、市场(申报量价/偏差考核带),生成校验结果与越限项。",
+          "type": "logic",
+          "condition": "收到 SUGGESTION_GENERATED",
+          "objects": [
+            "Dispatch_Suggestion",
+            "Constraint_Rule",
+            "Constraint_Hit",
+            "Equipment",
+            "Power_Station",
+            "Grid_Section",
+            "Market_Declaration"
+          ],
+          "rules": [
+            "15",
+            "16",
+            "18",
+            "19",
+            "21",
+            "26",
+            "30",
+            "31",
+            "33",
+            "35",
+            "36"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "clampSoftAndHard",
+          "description": "软约束(振动区 CR-UNIT-02/偏差考核带 CR-MKT-02)提示+优化可权衡;普通硬约束(出力上下限/出库/爬坡)自动钳制到限内并留痕。",
+          "type": "logic",
+          "condition": "约束逐条校验完成",
+          "objects": [
+            "Dispatch_Suggestion",
+            "Constraint_Hit",
+            "Constraint_Rule"
+          ],
+          "rules": [
+            "17",
+            "20",
+            "22",
+            "28",
+            "34"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "flagRedlineViolation",
+          "description": "命中硬约束红线(CR-HYD-05 防洪/CR-HYD-03 生态流量/CR-GRID-01 断面/CR-GRID-03 上级关口/CR-SAFE-02 大坝闸门)在 CONSTRAINT_VALIDATED 载荷标记“命中硬约束红线”,供 raiseRiskEvent 立风险;不可钳制消除者强制转人工。",
+          "type": "logic",
+          "condition": "存在硬约束红线命中",
+          "objects": [
+            "Constraint_Rule",
+            "Constraint_Hit",
+            "Risk_Event"
+          ],
+          "rules": [
+            "23",
+            "25",
+            "27",
+            "29",
+            "32",
+            "38",
+            "45"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "CONSTRAINT_VALIDATED"
+      ]
+    },
+    {
+      "id": "6",
+      "name": "compareSchemes",
+      "description": "主链路第⑤段·方案比选+风险标注(OP-04)。对校验通过(含可接受钳制)的案件生成 2-3 个候选方案(防洪裕度优先/消纳最大/经济最优)比选矩阵,按运行方式与目标优先级权重打分(红线一票否决出局,消纳与经济在可行域按汛/非汛权重加权,经济性打分=市场收益−偏差考核罚款),每方案标注风险 RK(关联 T1-T8 类型/L1-L4 等级/命中 CR)。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "CONSTRAINT_VALIDATED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "buildSchemeMatrix",
+          "description": "对收到的校验通过(CONSTRAINT_VALIDATED 载荷=校验通过/含可接受钳制)案件,汇总生成 2-3 套候选方案的比选矩阵。",
+          "type": "tool",
+          "condition": "收到 CONSTRAINT_VALIDATED 且载荷=校验通过(含可接受钳制)",
+          "objects": [
+            "Dispatch_Suggestion",
+            "Scheme_Comparison",
+            "Dispatch_Plan"
+          ],
+          "rules": []
+        },
+        {
+          "order": "2",
+          "name": "scoreByPriority",
+          "description": "按运行方式与三大目标优先级权重打分:硬约束红线方案一票否决出局,消纳与经济在可行域按汛期/非汛期权重加权(汛期消纳权重高于经济)。",
+          "type": "logic",
+          "condition": "比选矩阵已生成",
+          "objects": [
+            "Scheme_Comparison",
+            "Dispatch_Suggestion",
+            "Operating_Context",
+            "Dispatch_Objective"
+          ],
+          "rules": [
+            "12",
+            "34"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "tagSchemeRisk",
+          "description": "对每个候选方案标注风险 RK,记风险类型(T1 弃能/T2 越限/T3 防洪/T4 设备/T5 来水资源偏差/T6 预测偏差/T7 市场偏差/T8 指令冲突)与等级(L1-L4)。",
+          "type": "logic",
+          "condition": "打分完成",
+          "objects": [
+            "Risk_Event",
+            "Scheme_Comparison",
+            "Dispatch_Suggestion"
+          ],
+          "rules": [
+            "37"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "SCHEMES_COMPARED"
+      ]
+    },
+    {
+      "id": "7",
+      "name": "triageScheme",
+      "description": "主链路第⑥段·分流判断(OP-05)。判五条直通条件(关口送出与 GZL/基准偏差≤3% AND 无 L2 及以上风险 AND 出力预测置信度≥0.9 AND 无硬约束红线命中[CR-HYD-05/CR-HYD-03/CR-GRID-01/CR-GRID-03 四条] AND 比选最优方案明显占优)——“与”关系全满足才直通自动采纳;任一不满足即转人工。切换期/特殊运行方式强制不直通。产出单一事件 ROUTING_DECIDED,载荷=AUTO_ADOPTED|ROUTED_TO_MANUAL。手动绕过分流是纪律红线。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "SCHEMES_COMPARED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "evaluateDirectPass",
+          "description": "逐条判五条直通条件(偏差≤3% / 无 L2+风险 / 置信度≥0.9 / 无四条硬约束红线命中 / 方案明显占优),与关系全满足判直通;3.0% 与 0.9 为踩线按超阈保守处理,无灰度。",
+          "type": "logic",
+          "condition": "收到 SCHEMES_COMPARED",
+          "objects": [
+            "Dispatch_Suggestion",
+            "Scheme_Comparison",
+            "Risk_Event",
+            "Output_Forecast",
+            "Grid_Interface_Plan",
+            "Operating_Context"
+          ],
+          "rules": [
+            "41"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "routeDecision",
+          "description": "全满足→载荷置 AUTO_ADOPTED(自动采纳,仅知会调度员,无 AP);任一不满足或切换期/特殊方式→载荷置 ROUTED_TO_MANUAL(进人工复核工作台,案件 MANUAL_REVIEW)。",
+          "type": "logic",
+          "condition": "直通五条件判定完成",
+          "objects": [
+            "Dispatch_Case",
+            "Manual_Approval",
+            "Business_System"
+          ],
+          "rules": [
+            "41",
+            "42",
+            "43",
+            "44",
+            "45",
+            "46",
+            "63"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "snapshotDirectPass",
+          "description": "直通案件由系统自动生成并归档直通判定快照(偏差≤3%证据/无 L2+风险/置信度≥0.9证据/无硬约束红线/方案占优),作为第三道防线事后抽查抓手——直通不免审计只免事前人工确认。",
+          "type": "tool",
+          "condition": "载荷=AUTO_ADOPTED",
+          "objects": [
+            "Dispatch_Case",
+            "Audit_Event"
+          ],
+          "rules": [
+            "41",
+            "74"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "ROUTING_DECIDED"
+      ]
+    },
+    {
+      "id": "8",
+      "name": "manualConfirm",
+      "description": "第二道防线·人工确认(OP-05)。仅对转人工(ROUTING_DECIDED 载荷=ROUTED_TO_MANUAL)案件,按风险等级分层确认:L1 记录知会、L2 调度员复核、L3 转值长+暂缓 SUSPENDED、L4 转值长+总工+上报省调+暂停;确认人按“确认六看”复核,涉防洪/生态/关口红线不得越权放行、涉网以省调为准;拍板采纳/退回/否决/暂缓并同步留痕(确认人/意见≥10字/前值后值理由);逐级审批不跳级、每级 AP 留签、加签不分摊责任、回退分审批链内与流水线两类;确认有时效、超时自动升级(调度员→值长→总工,L4 超时惊动总工+主任),超时升级而非超时降标准。产出单一事件 MANUAL_REVIEW_DECIDED。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "ROUTING_DECIDED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "assignByRiskLevel",
+          "description": "对收到的转人工案件(ROUTING_DECIDED 载荷=ROUTED_TO_MANUAL)按最高风险等级分派确认层级并改派 owner:L1 值班调度员记录知会、L2 调度员复核、L3 值长+暂缓、L4 值长+总工+上报省调。",
+          "type": "logic",
+          "condition": "收到 ROUTING_DECIDED 且载荷=ROUTED_TO_MANUAL",
+          "objects": [
+            "Dispatch_Case",
+            "Manual_Approval",
+            "Risk_Event",
+            "Role"
+          ],
+          "rules": [
+            "47",
+            "48"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "reviewConfirmation",
+          "description": "确认人按“确认六看”复核约束完整性、风险定级准确性、比选合理性、涉网涉水位合规;涉防洪 CR-HYD-05/生态 CR-HYD-03/关口 CR-GRID-03 红线任何人不得越权放行,涉网一律以省调为准。",
+          "type": "manual",
+          "condition": "确认任务已分派",
+          "objects": [
+            "Manual_Approval",
+            "Dispatch_Suggestion",
+            "Constraint_Rule",
+            "Risk_Event"
+          ],
+          "rules": [
+            "45",
+            "51",
+            "55",
+            "73"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "recordDecisionWithTrace",
+          "description": "由本级在其确认权限内拍板采纳/退回/否决/暂缓(需逐级上行的高风险案件经 escalateApprovalChain 由对应上级拍板并留签,即先上行后由高一级拍板),并同步留痕——确认人工号、确认意见(≥10字)、前值/后值/理由,不填则提交按钮点不动,事后补录判留痕缺失。",
+          "type": "manual",
+          "condition": "复核完成",
+          "objects": [
+            "Manual_Approval",
+            "Audit_Event"
+          ],
+          "rules": [
+            "50",
+            "67",
+            "70"
+          ]
+        },
+        {
+          "order": "4",
+          "name": "escalateApprovalChain",
+          "description": "需上行时逐级审批不跳级、每级 AP 实例独立留签;加签是增加把关非分摊责任;回退区分审批链内回退(不改主状态仍 MANUAL_REVIEW)与流水线回退(退回/否决改状态);L4 经总工审定、重大方式主任签发,涉网回贴省调批复。",
+          "type": "manual",
+          "condition": "风险等级或涉网涉水位需逐级上行",
+          "objects": [
+            "Manual_Approval",
+            "Role"
+          ],
+          "rules": [
+            "53",
+            "54",
+            "55"
+          ]
+        },
+        {
+          "order": "5",
+          "name": "enforceTimeliness",
+          "description": "横切并行机制——自案件转人工分派(assignByRiskLevel)起即计时、贯穿复核/拍板/审批全程,而非确认链走完后的收尾步;确认须按时效要求完成(日前=报省调时点前留足复核时间/日内=4h 滚动窗口内/实时=分钟级、L4 更快);超时则自动升级提醒(调度员未接→值长→值长未接→总工,L4 超时直接惊动总工+主任),AP 留痕记“超时升级”事件;超时是升级不是降标准,“防洪>电网>消纳>经济”优先级永远在时效之上,宁可误申报赔 T7 也不放未闭环风险(KCP-19)。",
+          "type": "logic",
+          "condition": "自分派(assignByRiskLevel)起并行计时,超过对应时效仍未决",
+          "objects": [
+            "Manual_Approval",
+            "Dispatch_Case"
+          ],
+          "rules": [
+            "47"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "MANUAL_REVIEW_DECIDED"
+      ]
+    },
+    {
+      "id": "9",
+      "name": "finalizePlan",
+      "description": "计划定版(OP-06)。直通自动采纳(ROUTING_DECIDED 载荷=AUTO_ADOPTED)与人工确认采纳(MANUAL_REVIEW_DECIDED 载荷=MANUAL_CONFIRMED)两路汇合后的统一动作:按采纳(调整后)的出力曲线锁定调度计划 DP(类型/96 点出力/开停机/水位控制/关口送出/市场申报量价),状态置 PLANNED,定版即锁、改要走计划修正 OP-11。退回(RETURNED_FOR_REVISION→回 DRAFT 重走数据解释起)由 interpretData 承接、否决(REJECTED→重新生成方案)由 generateSuggestion 承接重入主链路;暂缓(SUSPENDED)案件经风险处置闭环、解除暂缓后由本流程(RISK_DISPOSED 载荷=风险闭环可恢复)承接定版。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "ROUTING_DECIDED",
+        "MANUAL_REVIEW_DECIDED",
+        "RISK_DISPOSED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "lockDispatchPlan",
+          "description": "收到直通采纳或人工确认采纳后锁定 DP 计划号(例 DP20260531001),固化 96 点出力/开停机/水位/关口送出/市场申报量价,状态置 PLANNED,定版后智调侧只读。",
+          "type": "tool",
+          "condition": "收到 ROUTING_DECIDED 载荷=AUTO_ADOPTED,或 MANUAL_REVIEW_DECIDED 载荷=MANUAL_CONFIRMED(采纳),或 RISK_DISPOSED 载荷=风险闭环可恢复(SUSPENDED 解除)",
+          "objects": [
+            "Dispatch_Plan",
+            "Dispatch_Suggestion",
+            "Dispatch_Case"
+          ],
+          "rules": [
+            "56"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "verifyGateAlignment",
+          "description": "定版前校关口送出曲线逐时段不超省调关口计划 GZL(CR-GRID-03),不符不得定版。",
+          "type": "logic",
+          "condition": "DP 拟定版",
+          "objects": [
+            "Dispatch_Plan",
+            "Grid_Interface_Plan"
+          ],
+          "rules": [
+            "29",
+            "72"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "PLAN_FINALIZED"
+      ]
+    },
+    {
+      "id": "10",
+      "name": "postToEMS",
+      "description": "状态回写能控EMS(OP-07)——智调(非控)域→能控EMS(控制)域唯一跨系统交接点、责任最集中处。定版 DP(含日内滚动修正版本)单向有序回写能控EMS生产域,96 点逐点一致,不允许跳过定版直接改 EMS 执行值;能控EMS二次校核(关口不超 GZL/出力不超可用容量/版本一致),不过拦回;每次回写(含异常重推)回贴 DS 审计链,记最后确认人与系统/人工触发。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "PLAN_FINALIZED",
+        "PLAN_ROLLED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "postPlanToEms",
+          "description": "把定版 DP(或日内滚动 DP 修正版本)单向有序回写能控EMS生产域,96 点逐点一致;智调对外口子仅此一个,绝不直接捅省调或交易中心。",
+          "type": "tool",
+          "condition": "收到 PLAN_FINALIZED 或 PLAN_ROLLED",
+          "objects": [
+            "Dispatch_Plan",
+            "Business_System"
+          ],
+          "rules": [
+            "57"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "emsSecondaryCheck",
+          "description": "能控EMS二次校核:关口送出不超 GZL(CR-GRID-03)、出力不超可用容量(CR-UNIT-04)、版本一致;校核不过拦回(版本不符/超关口被拦)。",
+          "type": "logic",
+          "condition": "DP 已回写",
+          "objects": [
+            "Dispatch_Plan",
+            "Grid_Interface_Plan",
+            "Equipment"
+          ],
+          "rules": [
+            "29",
+            "19"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "attachWritebackTrace",
+          "description": "每次回写动作(含接口异常人工重推)回贴进 DS 审计链,记时标、最后人工确认人、系统自动或人工触发,防链断在跨系统交接点(KCP-20 状态-AP 同步/防悬空断链)。",
+          "type": "tool",
+          "condition": "二次校核通过",
+          "objects": [
+            "Dispatch_Case",
+            "Audit_Event"
+          ],
+          "rules": [
+            "74"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "POSTED_TO_EMS"
+      ]
+    },
+    {
+      "id": "11",
+      "name": "declareMarket",
+      "description": "市场申报回写(OP-12),横切于主链路。基于定版 DP 的关口送出曲线生成现货/中长期申报量价(现货申报量=关口送出−中长期合约分解,量价落 CR-MKT-01 合规区间),经能控EMS转交易中心接口报出(智调不直连交易中心,能控EMS 为唯一对外出口);现货申报截止前必须报出(硬节点,过期作废,通常早于 GZL 下达/次日 00:00);经济性优先级最低,绝不为抢市场破关口/防洪红线。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "PLAN_FINALIZED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "buildMarketDeclaration",
+          "description": "基于定版 DP 生成现货/中长期申报量价:量来自关口送出曲线(现货=关口送出−中长期合约分解),价按报价策略(必发/风光报低价保消纳、可调电量择高价),量价落 CR-MKT-01 合规区间。",
+          "type": "tool",
+          "condition": "收到 PLAN_FINALIZED(计划定版、关口送出曲线锁定)",
+          "objects": [
+            "Market_Declaration",
+            "Dispatch_Plan",
+            "Grid_Interface_Plan"
+          ],
+          "rules": [
+            "33",
+            "61"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "submitToExchange",
+          "description": "经能控EMS转交易中心接口报出申报量价(控制域交接,智调不直连交易中心);现货申报截止前必须报出(硬门,过期作废),截止后量改不了只进偏差考核。",
+          "type": "tool",
+          "condition": "申报量价已生成且未过申报截止",
+          "objects": [
+            "Market_Declaration",
+            "Business_System"
+          ],
+          "rules": [
+            "61",
+            "33"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "MARKET_DECLARED"
+      ]
+    },
+    {
+      "id": "12",
+      "name": "dispatchInstruction",
+      "description": "指令下发(OP-08)——控制域(能控EMS)动作,智调(非控)域边界外的下游交接,纳入模型以保证事件链不断路。回写定版后到执行时刻,能控EMS按 DP 当前时段计划值分钟级下发 AGC(贴计划跟踪)/AVC/开停机令,AGC 调节速率受 CR-UNIT-05 爬坡率约束;智调从不直接下令(智调管想、能控EMS管做)。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "POSTED_TO_EMS"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "issueAgcAvcCommands",
+          "description": "能控EMS按已回写 DP 的当前时段计划值,分钟级持续向各电站机组下发 AGC/AVC/开停机令,跟踪电网频率与断面潮流做微调(受 CR-UNIT-05 爬坡率、CR-GRID-02 母线电压无功约束),案件进 DISPATCHED/EXECUTING。",
+          "type": "tool",
+          "condition": "收到 POSTED_TO_EMS 且到执行时刻",
+          "objects": [
+            "Dispatch_Instruction",
+            "Dispatch_Plan",
+            "Equipment",
+            "Power_Station",
+            "Business_System"
+          ],
+          "rules": [
+            "58",
+            "20",
+            "28"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "DISPATCHED"
+      ]
+    },
+    {
+      "id": "13",
+      "name": "captureExecution",
+      "description": "执行反馈回采与监盘(OP-09)。慧采/SCADA 回采实际出力并与计划值逐点比对,回流智调做闭环;调度员监盘“三看”(实际出力/水位/关口送出),实时越限、频率事件、机组跳闸即触发异常处置;偏差累积到超带(关联 CR-MKT-02、T6/T7)成为日内滚动修正信号。回采是控制域→智调域的回流,闭合三尺度。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "DISPATCHED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "captureActualOutput",
+          "description": "慧采/SCADA 回采各电站机组实际出力,实际 vs 计划逐点比对,回流智调供偏差复盘与日内滚动。",
+          "type": "tool",
+          "condition": "收到 DISPATCHED、执行中",
+          "objects": [
+            "Execution_Feedback",
+            "Power_Station",
+            "Equipment",
+            "Dispatch_Plan",
+            "Business_System"
+          ],
+          "rules": [
+            "59"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "monitorRealtime",
+          "description": "值班调度员监盘“三看”(实际出力 vs DP/水位 vs 控制目标/关口实际送出 vs GZL),对实时数据与执行结果持续人工盯防;实时越限、频率事件、机组跳闸即按四步初动(稳住→定级→转人立 RK→留痕)上报、触发异常处置(由下游 Human 应急工作流承接);偏差累积超带标记为滚动修正信号。注:实测回采(captureActualOutput)是慧采/SCADA 系统动作,本步三看监盘是调度员人工动作。",
+          "type": "manual",
+          "condition": "执行中(值班调度员逐整点监盘)",
+          "objects": [
+            "Execution_Feedback",
+            "Dispatch_Plan",
+            "Grid_Interface_Plan",
+            "Grid_Section"
+          ],
+          "rules": [
+            "62"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "EXECUTION_FEEDBACK"
+      ]
+    },
+    {
+      "id": "14",
+      "name": "rollingRevision",
+      "description": "日内滚动计划修正(OP-11),横切。每 4 小时滚动节拍或偏差持续>3%且扩大/资源明显变(T5)/省调临时调 GZL/机组状态突变(T4)/命中新硬约束红线触发;不另开新 DS,只改当前点之后时段(已执行段锁死),重走精简六段(数据解释→超短期预测→建议修正→约束校验→比选→快速分流);省调调 GZL 立即响应不等周期。产出 DP 修正版本(计划号不变、版本号递增、前值/后值/修正理由留痕),emit PLAN_ROLLED 经 postToEMS 重新下发。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "EXECUTION_FEEDBACK",
+        "RISK_EVENT_RAISED",
+        "RISK_DISPOSED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "triggerRolling",
+          "description": "由 4h 滚动节拍或触发条件成立启动:EXECUTION_FEEDBACK 载荷=偏差持续>3%且扩大,或 RISK_EVENT_RAISED 载荷=T4 机组突变/T5 资源偏差/T6 出力预测偏差(预测骤变需超短期大幅修正)/省调临时调 GZL/命中新红线,或 RISK_DISPOSED 载荷=需滚动修正(实时风险处置后改未来时段);省调调 GZL 立即响应不等周期。",
+          "type": "logic",
+          "condition": "滚动节拍到,或收到 EXECUTION_FEEDBACK(偏差超阈)/RISK_EVENT_RAISED(相关风险)/RISK_DISPOSED(载荷=需滚动修正)",
+          "objects": [
+            "Dispatch_Plan",
+            "Output_Forecast",
+            "Execution_Feedback",
+            "Risk_Event"
+          ],
+          "rules": [
+            "60"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "reRunPipelineFuture",
+          "description": "不另开新 DS,只改当前点之后时段(已执行段锁死、不可编辑),重走精简六段(数据解释→超短期预测→建议修正[修正方案 vs 维持日前]→约束校验→比选→快速分流)。",
+          "type": "logic",
+          "condition": "滚动已触发",
+          "objects": [
+            "Dispatch_Case",
+            "Output_Forecast",
+            "Dispatch_Suggestion"
+          ],
+          "rules": [
+            "60"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "finalizeRevision",
+          "description": "修正方案经直通或快速人工确认后产出 DP 修正版本(计划号不变、版本号递增,前值/后值/修正理由留痕)定版。",
+          "type": "tool",
+          "condition": "修正方案确认(直通或快速人工确认)",
+          "objects": [
+            "Dispatch_Plan",
+            "Audit_Event"
+          ],
+          "rules": [
+            "60",
+            "67"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "PLAN_ROLLED"
+      ]
+    },
+    {
+      "id": "15",
+      "name": "analyzeDeviation",
+      "description": "偏差分析复盘(OP-10)。执行回采后智调算实际出力 vs 计划出力偏差(96 点逐点+整体关口送出%),灵魂在追因不在算账:归类预测不准 T6(反哺预测模型/置信度算法)、来水资源偏离 T5(反哺数据质控)、执行走样(反哺指令执行纪律)、约束临时变化 T2、市场偏差 T7 超偏差考核带 CR-MKT-02(反哺市场申报口径);已执行时段如实进复盘不进修正。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "EXECUTION_FEEDBACK"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "computeDeviation",
+          "description": "实际 vs 计划 96 点逐点偏差与整体关口送出偏差%,识别整体超 3% 或单点暴偏、偏在哪个时段/电站/机组类型。",
+          "type": "logic",
+          "condition": "收到 EXECUTION_FEEDBACK",
+          "objects": [
+            "Deviation_Report",
+            "Execution_Feedback",
+            "Dispatch_Plan",
+            "Output_Forecast"
+          ],
+          "rules": [
+            "64"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "attributeRootCause",
+          "description": "追因归类:预测不准 T6、来水资源偏离 T5、执行走样、约束临时变化 T2、市场偏差 T7(超偏差考核带 CR-MKT-02);偏差持续超带或经济损失大转人工复盘进运行分析。",
+          "type": "logic",
+          "condition": "偏差已算出",
+          "objects": [
+            "Deviation_Report",
+            "Risk_Event",
+            "Output_Forecast"
+          ],
+          "rules": [
+            "64",
+            "34"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "DEVIATION_ANALYZED"
+      ]
+    },
+    {
+      "id": "16",
+      "name": "archiveCase",
+      "description": "全链路归档。校验全流程结束(确认/回写/执行/复盘齐、关联风险事件已闭环)后,把 DS 案件下全链路数据+日志(数据解释→预测→建议→校验→比选→确认 AP→风险 RK→计划 DP→执行→复盘)归档,可回放可追溯,状态置 ARCHIVED;是运行稽核与偏差复盘的数据底座,trace_log 不可删。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "DEVIATION_ANALYZED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "checkClosure",
+          "description": "校验是否满足完结条件:全链路动作齐、关联风险事件 RK 已闭环或误报关闭,SUSPENDED 已解除。",
+          "type": "logic",
+          "condition": "收到 DEVIATION_ANALYZED(偏差复盘完成)",
+          "objects": [
+            "Dispatch_Case",
+            "Risk_Event"
+          ],
+          "rules": [
+            "74"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "archiveFullChain",
+          "description": "把 DS 下全链路数据+日志(含每事件时标+触发上下文、每 OP 动作经办人、每确认动作 AP 实例与状态机同步)归档,状态置 ARCHIVED,供运行稽核全链路审计回放。",
+          "type": "tool",
+          "condition": "满足完结条件",
+          "objects": [
+            "Dispatch_Case",
+            "Manual_Approval",
+            "Risk_Event",
+            "Dispatch_Plan",
+            "Audit_Event"
+          ],
+          "rules": [
+            "74",
+            "67"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "ARCHIVED"
+      ]
+    },
+    {
+      "id": "17",
+      "name": "raiseRiskEvent",
+      "description": "风险事件立项与定级(横切急刹车的入口)。由约束校验命中硬约束红线(CONSTRAINT_VALIDATED 载荷=命中硬约束红线,吸收 CONSTRAINT_VIOLATED)或实时监控越界触发,立 RK 号、双维定级(类型 T1-T8×等级 L1-L4,同类型按严重度定级、红线类有不可降下限),L3 转值长+暂缓 SUSPENDED、L4 转值长+总工+标记上报省调+暂停,并改派 owner。RK 由智调约束校验引擎立项,人工可处置但不可删。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "CONSTRAINT_VALIDATED",
+        "EXECUTION_FEEDBACK"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "createRiskEvent",
+          "description": "立 RK 号,记关联 DS/DP、命中约束 CR、证据(命中时段/数值/越限幅度/趋势)。",
+          "type": "tool",
+          "condition": "CONSTRAINT_VALIDATED 载荷=命中硬约束红线,或 EXECUTION_FEEDBACK 载荷=实时监控越界/红线苗头",
+          "objects": [
+            "Risk_Event",
+            "Constraint_Hit",
+            "Dispatch_Case"
+          ],
+          "rules": [
+            "37",
+            "39"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "classifyRisk",
+          "description": "双维定级:类型 T1-T8(弃能/越限/防洪/设备/来水资源偏差/预测偏差/市场偏差/指令冲突)× 等级 L1-L4;同类型按严重度定不同级(如 T3 防洪逼近汛限 L3、超汛限+猛涨 L4)。红线类有不可降等级下限:生态 CR-HYD-03/防洪 CR-HYD-05/大坝 CR-SAFE-02 为 L3 起(防洪超汛限 L4),断面 CR-GRID-01/关口 CR-GRID-03 为 L2 起(量大/持续才 L3)。T7 市场偏差仅事后经 analyzeDeviation 偏差考核归因、不在 RISK_EVENT_RAISED 实时处置扇出内(有意孤岛)。",
+          "type": "logic",
+          "condition": "RK 已立",
+          "objects": [
+            "Risk_Event",
+            "Constraint_Rule"
+          ],
+          "rules": [
+            "37",
+            "38",
+            "40"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "suspendIfHigh",
+          "description": "L3→暂缓 SUSPENDED+转值长;L4→暂停+转值长总工+标记上报省调(防洪类 T3 的 L4 同步标记需报防汛指挥部门;reported_up=true 仅标记需上报,真正上报由值长+总工走调度渠道);按等级改派 owner。SUSPENDED 非 VOID,等风险闭环/上级批复才解除。",
+          "type": "logic",
+          "condition": "等级为 L3 或 L4",
+          "objects": [
+            "Risk_Event",
+            "Dispatch_Case",
+            "Manual_Approval"
+          ],
+          "rules": [
+            "48",
+            "49"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "RISK_EVENT_RAISED"
+      ]
+    },
+    {
+      "id": "18",
+      "name": "handleFloodControl",
+      "description": "防洪应急处置(T3,防洪优先级第一、标准最严)。水位逼近/超汛限 1612m、来水大涨或洪峰预报命中 CR-HYD-01/CR-HYD-05 时:预泄腾库加大出库(CR-HYD-02 内),梯级按滞时跟进(CR-HYD-04),始终守生态流量(CR-HYD-03);逼近定 L3 转值长+暂缓,超汛限定 L4 转值长+总工+上报省调及防汛指挥部门、请求放宽 GZL,案件 SUSPENDED 等批复闭环。宁可预泄“错杀”不可拦蓄“放过”。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "RISK_EVENT_RAISED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "assessFloodSituation",
+          "description": "研判水位逼近/超汛限 1612m、来水大涨、洪峰预报(CR-HYD-01/CR-HYD-05),分黄(1610m)/橙(1611.5m)/红(逼近超 1612m)预警。",
+          "type": "manual",
+          "condition": "RISK_EVENT_RAISED 载荷=T3 防洪风险",
+          "objects": [
+            "Risk_Event",
+            "Hydrology_Data",
+            "Power_Station"
+          ],
+          "rules": [
+            "21",
+            "25"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "prereleaseAndCascade",
+          "description": "预泄腾库、加大出库(在 CR-HYD-02 出库上下限内、不超下游安全泄量),龙头 ST0101 预泄下级 ST0102~0104 按滞时跟进配合(CR-HYD-04),任何时段守住生态流量最小下泄(CR-HYD-03);大流量泄洪/闸门启闭同步守大坝闸门启闭安全(CR-SAFE-02)。",
+          "type": "manual",
+          "condition": "需预泄/拦蓄腾库",
+          "objects": [
+            "Dispatch_Plan",
+            "Power_Station"
+          ],
+          "rules": [
+            "22",
+            "23",
+            "24",
+            "32"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "escalateAndReport",
+          "description": "定 L3 转值长+暂缓;定 L4(超汛限/防洪涉网叠加)转值长+总工+上报省调及防汛指挥部门、请求放宽 GZL,案件 SUSPENDED 暂停执行等明确指令/批复且风险闭环才解除。",
+          "type": "manual",
+          "condition": "等级 L3/L4 或防洪与涉网叠加",
+          "objects": [
+            "Risk_Event",
+            "Dispatch_Case",
+            "Grid_Interface_Plan",
+            "Manual_Approval"
+          ],
+          "rules": [
+            "48",
+            "49",
+            "25"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "FLOOD_CONTROL_HANDLED"
+      ]
+    },
+    {
+      "id": "19",
+      "name": "handleGridSecurity",
+      "description": "电网越限与上级关口冲突应急处置(T2/T8)。送出超断面/通道稳定限额(CR-GRID-01)立即限出力压回限额内、核限额是否检修方式版本;关口送出超/欠 GZL(CR-GRID-03)一律以省调为准(超送压回报备、欠送报正当理由)、绝不自动改关口,升 T8 转人工;涉网 L3 视情况上报、L4 必报省调,需调 GZL/断面限额走涉网申请等批复,省调临时指令立即响应走滚动。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "RISK_EVENT_RAISED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "limitOutputToSection",
+          "description": "送出超断面/通道稳定限额(CR-GRID-01)立即按限出力顺序减发压回限额内,核对限额是否检修方式(检修方式限额更紧,别用正常方式限额);实时紧急涉网工况可先限出力保安全、审批留痕事后立即补全并报省调(仅限实时紧急涉网/防洪,平时不许先行后补)。",
+          "type": "manual",
+          "condition": "RISK_EVENT_RAISED 载荷=T2 电网越限 或 T8 指令冲突/关口超欠(本工作流承接电网安全两类);本步针对 T2 断面/通道越限",
+          "objects": [
+            "Dispatch_Plan",
+            "Grid_Section",
+            "Constraint_Rule"
+          ],
+          "rules": [
+            "27"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "reconcileGateWithProvince",
+          "description": "关口送出超/欠 GZL(CR-GRID-03)一律以省调为准:超送压回关口曲线内并报备,欠送(如防洪拦蓄)报正当理由,绝不默默少送或擅改关口;升 T8 转人工。",
+          "type": "manual",
+          "condition": "RISK_EVENT_RAISED 载荷=T8 指令冲突/关口超欠",
+          "objects": [
+            "Grid_Interface_Plan",
+            "Dispatch_Plan"
+          ],
+          "rules": [
+            "29",
+            "72"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "escalateNetwork",
+          "description": "涉网 L3 视情况上报、L4 必报省调;需调整 GZL/断面限额走涉网申请、报省调等批复改,绝不先斩后奏;省调临时指令立即响应走 OP-11 滚动。",
+          "type": "manual",
+          "condition": "涉网等级 L3/L4 或需省调调整关口/限额",
+          "objects": [
+            "Risk_Event",
+            "Dispatch_Case",
+            "Grid_Interface_Plan"
+          ],
+          "rules": [
+            "48",
+            "49",
+            "55"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "GRID_SECURITY_HANDLED"
+      ]
+    },
+    {
+      "id": "20",
+      "name": "handleEquipmentFault",
+      "description": "设备故障/受阻/群发安全应急处置(T4,含设备安全红线 CR-SAFE-01)。机组跳闸、故障、受阻导致可用容量变化时,先以设备通(孙建国)为准更新可用容量(CR-UNIT-04);涉设备安全红线(CR-SAFE-01 温升过载)或群发振动异常(CR-UNIT-02)按设备安全第一紧急停运异常机组(宁可弃水也停机)。再按新可用容量上限重排出力、缺口由其他可用机组与备用补、补不齐差额向省调报备短时偏差,走 OP-11 滚动修正;定级多 L2-L3,影响关口/消纳或涉网/防洪/群发安全的升 L3/L4(经风险闭环、SUSPENDED 解除后恢复)。智调中所有“可用容量”相关校验根子在设备通数据同步,同步滞后会令 CR-UNIT-04 带病放行。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "RISK_EVENT_RAISED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "updateAvailableCapacity",
+          "description": "机组跳闸/故障/受阻先以设备通(孙建国)为准更新可用容量(CR-UNIT-04),受阻降容或置 0,占用先扣干净;涉设备安全红线(CR-SAFE-01 温升过载)或群发振动异常(CR-UNIT-02)按设备安全第一紧急停运异常机组、置可用容量 0 并保持(OP-08 紧急停机,宁可弃水也停机)。",
+          "type": "tool",
+          "condition": "RISK_EVENT_RAISED 载荷=T4 设备风险(机组故障/受阻,含设备安全红线 CR-SAFE-01/群发振动 CR-UNIT-02)",
+          "objects": [
+            "Equipment",
+            "Maintenance_Plan",
+            "Risk_Event"
+          ],
+          "rules": [
+            "19",
+            "31",
+            "17"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "rescheduleOutput",
+          "description": "按新可用容量上限重排出力,缺口由其他可用机组与备用补;整站可用容量不足填缺口则缺口落空转人工(调关口/调梯级)、补不齐的缺口差额向省调报备短时偏差(涉网以省调为准 CR-GRID-03),走 OP-11 滚动修正;涉网/防洪或群发安全受影响升 L3/L4。",
+          "type": "logic",
+          "condition": "可用容量已更新",
+          "objects": [
+            "Dispatch_Plan",
+            "Equipment",
+            "Grid_Interface_Plan"
+          ],
+          "rules": [
+            "19",
+            "29",
+            "60"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "EQUIPMENT_FAULT_HANDLED"
+      ]
+    },
+    {
+      "id": "21",
+      "name": "handleRenewableCurtailment",
+      "description": "弃水/弃风弃光消纳应急处置(T1,“能发的电没发出去,最心疼”)。来水大但关口送不出、断面受阻(CR-GRID-01)、出库到上限(CR-HYD-02)时,先想少弃(梯级腾挪/申请省调放宽关口/风光优先消纳、水电调峰让路);实在消纳不了限出力,弃风弃光为下策,弃水/弃风弃光量留痕;区分“该弃”(防洪预泄主动放,CR-HYD-05)与“被迫弃”(电网受阻,下策);汛期不弃就超汛限破 CR-HYD-05 则防洪优先、该弃就弃(人工裁量),量大或频繁立 T1 专项复盘。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "RISK_EVENT_RAISED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "attemptAbsorption",
+          "description": "来水大送不出/断面受阻(CR-GRID-01)/出库到上限(CR-HYD-02)时按限出力次序少弃:第 1 顺位先令水电下压拦蓄(下压=蓄水、不算弃,前提水位未顶汛限 CR-HYD-01 且守生态流量 CR-HYD-03),并梯级腾挪、申请省调放宽关口、风光优先消纳;水电下压到顶(水位顶汛限存不下)才轮到弃风弃光,避免‘断面受阻先弃风光、水电还有下压空间’的误处置。",
+          "type": "manual",
+          "condition": "RISK_EVENT_RAISED 载荷=T1 弃能/消纳不足",
+          "objects": [
+            "Dispatch_Plan",
+            "Power_Station",
+            "Grid_Interface_Plan",
+            "Grid_Section"
+          ],
+          "rules": [
+            "14",
+            "27",
+            "22",
+            "21",
+            "23"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "curtailAndRecord",
+          "description": "水电下压到顶后仍无法全消纳才弃风弃光(下策),升 T1;弃水量/弃风弃光量留痕、复盘消纳措施;归因区分“该弃”(防洪预泄 CR-HYD-05)与“被迫弃”(电网受阻 CR-GRID-01)。",
+          "type": "logic",
+          "condition": "无法全消纳",
+          "objects": [
+            "Risk_Event",
+            "Dispatch_Plan",
+            "Grid_Section"
+          ],
+          "rules": [
+            "14",
+            "65",
+            "27"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "escalateIfFloodConflict",
+          "description": "汛期若不弃就超汛限破 CR-HYD-05,则按防洪优先、该弃就弃(人工裁量);弃能量大或频繁立 T1 专项复盘,追是否非弃不可、下次能否少弃。",
+          "type": "manual",
+          "condition": "防洪与消纳冲突 或 弃能量大/频繁",
+          "objects": [
+            "Risk_Event",
+            "Power_Station"
+          ],
+          "rules": [
+            "25",
+            "65"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "CURTAILMENT_HANDLED"
+      ]
+    },
+    {
+      "id": "22",
+      "name": "switchOperatingMode",
+      "description": "运行方式切换(计划编制总开关,前置于比选/分流)。由汛期起止公告、汛限运行起止日期、检修计划、特殊方式(防洪/电网/孤网/调试/黑启动)驱动:切换 CR-HYD-01 水位上限参照点(汛限 1612m↔正常蓄水 1620m)、比选权重表(消纳 vs 经济/蓄能)、目标口径与分流策略;切换期强制人工确认、智调不直通、双人复核季节标识改对,切换时点须总工+水调一起定;检修方式编排须避开龙头汛期防洪关键期并会签。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "OPERATING_MODE_CHANGE_DECLARED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "updateModeFlag",
+          "description": "按流域防汛指挥部/上级汛期起止公告与水库调度规程汛限运行起止日期、或特殊方式启停,更新运行方式季节/特殊/日历/水文标识,双人复核改对。",
+          "type": "manual",
+          "condition": "收到 OPERATING_MODE_CHANGE_DECLARED(汛枯/特殊/检修方式变更)",
+          "objects": [
+            "Operating_Context",
+            "Role"
+          ],
+          "rules": []
+        },
+        {
+          "order": "2",
+          "name": "switchConstraintAndWeights",
+          "description": "切换 CR-HYD-01 水位参照(上限 汛限 1612m↔正常蓄水 1620m,下限始终守死水位 1580m——低于死水位放水过度同样升 T3 转人工)、方案比选权重表、三大目标口径与分流策略;切换期强制人工确认、不直通,切换时点须总工(韩总)+水调(林涛)一起人工拍定(提前量博弈、非系统自动)。",
+          "type": "logic",
+          "condition": "运行方式标识已更新",
+          "objects": [
+            "Operating_Context",
+            "Constraint_Rule",
+            "Dispatch_Objective"
+          ],
+          "rules": [
+            "21",
+            "12"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "arrangeMaintenanceMode",
+          "description": "检修方式编排:检修机可用容量降/置 0(CR-UNIT-04)、不参与分配,计划检修进日前/临时检修走日内/故障走实时;龙头 ST0101 机组检修避开汛期防洪关键期与来水大涨窗口,须过水调+总工人工会签批准方可排入。",
+          "type": "tool",
+          "condition": "涉检修方式变更",
+          "objects": [
+            "Maintenance_Plan",
+            "Equipment",
+            "Power_Station",
+            "Role"
+          ],
+          "rules": [
+            "19",
+            "5"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "OPERATING_MODE_SWITCHED"
+      ]
+    },
+    {
+      "id": "23",
+      "name": "handoverShift",
+      "description": "交接班——把一个班的“账”完整交给下一个人。五看(水位/设备/关口/在途/风险)+五交(在途 DS-DP/未闭环 RK/日内滚动修正/待办事项),白纸黑字留痕、可追溯,确保跨班连续与风险不漏。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "SHIFT_CHANGE_DUE"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "reviewShiftStatus",
+          "description": "交接“五看”:库水位与汛限裕度、设备可用容量与检修、关口送出与 GZL、在途案件计划、未闭环风险。",
+          "type": "manual",
+          "condition": "收到 SHIFT_CHANGE_DUE(班次切换)",
+          "objects": [
+            "Hydrology_Data",
+            "Equipment",
+            "Grid_Interface_Plan",
+            "Dispatch_Case",
+            "Risk_Event"
+          ],
+          "rules": []
+        },
+        {
+          "order": "2",
+          "name": "handoverOpenItems",
+          "description": "交接“五交”:在途 DS-DP、未闭环 RK、进行中的日内滚动修正、待办与省调沟通事项,白纸黑字留痕,接班人签收。",
+          "type": "manual",
+          "condition": "在途状态已盘点",
+          "objects": [
+            "Dispatch_Case",
+            "Dispatch_Plan",
+            "Risk_Event"
+          ],
+          "rules": [
+            "74"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "SHIFT_HANDED_OVER"
+      ]
+    },
+    {
+      "id": "24",
+      "name": "assessForecastAccuracy",
+      "description": "出力预测准确率考核(事后回评闭环)。拿实际出力逐点比 FC 预测,落误差带内算合格,合格点数/96=实际合格率,与发布时预期置信度对比;实际<0.9 追因 T5/T6,系统性“预期高实际低”说明置信度算法有问题(直接影响直通分流可靠性,最该警惕);分维度(电站/时间尺度/工况/模型版本)考核,反哺模型阈值与置信度算法。置信度 0.9 门限是预测组的“军令状”。",
+      "actor": [
+        "Agent"
+      ],
+      "trigger": [
+        "DEVIATION_ANALYZED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "backEvaluateAccuracy",
+          "description": "拿实际出力逐点比 FC 预测,落误差带内算合格,合格点数/96=实际合格率;并算均方根误差 RMSE(惩罚大偏差、防全天正负对冲),与合格率一并、逐时段 96 点看;再与发布时预期置信度(P50 合格率)对比。",
+          "type": "logic",
+          "condition": "收到 DEVIATION_ANALYZED 或进入周期考核",
+          "objects": [
+            "Output_Forecast",
+            "Execution_Feedback",
+            "Forecast_Model"
+          ],
+          "rules": [
+            "66"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "reviewByDimensionAndFeedback",
+          "description": "分维度(电站/时间尺度/工况/模型版本)考核;实际合格率没达 0.9 追因 T5/T6,系统性预期偏高则置信度算法有问题;反哺模型阈值与置信度算法,误报根因反哺约束阈值。",
+          "type": "logic",
+          "condition": "实际合格率已算出",
+          "objects": [
+            "Output_Forecast",
+            "Forecast_Model"
+          ],
+          "rules": [
+            "9",
+            "10",
+            "66"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "FORECAST_ACCURACY_ASSESSED"
+      ]
+    },
+    {
+      "id": "25",
+      "name": "runOperationAudit",
+      "description": "第三道防线·运行稽核与全链路审计。对归档案件按三种抽样(周期/风险加权 L4 必审 100%、L3 约 50%、擦边重点/事件触发即审)抽查,非现场调全链路日志审(状态流转合规、直通五条真满足、确认留痕全无越权、约束跑齐钳制合理、风险定级准 L3/L4 暂缓真、偏差超 3% 追因、涉网走省调),必要时现场核实;对 KCP-01~KCP-25 抽查;留稽核底稿,按稽核发现四级与问题五档分级(涉网涉防洪从重)开整改要求→回访→闭环或升级,整改闭环率列 KCP-25。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "ARCHIVED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "sampleCases",
+          "description": "三种抽样组合:周期抽样(覆盖各电站/时间尺度/风险等级)、风险加权(L4 必审 100%、L3 约 50%、擦边偏差 2.8%/置信度 0.90~0.92 重点抽)、事件触发(CONSTRAINT_VIOLATED/立 L3-L4 风险/手动绕过分流/超时升级即审不等周期)。",
+          "type": "logic",
+          "condition": "收到 ARCHIVED 或周期到/异常事件触发",
+          "objects": [
+            "Dispatch_Case",
+            "Audit_Finding"
+          ],
+          "rules": [
+            "76"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "auditFullChain",
+          "description": "非现场调全链路数据日志审(状态流转合规无悬空、直通五条真满足、人工确认留痕全无越权签字真、五组约束跑齐钳制合理、风险定级准 L3/L4 暂缓真、偏差超 3% 追因、涉网超关口/变更走省调),对 KCP-01~25 抽查(KCP-14/15/17/21 每周必抽),必要时现场核实检修真在修/签字人真在岗/SCADA vs 指令。",
+          "type": "manual",
+          "condition": "样本已选定",
+          "objects": [
+            "Dispatch_Case",
+            "Manual_Approval",
+            "Risk_Event",
+            "Constraint_Hit",
+            "Key_Control_Point",
+            "Audit_Event"
+          ],
+          "rules": [
+            "74",
+            "73",
+            "69"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "recordFindingAndClose",
+          "description": "留稽核底稿(批次/时间/稽核人/抽样范围方法/依据/发现逐条+发现等级/无异常说明/整改要求);按稽核发现四级与问题五档分级、涉网涉防洪从重,开整改要求(谁改/改什么/何时改完)→回访核实→闭环归档或升级上报,整改闭环率为 KCP-25。",
+          "type": "manual",
+          "condition": "稽核审查完成",
+          "objects": [
+            "Audit_Finding",
+            "Key_Control_Point",
+            "Audit_Working_Paper"
+          ],
+          "rules": [
+            "76",
+            "77"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "AUDIT_COMPLETED"
+      ]
+    },
+    {
+      "id": "26",
+      "name": "maintainConstraintConfig",
+      "description": "约束配置与维护(规则库的“活”维护)。按省调断面限额/关口 GZL 更新、运行方式变更、风险误报根因反哺、预测准确率回评反哺,更新 CR-* 约束阈值/限值/红线/命中默认动作配置;配置变更经业务复核+版本留痕(谁改/前值/后值/理由),系统组配置不替业务确认;误报关闭须留痕反哺调阈值,误报率高本身是该被稽核的信号。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "AUDIT_COMPLETED",
+        "FORECAST_ACCURACY_ASSESSED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "updateConstraintThresholds",
+          "description": "按省调断面限额/关口 GZL 更新、运行方式变更、风险误报根因反哺、准确率回评反哺,更新对应 CR-* 约束的阈值/限值/红线/命中默认动作配置。",
+          "type": "tool",
+          "condition": "收到 AUDIT_COMPLETED(稽核发现反哺)/FORECAST_ACCURACY_ASSESSED(准确率回评反哺),或省调限额/方式变更申请",
+          "objects": [
+            "Constraint_Rule",
+            "Business_System"
+          ],
+          "rules": [
+            "75",
+            "71"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "reviewAndVersionConfig",
+          "description": "配置变更经业务复核与版本留痕(谁改/前值/后值/理由),系统组配置不替业务确认;误报关闭须留清“为什么判误报”反哺阈值,误报判定错误倒查。",
+          "type": "manual",
+          "condition": "配置拟更新",
+          "objects": [
+            "Constraint_Rule",
+            "Role",
+            "Audit_Event",
+            "Forecast_Model"
+          ],
+          "rules": [
+            "68",
+            "75",
+            "52"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "CONSTRAINT_CONFIG_UPDATED"
+      ]
+    },
+    {
+      "id": "27",
+      "name": "resolveRiskAndResume",
+      "description": "风险处置闭环与暂缓解除回流(横切,补齐 SUSPENDED 恢复链)。承接四类应急处置完成事件,由值长/总工核风险事件 RK 是否已闭环(隐患消除/方案修正后重过校验通过)、误报关闭、或 L4 上报省调取得明确批复;据结论解除案件 SUSPENDED 暂缓(解除权限值长+总工,擅自恢复属越权红线、KCP-24),并产出 RISK_DISPOSED 载荷指引恢复走向:风险闭环可恢复→回 finalizePlan 定版、需改未来时段→转 rollingRevision 日内滚动、维持暂缓→保持 SUSPENDED 等上级批复、误报关闭→案件解冻按当前点恢复主链路。解除/恢复动作回贴 DS 审计链,保证 trace 从 RISK_EVENT_RAISED→处置→闭环→恢复连续可追。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "FLOOD_CONTROL_HANDLED",
+        "GRID_SECURITY_HANDLED",
+        "EQUIPMENT_FAULT_HANDLED",
+        "CURTAILMENT_HANDLED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "verifyRiskClosure",
+          "description": "值长/总工核关联风险事件 RK 状态:隐患消除或方案修正后重过校验通过=已闭环;经核实判据为假/隐患不存在=误报关闭(须留痕反哺阈值);L4 上报省调/防汛取得明确批复且风险闭环;判定处置结论(闭环可恢复/维持暂缓/误报关闭/否决重做)。",
+          "type": "manual",
+          "condition": "收到风险处置完成事件(FLOOD_CONTROL_HANDLED / GRID_SECURITY_HANDLED / EQUIPMENT_FAULT_HANDLED / CURTAILMENT_HANDLED)",
+          "objects": [
+            "Risk_Event",
+            "Dispatch_Case",
+            "Role"
+          ],
+          "rules": [
+            "48",
+            "52",
+            "49"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "liftSuspensionAndRoute",
+          "description": "风险闭环或误报关闭则解除案件 SUSPENDED 暂缓(SUSPENDED≠VOID,解除权限值长+总工),并按 RISK_DISPOSED 载荷标记恢复走向(闭环可恢复→定版/需滚动修正→日内滚动/维持暂缓→保持暂缓等批复);误报关闭案件解冻按当前点恢复主链路;解除与恢复回贴 DS 审计链保证全链路可回放(KCP-20/KCP-24)。",
+          "type": "logic",
+          "condition": "风险处置结论已判定",
+          "objects": [
+            "Dispatch_Case",
+            "Risk_Event",
+            "Audit_Event"
+          ],
+          "rules": [
+            "48",
+            "73",
+            "74"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "RISK_DISPOSED"
+      ]
+    },
+    {
+      "id": "28",
+      "name": "validateAndDeploySystemChange",
+      "description": "智调系统变更上线测试与部署(SDLC/运维治理,横切于运行流程之外)。当智调系统软件版本升级、业务规则变更、阈值参数调整(含运行流程 maintainConstraintConfig 改动 CR-* 后发出的 CONSTRAINT_CONFIG_UPDATED),或接入新电站/新机组硬件时:测试人员依据《测试用例集》对该次变更完整执行六段流水线端到端走查测试;任一验收项与预期不符则退回开发组修复后回归;变更涉及规则/阈值/新设备的,配置管理员同步更新关联测试用例与电站/设备基线并递增版本;最后由配置管理模块按测试覆盖完整性拦截——缺失覆盖的流水线段禁止发布至生产环境,全部通过方可上线。守住上线安全红线、确保测试准则与生产规则一致。",
+      "actor": [
+        "Human"
+      ],
+      "trigger": [
+        "CONSTRAINT_CONFIG_UPDATED",
+        "SYSTEM_CHANGE_REQUESTED"
+      ],
+      "actions": [
+        {
+          "order": "1",
+          "name": "runPipelineWalkthrough",
+          "description": "测试人员依据《测试用例集》对该次变更完整执行六段流水线(①数据解释②出力预测③调度建议生成④约束校验⑤方案比选+风险标注⑥人工确认+回写)端到端走查测试,确保变更后各段流水线完整稳定、不引入业务风险。",
+          "type": "manual",
+          "condition": "收到 CONSTRAINT_CONFIG_UPDATED(阈值/业务规则变更),或 SYSTEM_CHANGE_REQUESTED(软件升级/接入新电站机组)",
+          "objects": [
+            "Business_System",
+            "Power_Station",
+            "Equipment",
+            "Output_Forecast",
+            "Scheme_Comparison"
+          ],
+          "rules": [
+            "78"
+          ]
+        },
+        {
+          "order": "2",
+          "name": "returnOnTestFailure",
+          "description": "任一验收项实际结果与预期不一致即判不通过,在协同系统把测试任务退回业务系统开发组(Role)修复,修复后回归重测,建立测试异常发现→修复→回归闭环,质量风险部署前清除。",
+          "type": "manual",
+          "condition": "走查测试存在验收项与预期不一致",
+          "objects": [
+            "Business_System",
+            "Role"
+          ],
+          "rules": [
+            "80"
+          ]
+        },
+        {
+          "order": "3",
+          "name": "syncTestCasesAndBaseline",
+          "description": "变更涉及业务规则/阈值修改或新增电站机组设备时,配置管理员(Role)同步修改关联测试用例并按外部版本规范递增测试用例集版本号,涉及的电站/设备基线一并更新,防测试环境与生产脱节。",
+          "type": "manual",
+          "condition": "变更涉及业务规则/阈值修改或新增电站机组设备",
+          "objects": [
+            "Role",
+            "Power_Station",
+            "Equipment"
+          ],
+          "rules": [
+            "81"
+          ]
+        },
+        {
+          "order": "4",
+          "name": "gateDeployByCoverage",
+          "description": "业务系统配置管理模块校验各流水线段测试覆盖完整性:任一流水线段缺失对应测试用例覆盖即禁止发布部署至生产环境(工程层自动拦截),走查与回归全部通过且覆盖完整方可上线。",
+          "type": "logic",
+          "condition": "走查测试通过、测试用例已同步,拟发布部署至生产环境",
+          "objects": [
+            "Business_System"
+          ],
+          "rules": [
+            "79"
+          ]
+        }
+      ],
+      "triggered_event": [
+        "SYSTEM_CHANGE_DEPLOYED"
+      ]
+    }
+  ]
+}

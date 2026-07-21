@@ -1,0 +1,1823 @@
+{
+  "metadata": {
+    "project_name": "Energy-Dispatch-v1",
+    "document_type": "数据对象",
+    "version": "v0_1_003",
+    "last_updated": "2026-06-01",
+    "description": "能源调度领域本体的名词层 — 类型化实体、属性、外键与 PII 分类。"
+  },
+  "objects": [
+    {
+      "id": "Power_Station",
+      "name": "电站",
+      "description": "电站是调度的物理生产单元与基础空间对象,包括梯级水电站(年/季/日调节、径流式)、风电场与光伏电站,既是调度指令的受体,也是气象水文数据与出力预测的归属点。水库电站还承载正常蓄水位、汛限水位、死水位等防洪调度边界。",
+      "type": "data",
+      "relationship_description": "【电站 (Power_Station)】通过上下级电站构成梯级水力联系(上级出库=下级入库),下辖多台【设备 (Equipment)】,经并网点对接【电网断面 (Grid_Section)】,是【出力预测 (Output_Forecast)】【水文数据 (Hydrology_Data)】【气象数据 (Weather_Data)】的归属电站。",
+      "primary_key": "power_station_id",
+      "properties": [
+        {
+          "name": "power_station_id",
+          "type": "String",
+          "description": "电站号,ST+4 位(如 ST0101 龙盘一级),主键。"
+        },
+        {
+          "name": "station_name",
+          "type": "String",
+          "description": "电站名称(如 龙盘一级、滇中风电场、高原光伏电站)。"
+        },
+        {
+          "name": "station_type",
+          "type": "String",
+          "description": "电站类型:水电/风电/光伏;决定走来水信号还是资源信号。"
+        },
+        {
+          "name": "basin_region",
+          "type": "String",
+          "description": "所属流域/区域(如 梯级流域、滇中区域)。"
+        },
+        {
+          "name": "capacity_mw",
+          "type": "Float",
+          "description": "装机容量(MW),如 ST0101=600MW。"
+        },
+        {
+          "name": "regulation",
+          "type": "String",
+          "description": "调节性能:年调节/季调节/日调节/径流式。"
+        },
+        {
+          "name": "cascade_order",
+          "type": "Integer",
+          "description": "梯级序位(水电梯级必填,一级=1…四级=4)。"
+        },
+        {
+          "name": "upstream_station_id",
+          "type": "String",
+          "description": "上级电站号(水电梯级,上级出库=本级入库)。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "downstream_station_id",
+          "type": "String",
+          "description": "下级电站号(水电梯级,本级出库=下级入库)。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "normal_level",
+          "type": "Float",
+          "description": "正常蓄水位(m,水库电站必填,如 ST0101=1620m)。"
+        },
+        {
+          "name": "flood_limit_level",
+          "type": "Float",
+          "description": "汛限水位(m,水库电站必填,如 ST0101=1612m)。"
+        },
+        {
+          "name": "dead_level",
+          "type": "Float",
+          "description": "死水位(m,水库电站必填,如 ST0101=1580m)。"
+        },
+        {
+          "name": "grid_section_id",
+          "type": "String",
+          "description": "并网点/送出对应的电网断面编码。",
+          "is_foreign_key": true,
+          "references": "Grid_Section"
+        }
+      ]
+    },
+    {
+      "id": "Equipment",
+      "name": "设备",
+      "description": "设备是电站内部的最小可调单元(设备号 EQ),涵盖水轮发电机组、风机、逆变器、主变、闸门等。其额定出力、最小技术出力、振动区、AGC 爬坡率等约束直接决定可调度上限;运行/备用/检修/故障/受阻状态与可用容量由设备通维护,智调只读引用。",
+      "type": "data",
+      "relationship_description": "【设备 (Equipment)】隶属于某座【电站 (Power_Station)】,其可用容量与检修状态来自【检修计划 (Maintenance_Plan)】,是【出力预测 (Output_Forecast)】【调度指令 (Dispatch_Instruction)】与【执行反馈 (Execution_Feedback)】的机组级对象。",
+      "primary_key": "equipment_id",
+      "properties": [
+        {
+          "name": "equipment_id",
+          "type": "String",
+          "description": "设备号,EQ+6 位(如 EQ010101 一级#1 机组),主键。"
+        },
+        {
+          "name": "power_station_id",
+          "type": "String",
+          "description": "所属电站号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "equipment_type",
+          "type": "String",
+          "description": "设备类型:水轮发电机组/风机/逆变器/主变/闸门。"
+        },
+        {
+          "name": "rated_mw",
+          "type": "Float",
+          "description": "额定出力(MW,如单机 300MW)。"
+        },
+        {
+          "name": "min_tech_mw",
+          "type": "Float",
+          "description": "最小技术出力(MW),CR-UNIT-01 出力下限依据。"
+        },
+        {
+          "name": "vibration_zone",
+          "type": "String",
+          "description": "振动区间(MW 区间,水机必填),CR-UNIT-02 规避区。"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "当前状态:运行/备用/检修/故障/受阻(数据源在设备通)。"
+        },
+        {
+          "name": "available_mw",
+          "type": "Float",
+          "description": "可用容量(MW),唯一写入源为设备通,CR-UNIT-04 校验依据。"
+        },
+        {
+          "name": "agc_ramp_rate",
+          "type": "Float",
+          "description": "AGC 调节速率/爬坡率(MW/min,AGC 机组必填),CR-UNIT-05 限速。"
+        }
+      ]
+    },
+    {
+      "id": "Weather_Data",
+      "name": "气象数据",
+      "description": "气象数据是经慧采/预报通接入的气象批次(气象批次号 WX),含数值天气预报(NWP)及测风塔/测光站/气象站实测的风速、辐照、温度、降水等要素,是风电与光伏出力预测的输入。每批次带预报时效、空间点位、置信度与质控状态。",
+      "type": "data",
+      "relationship_description": "【气象数据 (Weather_Data)】可关联到某座风电/光伏【电站 (Power_Station)】的点位,经数据解释为资源信号后作为【出力预测 (Output_Forecast)】的输入。",
+      "primary_key": "weather_data_id",
+      "properties": [
+        {
+          "name": "weather_data_id",
+          "type": "String",
+          "description": "气象批次号,WX+8 位日期+3 位(如 WX20260530008),主键。"
+        },
+        {
+          "name": "station_id",
+          "type": "String",
+          "description": "关联电站号(风电场/光伏场点位,如适用)。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "source",
+          "type": "String",
+          "description": "来源:NWP/测风塔/测光站/气象站。"
+        },
+        {
+          "name": "wind_speed",
+          "type": "Float",
+          "description": "风速(m/s,风电场必填)。"
+        },
+        {
+          "name": "ghi",
+          "type": "Float",
+          "description": "水平面总辐照 GHI(W/m²,光伏场必填)。"
+        },
+        {
+          "name": "temperature",
+          "type": "Float",
+          "description": "温度(℃)。"
+        },
+        {
+          "name": "precipitation",
+          "type": "Float",
+          "description": "降水(mm)。"
+        },
+        {
+          "name": "forecast_horizon",
+          "type": "String",
+          "description": "预报时效:超短期/短期/中期。"
+        },
+        {
+          "name": "point_id",
+          "type": "String",
+          "description": "空间点位(站点/网格编码)。"
+        },
+        {
+          "name": "confidence",
+          "type": "Float",
+          "description": "置信度(0~1)。"
+        },
+        {
+          "name": "qc_status",
+          "type": "String",
+          "description": "质控状态:正常/可疑/冲突/拒用(系统写)。"
+        }
+      ]
+    },
+    {
+      "id": "Hydrology_Data",
+      "name": "水文数据",
+      "description": "水文数据是经慧采/预报通/水文站接入的水文批次(水文批次号 HY),含入库流量、出库流量、区间来水、水库水位、蓄能及来水预报范围,是水电出力与水库调度的输入。水位的物理区间由电站的死水位、正常蓄水位与汛限水位约束,越界触发质控与水位约束告警。",
+      "type": "data",
+      "relationship_description": "【水文数据 (Hydrology_Data)】归属于某座水库【电站 (Power_Station)】,经数据解释为来水信号后作为【出力预测 (Output_Forecast)】与水库调度的输入。",
+      "primary_key": "hydrology_data_id",
+      "properties": [
+        {
+          "name": "hydrology_data_id",
+          "type": "String",
+          "description": "水文批次号,HY+8 位日期+3 位(如 HY20260530005),主键。"
+        },
+        {
+          "name": "station_id",
+          "type": "String",
+          "description": "关联电站/断面号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "inflow",
+          "type": "Float",
+          "description": "入库流量(m³/s)。"
+        },
+        {
+          "name": "outflow",
+          "type": "Float",
+          "description": "出库流量(m³/s)。"
+        },
+        {
+          "name": "interval_inflow",
+          "type": "Float",
+          "description": "区间来水(m³/s,梯级必填)。"
+        },
+        {
+          "name": "water_level",
+          "type": "Float",
+          "description": "水库水位(m,水库电站必填)。"
+        },
+        {
+          "name": "storage_energy",
+          "type": "Float",
+          "description": "蓄能(MWh,水库电站必填)。"
+        },
+        {
+          "name": "forecast_range",
+          "type": "String",
+          "description": "来水预报范围:短期 1–7 天/中期/长期。"
+        },
+        {
+          "name": "qc_status",
+          "type": "String",
+          "description": "质控状态:正常/可疑/冲突/拒用(系统写)。"
+        }
+      ]
+    },
+    {
+      "id": "Output_Forecast",
+      "name": "出力预测",
+      "description": "出力预测是预测引擎基于来水/资源信号与设备可用容量生成的发电能力预估(预测批次号 FC),按 96 点给出 P50 中值与 P90 保守区间,是调度建议生成的基础。其准确率/合格率回评(P50 合格率)是直通条件\"置信度≥0.9\"的来源。",
+      "type": "data",
+      "relationship_description": "【出力预测 (Output_Forecast)】挂在某个【调度辅助案件 (Dispatch_Case)】下,针对某座【电站 (Power_Station)】或【设备 (Equipment)】,以【气象数据 (Weather_Data)】【水文数据 (Hydrology_Data)】为输入,产出供【调度建议 (Dispatch_Suggestion)】使用。",
+      "primary_key": "output_forecast_id",
+      "properties": [
+        {
+          "name": "output_forecast_id",
+          "type": "String",
+          "description": "预测批次号,FC+8 位日期+4 位(如 FC202605300012),主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "所属调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "station_id",
+          "type": "String",
+          "description": "预测对应的电站号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "equipment_id",
+          "type": "String",
+          "description": "预测对应的机组号(机组级预测必填)。",
+          "is_foreign_key": true,
+          "references": "Equipment"
+        },
+        {
+          "name": "weather_data_id",
+          "type": "String",
+          "description": "作为输入的气象批次号(风光预测)。",
+          "is_foreign_key": true,
+          "references": "Weather_Data"
+        },
+        {
+          "name": "hydrology_data_id",
+          "type": "String",
+          "description": "作为输入的水文批次号(水电预测)。",
+          "is_foreign_key": true,
+          "references": "Hydrology_Data"
+        },
+        {
+          "name": "interpretation_result_id",
+          "type": "String",
+          "description": "作为直接输入的数据解释结果(来水/资源信号)编号。",
+          "is_foreign_key": true,
+          "references": "Interpretation_Result"
+        },
+        {
+          "name": "time_scale",
+          "type": "String",
+          "description": "时间尺度:超短期 0–4h/短期 0–72h 96 点/中期。"
+        },
+        {
+          "name": "forecast_mw_p50",
+          "type": "List<String>",
+          "description": "逐时段预测出力 P50 中值(MW,96 点数组)。"
+        },
+        {
+          "name": "forecast_mw_p90",
+          "type": "List<String>",
+          "description": "逐时段预测出力 P90 保守区间(MW,96 点数组)。"
+        },
+        {
+          "name": "forecast_model_id",
+          "type": "String",
+          "description": "所用预测模型版本标识(如 WIND-v3.2),偏差复盘追溯线索。",
+          "is_foreign_key": true,
+          "references": "Forecast_Model"
+        },
+        {
+          "name": "accuracy_rate",
+          "type": "Float",
+          "description": "准确率/合格率回评(0~1),直通条件③置信度来源。"
+        },
+        {
+          "name": "deviation",
+          "type": "Float",
+          "description": "实际 vs 预测偏差(%,OP-10 复盘回填)。"
+        }
+      ]
+    },
+    {
+      "id": "Dispatch_Case",
+      "name": "调度辅助案件",
+      "description": "调度辅助案件是智调里一切工作的核心载体与全过程档案(案件号 DS),承载从数据接入、解释、预测、建议、约束校验、方案比选到人工确认、回写执行、偏差复盘归档的六段流水线生命周期。它串联各阶段产物号并记录全链路留痕,是审计追溯与责任认定的底座。",
+      "type": "data",
+      "relationship_description": "【调度辅助案件 (Dispatch_Case)】以某个【运行方式 (Operating_Context)】为边界背景,选用当前【出力预测 (Output_Forecast)】,从候选【调度建议 (Dispatch_Suggestion)】中选定方案,经【方案比选 (Scheme_Comparison)】后定版为【调度计划 (Dispatch_Plan)】,并关联其【风险事件 (Risk_Event)】【人工确认 (Manual_Approval)】与【审计事件 (Audit_Event)】。",
+      "primary_key": "dispatch_case_id",
+      "properties": [
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "案件号,DS+8 位日期+5 位(如 DS2026053000123),主键。"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "当前状态(DRAFT/DATA_INTERPRETED/FORECASTED/SUGGESTED/VALIDATING/VALIDATED/COMPARING/AUTO_ADOPTED/MANUAL_REVIEW/CONFIRMED/RETURNED/REJECTED/PLANNED/POSTED/DISPATCHED/EXECUTING/SUSPENDED/VOID/ARCHIVED)。"
+        },
+        {
+          "name": "created_by",
+          "type": "String",
+          "description": "生成方式:定时/数据驱动/人工开案。"
+        },
+        {
+          "name": "cover_date",
+          "type": "Date",
+          "description": "计划覆盖日期(日前 D-1 为次日/日内为当日)。"
+        },
+        {
+          "name": "plan_type",
+          "type": "String",
+          "description": "计划类型:日前 D-1/日内滚动/实时。"
+        },
+        {
+          "name": "stations",
+          "type": "List<String>",
+          "description": "涉及电站号列表(决定专责可见范围)。"
+        },
+        {
+          "name": "operating_context_id",
+          "type": "String",
+          "description": "边界背景运行方式编号。",
+          "is_foreign_key": true,
+          "references": "Operating_Context"
+        },
+        {
+          "name": "fc_batch_id",
+          "type": "String",
+          "description": "当前生效的出力预测批次号。",
+          "is_foreign_key": true,
+          "references": "Output_Forecast"
+        },
+        {
+          "name": "selected_scheme_id",
+          "type": "String",
+          "description": "比选/确认后选定的调度建议号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Suggestion"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "定版后生成的调度计划号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "max_risk_level",
+          "type": "String",
+          "description": "案件最高风险等级 L1~L4(决定确认级别与改派)。"
+        },
+        {
+          "name": "gate_deviation",
+          "type": "Float",
+          "description": "关口送出偏差(%,vs 省调关口计划),直通条件①判据。"
+        },
+        {
+          "name": "confidence",
+          "type": "Float",
+          "description": "出力预测置信度(0~1),直通条件③判据。"
+        },
+        {
+          "name": "owner_id",
+          "type": "String",
+          "description": "当前归属处理人工号(随风险升级自动改派,属个人信息)。"
+        },
+        {
+          "name": "is_suspended",
+          "type": "Boolean",
+          "description": "是否暂缓执行(命中 L3/L4 触发 SUSPENDED)。"
+        },
+        {
+          "name": "superseded_by_id",
+          "type": "String",
+          "description": "被哪个后续案件取代(数据驱动重复开案时)。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "trace_log",
+          "type": "String",
+          "description": "全链路留痕(事件+时间+操作人),审计底座不可删。"
+        }
+      ]
+    },
+    {
+      "id": "Dispatch_Suggestion",
+      "name": "调度建议",
+      "description": "调度建议是建议引擎依据出力预测、调度目标与省调关口计划生成的 96 点逐时段调度路径草案,覆盖各电站/机组出力、开停机、水库水位与出库控制、关口送出曲线及市场申报量价。一个案件可有多套候选建议(A/B/C),是约束校验与方案比选的输入客体。",
+      "type": "data",
+      "relationship_description": "【调度建议 (Dispatch_Suggestion)】挂在某个【调度辅助案件 (Dispatch_Case)】下,依据某个【出力预测 (Output_Forecast)】生成,按某套【调度目标 (Dispatch_Objective)】优化,经约束校验产生【约束校验命中 (Constraint_Hit)】,并进入【方案比选 (Scheme_Comparison)】。",
+      "primary_key": "dispatch_suggestion_id",
+      "properties": [
+        {
+          "name": "dispatch_suggestion_id",
+          "type": "String",
+          "description": "建议号(挂 DS 下流水,一个 DS 可有 A/B/C 多套),主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "所属调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "output_forecast_id",
+          "type": "String",
+          "description": "依据的出力预测批次号。",
+          "is_foreign_key": true,
+          "references": "Output_Forecast"
+        },
+        {
+          "name": "dispatch_objective_id",
+          "type": "String",
+          "description": "采用的调度目标口径编号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Objective"
+        },
+        {
+          "name": "cover_date",
+          "type": "Date",
+          "description": "建议覆盖日期。"
+        },
+        {
+          "name": "station_output_96",
+          "type": "List<String>",
+          "description": "各电站逐 96 点出力(MW 数组)。"
+        },
+        {
+          "name": "unit_dispatch",
+          "type": "List<String>",
+          "description": "机组开停机安排(按设备+96 点)。"
+        },
+        {
+          "name": "water_level_ctrl",
+          "type": "List<String>",
+          "description": "水库水位控制曲线(m,逐时段,水库电站)。"
+        },
+        {
+          "name": "outflow_ctrl",
+          "type": "List<String>",
+          "description": "出库流量控制(m³/s,预泄/拦蓄安排)。"
+        },
+        {
+          "name": "gate_output_96",
+          "type": "List<String>",
+          "description": "关口送出曲线(MW,96 点,对齐 GZL)。"
+        },
+        {
+          "name": "market_bid",
+          "type": "String",
+          "description": "市场申报量价(MWh/元,按时段)。"
+        },
+        {
+          "name": "confidence",
+          "type": "Float",
+          "description": "建议置信度(0~1,继承 FC 合格率)。"
+        },
+        {
+          "name": "gate_deviation",
+          "type": "Float",
+          "description": "关口偏差(%,vs GZL/基准),直通条件①用。"
+        },
+        {
+          "name": "objective_score",
+          "type": "String",
+          "description": "各目标得分(防洪/电网/消纳/经济分项),比选用。"
+        },
+        {
+          "name": "is_recommended",
+          "type": "Boolean",
+          "description": "是否为比选推荐方案。"
+        }
+      ]
+    },
+    {
+      "id": "Dispatch_Plan",
+      "name": "调度计划",
+      "description": "调度计划是调度辅助决策的最终定版落地物(计划号 DP),分日前 D-1、日内滚动、实时三类。按 96 点逐时段锁定各电站/机组出力、开停机、水库水位控制、关口送出曲线与市场申报量价,经回写能控 EMS 后是下发执行与上报省调的法定依据;定版后智调侧只读,修改须走日内滚动(OP-11)。",
+      "type": "data",
+      "relationship_description": "【调度计划 (Dispatch_Plan)】由某个【调度辅助案件 (Dispatch_Case)】定版生成,回写能控 EMS 后派生【调度指令 (Dispatch_Instruction)】【市场申报 (Market_Declaration)】,执行后由【执行反馈 (Execution_Feedback)】与【偏差报告 (Deviation_Report)】闭环。",
+      "primary_key": "dispatch_plan_id",
+      "properties": [
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "计划号,DP+8 位日期+3 位+类型(如 DP20260530001),主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "来源调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "plan_type",
+          "type": "String",
+          "description": "类型:日前 D-1/日内滚动/实时。"
+        },
+        {
+          "name": "cover_date",
+          "type": "Date",
+          "description": "计划覆盖日期。"
+        },
+        {
+          "name": "station_output_96",
+          "type": "List<String>",
+          "description": "各电站/机组 96 点出力(MW 数组)。"
+        },
+        {
+          "name": "unit_onoff",
+          "type": "List<String>",
+          "description": "开停机安排(96 点开停标记),CR-UNIT-03 校。"
+        },
+        {
+          "name": "level_control",
+          "type": "List<String>",
+          "description": "水库水位控制(m,96 点,水库电站),CR-HYD-01 校。"
+        },
+        {
+          "name": "gate_curve",
+          "type": "List<String>",
+          "description": "关口送出曲线(MW,96 点),对齐 GZL 算偏差。"
+        },
+        {
+          "name": "market_bid",
+          "type": "String",
+          "description": "市场申报量价(MWh/价),OP-12 申报。"
+        },
+        {
+          "name": "total_energy_mwh",
+          "type": "Float",
+          "description": "计划总发电量(MWh)。"
+        },
+        {
+          "name": "version",
+          "type": "String",
+          "description": "版本号(定版/滚动修正版本)。"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "状态:草稿/定版/已回写/执行中/归档(与 DS 联动)。"
+        },
+        {
+          "name": "creation_time",
+          "type": "Timestamp",
+          "description": "计划定版生成时间。"
+        }
+      ]
+    },
+    {
+      "id": "Constraint_Rule",
+      "name": "约束规则",
+      "description": "约束规则是定义调度业务边界的逻辑判据(规则编码 CR-<组>-NN),分机组(CR-UNIT)、水库水调(CR-HYD)、电网(CR-GRID)、安全(CR-SAFE)、市场(CR-MKT)五组,校验顺序为机组→水库→电网→安全→市场。分硬约束(不可违反)与软约束(可权衡);其中防洪 CR-HYD-05、生态流量 CR-HYD-03、电网越限 CR-GRID-01、上级关口 CR-GRID-03 为硬红线。",
+      "type": "data",
+      "relationship_description": "【约束规则 (Constraint_Rule)】是约束校验引擎对【调度建议 (Dispatch_Suggestion)】校验的依据,命中产生【约束校验命中 (Constraint_Hit)】并可升级为【风险事件 (Risk_Event)】,由某个【系统角色 (Role)】作为责任方。",
+      "primary_key": "constraint_rule_id",
+      "properties": [
+        {
+          "name": "constraint_rule_id",
+          "type": "String",
+          "description": "规则编码,CR-<组>-NN(如 CR-HYD-05),主键。"
+        },
+        {
+          "name": "rule_group",
+          "type": "String",
+          "description": "组别:机组/水库水调/电网/安全/市场(校验顺序固定)。"
+        },
+        {
+          "name": "check_point",
+          "type": "String",
+          "description": "检查点/校验对象(出力/水位/断面/生态流量等)。"
+        },
+        {
+          "name": "threshold_value",
+          "type": "String",
+          "description": "阈值/限值(视规则而定的越限判据)。"
+        },
+        {
+          "name": "is_hard_constraint",
+          "type": "Boolean",
+          "description": "是否硬约束(硬不可违反,软可权衡)。"
+        },
+        {
+          "name": "is_redline",
+          "type": "Boolean",
+          "description": "是否硬红线(命中即直通条件④不通过、转人工)。"
+        },
+        {
+          "name": "default_action",
+          "type": "String",
+          "description": "命中默认动作:提示/自动调整/越限告警/转人工/升风险。"
+        },
+        {
+          "name": "owner_role_id",
+          "type": "String",
+          "description": "负责该规则的责任角色编号。",
+          "is_foreign_key": true,
+          "references": "Role"
+        }
+      ]
+    },
+    {
+      "id": "Constraint_Hit",
+      "name": "约束校验命中",
+      "description": "约束校验命中是约束校验引擎跑五组约束后,某条约束规则在某套调度建议某时段/对象上的单次命中记录,载明命中编码、组别、硬软、检查点、实际值对限值、默认动作与是否升风险。约束命中不等于风险事件——多数软约束仅提示/优化,只有带\"升风险\"动作的命中才进一步立项为风险事件。",
+      "type": "data",
+      "relationship_description": "【约束校验命中 (Constraint_Hit)】由某个【调度辅助案件 (Dispatch_Case)】校验阶段产生,记录某条【约束规则 (Constraint_Rule)】对某套【调度建议 (Dispatch_Suggestion)】的命中,升风险时关联【风险事件 (Risk_Event)】。",
+      "primary_key": "constraint_hit_id",
+      "properties": [
+        {
+          "name": "constraint_hit_id",
+          "type": "String",
+          "description": "约束校验命中记录唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "所属调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "constraint_rule_id",
+          "type": "String",
+          "description": "命中的约束规则编码。",
+          "is_foreign_key": true,
+          "references": "Constraint_Rule"
+        },
+        {
+          "name": "dispatch_suggestion_id",
+          "type": "String",
+          "description": "命中所在的调度建议号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Suggestion"
+        },
+        {
+          "name": "hard_soft",
+          "type": "String",
+          "description": "硬约束/软约束。"
+        },
+        {
+          "name": "check_point",
+          "type": "String",
+          "description": "具体命中点(哪个时段/电站/机组)。"
+        },
+        {
+          "name": "value_vs_limit",
+          "type": "String",
+          "description": "实际值 vs 限值(如 水位 1613m vs 汛限 1612m)。"
+        },
+        {
+          "name": "default_action",
+          "type": "String",
+          "description": "命中默认动作:提示/自动调整/越限告警/转人工/升风险。"
+        },
+        {
+          "name": "risk_raised",
+          "type": "Boolean",
+          "description": "是否升风险(是→关联生成风险事件)。"
+        },
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "description": "升风险时关联的风险事件号。",
+          "is_foreign_key": true,
+          "references": "Risk_Event"
+        }
+      ]
+    },
+    {
+      "id": "Risk_Event",
+      "name": "风险事件",
+      "description": "风险事件是约束校验引擎在校验/比选时立项的异常或隐患记录(风险事件号 RK),类型 T1~T8(弃水/电网越限/防洪/设备/来水偏差/预测偏差/市场偏差/指令冲突),等级 L1~L4(决定处置层级与暂缓)。L3/L4 触发案件暂缓执行,L4 标记需上报上级调度。系统立项,人工可处置但不可删。",
+      "type": "data",
+      "relationship_description": "【风险事件 (Risk_Event)】挂在某个【调度辅助案件 (Dispatch_Case)】(及可能的【调度计划 (Dispatch_Plan)】)上,由命中的【约束规则 (Constraint_Rule)】触发,经【人工确认 (Manual_Approval)】处置。",
+      "primary_key": "risk_event_id",
+      "properties": [
+        {
+          "name": "risk_event_id",
+          "type": "String",
+          "description": "风险事件号,RK+8 位日期+5 位(如 RK2026053000007),主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "关联调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "涉及的调度计划号(如适用)。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "risk_type",
+          "type": "String",
+          "description": "风险类型 T1~T8(弃水/电网越限/防洪/设备/来水偏差/预测偏差/市场偏差/指令冲突)。"
+        },
+        {
+          "name": "risk_level",
+          "type": "String",
+          "description": "风险等级 L1~L4。"
+        },
+        {
+          "name": "hit_constraint_id",
+          "type": "String",
+          "description": "触发该风险的命中约束编码。",
+          "is_foreign_key": true,
+          "references": "Constraint_Rule"
+        },
+        {
+          "name": "evidence",
+          "type": "String",
+          "description": "风险证据/判定说明。"
+        },
+        {
+          "name": "disposal_action",
+          "type": "String",
+          "description": "处置动作:放行/退回修正/调整方案/否决/暂缓执行/上报上级调度。"
+        },
+        {
+          "name": "disposer_id",
+          "type": "String",
+          "description": "处置人工号(L1/L2 调度员/L3 值长/L4 值长+总工,属个人信息)。"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "状态:待处置/处置中/已闭环/误报关闭。"
+        },
+        {
+          "name": "is_suspended",
+          "type": "Boolean",
+          "description": "是否暂缓执行(L3/L4 标 true → 案件 SUSPENDED)。"
+        },
+        {
+          "name": "reported_up",
+          "type": "Boolean",
+          "description": "是否需上报上级调度(L4 标 true;标记≠已上报)。"
+        }
+      ]
+    },
+    {
+      "id": "Manual_Approval",
+      "name": "人工确认",
+      "description": "人工确认是\"AI 辅助+人确认\"的人侧落点(审批流实例号 AP),记录调度员复核、值长确认、总工审定等环节的确认结论(采纳/退回/否决/暂缓)、确认意见与关键参数修改的前值/后值/理由。触发以偏差或风险超阈为主,确认环节按风险等级卡级(L1/L2 调度员、L3 值长、L4 值长+总工)。",
+      "type": "data",
+      "relationship_description": "【人工确认 (Manual_Approval)】挂在某个【调度辅助案件 (Dispatch_Case)】(及可能的【调度计划 (Dispatch_Plan)】)上,由相应【系统角色 (Role)】的确认人按级处置。",
+      "primary_key": "manual_approval_id",
+      "properties": [
+        {
+          "name": "manual_approval_id",
+          "type": "String",
+          "description": "审批流实例号,AP+8 位日期+6 位(如 AP20260530000456),主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "关联调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "涉及的调度计划号(如适用)。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "stage",
+          "type": "String",
+          "description": "确认环节:调度员复核/值长确认/总工审定(按风险级卡)。"
+        },
+        {
+          "name": "confirmer_id",
+          "type": "String",
+          "description": "确认人工号(认账号不认脸,属个人信息)。"
+        },
+        {
+          "name": "conclusion",
+          "type": "String",
+          "description": "确认结论:采纳/退回/否决/暂缓。"
+        },
+        {
+          "name": "opinion",
+          "type": "String",
+          "description": "确认意见/留痕理由(≥10 字)。"
+        },
+        {
+          "name": "trace_before",
+          "type": "String",
+          "description": "关键参数修改前值(留痕快照)。"
+        },
+        {
+          "name": "trace_after",
+          "type": "String",
+          "description": "关键参数修改后值(留痕快照)。"
+        },
+        {
+          "name": "trace_reason",
+          "type": "String",
+          "description": "参数修改理由(留痕,≥10 字)。"
+        },
+        {
+          "name": "confirmed_at",
+          "type": "Timestamp",
+          "description": "确认时刻。"
+        }
+      ]
+    },
+    {
+      "id": "Scheme_Comparison",
+      "name": "方案比选",
+      "description": "方案比选是比选引擎对通过校验的多套候选建议做多维对比择优的产物(对应 OP-04、事件 SCHEMES_COMPARED),输出\"方案×评价维度\"的比选矩阵(防洪/电网/消纳/经济/关口偏差/置信度/命中风险/综合得分)并给出推荐方案。推荐方案明显占优是直通条件⑤,得分接近各有取舍则需人工裁量。",
+      "type": "data",
+      "relationship_description": "【方案比选 (Scheme_Comparison)】挂在某个【调度辅助案件 (Dispatch_Case)】下,对其候选【调度建议 (Dispatch_Suggestion)】集做对比并给出推荐方案。",
+      "primary_key": "scheme_comparison_id",
+      "properties": [
+        {
+          "name": "scheme_comparison_id",
+          "type": "String",
+          "description": "方案比选记录唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "所属调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "compared_suggestions",
+          "type": "List<String>",
+          "description": "参与比选的候选建议号列表(A/B/C)。"
+        },
+        {
+          "name": "comparison_matrix",
+          "type": "String",
+          "description": "比选矩阵(方案×评价维度:防洪/电网/消纳/经济/关口偏差/置信度/风险/综合得分)。"
+        },
+        {
+          "name": "recommended_suggestion_id",
+          "type": "String",
+          "description": "综合得分最高的推荐方案号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Suggestion"
+        },
+        {
+          "name": "is_clearly_dominant",
+          "type": "Boolean",
+          "description": "推荐方案是否明显占优(直通条件⑤);否则需人工裁量。"
+        },
+        {
+          "name": "comparison_time",
+          "type": "Timestamp",
+          "description": "比选完成时间。"
+        }
+      ]
+    },
+    {
+      "id": "Dispatch_Objective",
+      "name": "调度目标",
+      "description": "调度目标是调度建议优化所奔的目标及其优先级口径,分汛期(防洪安全>电网安全>清洁能源消纳>经济性)与非汛期(电网安全>经济性/消纳>来水蓄能优化)两套,作为建议引擎多目标优化的层级配置(高优先级先满足,防洪类为硬约束)。",
+      "type": "data",
+      "relationship_description": "【调度目标 (Dispatch_Objective)】为【调度建议 (Dispatch_Suggestion)】提供优化目标层级,其优先级随汛期/非汛期【运行方式 (Operating_Context)】切换。",
+      "primary_key": "dispatch_objective_id",
+      "properties": [
+        {
+          "name": "dispatch_objective_id",
+          "type": "String",
+          "description": "调度目标口径唯一编号,主键。"
+        },
+        {
+          "name": "target_profile",
+          "type": "String",
+          "description": "口径:汛期/非汛期。"
+        },
+        {
+          "name": "priority_order",
+          "type": "String",
+          "description": "目标优先级(从高到低,如 防洪安全>电网安全>消纳>经济性)。"
+        },
+        {
+          "name": "hard_objectives",
+          "type": "String",
+          "description": "属硬约束的目标(如防洪安全、电网安全)。"
+        },
+        {
+          "name": "description",
+          "type": "String",
+          "description": "该口径的适用说明与切换条件(按日历+实际水情判定)。"
+        }
+      ]
+    },
+    {
+      "id": "Operating_Context",
+      "name": "运行方式",
+      "description": "运行方式是描述电网配置、设备检修/受阻方式及外部环境背景(汛期/非汛期、丰枯季节、节假日方式、特殊运行标识)的业务组合,作为调度流水线的边界背景条件,直接驱动约束规则阈值切换(如水位上限参照点)与算法逻辑及调度目标优先级的选择。",
+      "type": "data",
+      "relationship_description": "【运行方式 (Operating_Context)】作为边界背景被【调度辅助案件 (Dispatch_Case)】引用,并决定【调度目标 (Dispatch_Objective)】的汛期/非汛期口径与约束阈值切换。",
+      "primary_key": "operating_context_id",
+      "properties": [
+        {
+          "name": "operating_context_id",
+          "type": "String",
+          "description": "运行方式编号,主键。"
+        },
+        {
+          "name": "season_tag",
+          "type": "String",
+          "description": "季节/汛期标识:汛期/非汛期、丰水期/枯水期。"
+        },
+        {
+          "name": "calendar_type",
+          "type": "String",
+          "description": "日历类型:工作日/节假日方式。"
+        },
+        {
+          "name": "special_operating_mode",
+          "type": "String",
+          "description": "特殊运行标识(如检修方式、受阻方式、特殊方式)。"
+        },
+        {
+          "name": "is_maintenance_mode",
+          "type": "Boolean",
+          "description": "是否处于检修方式。"
+        },
+        {
+          "name": "forecast_model_version",
+          "type": "String",
+          "description": "该方式下采用的预测/算法模型版本。"
+        }
+      ]
+    },
+    {
+      "id": "Grid_Interface_Plan",
+      "name": "关口送出计划",
+      "description": "关口送出计划是上级省调下达的关口送出限额或 96 点送出曲线指令(GZL),是衡量本地调度执行合规性的最高优先级硬边界与考核基准。所有调度方案的关口送出曲线都要对齐 GZL,关口偏差≤3% 是直通条件①;超出即触发上级关口约束(CR-GRID-03)。",
+      "type": "data",
+      "relationship_description": "【关口送出计划 (Grid_Interface_Plan)】由省调下达、经慧采接入,对应某个【电网断面 (Grid_Section)】,是【调度计划 (Dispatch_Plan)】关口送出曲线对齐与偏差核算的基准。",
+      "primary_key": "grid_interface_plan_id",
+      "properties": [
+        {
+          "name": "grid_interface_plan_id",
+          "type": "String",
+          "description": "关口计划号(GZL),主键。"
+        },
+        {
+          "name": "target_date",
+          "type": "Date",
+          "description": "关口计划覆盖日期。"
+        },
+        {
+          "name": "grid_section_id",
+          "type": "String",
+          "description": "对应的送出断面/关口编码。",
+          "is_foreign_key": true,
+          "references": "Grid_Section"
+        },
+        {
+          "name": "interface_curve_96",
+          "type": "List<String>",
+          "description": "关口送出曲线(MW,96 点)。"
+        },
+        {
+          "name": "total_daily_limit",
+          "type": "Float",
+          "description": "日送出电量限额(MWh)。"
+        },
+        {
+          "name": "issuing_authority",
+          "type": "String",
+          "description": "下达机构(省调/上级电网调度)。"
+        },
+        {
+          "name": "received_time",
+          "type": "Timestamp",
+          "description": "接入/接收时间。"
+        }
+      ]
+    },
+    {
+      "id": "Grid_Section",
+      "name": "电网断面",
+      "description": "电网断面是电站送出与电网安全校核所依据的输电断面/送出通道,具有稳定限额与潮流约束,是电网约束(送出断面限额 CR-GRID-01、N-1 安全校核)与关口送出对齐的物理对象。越限触发电网越限风险(T2)。",
+      "type": "data",
+      "relationship_description": "【电网断面 (Grid_Section)】是【电站 (Power_Station)】的并网/送出对象,也是【关口送出计划 (Grid_Interface_Plan)】对齐的断面,其限额由电网组约束规则校验。",
+      "primary_key": "grid_section_id",
+      "properties": [
+        {
+          "name": "grid_section_id",
+          "type": "String",
+          "description": "断面/送出通道编码,主键。"
+        },
+        {
+          "name": "section_name",
+          "type": "String",
+          "description": "断面名称(如某送出断面/通道)。"
+        },
+        {
+          "name": "section_type",
+          "type": "String",
+          "description": "类型:送出断面/省际关口/通道。"
+        },
+        {
+          "name": "stability_limit_mw",
+          "type": "Float",
+          "description": "稳定输送限额(MW)。"
+        },
+        {
+          "name": "voltage_level",
+          "type": "String",
+          "description": "电压等级(kV)。"
+        },
+        {
+          "name": "description",
+          "type": "String",
+          "description": "断面说明与关联电站/线路。"
+        }
+      ]
+    },
+    {
+      "id": "Dispatch_Instruction",
+      "name": "调度指令",
+      "description": "调度指令是调度计划回写能控 EMS 后由能控 EMS 下发到各电站的执行指令(OP-08、事件 DISPATCHED),包括 AGC(自动发电控制)、AVC(自动电压控制)与开停机令。智调只负责定版与回写,指令下发与执行由能控 EMS 接管,智调不直接下令。",
+      "type": "data",
+      "relationship_description": "【调度指令 (Dispatch_Instruction)】依据某份【调度计划 (Dispatch_Plan)】由能控 EMS【业务系统 (Business_System)】下发至某座【电站 (Power_Station)】或【设备 (Equipment)】。",
+      "primary_key": "dispatch_instruction_id",
+      "properties": [
+        {
+          "name": "dispatch_instruction_id",
+          "type": "String",
+          "description": "调度指令唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "依据的调度计划号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "power_station_id",
+          "type": "String",
+          "description": "指令目标电站号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "equipment_id",
+          "type": "String",
+          "description": "指令目标机组号(如适用)。",
+          "is_foreign_key": true,
+          "references": "Equipment"
+        },
+        {
+          "name": "instruction_type",
+          "type": "String",
+          "description": "指令类型:AGC/AVC/开停机令。"
+        },
+        {
+          "name": "issued_by_system_id",
+          "type": "String",
+          "description": "下发系统(能控 EMS)。",
+          "is_foreign_key": true,
+          "references": "Business_System"
+        },
+        {
+          "name": "target_value",
+          "type": "String",
+          "description": "指令目标值(出力 MW/电压/开停状态)。"
+        },
+        {
+          "name": "dispatched_at",
+          "type": "Timestamp",
+          "description": "指令下发时间。"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "指令状态:已下发/执行中/已执行/失败。"
+        }
+      ]
+    },
+    {
+      "id": "Execution_Feedback",
+      "name": "执行反馈",
+      "description": "执行反馈是机组执行后由慧采/SCADA 回采的实际出力等量测(OP-09、事件 EXECUTION_FEEDBACK),喂回智调与计划比对,是偏差复盘的输入与闭环的开始。回采经慧采,智调不直接采数。",
+      "type": "data",
+      "relationship_description": "【执行反馈 (Execution_Feedback)】针对某份【调度计划 (Dispatch_Plan)】回采某座【电站 (Power_Station)】或【设备 (Equipment)】的实际出力,供【偏差报告 (Deviation_Report)】比对。",
+      "primary_key": "execution_feedback_id",
+      "properties": [
+        {
+          "name": "execution_feedback_id",
+          "type": "String",
+          "description": "执行反馈记录唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "对应的调度计划号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "power_station_id",
+          "type": "String",
+          "description": "回采的电站号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "equipment_id",
+          "type": "String",
+          "description": "回采的机组号(如适用)。",
+          "is_foreign_key": true,
+          "references": "Equipment"
+        },
+        {
+          "name": "actual_output_96",
+          "type": "List<String>",
+          "description": "实际出力(MW,96 点回采)。"
+        },
+        {
+          "name": "actual_gate_energy",
+          "type": "Float",
+          "description": "实际关口送出电量(MWh)。"
+        },
+        {
+          "name": "feedback_time",
+          "type": "Timestamp",
+          "description": "回采时间。"
+        },
+        {
+          "name": "source_system",
+          "type": "String",
+          "description": "回采来源(慧采/SCADA)。"
+        }
+      ]
+    },
+    {
+      "id": "Deviation_Report",
+      "name": "偏差报告",
+      "description": "偏差报告是执行反馈回采后智调自动做的实际 vs 计划偏差复盘产物(OP-10、事件 DEVIATION_ANALYZED),按 96 点逐时段算逐点偏差与关口送出整体偏差百分比,并归因(来水/资源/预测/执行偏差),是运行分析与稽核复盘的数据基础,结论反哺预测模型与约束阈值优化。",
+      "type": "data",
+      "relationship_description": "【偏差报告 (Deviation_Report)】针对某个【调度辅助案件 (Dispatch_Case)】及其【调度计划 (Dispatch_Plan)】,对比【执行反馈 (Execution_Feedback)】与计划,产出偏差分析供运行分析与稽核使用。",
+      "primary_key": "deviation_report_id",
+      "properties": [
+        {
+          "name": "deviation_report_id",
+          "type": "String",
+          "description": "偏差报告唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "关联调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "对比的调度计划号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "point_deviation_96",
+          "type": "List<String>",
+          "description": "逐时段偏差(实际−计划,MW,96 点)。"
+        },
+        {
+          "name": "gate_deviation_rate",
+          "type": "Float",
+          "description": "关口送出整体偏差百分比(实际 vs 计划/GZL)。"
+        },
+        {
+          "name": "deviation_cause",
+          "type": "String",
+          "description": "偏差归因(来水/资源/预测/执行偏差)。"
+        },
+        {
+          "name": "analysis_conclusion",
+          "type": "String",
+          "description": "复盘结论与优化建议(反哺模型/阈值)。"
+        },
+        {
+          "name": "analyzed_at",
+          "type": "Timestamp",
+          "description": "偏差复盘时间。"
+        }
+      ]
+    },
+    {
+      "id": "Market_Declaration",
+      "name": "市场申报",
+      "description": "市场申报是调度计划中的市场申报量价经能控 EMS 回写至电力交易中心的申报记录(OP-12),含现货量价申报与中长期合约电量分解,受申报量价上下限(CR-MKT-01)与偏差考核带(CR-MKT-02)约束。智调不直连交易中心,申报经能控 EMS 中转。",
+      "type": "data",
+      "relationship_description": "【市场申报 (Market_Declaration)】依据某份【调度计划 (Dispatch_Plan)】(及其【调度辅助案件 (Dispatch_Case)】)向电力交易中心申报量价。",
+      "primary_key": "market_declaration_id",
+      "properties": [
+        {
+          "name": "market_declaration_id",
+          "type": "String",
+          "description": "市场申报记录唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_plan_id",
+          "type": "String",
+          "description": "依据的调度计划号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Plan"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "关联调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "declaration_type",
+          "type": "String",
+          "description": "申报类型:现货/中长期合约。"
+        },
+        {
+          "name": "bid_quantity_price",
+          "type": "String",
+          "description": "申报量价(量 MWh/价,按时段)。"
+        },
+        {
+          "name": "clearing_result",
+          "type": "String",
+          "description": "出清结果(经慧采接回)。"
+        },
+        {
+          "name": "declared_at",
+          "type": "Timestamp",
+          "description": "申报时间。"
+        }
+      ]
+    },
+    {
+      "id": "Maintenance_Plan",
+      "name": "检修计划",
+      "description": "检修计划是设备通维护的机组/设备检修与受阻安排,决定设备状态与可用容量,智调只读引用。检修导致的可用容量下降是机组约束(检修/受阻可用容量 CR-UNIT-04)的校验依据,设备通同步不及时会导致预测虚高与约束带病放行。",
+      "type": "data",
+      "relationship_description": "【检修计划 (Maintenance_Plan)】针对某台【设备 (Equipment)】(及其所属【电站 (Power_Station)】)安排检修/受阻,影响其可用容量与出力预测。",
+      "primary_key": "maintenance_plan_id",
+      "properties": [
+        {
+          "name": "maintenance_plan_id",
+          "type": "String",
+          "description": "检修计划单唯一编号,主键。"
+        },
+        {
+          "name": "equipment_id",
+          "type": "String",
+          "description": "检修对象设备/机组号。",
+          "is_foreign_key": true,
+          "references": "Equipment"
+        },
+        {
+          "name": "power_station_id",
+          "type": "String",
+          "description": "所属电站号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "maintenance_type",
+          "type": "String",
+          "description": "检修类型:计划检修/临时检修/受阻。"
+        },
+        {
+          "name": "start_time",
+          "type": "Timestamp",
+          "description": "检修起始时间。"
+        },
+        {
+          "name": "end_time",
+          "type": "Timestamp",
+          "description": "检修结束时间。"
+        },
+        {
+          "name": "available_mw_during",
+          "type": "Float",
+          "description": "检修/受阻期间可用容量(MW)。"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "状态:计划/执行中/已完成/取消。"
+        }
+      ]
+    },
+    {
+      "id": "Business_System",
+      "name": "业务系统",
+      "description": "业务系统是调度运转所依赖的信息系统,分自有\"五件套\"(数据采集接入平台慧采、智能调度辅助决策系统智调、能量管理与生产计划系统能控EMS、气象水文预报系统预报通、机组与设备管理系统设备通)与\"外联\"(省调、电力交易中心、流域梯级水调机构、气象局/水文站)。每类数据有唯一写入源,其余系统只读。",
+      "type": "data",
+      "relationship_description": "【业务系统 (Business_System)】是各类调度数据的唯一写入源或读取方,承载【系统角色 (Role)】的操作,并作为【调度指令 (Dispatch_Instruction)】下发方与【关键控制点 (Key_Control_Point)】的责任系统。",
+      "primary_key": "business_system_id",
+      "properties": [
+        {
+          "name": "business_system_id",
+          "type": "String",
+          "description": "业务系统唯一编号,主键。"
+        },
+        {
+          "name": "system_name",
+          "type": "String",
+          "description": "系统名称(慧采/智调/能控EMS/预报通/设备通/省调/电力交易中心等)。"
+        },
+        {
+          "name": "system_category",
+          "type": "String",
+          "description": "系统类别:五件套(自有)/外联。"
+        },
+        {
+          "name": "role_in_flow",
+          "type": "String",
+          "description": "在数据流中的角色(入口采集/决策工作台/落地执行/预报源/设备台账等)。"
+        },
+        {
+          "name": "data_ownership",
+          "type": "String",
+          "description": "作为唯一写入源拥有的数据类别(如 SCADA 实测/气象批次/调度计划/可用容量)。"
+        },
+        {
+          "name": "is_internal",
+          "type": "Boolean",
+          "description": "是否自有系统(五件套为是,外联为否)。"
+        }
+      ]
+    },
+    {
+      "id": "Role",
+      "name": "系统角色",
+      "description": "系统角色是智调中按调度中心岗位序列划分的权限角色,如值班调度员、值长、水调/水文专责、新能源功率预测专责、设备/检修专责、安全/调度稽核、智调系统组、总调度师(总工)、调度中心主任。权限分看/做/定三类,确认级别按风险等级卡死(L1/L2 调度员、L3 值长、L4 值长+总工),并遵循配置权与确认权分离、稽核只看不批。",
+      "type": "data",
+      "relationship_description": "【系统角色 (Role)】主要在某个【业务系统 (Business_System)】中行使,决定对【调度辅助案件 (Dispatch_Case)】的处置与确认级别,并作为【约束规则 (Constraint_Rule)】与【关键控制点 (Key_Control_Point)】的责任方。",
+      "primary_key": "role_id",
+      "properties": [
+        {
+          "name": "role_id",
+          "type": "String",
+          "description": "系统角色唯一编号,主键。"
+        },
+        {
+          "name": "role_name",
+          "type": "String",
+          "description": "角色名称(值班调度员/值长/水调专责/预测专责/设备专责/安全稽核/系统组/总工/调度中心主任)。"
+        },
+        {
+          "name": "primary_system_id",
+          "type": "String",
+          "description": "该角色主要行使所在的业务系统。",
+          "is_foreign_key": true,
+          "references": "Business_System"
+        },
+        {
+          "name": "permission_view",
+          "type": "String",
+          "description": "看(查看)权限范围(全部案件/相关专业案件/含审计日志等)。"
+        },
+        {
+          "name": "permission_operate",
+          "type": "String",
+          "description": "做(操作/编辑)权限(触发重算/编辑解释/维护可用容量/配规则等)。"
+        },
+        {
+          "name": "permission_confirm",
+          "type": "String",
+          "description": "定(确认/审定)权限及可确认到的最高风险级(L2/L3/L4 或不参与确认)。"
+        }
+      ]
+    },
+    {
+      "id": "Audit_Finding",
+      "name": "稽核发现",
+      "description": "稽核发现是运行稽核(第三道防线)审出的问题,按严重程度分一般/重要/严重/重大四级(与运行风险 L1~L4 逻辑类似但属审计问题),载明所涉案件、环节、问题事实、整改要求与闭环状态,严重及以上涉及越权、借账号、绕分流、超关口、防洪红线越权放行等纪律红线。",
+      "type": "data",
+      "relationship_description": "【稽核发现 (Audit_Finding)】针对某个【调度辅助案件 (Dispatch_Case)】在某个【关键控制点 (Key_Control_Point)】审出问题,由作为安全稽核的角色提出并跟踪整改闭环。",
+      "primary_key": "audit_finding_id",
+      "properties": [
+        {
+          "name": "audit_finding_id",
+          "type": "String",
+          "description": "稽核发现唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "所涉调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "key_control_point_id",
+          "type": "String",
+          "description": "关联的关键控制点编号(在哪个控制点发现)。",
+          "is_foreign_key": true,
+          "references": "Key_Control_Point"
+        },
+        {
+          "name": "working_paper_id",
+          "type": "String",
+          "description": "该发现所属的稽核底稿编号。",
+          "is_foreign_key": true,
+          "references": "Audit_Working_Paper"
+        },
+        {
+          "name": "finding_level",
+          "type": "String",
+          "description": "发现等级:一般/重要/严重/重大。"
+        },
+        {
+          "name": "finding_description",
+          "type": "String",
+          "description": "问题事实描述(哪个环节、什么问题)。"
+        },
+        {
+          "name": "rectification_requirement",
+          "type": "String",
+          "description": "整改要求(谁改、改什么、何时改完、怎么验证)。"
+        },
+        {
+          "name": "is_closed",
+          "type": "Boolean",
+          "description": "整改是否闭环。"
+        },
+        {
+          "name": "auditor_id",
+          "type": "String",
+          "description": "稽核人工号(如 E020077,属个人信息)。"
+        }
+      ]
+    },
+    {
+      "id": "Key_Control_Point",
+      "name": "关键控制点",
+      "description": "关键控制点(KCP)是调度全链路上为防范特定风险而设置的内控控制点,覆盖数据质控、预测合格率、约束校验、分流阈值、人工确认留痕、审批权限、回写执行、复核/整改闭环率等环节,按预防/检测/纠正属性搭配使用,配有责任系统/角色与稽核验证方法,是运行稽核验证控制有效性的依据。",
+      "type": "data",
+      "relationship_description": "【关键控制点 (Key_Control_Point)】落在某个【业务系统 (Business_System)】或【系统角色 (Role)】上,其控制手段常对应特定【约束规则 (Constraint_Rule)】,是【稽核发现 (Audit_Finding)】的定位环节。",
+      "primary_key": "key_control_point_id",
+      "properties": [
+        {
+          "name": "key_control_point_id",
+          "type": "String",
+          "description": "控制点编号(KCP),主键。"
+        },
+        {
+          "name": "link_stage",
+          "type": "String",
+          "description": "所在链路环节(数据质控/预测合格率/约束校验/分流阈值/确认留痕/审批权限/回写执行/整改闭环)。"
+        },
+        {
+          "name": "risk_description",
+          "type": "String",
+          "description": "该控制点防范的风险。"
+        },
+        {
+          "name": "control_mechanism",
+          "type": "String",
+          "description": "控制手段(质控六道关/合格率把关/五组约束/五条件直通/留痕必填/逐级审批等)。"
+        },
+        {
+          "name": "control_type",
+          "type": "String",
+          "description": "控制属性:预防型/检测型/纠正型。"
+        },
+        {
+          "name": "related_system_id",
+          "type": "String",
+          "description": "主要承载该控制的业务系统。",
+          "is_foreign_key": true,
+          "references": "Business_System"
+        },
+        {
+          "name": "responsible_role_id",
+          "type": "String",
+          "description": "该控制点的责任角色。",
+          "is_foreign_key": true,
+          "references": "Role"
+        },
+        {
+          "name": "related_constraint_id",
+          "type": "String",
+          "description": "对应的约束规则编码(如适用)。",
+          "is_foreign_key": true,
+          "references": "Constraint_Rule"
+        },
+        {
+          "name": "audit_verification_method",
+          "type": "String",
+          "description": "稽核验证该控制是否有效的方法。"
+        }
+      ]
+    },
+    {
+      "id": "Audit_Event",
+      "name": "审计事件",
+      "description": "审计事件是调度全链路上每一次状态流转/关键动作触发的事件留痕(约 19 类事件,如 DATA_INGESTED、FORECAST_COMPLETED、CONSTRAINT_VIOLATED、ROUTED_TO_MANUAL、MANUAL_CONFIRMED、PLAN_FINALIZED、DISPATCHED、DEVIATION_ANALYZED、ARCHIVED 等),记录事件类型、触发主体、时间、状态前后值与理由,是全链路审计追踪与可回放的底座(对应案件的 trace_log,任何修改记谁/何时/前值/后值/理由)。",
+      "type": "data",
+      "relationship_description": "【审计事件 (Audit_Event)】挂在某个【调度辅助案件 (Dispatch_Case)】上,按时间线记录由【系统角色 (Role)】对应人员或系统触发的动作,构成不可删的审计留痕。",
+      "primary_key": "audit_event_id",
+      "properties": [
+        {
+          "name": "audit_event_id",
+          "type": "String",
+          "description": "审计事件留痕唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "关联调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "event_type",
+          "type": "String",
+          "description": "事件类型(DATA_INGESTED/FORECAST_COMPLETED/CONSTRAINT_VIOLATED/ROUTED_TO_MANUAL/MANUAL_CONFIRMED/PLAN_FINALIZED/DISPATCHED/DEVIATION_ANALYZED/ARCHIVED 等)。"
+        },
+        {
+          "name": "actor_type",
+          "type": "String",
+          "description": "触发主体类型:系统/人工。"
+        },
+        {
+          "name": "operator_id",
+          "type": "String",
+          "description": "人工触发时的操作人工号(系统触发为空,属个人信息)。"
+        },
+        {
+          "name": "event_time",
+          "type": "Timestamp",
+          "description": "事件发生时间。"
+        },
+        {
+          "name": "from_status",
+          "type": "String",
+          "description": "状态变更前态(如适用)。"
+        },
+        {
+          "name": "to_status",
+          "type": "String",
+          "description": "状态变更后态(如适用)。"
+        },
+        {
+          "name": "trace_detail",
+          "type": "String",
+          "description": "事件详情/前后值/理由留痕。"
+        }
+      ]
+    },
+    {
+      "id": "Interpretation_Result",
+      "name": "数据解释结果",
+      "description": "数据解释结果是数据解释引擎(①段,事件 DATA_INTERPRETED)将质控对齐后的原始气象/水文数据解释成调度可直接使用的信号,分来水信号(水电:各梯级电站逐 96 点来水/蓄能信号及涨/平/退趋势)与资源信号(风光:各风光场逐 96 点风/光资源强度),是出力预测的直接输入。梯级来水解释须按水流滞时把上级出库平移为下级入库,滞时配错会使下级来水信号在时间轴上错位。",
+      "type": "data",
+      "relationship_description": "【数据解释结果 (Interpretation_Result)】挂在某个【调度辅助案件 (Dispatch_Case)】下,由【水文数据 (Hydrology_Data)】解释为来水信号、由【气象数据 (Weather_Data)】解释为资源信号,服务于对应【电站 (Power_Station)】的【出力预测 (Output_Forecast)】。",
+      "primary_key": "interpretation_result_id",
+      "properties": [
+        {
+          "name": "interpretation_result_id",
+          "type": "String",
+          "description": "数据解释结果唯一编号,主键。"
+        },
+        {
+          "name": "dispatch_case_id",
+          "type": "String",
+          "description": "所属调度辅助案件号。",
+          "is_foreign_key": true,
+          "references": "Dispatch_Case"
+        },
+        {
+          "name": "interpretation_type",
+          "type": "String",
+          "description": "解释类型:来水信号(水电)/资源信号(风光)。"
+        },
+        {
+          "name": "station_id",
+          "type": "String",
+          "description": "解释结果对应的电站号。",
+          "is_foreign_key": true,
+          "references": "Power_Station"
+        },
+        {
+          "name": "weather_data_id",
+          "type": "String",
+          "description": "资源信号所依据的气象批次号(风光)。",
+          "is_foreign_key": true,
+          "references": "Weather_Data"
+        },
+        {
+          "name": "hydrology_data_id",
+          "type": "String",
+          "description": "来水信号所依据的水文批次号(水电)。",
+          "is_foreign_key": true,
+          "references": "Hydrology_Data"
+        },
+        {
+          "name": "signal_profile_96",
+          "type": "List<String>",
+          "description": "逐 96 点信号值(来水/蓄能 或 风/光资源强度)。"
+        },
+        {
+          "name": "inflow_trend",
+          "type": "String",
+          "description": "来水趋势:涨/平/退(来水信号适用)。"
+        },
+        {
+          "name": "lag_time_setting",
+          "type": "String",
+          "description": "梯级水流滞时参数设置(来水信号适用,汛期流速快滞时变短)。"
+        },
+        {
+          "name": "interpreted_by",
+          "type": "String",
+          "description": "口径审定专责工号(水调/预测,属个人信息)。"
+        },
+        {
+          "name": "interpreted_at",
+          "type": "Timestamp",
+          "description": "解释完成时间。"
+        }
+      ]
+    },
+    {
+      "id": "Forecast_Model",
+      "name": "预测模型",
+      "description": "预测模型是出力预测引擎背后的算法模型及其版本(如风电功率 WIND-v3.2、光伏出力 SOLAR-v2.5、水电来水出力 HYDRO-v4.1),各自独立版本管理。上线/回退权限在智调系统组,上线须经离线回评与影子运行且影子期合格率不低于在线版,全过程留痕;模型版本切换只对之后新生成的预测生效,不追溯重算历史批次,每个出力预测批次都记录所用版本,是偏差复盘追责的关键线索。",
+      "type": "data",
+      "relationship_description": "【预测模型 (Forecast_Model)】由智调系统组【系统角色 (Role)】管理上线与回退,被【出力预测 (Output_Forecast)】引用以记录所用模型版本。",
+      "primary_key": "forecast_model_id",
+      "properties": [
+        {
+          "name": "forecast_model_id",
+          "type": "String",
+          "description": "预测模型版本标识,模型类型+主版本.次版本(如 WIND-v3.2),主键。"
+        },
+        {
+          "name": "model_type",
+          "type": "String",
+          "description": "模型类型:风电功率/光伏出力/水电来水出力。"
+        },
+        {
+          "name": "algorithm_desc",
+          "type": "String",
+          "description": "算法/口径说明(如风机功率曲线、辐照-效率修正、来水-水头-效率)。"
+        },
+        {
+          "name": "offline_qualified_rate",
+          "type": "Float",
+          "description": "上线前离线回评 P50 合格率。"
+        },
+        {
+          "name": "shadow_run_result",
+          "type": "String",
+          "description": "影子运行比对结果(新旧版本并行准确率)。"
+        },
+        {
+          "name": "online_status",
+          "type": "String",
+          "description": "在线状态:在线/影子运行/已回退/下线。"
+        },
+        {
+          "name": "online_time",
+          "type": "Timestamp",
+          "description": "上线时间。"
+        },
+        {
+          "name": "managed_by_role_id",
+          "type": "String",
+          "description": "负责上线/回退的角色(智调系统组)。",
+          "is_foreign_key": true,
+          "references": "Role"
+        }
+      ]
+    },
+    {
+      "id": "Audit_Working_Paper",
+      "name": "稽核底稿",
+      "description": "稽核底稿是每一次运行稽核(无论是否查出问题)都必须留存的工作留痕与证据,载明稽核批次/编号、稽核时间与稽核人、抽样范围与方法、稽核依据(本手册/统一基线/约束规则库 CR-*)、稽核发现、无异常说明与整改要求。底稿要求可复核、可追溯——别人顺着抽样范围、依据、发现能复现稽核判断,是稽核工作本身被监督的依据。",
+      "type": "data",
+      "relationship_description": "【稽核底稿 (Audit_Working_Paper)】由作为安全稽核的【系统角色 (Role)】对抽样的【调度辅助案件 (Dispatch_Case)】开展稽核形成,其逐条问题记为【稽核发现 (Audit_Finding)】。",
+      "primary_key": "audit_working_paper_id",
+      "properties": [
+        {
+          "name": "audit_working_paper_id",
+          "type": "String",
+          "description": "稽核批次/底稿唯一编号,主键。"
+        },
+        {
+          "name": "audit_time",
+          "type": "Timestamp",
+          "description": "稽核时间。"
+        },
+        {
+          "name": "auditor_id",
+          "type": "String",
+          "description": "稽核人工号(如 E020077,属个人信息)。"
+        },
+        {
+          "name": "sampled_cases",
+          "type": "List<String>",
+          "description": "抽样的调度辅助案件号清单。"
+        },
+        {
+          "name": "sampling_method",
+          "type": "String",
+          "description": "抽样范围与方法(现场/非现场、随机/重点)。"
+        },
+        {
+          "name": "audit_basis",
+          "type": "String",
+          "description": "稽核依据(本手册/统一基线/约束规则库 CR-*)。"
+        },
+        {
+          "name": "no_exception_note",
+          "type": "String",
+          "description": "无异常说明(审过未见异常的也须写明)。"
+        },
+        {
+          "name": "rectification_summary",
+          "type": "String",
+          "description": "整改要求汇总(谁、何时、怎么改)。"
+        }
+      ]
+    }
+  ]
+}

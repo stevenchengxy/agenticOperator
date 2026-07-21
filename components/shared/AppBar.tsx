@@ -1,8 +1,13 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import clsx from "clsx";
 import { Ic } from "./Ic";
 import { useApp } from "@/lib/i18n";
+import { useDomain } from "@/lib/domains";
+import { useEmHealth } from "@/lib/api/em-health";
+import { fetchJson } from "@/lib/api/client";
+import { DomainSwitcher } from "./DomainSwitcher";
 
 export function AppBar({
   crumbs = [],
@@ -12,6 +17,9 @@ export function AppBar({
   onOpenCmdK?: () => void;
 }) {
   const { t, lang, setLang, theme, setTheme } = useApp();
+  // Global EM health pill — visible from every page so degraded mode
+  // (Neo4j unreachable / EM library faulted) is never invisible.
+  const emHealth = useEmHealth();
   return (
     <div className="flex items-center h-11 px-3.5 gap-3 border-b border-line bg-surface relative z-10">
       <div className="flex items-center gap-2 font-semibold text-[13px] tracking-tight">
@@ -40,6 +48,7 @@ export function AppBar({
       </div>
       <div className="flex-1" />
 
+      {/* ── Search ───────────────────────────────────────────────── */}
       <button
         onClick={onOpenCmdK}
         className="flex items-center gap-2 h-7 px-2.5 bg-panel border border-line rounded-md text-ink-3 text-[12px] min-w-[240px] cursor-pointer hover:border-line-strong"
@@ -49,52 +58,164 @@ export function AppBar({
         <kbd className="ml-auto font-mono text-[10px] bg-surface border border-line rounded-sm px-[5px] py-[1px] text-ink-3">⌘K</kbd>
       </button>
 
-      <div className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] bg-panel border border-line text-ink-2 whitespace-nowrap">
-        <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--c-ok)] anim-pulse" style={{ boxShadow: "0 0 0 3px color-mix(in oklab, var(--c-ok) 20%, transparent)" }} />
-        {t("realtime")}
+      {/* ── System status (passive indicators, clustered) ─────────── */}
+      <Sep />
+      <div className="flex items-center gap-1.5">
+        <div className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] bg-panel border border-line text-ink-2 whitespace-nowrap">
+          <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--c-ok)] anim-pulse" style={{ boxShadow: "0 0 0 3px color-mix(in oklab, var(--c-ok) 20%, transparent)" }} />
+          {t("realtime")}
+        </div>
+        <EmStatusPill health={emHealth.data} loading={emHealth.loading} onSync={emHealth.syncNow} />
       </div>
 
-      {/* Language segmented */}
-      <div className="flex items-center h-6 p-[2px] bg-panel border border-line rounded-md">
+      {/* ── Workspace context ─────────────────────────────────────── */}
+      <Sep />
+      <DomainSwitcher />
+
+      {/* ── User controls ─────────────────────────────────────────── */}
+      <Sep />
+      <div className="flex items-center gap-1.5">
+        {/* Language segmented */}
+        <div className="flex items-center h-6 p-[2px] bg-panel border border-line rounded-md">
+          <button
+            onClick={() => setLang("zh")}
+            className={clsx(
+              "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
+              lang === "zh" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
+            )}
+          >
+            中文
+          </button>
+          <button
+            onClick={() => setLang("en")}
+            className={clsx(
+              "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
+              lang === "en" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
+            )}
+          >
+            EN
+          </button>
+        </div>
+
+        {/* Theme toggle */}
         <button
-          onClick={() => setLang("zh")}
-          className={clsx(
-            "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
-            lang === "zh" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
-          )}
+          className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line"
+          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+          title={theme === "light" ? t("theme_dark") : t("theme_light")}
         >
-          中文
+          {theme === "light" ? <Ic.moon /> : <Ic.sun />}
         </button>
-        <button
-          onClick={() => setLang("en")}
-          className={clsx(
-            "h-5 px-2 rounded-sm text-[11px] cursor-pointer border-0",
-            lang === "en" ? "bg-surface text-ink-1 shadow-sh-1" : "bg-transparent text-ink-3"
-          )}
+
+        <BellLink />
+
+        <div
+          className="w-[26px] h-[26px] rounded-full grid place-items-center text-white text-[11px] font-semibold"
+          style={{ background: "linear-gradient(135deg, oklch(0.72 0.08 25), oklch(0.58 0.13 320))" }}
         >
-          EN
-        </button>
-      </div>
-
-      {/* Theme toggle */}
-      <button
-        className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line"
-        onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-        title={theme === "light" ? t("theme_dark") : t("theme_light")}
-      >
-        {theme === "light" ? <Ic.moon /> : <Ic.sun />}
-      </button>
-
-      <button className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line" title="alerts">
-        <Ic.bell />
-      </button>
-
-      <div
-        className="w-[26px] h-[26px] rounded-full grid place-items-center text-white text-[11px] font-semibold"
-        style={{ background: "linear-gradient(135deg, oklch(0.72 0.08 25), oklch(0.58 0.13 320))" }}
-      >
-        Z
+          Z
+        </div>
       </div>
     </div>
+  );
+}
+
+// Hairline zone separator for the AppBar. Splits search · status · context ·
+// controls into visually distinct groups so passive indicators (realtime, EM)
+// stop reading as buttons sitting in one undifferentiated pill row.
+function Sep() {
+  return <div className="w-px h-5 bg-line" aria-hidden />;
+}
+
+// 铃铛 → 消息通知中心入口 + 域内红点(10s 轮询)。红点口径 = unreadNotify
+// (shouldNotify=true 的未读):普通业务消息(shouldNotify=false)不点亮,
+// 否则红点常亮失去信号价值(2026-06-11 审计)。
+function BellLink() {
+  const { t } = useApp();
+  const { domain } = useDomain();
+  const [unread, setUnread] = React.useState(0);
+
+  React.useEffect(() => {
+    const qs = domain ? `&domain=${encodeURIComponent(domain)}` : "";
+    const tick = () => {
+      fetchJson<{ counts: { unreadNotify?: number } | null }>(`/api/notifications?countsOnly=1${qs}`, { cache: "no-store" })
+        .then((j) => setUnread(j.counts?.unreadNotify ?? 0))
+        .catch(() => {/* keep last value */});
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => clearInterval(id);
+  }, [domain]);
+
+  return (
+    <Link
+      href="/notifications"
+      className="w-7 h-7 grid place-items-center rounded-md border border-transparent text-ink-2 hover:bg-panel hover:border-line relative"
+      title={unread > 0 ? `${t("ntf_title")} · ${unread}` : t("ntf_title")}
+    >
+      <Ic.bell />
+      {unread > 0 && (
+        <span
+          className="absolute top-[3px] right-[3px] w-[7px] h-[7px] rounded-full"
+          style={{ background: "var(--c-err)", boxShadow: "0 0 0 2px var(--c-surface)" }}
+          aria-hidden
+        />
+      )}
+    </Link>
+  );
+}
+
+// EM dot — three states: healthy (green) / degraded (orange) / down or
+// unconfigured (red). Click triggers a manual sync; tooltip explains why.
+function EmStatusPill({
+  health,
+  loading,
+  onSync,
+}: {
+  health: ReturnType<typeof useEmHealth>["data"];
+  loading: boolean;
+  onSync: () => Promise<void>;
+}) {
+  const state = health?.state ?? (loading ? "loading" : "unknown");
+  const palette: Record<string, { color: string; label: string }> = {
+    healthy: { color: "var(--c-ok)", label: "EM 正常" },
+    degraded: { color: "var(--c-warn)", label: "EM 降级" },
+    down: { color: "var(--c-err)", label: "EM 不可用" },
+    unconfigured: { color: "var(--c-ink-3)", label: "EM 未配置" },
+    loading: { color: "var(--c-ink-4)", label: "EM 检测中" },
+    unknown: { color: "var(--c-ink-3)", label: "EM 状态未知" },
+  };
+  const p = palette[state] ?? palette.unknown;
+  const tooltip = health
+    ? [
+        `状态：${p.label}`,
+        health.neo4j.configured
+          ? `Ontology：${health.neo4j.reachable ? "可达" : "不通"}${health.neo4j.error ? ` · ${health.neo4j.error}` : ""}`
+          : "Ontology：未配置",
+        health.neo4j.lastSyncAt
+          ? `上次同步：${new Date(health.neo4j.lastSyncAt).toLocaleString(undefined, { hour12: false })}`
+          : "尚未成功同步",
+        "（点击立即同步）",
+      ].join("\n")
+    : "EM 健康检查中…";
+
+  return (
+    <button
+      onClick={() => void onSync()}
+      title={tooltip}
+      className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] bg-panel border border-line whitespace-nowrap cursor-pointer hover:border-line-strong"
+      style={{ color: "var(--c-ink-2)" }}
+    >
+      <span
+        className={state === "healthy" ? "anim-pulse" : ""}
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: p.color,
+          boxShadow: `0 0 0 3px color-mix(in oklab, ${p.color} 18%, transparent)`,
+        }}
+      />
+      EM
+    </button>
   );
 }

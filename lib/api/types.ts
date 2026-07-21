@@ -1,0 +1,324 @@
+import type { Stage, AgentKind } from '../agent-mapping';
+import type { DomainId } from '../domains';
+
+export type RunStatus =
+  | 'running'
+  | 'suspended'
+  | 'timed_out'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'interrupted';
+
+export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'retrying';
+
+export type EventKind = 'trigger' | 'domain' | 'error' | 'gate';
+
+export type AlertCategory = 'sla' | 'rate' | 'quality' | 'infra' | 'dlq';
+export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low';
+
+export type ApiMeta = {
+  partial?: ('ws' | 'em')[];
+  generatedAt: string;
+};
+
+export type AgentRow = {
+  short: string;
+  wsId: string;
+  /** Top-level domain container (see lib/domains.tsx). */
+  domain: DomainId;
+  /** i18n key for the Chinese / English translated display name. */
+  displayName: string;
+  /** Human name as registered in Inngest (matches the Inngest dashboard). */
+  inngestName: string;
+  stage: Stage;
+  kind: AgentKind;
+  ownerTeam: string;
+  version: string;
+  status: RunStatus | null;
+  p50Ms: number | null;
+  runs24h: number;
+  successRate: number | null;
+  costYuan: number;
+  lastActivityAt: string | null;
+  spark: number[];
+  /** Live realness from lib/inngest-registry.ts — reflects actual Inngest
+   *  registration state at request time, not static AGENT_MAP membership. */
+  realness: 'real' | 'shell' | 'unbuilt';
+  /** Inngest function slug for this agent; null when unbuilt. */
+  slug: string | null;
+  /** True iff agent is registered (real/shell) but currently paused
+   *  (AgentConfig.enabled=false). UI uses this to show the resume affordance. */
+  paused: boolean;
+  /** Operator-set display name override (from a managed AgentVersion row). When
+   *  present the Fleet shows this instead of t(displayName). Null = use the
+   *  built-in i18n / shell name. */
+  customName?: string | null;
+  /** Id for the lifecycle/rename/delete APIs (`/api/agent-drafts/[id]`): a real
+   *  agent's synthetic `real:<domain>:<short>` id, or a shell's AgentVersion id.
+   *  Null when the row isn't operator-manageable (e.g. an unmapped live fn). */
+  manageId?: string | null;
+};
+export type AgentsResponse = { agents: AgentRow[]; meta: ApiMeta };
+
+export type RunSummary = {
+  id: string;
+  triggerEvent: string;
+  triggerData: { client: string; jdId: string };
+  status: RunStatus;
+  startedAt: string;
+  lastActivityAt: string;
+  completedAt: string | null;
+  agentCount: number;
+  pendingHumanTasks: number;
+  suspendedReason: string | null;
+};
+export type RunsResponse = {
+  runs: RunSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  meta: ApiMeta;
+};
+
+export type StepDetail = {
+  id: string;
+  nodeId: string;
+  agentShort: string;
+  status: StepStatus;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  input: unknown | null;
+  output: unknown | null;
+  error: string | null;
+};
+export type StepsResponse = { steps: StepDetail[]; meta: ApiMeta };
+
+export type EventField = {
+  name: string;
+  /** RAAS type string ("String", "Boolean", "List<String>", "Job_Requisition", ...). */
+  type: string;
+  required: boolean;
+  position: number;
+  /** Business entity referenced when this field carries an embedded object. */
+  targetObject: string | null;
+};
+
+export type EventMutation = {
+  targetObject: string;
+  /** "CREATE_OR_MODIFY", "DELETE", etc. */
+  mutationType: string;
+  impactedProperties: string[];
+};
+
+export type EventContract = {
+  name: string;
+  stage: Stage;
+  kind: EventKind;
+  desc: string;
+  publishers: string[];
+  subscribers: string[];
+  emits: string[];
+  schema: object | null;
+  schemaVersion: number;
+  rateLastHour: number;
+  errorRateLastHour: number;
+  // Provenance — where this contract came from. Neo4j is the source of truth;
+  // 'hardcoded' means we're in cold-start fallback (Neo4j sync never succeeded
+  // AND DB is empty). Frontend should badge this prominently.
+  source: 'neo4j' | 'hardcoded' | 'manual';
+  syncedAt: string | null;
+  activeVersions: string[];
+  // Independent of `source` (which describes metadata provenance), this
+  // describes the runtime *validator*: whether em.publish actually validates
+  // against a Neo4j-derived Zod schema or only the builtin fallback. Mixed
+  // is possible per-version — see versionSources.
+  schemaSource?: 'neo4j' | 'builtin' | 'missing';
+  versionSources?: Array<{ version: string; source: 'neo4j' | 'builtin'; fallbackReason?: string }>;
+  // Raw RAAS-shape data (only present when source === 'neo4j'). Used by the
+  // Payload / Subscribers tabs to render fidelity that JSON Schema can't carry.
+  fields?: EventField[];
+  mutations?: EventMutation[];
+  sourceAction?: string | null;
+  /** Allmeta breaking-change flag — UI badges in red. */
+  isBreakingChange?: boolean;
+  /** When sync detected an actual content delta, this advances. */
+  lastChangedAt?: string | null;
+  /** ISO timestamp when sync first noticed this name was missing from Neo4j. */
+  retiredAt?: string | null;
+  /** Allmeta upstream tracking (sourceFile / upstreamUpdatedAt) carried via extraJson. */
+  sourceFile?: string | null;
+};
+export type EventsMeta = ApiMeta & {
+  // Aggregate provenance for the response. 'neo4j' = all rows from synced cache;
+  // 'hardcoded' = pure fallback (cold start); 'mixed' = both (rare but possible).
+  source: 'neo4j' | 'hardcoded' | 'mixed';
+  // Most recent successful Neo4j sync. null when sync has never succeeded.
+  lastNeo4jSyncAt: string | null;
+  // Last error from sync worker (still null when last attempt succeeded).
+  lastNeo4jError: string | null;
+  totalNeo4jRows: number;
+  totalHardcodedRows: number;
+};
+export type EventsResponse = { events: EventContract[]; meta: EventsMeta };
+
+export type ActivityEvent = {
+  id: string;
+  runId: string;
+  agentShort: string;
+  type:
+    | 'agent_start'
+    | 'agent_complete'
+    | 'agent_error'
+    | 'human_waiting'
+    | 'human_completed'
+    | 'event_emitted'
+    | 'decision'
+    | 'tool'
+    | 'anomaly';
+  narrative: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type AuditEntry = {
+  id: string;
+  eventName: string;
+  traceId: string;
+  payloadDigest: string;
+  createdAt: string;
+};
+export type DLQEntry = {
+  id: string;
+  eventName: string;
+  reason: string;
+  payload: unknown;
+  createdAt: string;
+};
+
+export type TimelineEvent = {
+  ts: string;
+  source: 'ws' | 'em';
+  kind: string;
+  detail: string;
+};
+export type TraceResponse = {
+  traceId: string;
+  ws: { run: RunSummary; steps: StepDetail[]; activities: ActivityEvent[] } | null;
+  em: { auditEntries: AuditEntry[]; dlqEntries: DLQEntry[]; dedupHits: number } | null;
+  unifiedTimeline: TimelineEvent[];
+  meta: ApiMeta;
+};
+
+export type HumanTaskCard = {
+  id: string;
+  runId: string;
+  nodeId: string;
+  agentShort: string;
+  title: string;
+  assignee: string | null;
+  deadline: string | null;
+  createdAt: string;
+  // EM v2 §10.4 — when populated, the inbox card renders a deep link back
+  // to the EventInstance that triggered this HITL escalation.
+  triggeringEventInstanceId?: string | null;
+  triggeringEventName?: string | null;
+};
+export type HumanTasksResponse = {
+  total: number;
+  pendingCount: number;
+  recent: HumanTaskCard[];
+  meta: ApiMeta;
+};
+
+export type HumanTaskDetail = HumanTaskCard & {
+  status: 'pending' | 'approved' | 'rejected';
+  payload: unknown;
+  aiOpinion: unknown | null;
+  hasChatbotSession: boolean;
+  chatbotSessionId: string | null;
+  // triggeringEventInstanceId / triggeringEventName already inherited from
+  // HumanTaskCard above, but re-affirmed here so callers don't have to
+  // chase down the parent type.
+};
+
+export type HumanTaskAction =
+  | { action: 'approve'; comment?: string }
+  | { action: 'reject'; reason: string }
+  | { action: 'escalate'; targetClient: string };
+
+export type HumanTaskActionResult = {
+  task: HumanTaskDetail;
+  emittedEvents: string[];
+  newChildSession?: string;
+  meta: ApiMeta;
+};
+
+export type Message = {
+  role: 'user' | 'assistant' | 'system' | 'client';
+  content: string;
+  timestamp: string;
+};
+export type MessagesResponse = {
+  sessionId: string | null;
+  messages: Message[];
+  meta: ApiMeta;
+};
+
+export type TriggerKind = 'cron' | 'webhook' | 'upstream';
+export type TriggerDef = {
+  id: string;
+  kind: TriggerKind;
+  name: string;
+  description: string;
+  emits: string[];
+  schedule?: string;
+  endpoint?: string;
+  upstreamEvent?: string;
+  lastFiredAt: string | null;
+  nextFireAt: string | null;
+  fireCount24h: number;
+  errorCount24h: number;
+};
+export type TriggersResponse = { triggers: TriggerDef[]; meta: ApiMeta };
+
+export type Alert = {
+  id: string;
+  category: AlertCategory;
+  severity: AlertSeverity;
+  title: string;
+  affected: string;
+  triggeredAt: string;
+  acked: boolean;
+  ackedBy: string | null;
+  resolved?: boolean;
+  resolvedAt?: string | null;
+};
+export type AlertsResponse = {
+  alerts: Alert[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  meta: ApiMeta;
+};
+
+export type DataSource = {
+  id: string;
+  name: string;
+  category: 'ats' | 'channel' | 'llm' | 'msg' | 'storage' | 'identity' | 'vector';
+  status: 'ok' | 'degraded' | 'down';
+  lastCheckedAt: string;
+  rps: number;
+  errorRate: number;
+};
+export type DataSourcesResponse = { sources: DataSource[]; meta: ApiMeta };
+
+export type ApiError = {
+  error: 'BAD_REQUEST' | 'NOT_FOUND' | 'UPSTREAM_DOWN' | 'INTERNAL' | 'PROTOCOL';
+  message: string;
+  field?: string;
+  traceId?: string;
+};

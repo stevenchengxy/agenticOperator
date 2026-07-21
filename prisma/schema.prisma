@@ -1,0 +1,1515 @@
+// AO unified Prisma schema (P3 foundation)
+//
+// Design principles (from spec):
+// - Single SQLite file `data/ao.db` for dev (env-overridable for prod Postgres).
+// - Only runtime/audit/gateway models from EM (Q1: no Editor).
+// - WS workflow models, minus Copilot (Q2) and test/studio/simulation tables.
+// - All Postgres-specific (@db.Text, @db.VarChar(N), arrays) stripped for SQLite.
+// - JSON columns stored as TEXT, parsed by service layer.
+//
+// P3 progress: foundation (~10 of ~25 final tables). Remaining tables and
+// migration plan documented in docs/superpowers/specs/2026-04-27-ao-int-p3-monorepo-merge-design.md §4.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // 2026-05-28: migrated SQLite → local Postgres (durable, concurrent-safe).
+  // JSON columns stay TEXT/String so the service layer (which JSON.parse-es
+  // them) is engine-agnostic; only the provider + driver adapter change.
+  provider = "postgresql"
+}
+
+// =====================================================================
+// WS — Workflow runtime
+// =====================================================================
+
+model WorkflowRun {
+  id               String    @id @default(cuid())
+  triggerEvent     String
+  triggerData      String    // JSON
+  // status values per spec §13: running | suspended | timed_out | completed
+  // | failed | paused | interrupted
+  status           String    @default("running")
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+  lastActivityAt   DateTime  @default(now())
+  suspendedReason  String?
+
+  steps            WorkflowStep[]
+  activities       AgentActivity[]
+
+  @@index([status])
+  @@index([startedAt])
+  @@index([lastActivityAt])
+}
+
+model WorkflowStep {
+  id          String    @id @default(cuid())
+  runId       String
+  run         WorkflowRun @relation(fields: [runId], references: [id])
+  nodeId      String
+  stepName    String
+  status      String    // pending | running | completed | failed | retrying
+  input       String?   // JSON
+  output      String?   // JSON
+  error       String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  durationMs  Int?
+
+  @@index([runId])
+  @@index([nodeId])
+  @@index([status])
+}
+
+model AgentActivity {
+  id        String   @id @default(cuid())
+  runId     String?
+  run       WorkflowRun? @relation(fields: [runId], references: [id])
+  nodeId    String
+  agentName String
+  type      String
+  narrative String
+  metadata  String?  // JSON
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([nodeId])
+  @@index([agentName])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model HumanTask {
+  id            String    @id @default(cuid())
+  runId         String
+  nodeId        String
+  nodeName      String
+  title         String
+  payload       String    // JSON
+  aiOpinion     String?   // JSON
+  status        String    @default("pending") // pending | approved | rejected
+  assignee      String?
+  result        String?   // JSON
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+  deadline      DateTime?
+  approveEvent  String?
+  rejectEvent   String?
+  eventData     String?   // JSON
+  resolvedBy    String?
+
+  // EM v2 spec §10.4 — when an agent escalates via business rules, it must
+  // record the EventInstance that triggered the escalation. Lets /inbox
+  // cards link back to /events/:name/instances/:id. Optional today (legacy
+  // tasks lack it) but populated by all new agent code paths.
+  triggeringEventInstanceId String?  @map("triggering_event_instance_id")
+  triggeringEventName       String?  @map("triggering_event_name")
+
+  @@index([runId])
+  @@index([status])
+  @@index([nodeId])
+  @@index([assignee])
+  @@index([triggeringEventInstanceId])
+}
+
+model ChatbotSession {
+  id                 String    @id @default(cuid())
+  sessionType        String
+  status             String    @default("open")
+  correlationId      String
+  humanTaskId        String?
+  hitlRequestId      String?
+  parentSessionId    String?
+  clientId           String?
+  assignedTo         String?
+  aiAnalysis         String?   // JSON
+  questions          String    // JSON
+  collectedAnswers   String    @default("{}")
+  conversationLog    String    @default("[]")
+  resolvedPath       String?
+  resolvedBy         String?
+  resolvedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deadline           DateTime?
+
+  @@index([correlationId])
+  @@index([status])
+  @@index([humanTaskId])
+}
+
+// Living KB rules (used by processResume.rule etc.)
+model CandidateLock {
+  id           String   @id @default(cuid())
+  candidateId  String
+  clientId     String
+  jdId         String?
+  recruiterId  String
+  expiresAt    DateTime?
+  reason       String?
+  releasedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  // RMHR lock-truth mirror (2026-06-08 candidate-lock alignment).
+  // AO-local cache of the company RMHR uploadByRecruiterEmail response. Company RMHR is
+  // the enforcing source of truth; this row records the last-known answer per (candidate, rmhrResumeId).
+  uploadId            String?   // ingestion event id — idempotency guard for manual replay
+  rmhrResumeId        String?   // company resumeId — cross-system correlation key
+  lockState           Int?      // 1=未锁定 / 2=锁定 / 3=保护 (LockState)
+  blacklisted         Boolean   @default(false)
+  lockOwnerEmployeeId String?   // RMHR lockBy (工号) — who actually owns the lock
+  lockByName          String?
+  lockByEmail         String?   // RMHR lockByEmail — the gate comparison key
+  lockTime            String?   // RMHR lockTime RAW "yyyy-MM-dd HH:mm:ss" (not coerced)
+  lockMessage         String?   // RMHR model.message
+  requestedByEmail    String?   // recruiterEmail WE tried to lock under (distinct from owner)
+  lockDecision        String?   // 'proceed' | 'lock-only' | 'fault'
+  lockReason          String?   // LockOutcomeReason
+  lastCheckedAt       DateTime? // when we last called RMHR for this upload
+  updatedAt           DateTime  @default(now()) @updatedAt
+
+  @@index([candidateId, clientId])
+  @@index([candidateId, rmhrResumeId])
+  @@index([uploadId])
+  @@index([clientId, expiresAt])
+}
+
+model Blacklist {
+  id           String   @id @default(cuid())
+  candidateId  String
+  clientId     String?
+  reason       String
+  addedBy      String
+  createdAt    DateTime @default(now())
+
+  @@index([candidateId, clientId])
+}
+
+// =====================================================================
+// EM — Audit & DLQ (runtime only, no Editor)
+// =====================================================================
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  eventName    String
+  traceId      String
+  payload      String   // JSON
+  payloadDigest String
+  source       String   // 'ws' | 'em' | 'external'
+  createdAt    DateTime @default(now())
+
+  @@index([eventName])
+  @@index([traceId])
+  @@index([createdAt])
+}
+
+model DLQEntry {
+  id        String   @id @default(cuid())
+  eventName String
+  reason    String
+  payload   String   // JSON
+  retries   Int      @default(0)
+  createdAt DateTime @default(now())
+  resolvedAt DateTime?
+
+  @@index([eventName])
+  @@index([resolvedAt])
+}
+
+model DedupCache {
+  id          String   @id @default(cuid())
+  dedupKey    String   @unique
+  eventName   String
+  firstSeenAt DateTime @default(now())
+  hitCount    Int      @default(1)
+
+  @@index([eventName])
+  @@index([firstSeenAt])
+}
+
+// =====================================================================
+// WS — Living KB Layer 4 (Episodes) + AgentConfig
+// =====================================================================
+
+// One row per agent execution. Powers /api/trace LLM-trace tab and the
+// agent-tuning loop (judgeScore + reviewerFeedback).
+model AgentEpisode {
+  id               String   @id @default(cuid())
+  agentName        String
+  runId            String?
+  workflowId       String?
+  clientId         String?
+  input            String   // JSON
+  output           String   // JSON
+  toolTrace        String?  // JSON
+  ruleEvaluations  String?  // JSON
+  durationMs       Int
+  modelUsed        String?
+  tokenUsage       String?  // JSON: {prompt, completion, total}
+  judgeScore       Float?
+  judgeRationale   String?
+  judgedAt         DateTime?
+  reviewerFeedback String?
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  isFewShot        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  @@index([agentName])
+  @@index([runId])
+  @@index([clientId, agentName])
+  @@index([judgeScore])
+  @@index([isFewShot])
+  @@index([createdAt])
+}
+
+// Per-agent runtime overrides (temperature, prompt append, tier, retries).
+// Edited via /api/agent-config (P3 chunk 4) and ConfigAdvisor agent.
+model AgentConfig {
+  id               String  @id  // matches WorkflowAgentDef.id
+  enabled          Boolean @default(true)
+  description      String?
+  temperature      Float?
+  maxRetries       Int?
+  tier             String?  // "lite" | "standard" | "pro"
+  maxOutputTokens  Int?
+  promptAppend     String?
+  skillOverrides   String?  // JSON: Record<string, Partial<AIConfig>>
+  tuningNotes      String?
+  lastAdvisedAt    DateTime?
+  adviceAccepted   Boolean  @default(false)
+  updatedAt        DateTime @updatedAt
+  history          AgentConfigHistory[]
+
+  // Phase 2 (Manage): throttle support — stub-factory checks this at handler start.
+  // If throttleUntil > now(), the agent sleeps until that time before processing.
+  throttleUntil    DateTime?
+  throttleReason   String?
+}
+
+model AgentConfigHistory {
+  id        String   @id @default(cuid())
+  agentId   String
+  config    AgentConfig @relation(fields: [agentId], references: [id])
+  changedBy String   @default("user")
+  before    String   // JSON
+  after     String   // JSON
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([agentId])
+  @@index([createdAt])
+}
+
+// Phase 0: Agent 版本表 — 配置快照 + 未来 codegen 落库目标。
+// 见 docs/2026-05-25-ao-behavior-codegen-research.md §8.1
+model AgentVersion {
+  id           String   @id @default(cuid())
+  // short = AGENT_MAP 里的 short code (e.g. "JDGenerator")
+  // slug  = Inngest function id (e.g. "create-jd-agent") — 也是 AgentConfig.id
+  short        String
+  slug         String
+  versionLabel String   // 'v1.9.4' 或 '2026-05-25-1830' 自动生成
+  status       String   @default("draft")  // 'draft' | 'active' | 'offline' | 'archived'
+  // 业务领域 (raas / feikong / energy …). Set for ontology-generated shell
+  // agents so the Fleet drafts store can scope by domain. Null for real-agent
+  // versions (their domain is derived from short → AGENT_MAP).
+  domain       String?
+
+  // Phase 0 实际使用
+  configJson   String?  // JSON: AgentConfig 快照 (ontology-gen: 草稿展示字段 JSON)
+  configHash   String?  // sha256(configJson) — 用于去重
+  capturedFrom String?  // 'current-config' | 'manual' | 'codegen' | 'ontology-gen'
+  notes        String?
+
+  // Phase 1+ 留空字段 (nullable,Phase 0 不写)
+  codeBlob     String?
+  codeHash     String?
+  specJson     String?
+  promptText   String?
+  modelUsed    String?
+
+  // Provenance
+  generatedBy  String   @default("operator-unknown")
+  createdAt    DateTime @default(now())
+  deployedAt   DateTime?
+  // Recycle bin: set when an agent is soft-deleted (status='archived'); cleared
+  // on restore. Keeps deleted agents as a restorable backup.
+  archivedAt   DateTime?
+
+  @@unique([short, versionLabel])
+  @@index([short, createdAt])
+  @@index([slug])
+  @@index([status])
+  @@index([capturedFrom, domain, status])
+}
+
+// Agent Factory — cross-run learning. Each row is a lesson the brain wrote
+// after analyzing a failure (or a notable success), persisted per-domain so the
+// next brain.start() can load prior reflections into its system prompt. This
+// is what turns "each run starts amnesiac" into Reflexion-style learning.
+model FailureReflection {
+  id          String   @id @default(cuid())
+  domain      String   // business domain id (e.g. "Agents-generation", "招聘-v1")
+  // 'failure' = sandbox/validate failure root-caused; 'success' = patterns that
+  // worked; 'caveat' = subtle gotcha observed (e.g. tool quirks). The brain
+  // self-classifies via analyze_failure.
+  kind        String   @default("failure")  // 'failure' | 'success' | 'caveat'
+  summary     String   // 1-line: what happened
+  rootCause   String?  // why it happened (LLM diagnosis)
+  lesson      String   // what to do differently next time — the actionable bit
+  // Provenance
+  runId       String?  // FactoryBuildRun id, if available
+  ranAgents   String?  // JSON: which agents were in play
+  failedAgent String?  // slug of the agent at fault (if any)
+  createdAt   DateTime @default(now())
+
+  @@index([domain, createdAt(sort: Desc)])
+  @@index([domain, kind])
+}
+
+// One Agent-Factory brain run — the full streamed transcript + outcome, so the
+// chatbot survives a page refresh (server-side history) and the user can reopen
+// or "regenerate" a past run. Complements the per-browser localStorage cache
+// that restores the IN-PROGRESS transcript instantly. (Fix #3.)
+model FactoryBrainRun {
+  id              String   @id @default(cuid())
+  domain          String   // business domain id the brain generated for
+  goal            String   // the goal text given to the brain
+  status          String   @default("running") // 'running' | 'done' | 'error' | 'aborted'
+  tokensUsed      Int      @default(0)
+  turns           Int      @default(0)
+  agentsCount     Int      @default(0)
+  reachedTerminal Boolean  @default(false)     // sandbox event chain reached a terminal state
+  errorMessage    String?
+  transcript      String   @default("[]")       // JSON BrainEvent[] — the full live trace
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([domain, createdAt(sort: Desc)])
+}
+
+// Durable mirror of the factory brain's conversation — the "继续" checkpoint that
+// survives a server restart/HMR (see lib/agent-factory-v3/brain/conversation-store.ts).
+// App-managed: the store creates/reads the table via raw SQL. Modeled here ONLY so
+// `prisma db push` recognizes it and never drops it (otherwise every `npm run dev`
+// wipes in-progress conversations and "继续" starts over from scratch).
+model FactoryConversation {
+  id           String   @id
+  domain       String?
+  messagesJson String   @map("messages_json")
+  ctxJson      String   @map("ctx_json")
+  updatedAt    DateTime @default(now()) @db.Timestamptz(6) @map("updated_at")
+
+  @@map("factory_conversation")
+}
+
+// HITL human-message mailbox for in-flight factory runs (see
+// lib/agent-factory-v3/brain/mailbox.ts). App-managed via raw SQL; modeled here so
+// db push keeps the table instead of dropping it on every restart.
+model FactoryHumanMsg {
+  id        BigInt   @id @default(autoincrement())
+  runId     String   @map("run_id")
+  text      String
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+
+  @@index([runId, consumed], map: "factory_human_msg_run_idx")
+  @@map("factory_human_msg")
+}
+
+// =====================================================================
+// EM — Runtime / Gateway / Outbound (Q1: no Editor)
+// =====================================================================
+
+// EM event-definition table; AO reads ACTIVE rows only as event-contract
+// cache. No edit operations exposed by AO.
+//
+// v2 spec additions (additive, optional):
+//   activeVersionsJson: JSON array of version strings, descending (latest first)
+//   schemasByVersionJson: JSON object { "2.0": <jsonschema>, "1.0": ... }
+//   publishersJson / subscribersJson: JSON string[]
+//   source: 'neo4j' (synced) | 'hardcoded' (fallback) | 'manual'
+//   syncedAt: last successful Neo4j sync
+//   retiredAt: hide from UI when set
+model EventDefinition {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String
+  payload     String  // JSON
+  extraJson   String  @default("{}") @map("extra_json")
+  status      String  @default("DRAFT")
+  version     String  @default("1.0")
+  sortOrder   Int     @default(0) @map("sort_order")
+  batchId     String? @map("batch_id")
+  createdAt   String  @map("created_at")
+  updatedAt   String  @map("updated_at")
+
+  // v2 additive fields
+  activeVersionsJson    String?   @map("active_versions_json")    // JSON: string[]
+  schemasByVersionJson  String?   @map("schemas_by_version_json") // JSON: Record<version, JsonSchema>
+  publishersJson        String?   @map("publishers_json")         // JSON: string[]
+  subscribersJson       String?   @map("subscribers_json")        // JSON: string[]
+  source                String    @default("hardcoded")            // 'neo4j' | 'hardcoded' | 'manual'
+  syncedAt              DateTime? @map("synced_at")
+  retiredAt             DateTime? @map("retired_at")
+
+  // Change detection: SHA-256(description + payload + extraJson + publishers
+  // + subscribers). Sync compares this against the new computed hash to
+  // decide whether the row actually changed (vs. just got re-touched). If
+  // it changed, lastChangedAt is set to NOW().
+  contentHash           String?   @map("content_hash")
+  lastChangedAt         DateTime? @map("last_changed_at")
+
+  // Allmeta sets `is_breaking_change` on the Event node when a published
+  // version contains a non-back-compatible mutation. We surface this so
+  // /events shows a red badge and ops knows to verify nothing in flight
+  // depends on the old shape.
+  isBreakingChange      Boolean   @default(false) @map("is_breaking_change")
+
+  @@index([source, syncedAt])
+  @@index([retiredAt])
+  @@index([lastChangedAt])
+  @@map("events")
+}
+
+// EM v2 §9 — EventInstance: business-level publish trail. One row per
+// em.publish() call. Inngest stores the full payload; this table stores
+// summary + provenance + lifecycle status for UI / audit / replay.
+model EventInstance {
+  id                  String    @id @default(uuid())
+  externalEventId     String?   @unique @map("external_event_id")
+  name                String
+  source              String                              // "raas-bridge" | "rpa.matchResumeAgent" | ...
+  status              String                              // accepted | rejected_schema | rejected_filter | duplicate | meta_rejection | em_degraded
+  rejectionType       String?   @map("rejection_type")    // SCHEMA_VALIDATION_FAILED | FILTER_REJECTED
+  rejectionReason     String?   @map("rejection_reason")
+  schemaErrors        String?   @map("schema_errors")     // JSON: ZodIssue[]
+  schemaVersionUsed   String?   @map("schema_version_used")
+  triedVersions       String?   @map("tried_versions")    // JSON: string[]
+  causedByEventId     String?   @map("caused_by_event_id")
+  causedByName        String?   @map("caused_by_name")
+  payloadSummary      String?   @map("payload_summary")   // JSON snippet
+  // Persisted business-domain attribution. Keeping this on the row (instead
+  // of deriving it after pagination) makes domain-scoped totals and pages
+  // exact. Legacy null rows are lazily backfilled by the read path.
+  domain              String?
+  ts                  DateTime  @default(now())
+
+  @@index([name, ts])
+  @@index([status])
+  @@index([causedByEventId])
+  @@index([source])
+  @@index([domain, ts])
+  @@map("event_instances")
+}
+
+// EM library health snapshot (singleton row id='singleton').
+// Driven by server/em/degraded-mode.ts. UI reads to render AppBar dot etc.
+model EmSystemStatus {
+  id                String    @id @default("singleton")
+  state             String    @default("healthy")  // 'healthy' | 'degraded' | 'down'
+  degradedSince     DateTime? @map("degraded_since")
+  lastError         String?   @map("last_error")
+  lastErrorAt       DateTime? @map("last_error_at")
+  fallbackCount24h  Int       @default(0) @map("fallback_count_24h")
+  publishCount24h   Int       @default(0) @map("publish_count_24h")
+  rejectCount24h    Int       @default(0) @map("reject_count_24h")
+  // Neo4j sync sub-status
+  neo4jLastSyncAt   DateTime? @map("neo4j_last_sync_at")
+  neo4jLastError    String?   @map("neo4j_last_error")
+  neo4jUpsertedLast Int       @default(0) @map("neo4j_upserted_last")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("em_system_status")
+}
+
+model GatewayFilterRule {
+  id               String  @id @default(uuid())
+  ruleType         String  @map("rule_type") // whitelist | blacklist | auto_map
+  eventNamePattern String  @map("event_name_pattern")
+  targetEventId    String? @map("target_event_id")
+  enabled          Int     @default(1)
+  description      String?
+  createdAt        String  @map("created_at")
+
+  @@map("gateway_filter_rules")
+}
+
+// Phase 7 outbound — terminal agents enqueue here for external delivery.
+model OutboundEvent {
+  id              String  @id @default(uuid())
+  correlationId   String  @map("correlation_id")
+  eventName       String  @map("event_name")
+  eventId         String  @map("event_id")
+  payload         String  // JSON
+  expectAckEvent  String? @map("expect_ack_event")
+  status          String  @default("sent") // sent | pending | acknowledged | timeout | failed | chained
+  sentAt          String  @map("sent_at")
+  ackReceivedAt   String? @map("ack_received_at")
+  ackMessageId    Int?    @map("ack_message_id")
+  timeoutSeconds  Int     @default(300) @map("timeout_seconds")
+  extraMetadata   String? @map("extra_metadata") // JSON
+
+  @@index([correlationId])
+  @@index([status])
+  @@map("outbound_events")
+}
+
+// Inbound RaaS messages from external Kafka — full audit trail.
+model RaasMessage {
+  id                Int     @id @default(autoincrement())
+  receivedAt        String  @map("received_at")
+  topic             String
+  partition         Int     @default(0)
+  offset            Int
+  key               String?
+  data              String  // JSON
+  classification    String? // matched_valid | matched_invalid | unrecognized | parse_error
+  matchedEventDefId String? @map("matched_event_def_id")
+  validationErrors  String? @map("validation_errors") // JSON array
+  classifiedAt      String? @map("classified_at")
+  ingestionStatus   String? @map("ingestion_status") // pending | ingested | failed | skipped
+  ingestedAt        String? @map("ingested_at")
+
+  @@index([classification], map: "idx_raas_classification")
+  @@index([ingestionStatus], map: "idx_raas_ingestion_status")
+  @@map("raas_messages")
+}
+
+model RejectedMessage {
+  id           String  @id
+  rawPayload   String? @map("raw_payload")
+  rejectReason String  @map("reject_reason") // malformed_json | missing_event_name | unknown_source | out_of_domain
+  source       String?
+  receivedAt   String  @map("received_at")
+
+  @@map("rejected_messages")
+}
+
+model IngestionConfig {
+  id         String @id @default(uuid())
+  eventName  String @unique @map("event_name")
+  autoIngest Int    @default(0) @map("auto_ingest")
+  createdAt  String @map("created_at")
+  updatedAt  String @map("updated_at")
+
+  @@map("ingestion_configs")
+}
+
+model HealthIncident {
+  id            String  @id
+  healthState   String  @map("health_state") // YELLOW | RED
+  failedEvent   String? @map("failed_event")
+  failureReason String? @map("failure_reason")
+  agentName     String? @map("agent_name")
+  sampledAt     String  @map("sampled_at")
+  resolved      Int     @default(0)
+
+  @@map("health_incidents")
+}
+
+model ExecutionTrace {
+  id           String  @id @default(uuid())
+  triggerEvent String  @map("trigger_event")
+  mode         String  @default("simulated") // simulated | live
+  steps        String  @default("[]") // JSON array
+  summary      String  @default("{}") // JSON
+  startedAt    String  @map("started_at")
+  completedAt  String? @map("completed_at")
+  maxDepth     Int     @default(10) @map("max_depth")
+
+  @@map("execution_traces")
+}
+
+// =====================================================================
+// Recruitment workflow: requirement → JD pipeline (workflow nodes 1-2 → 4)
+// =====================================================================
+
+model JobRequisition {
+  id              String   @id                 // requisition_id (uuid or short)
+  client          String                       // 客户名 / company name
+  title           String                       // 岗位名称
+  city            String?
+  headcount       Int?                         // 计划招聘人数
+  salaryRangeMin  Int?                         // CNY/月
+  salaryRangeMax  Int?
+  responsibilities String?                     // 岗位职责（多行 markdown）
+  requirements     String?                     // 任职要求（硬性 + 软性）
+  niceToHaves      String?                     // 加分项
+  source           String   @default("manual") // manual | sync
+  status           String   @default("pending_clarification")
+                                                // pending_clarification | clarified | jd_ready | published | closed
+  rawPayload       String?                     // 原始 REQUIREMENT_LOGGED payload (JSON string)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  jds              JobDescription[]
+}
+
+model JobDescription {
+  id                   String   @id              // jd_id (uuid)
+  requisitionId        String                    // FK → JobRequisition.id
+  client               String
+  title                String                    // 标准化职位名称
+  jdContent            String                    // 完整 JD 文本（markdown / JSON-string）
+  responsibilities     String?
+  requirements         String?
+  niceToHaves          String?
+  searchKeywords       String?                   // top-5 keywords as comma-separated string
+  qualityScore         Float?
+  qualitySuggestions   String?                   // JSON string array
+  marketCompetitiveness String?                  // 高 / 中 / 低
+
+  // ── 结构化匹配签名（per JOB_REQUISITION_GENERATED.payload） ──
+  mustHaveSkills       String?                   // JSON string of string[]
+  niceToHaveSkills     String?                   // JSON string of string[]
+  degreeRequirement    String?                   // 本科及以上 / 硕士及以上 / 不限
+  educationRequirement String?                   // 计算机相关专业 / 不限
+  languageRequirements String?                   // 英语读写流利 / 无
+  negativeRequirement  String?                   // 排除条件
+  workYears            Int?                      // 最少工作年限
+  expectedLevel        String?                   // T3-T4 / 中3-高1
+  interviewMode        String?                   // 现场面试 / 视频面试
+
+  status               String   @default("draft") // draft | approved | rejected | published
+  generatorMode        String?                   // robohire | llm | manual
+  generatorModel       String?                   // model used (e.g. gemini-3-flash-preview)
+  generatorRequestId   String?
+  generatorDurationMs  Int?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  requisition          JobRequisition @relation(fields: [requisitionId], references: [id])
+}
+
+// =====================================================================
+// Behavior axis — Phase 1 (2026-05-14) + Phase 2 additions
+// =====================================================================
+
+// Lightweight alert lifecycle table for Monitor Agent + Manager Agent.
+// Dedup contract: one unresolved row per alertKey (resolvedAt IS NULL).
+// Lifecycle: firstSeenAt → lastSeenAt (updated on repeat fire) → resolvedAt.
+model BehaviorAlert {
+  id          String   @id @default(cuid())
+  alertKey    String                                    // dedupe key e.g. 'agent_error_rate.JDGenerator'
+  severity    String                                    // 'warning' | 'error'
+  ruleId      String                                    // which heuristic fired
+  details     String                                    // JSON: per-rule context
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  resolvedAt  DateTime?
+  managerActionTaken String?                            // 'monitor' | 'escalate' | 'throttle' | 'auto_restart'
+  managerActionAt    DateTime?
+
+  // Phase 2: auto_restart loop guard — prevent runaway restart cycles
+  autoRestartCount    Int       @default(0)
+  lastAutoRestartAt   DateTime?
+
+  @@unique([alertKey, resolvedAt])                      // one unresolved alert per key
+  @@index([severity])
+  @@index([firstSeenAt])
+}
+
+// =====================================================================
+// Rule Check audit (restored from Steven branch on 2026-05-14).
+// AO's private LLM-rule-check audit log — corresponds to /rule-check page.
+// Per the v0_1_010 alignment decision (alignment doc §3.5),
+// Candidate_Match_Result on Allmeta stores only 4 conclusion fields;
+// full audit details (rules evaluated / LLM I/O / failure reasons) live here.
+// =====================================================================
+
+model RuleCheckAudit {
+  // 主键 + 关联
+  audit_id              String   @id
+  run_id                String
+  scenario_id           String?
+  trace_id              String?
+
+  // 业务 ID(soft link 到 Neo4j 实体节点)
+  upload_id             String
+  candidate_id          String
+  resume_id             String
+  job_requisition_id    String
+
+  // dims(从 RAAS getRequirementsAgentView extract)
+  client_name           String?
+  // 可读客户名(写入时由 resolveClientName 解析并持久化;读时不再实时查 partner-pg)
+  client_display_name   String?
+  business_group        String?
+  studio                String?
+
+  // 决策
+  decision              String   // PASS | FAIL
+  llm_decision          String   // PASS | FAIL | KEEP | DROP | PAUSE | UNKNOWN
+  failure_reasons       String   // JSON array
+  // 基础设施失败原因(llm-call-error / ontology-graph-unavailable / parse-error …)。
+  // 非空 = 这条 FAIL 是基础设施挂起(没钱/故障),候选人未被拒;总览/漏斗的
+  // 通过-未通过计数据此排除。业务判定(真·通过/未通过)此列为 NULL。
+  fail_reason           String?
+
+  // LLM observability
+  llm_model             String
+  llm_duration_ms       Int
+  llm_prompt_tokens     Int?
+  llm_completion_tokens Int?
+  parse_error           String?
+
+  // 规则集
+  rules_evaluated       Int
+  rules_total_in_ontology Int
+  rule_source           String   // neo4j-direct | ontology-api | json-fallback
+  partial_resume_fields String   // JSON array
+  filtered_out_rules    String?  // JSON array
+  rule_provenance       String?  // JSON array of {rule_id, tier, included, reason}
+
+  // 完整 input snapshot
+  parsed_resume_json    String?
+  job_requisition_json  String?
+
+  // LLM I/O 全文
+  user_prompt           String?
+  system_prompt         String?
+  llm_raw_text          String?
+
+  // Augmentation + lineage
+  resume_augmentation   String?
+  parent_audit_id       String?
+
+  created_at            DateTime @default(now())
+
+  flags                 RuleCheckFlag[]
+
+  @@index([candidate_id])
+  @@index([resume_id])
+  @@index([job_requisition_id])
+  @@index([decision])
+  @@index([created_at])
+  @@index([created_at, audit_id])
+  @@index([client_name, created_at])
+  @@index([job_requisition_id, created_at])
+  @@index([parent_audit_id])
+  @@index([trace_id])
+}
+
+model RuleCheckFlag {
+  flag_id            String   @id
+  audit_id           String
+  audit              RuleCheckAudit @relation(fields: [audit_id], references: [audit_id], onDelete: Cascade)
+
+  rule_id            String
+  rule_name_snapshot String
+  severity           String   // terminal | needs_human | flag_only
+  applicable_client  String?
+  applicable         Boolean
+  result             String   // PASS | FAIL | NOT_APPLICABLE
+  evidence           String?
+  next_action        String?  // continue | block
+
+  created_at         DateTime @default(now())
+
+  @@index([audit_id])
+  @@index([rule_id])
+  @@index([rule_id, audit_id])
+  @@index([result])
+  @@index([severity])
+}
+
+// =====================================================================
+// Generic, domain-agnostic rule-check store. The recruitment RuleCheckAudit
+// above is hard-coupled to recruitment fields (candidate/resume/job, all
+// required), so non-recruitment rule-check agents (e.g. the energy-dispatch
+// validateConstraints agent) write here instead. One row per agent run; the
+// principle is the same for every domain/step: 筛查 rules → 二次验证抓取对不对
+// → 规则判断. The /rule-check 总览 + 审计面板 read this for non-recruitment
+// domains (scoped by `domain`).
+// =====================================================================
+model OntologyRuleCheck {
+  id            String   @id @default(cuid())
+  domain        String   // Allmeta domain id, e.g. 能源调度-v1
+  agentSlug     String   // e.g. energy-validate-constraints
+  agentName     String   // e.g. ValidateConstraintsAgent
+  stage         String   // 业务步骤, e.g. 约束规则校验
+  caseId        String   // 案件/run id (= WorkflowRun.id when present)
+  runId         String?
+  traceId       String?
+  dsNo          String?  // 调度辅助案件号 DS…
+
+  decision      String   // VALIDATED | VIOLATED
+  redlineFlag   Boolean  @default(false)
+
+  // 筛查 + 二次验证统计
+  rulesTotal    Int      // 域内规则总数
+  rulesSelected Int      // 本步骤筛出的规则数
+  rulesExpected Int      // 期望抓到的规则数(二次验证基准)
+  selectionOk   Boolean  // 二次验证结论:抓取是否正确/齐全
+  selectionNote String?  // JSON {missing[], extra[], parseIssues[]}
+  rulesEvaluated Int     // 实际执行判断的规则数
+  ruleSource    String   // ontology-api | json-fallback | snapshot
+
+  createdAt     DateTime @default(now())
+
+  evals         OntologyRuleCheckEval[]
+
+  @@index([domain])
+  @@index([domain, createdAt, id])
+  @@index([domain, agentSlug, createdAt])
+  @@index([domain, stage, createdAt])
+  @@index([caseId])
+  @@index([decision])
+  @@index([createdAt])
+}
+
+model OntologyRuleCheckEval {
+  id            String   @id @default(cuid())
+  checkId       String
+  check         OntologyRuleCheck @relation(fields: [checkId], references: [id], onDelete: Cascade)
+
+  ruleId        String   // CR-HYD-05 …
+  ruleName      String
+  ruleGroup     String   // 机组 | 水库水调 | 电网 | 安全 | 市场
+  hardSoft      String   // hard | soft
+  result        String   // PASS | FAIL | CLAMPED | NA
+  checkPoint    String?  // 96点中哪几点 / 检查口径
+  beforeVal     String?  // 前值
+  afterVal      String?  // 后值(钳制/调整后)
+  defaultAction String?  // 命中默认动作
+  riskType      String?  // T1..T8
+  riskLevel     String?  // L1..L4
+  evidence      String?
+
+  createdAt     DateTime @default(now())
+
+  @@index([checkId])
+  @@index([ruleId])
+  @@index([result])
+}
+
+// =====================================================================
+// AgentStepEvidence — captures input/output/external-call evidence per
+// step.run inside the 3 PRA agents. Used by /monitor/flows/[flowId] to
+// render a complete trail: "RAAS POST /candidates → Allmeta POST
+// /Candidate → Neo4j upsert {...}".
+//
+// Per-run there are typically 5-10 evidence rows (one per major step).
+// Flow detail UI groups by run_id + flow_id and shows ordered timeline.
+// =====================================================================
+
+model AgentStepEvidence {
+  id            String   @id            // ULID
+  run_id        String                  // Inngest run id
+  function_slug String                  // e.g. agentic-operator-main-resume-parser-agent
+  flow_id       String                  // "upload:xxx" / "jr:xxx" / "evt:xxx"
+
+  step_name     String                  // e.g. save-candidate / write-allmeta-candidate
+  step_kind     String                  // guard | fetch | compute | persist | audit | subsystem | emit | allmeta_write
+
+  external_call String?                 // "RAAS POST /api/v1/candidates" / "Allmeta POST /instances/Candidate?domain=RAAS-v1"
+  input_json    String?                 // JSON.stringify of request body (truncated to 12K)
+  output_json   String?                 // JSON.stringify of response (truncated to 12K)
+  error_message String?                 // if step failed
+  duration_ms   Int?
+
+  // Allmeta-write specific (when step_kind = "allmeta_write")
+  allmeta_label    String?              // e.g. "Candidate" / "Resume" / "Candidate_Match_Result"
+  allmeta_pk_value String?              // e.g. "cand_xxx" — the PK upserted
+  allmeta_neo4j    String?              // Cypher hint or upsert result summary
+
+  created_at    DateTime @default(now())
+
+  @@index([run_id])
+  @@index([flow_id])
+  @@index([function_slug])
+  @@index([created_at])
+}
+
+// =====================================================================
+// Schema status: 24 tables (10 P3-foundation + 12 chunk-1 + 2 recruitment).
+//
+// Skipped for later (advanced ML/KB; not consumed by current AO routes —
+// add when their service modules get ported in chunk 2):
+//   - AgentEpisodeStats, AgentPattern, AgentSpan, AgentBlackboardEntry
+//
+// Definitively NOT migrating per Q1 + Q2 decisions:
+//   - Editor: ActionSnapshot, ActionDiff, ChangeLog, AgentTask,
+//     ReviewQueueEntry, VersionBranch, EditCheckpoint, DatasetSnapshot,
+//     SnapshotChangeRecord
+//   - Copilot: CopilotConversation, CopilotMessage
+//   - Studio/test: StudioReport, CardReport, SimulationSnapshot, test_*
+// =====================================================================
+
+// =====================================================================
+// Rule Check — eval surface for matchResume rule evaluation
+// =====================================================================
+
+model RuleCheckRun {
+  id                    String    @id @default(cuid())
+  startedAt             DateTime  @default(now())
+  finishedAt            DateTime?
+  status                String    @default("running") // running | done | error
+  model                 String
+  clientIdOverride      String?
+  totalScenarios        Int       @default(0)
+  passCount             Int       @default(0)
+  failCount             Int       @default(0)
+  totalLlmMs            Int       @default(0)
+  totalPromptTokens     Int       @default(0)
+  totalCompletionTokens Int       @default(0)
+  capHits               Int       @default(0)
+  errorMessage          String?
+  results               RuleCheckScenarioResult[]
+
+  @@index([startedAt])
+}
+
+model RuleCheckScenarioResult {
+  id                String   @id @default(cuid())
+  runId             String
+  run               RuleCheckRun @relation(fields: [runId], references: [id])
+
+  scenarioId        String
+  scenarioName      String
+
+  expectedDecision  String
+  expectedRules     String   // JSON: Record<rule_id, status>
+
+  actualDecision    String
+  actualStats       String   // JSON: MatchResumeCheckStats
+  ruleResults       String   // JSON: RuleResult[]
+
+  matchKind         String   // pass | fail-decision | fail-rule | fail-missing-rule | fail-parse | fail-runtime
+  failures          String?  // JSON: string[]
+
+  inferenceChain    String   // JSON: InferenceChain[]
+  graphContext      String   // JSON: GraphContext
+
+  llmMs             Int
+  llmModel          String
+  promptTokens      Int?
+  completionTokens  Int?
+  finishReason      String?
+  graphCalls        Int      @default(0)
+  rawLlmText        String?
+
+  ranAt             DateTime @default(now())
+
+  @@unique([runId, scenarioId])
+  @@index([runId])
+}
+
+// =====================================================================
+// Inngest mirror archive (2026-05-28) — durable copy of the Inngest dev
+// server's events / runs / step-traces. The polling archiver
+// (scripts/inngest-archiver.ts) upserts these every ARCHIVE_INTERVAL_MS so
+// monitoring survives an Inngest crash / volume wipe. Read path:
+// lib/inngest-archive/reader.ts + lib/inngest-source.ts (PG-first, live
+// fallback). JSON columns are TEXT (engine-agnostic; parsed by readers).
+// See docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md
+// =====================================================================
+
+model InngestEventArchive {
+  id          String    @id              // Inngest event id (REST id)
+  internalId  String?   @map("internal_id")
+  name        String
+  data        String                     // JSON
+  ts          DateTime?
+  receivedAt  DateTime? @map("received_at")
+  sourceApp   String?   @map("source_app")
+  // Materialized from payload / event namespace / source app so a domain
+  // filter is applied in Postgres before count + pagination.
+  domain      String?
+  // Canonical event timeline: received_at → ts → first archive time. Kept
+  // materialized because nullable-column COALESCE ordering cannot be expressed
+  // through Prisma's portable orderBy API.
+  occurredAt  DateTime? @map("occurred_at")
+  archivedAt  DateTime  @default(now()) @map("archived_at")
+
+  @@index([name, ts])
+  @@index([archivedAt])
+  @@index([domain, archivedAt])
+  @@index([domain, occurredAt])
+  @@map("inngest_event_archive")
+}
+
+model InngestRunArchive {
+  runId           String    @id @map("run_id")
+  functionSlug    String    @map("function_slug")
+  functionName    String?   @map("function_name")
+  appId           String?   @map("app_id")
+  // Business domain of the owning Inngest app. Persisted for stable,
+  // count-accurate server-side pagination.
+  domain          String?
+  status          String                  // Running | Completed | Failed | Cancelled
+  startedAt       DateTime? @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  durationMs      Int?      @map("duration_ms")
+  eventName       String?   @map("event_name")
+  triggerEventIds String?   @map("trigger_event_ids")  // JSON string[]
+  eventPayload    String?   @map("event_payload")       // JSON (triggering event payload)
+  output          String?                               // JSON (run output)
+  flowId          String?   @map("flow_id")
+  // Whether the full step trace + IO has been fetched for this run. The
+  // archiver only does the (expensive) per-step trace fetch once a run is
+  // newly seen or has just reached a terminal state, to bound GraphQL load.
+  traceFetched    Boolean   @default(false) @map("trace_fetched")
+  archivedAt      DateTime  @default(now()) @map("archived_at")
+  lastSyncedAt    DateTime  @updatedAt @map("last_synced_at")
+
+  steps           InngestStepArchive[]
+
+  @@index([functionSlug])
+  @@index([status])
+  @@index([startedAt])
+  @@index([flowId])
+  @@index([domain, startedAt])
+  @@index([eventName, startedAt])
+  @@map("inngest_run_archive")
+}
+
+model InngestStepArchive {
+  id          String    @id              // `${runId}:${spanId}`
+  runId       String    @map("run_id")
+  run         InngestRunArchive @relation(fields: [runId], references: [runId], onDelete: Cascade)
+  spanId      String    @map("span_id")
+  name        String
+  stepOp      String?   @map("step_op")
+  status      String?
+  attempts    Int?
+  durationMs  Int?      @map("duration_ms")
+  queuedAt    DateTime? @map("queued_at")
+  startedAt   DateTime? @map("started_at")
+  endedAt     DateTime? @map("ended_at")
+  input       String?                    // JSON
+  output      String?                    // JSON
+  error       String?                    // JSON
+  archivedAt  DateTime  @default(now()) @map("archived_at")
+
+  @@index([runId])
+  @@map("inngest_step_archive")
+}
+
+// Operator-deleted runs (监控页「删除」). The live Inngest dev server has no
+// run-deletion API and both the polling archiver and the write-through
+// middleware re-mirror live runs, so deleting the archive row alone would
+// resurrect it — the tombstone makes deletion stick: writers skip tombstoned
+// runIds and the live-merge read path filters them out.
+model InngestRunTombstone {
+  runId     String   @id @map("run_id")
+  deletedAt DateTime @default(now()) @map("deleted_at")
+
+  @@map("inngest_run_tombstone")
+}
+
+// Singleton heartbeat row (id='singleton') — archiver writes its last poll
+// time + counts + last error here so /monitor can show archive freshness.
+model InngestArchiveCursor {
+  id             String    @id @default("singleton")
+  lastPollAt     DateTime? @map("last_poll_at")
+  lastSuccessAt  DateTime? @map("last_success_at")
+  eventsArchived Int       @default(0) @map("events_archived")
+  runsArchived   Int       @default(0) @map("runs_archived")
+  stepsArchived  Int       @default(0) @map("steps_archived")
+  lastError      String?   @map("last_error")
+  lastErrorAt    DateTime? @map("last_error_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("inngest_archive_cursor")
+}
+
+// =====================================================================
+// Domain — top-level business container (Phase 0)
+// =====================================================================
+// User-extensible top-level scope. Each domain holds its own agent fleet.
+// `id` is the slug used by localStorage `ao:domain` + AGENT_MAP.domain.
+// `raas` and `r7` are seeded with `is_system=true` and cannot be archived.
+// See docs/superpowers/specs/2026-06-01-domain-foundation-design.md.
+model Domain {
+  id          String    @id
+  name        String
+  color       String
+  is_system   Boolean   @default(false) @map("is_system")
+  created_at  DateTime  @default(now()) @map("created_at")
+  archived_at DateTime? @map("archived_at")
+
+  @@map("domain")
+}
+
+// =====================================================================
+// Per-domain Inngest app registration. Each business domain can register
+// its own Inngest app (id `agentic-operator-<domain>`), served at the
+// dynamic route /api/inngest/<domain>. Ontology-generated agents deployed
+// in that domain become live (stub) functions on this app. status='offline'
+// means the serve route returns zero functions (effectively unregistered).
+// =====================================================================
+model DomainInngestApp {
+  domain       String    @id // matches Domain.id
+  appId        String // 'agentic-operator-<domain>'
+  status       String    @default("offline") // 'online' | 'offline'
+  callbackUrl  String? // last serve URL POSTed to Inngest /fn/register
+  registeredAt DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@map("domain_inngest_app")
+}
+
+// =====================================================================
+// Run AI Summary — durable LLM-generated summary of a workflow run.
+// Supports both run-summary and agent-summary uses via nullable run_id +
+// function_slug. trigger_path = 'eager-on-fail' | 'lazy-on-view' |
+// 'agent-tuning'. Unique on (run_id, last_activity_at) so eager + lazy
+// callers can upsert idempotently.
+// =====================================================================
+model RunAiSummary {
+  id                    String   @id @default(cuid())
+  run_id                String?
+  trace_id              String?
+  function_slug         String?
+  trigger_event         String?
+  terminal_status       String?
+  last_activity_at      DateTime?
+  summary_text          String
+  source                String
+  trigger_path          String
+  llm_model             String?
+  llm_duration_ms       Int?
+  llm_prompt_tokens     Int?
+  llm_completion_tokens Int?
+  system_prompt         String?
+  user_prompt           String?
+  llm_raw_text          String?
+  prompt_context_chars  Int?
+  agents_touched        Int?
+  steps_total           Int?
+  steps_failed          Int?
+  activity_count        Int?
+  errors_excerpt        String?
+  parse_error           String?
+  generated_at          DateTime @default(now())
+
+  @@unique([run_id, last_activity_at])
+  @@index([run_id])
+  @@index([function_slug, generated_at])
+  @@index([terminal_status, generated_at])
+  @@index([generated_at])
+  @@map("run_ai_summary")
+}
+
+// ── 消息通知中心 (Notification center) ──────────────────────────────────
+// Unified "message + alert" surface. Curated DOWNSTREAM of the full log/trace
+// (everything queryable lives in the audit log); only signals worth a human's
+// attention are materialized here. Messages (business lifecycle / events) are
+// rendered deterministically; alerts (error/critical) are deduped by dedupeKey
+// and optionally enriched by the AI manager (aiSummary/aiSeverity/...), with a
+// deterministic fallback. See 2026-06-01-notification-center-and-audit-completeness-design.md.
+model Notification {
+  id       String   @id @default(cuid())
+  ts       DateTime @default(now())
+
+  kind     String // "message" | "alert"
+  severity String // message→"info"; alert→"warning"|"critical"
+  category String // "system" | "agent" | "event" | "candidate" | "job"
+  source   String // business source label: agent short name | "LLM 网关" | "EM" | ...
+  title    String
+  body     String
+
+  // Business domain (Allmeta domain id, e.g. 能源调度-v1) this notification
+  // belongs to. Null = cross-domain/system or legacy (treated as the default
+  // recruitment domain). The notifications view scopes by the active business
+  // domain (other domains' notifications are hidden) EXCEPT category='system',
+  // which always shows regardless of domain.
+  domain          String?
+
+  // correlation / deep-link
+  runId           String?
+  traceId         String?
+  eventInstanceId String?
+  agent           String?
+  anchorsJson     String? // JSON {candidate_id, job_requisition_id, upload_id, client_id}
+  linkKind        String? // "run" | "trace" | "rule_check" | "event" | "none"
+  linkId          String?
+
+  // alert-only (null for plain messages)
+  dedupeKey     String?
+  count         Int       @default(1)
+  firstSeenAt   DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  status        String? // "firing" | "ack" | "resolved" | "auto_handled"
+  disposition   String    @default("info_only") // "needs_human" | "auto_handled" | "info_only"
+  managerAction String? // mirrored from BehaviorAlert.managerActionTaken (display only)
+
+  // AI enrichment cache (mirrors RunAiSummary pattern)
+  aiSummary      String?
+  aiSeverity     String?
+  aiShouldNotify Boolean?
+  aiSource       String? // "llm" | "fallback" | "none"
+  llmModel       String?
+  aiGeneratedAt  DateTime?
+
+  // notify + read state
+  shouldNotify  Boolean   @default(false)
+  notifiedAt    DateTime?
+  notifyChannel String? // "in_app"
+  readAt        DateTime?
+
+  @@unique([dedupeKey, status]) // one firing alert per dedupeKey; messages have null key (distinct in PG)
+  @@index([ts])
+  @@index([lastSeenAt]) // 列表排序键(告警 re-fire 只 bump lastSeenAt 不动 ts)
+  @@index([kind, ts])
+  @@index([severity, ts])
+  @@index([category, ts])
+  @@index([status])
+  @@index([runId])
+  @@index([readAt])
+  @@index([domain, ts])
+  @@map("notification")
+}
+
+// ── 审计日志 (unified audit log) ────────────────────────────────────────
+// Single queryable record of every agent activity, mirrored fire-and-forget
+// from the central AgentLogger (server/agent-logger.ts) with a normalized
+// (level, category) + correlation keys. Powers /api/log-events ("show
+// everything for this run/agent/severity/time"). The everything-queryable substrate;
+// the Notification table is the curated, surfaced subset on top.
+model LogEvent {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  level       String // debug | info | notice | warn | error | critical
+  category    String // error | anomaly | tool | decision | event | lifecycle | step | hitl | info
+  source      String   @default("agent") // agent | system | em | manage | external
+  agent       String?
+  runId       String?
+  traceId     String?
+  eventName   String?
+  // Original JSONL kind + business anchors. Normalized category/level remain
+  // query lanes; these fields preserve the lossless per-run log representation
+  // previously available only in local files.
+  rawKind     String?  @map("raw_kind")
+  anchorsJson String?  @map("anchors_json")
+  message     String
+  payloadJson String?
+  durationMs  Int?
+
+  @@index([ts])
+  @@index([runId, ts])
+  @@index([agent, ts])
+  @@index([traceId, ts])
+  @@index([level, ts])
+  @@index([category, ts])
+  @@map("log_event")
+}
+
+// ── 服务心跳 (backend liveness) ─────────────────────────────────────────
+// Single-row liveness marker for the AO backend. instrumentation.ts#register
+// writes a boot record on every process start and a periodic heartbeat; a clean
+// SIGTERM/SIGINT sets cleanShutdown=true. On the NEXT boot, a previous row with
+// cleanShutdown=false ⇒ the process crashed → a critical "异常重启" notification.
+// Deterministic, zero-LLM. See 2026-06-01-system-health-notifications-design.md §3.
+model ServiceHeartbeat {
+  id              String    @id @default("default")
+  bootCount       Int       @default(0)
+  lastBootAt      DateTime?
+  lastHeartbeatAt DateTime?
+  cleanShutdown   Boolean   @default(true) // was the previous run shut down cleanly?
+  pid             Int?
+  updatedAt       DateTime  @updatedAt
+
+  @@map("service_heartbeat")
+}
+
+// ─── Multi-agent monitor (P2/P3) ────────────────────────────────────────────
+// Durable observation cache for the AI fact-monitoring layer. NOT the
+// authoritative verdict store (RuleCheckAudit/OntologyRuleCheck stay
+// authoritative) — this holds judge opinions, jury votes, drift + calibration.
+// Retention: raw rows ~90d (covers the 60–90d judge-drift window), then prune.
+model MonitorEval {
+  id                  String   @id @default(cuid())
+  ts                  DateTime @default(now())
+
+  domain              String?
+  kind                String // "groundedness" | "jury" | "drift" | "calibration"
+  agent               String?
+  runId               String?  @map("run_id")
+  auditId             String?  @map("audit_id")
+  anchorsJson         String?  @map("anchors_json")
+
+  // judge opinion (non-authoritative)
+  score               Float?
+  verdict             String? // "grounded" | "not_grounded" | "contested" | "unsure"
+  juryVotesJson       String?  @map("jury_votes_json")
+  rationale           String?
+
+  // judge meta + reproducible drift
+  judgeModel          String?  @map("judge_model")
+  judgeFamily         String?  @map("judge_family")
+  judgePromptVersion  String?  @map("judge_prompt_version")
+  rubricVersion       String?  @map("rubric_version")
+  primaryAgreed       Boolean? @map("primary_agreed")
+
+  // cost / latency (evidences bounded jury cost)
+  llmPromptTokens     Int?     @map("llm_prompt_tokens")
+  llmCompletionTokens Int?     @map("llm_completion_tokens")
+  llmDurationMs       Int?     @map("llm_duration_ms")
+
+  // idempotency + autonomy gate
+  sampledFrom         String?  @map("sampled_from")
+  sweepWindow         String?  @map("sweep_window")
+  autonomyMode        String?  @map("autonomy_mode")
+  suppressed          Boolean  @default(false)
+
+  // calibration
+  humanLabel          String?  @map("human_label")
+  agreement           Float?
+
+  aiSource            String   @default("llm") @map("ai_source")
+
+  @@unique([kind, sampledFrom])
+  @@index([domain, ts])
+  @@index([kind, ts])
+  @@index([auditId])
+  @@index([runId])
+  @@map("monitor_eval")
+}
+
+// Per-domain monitor configuration (sampling %, judge family, autonomy level,
+// thresholds). Absent row → coded defaults (see lib/monitor/monitor-config.ts).
+model MonitorConfig {
+  domain              String   @id // Allmeta domain id
+  samplingPct         Int      @default(10) @map("sampling_pct")
+  judgeFamily         String?  @map("judge_family")
+  autonomy            String   @default("read_only") // "read_only" | "notify" | "act"
+  thresholdsJson      String?  @map("thresholds_json")
+  enabledMonitorsJson String?  @map("enabled_monitors_json")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("monitor_config")
+}
+
+// AO runtime infrastructure overrides. Values here intentionally cover only
+// operator-approved infrastructure keys; all other env remains deployment-owned.
+model RuntimeConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("runtime_config")
+}
+
+// 流程追踪 · 事件 AI 分析缓存。on-demand 生成（observability，不上 Inngest），
+// 按 eventId 缓存，避免每次开抽屉都重打 LLM。一个事件 → 一条分析。
+model FunnelEventAnalysis {
+  eventId          String   @id @map("event_id")
+  candidateId      String   @map("candidate_id")
+  eventName        String   @map("event_name")
+  model            String
+  summary          String                 // 事件解读（业务语言）
+  chainRole        String   @map("chain_role")   // 在整条链路上的定位
+  reasoning        String                 // 背后 LLM 推理判断摘要
+  risksJson        String   @map("risks_json")   // JSON string[]
+  nextStep         String   @map("next_step")
+  rawJson          String   @map("raw_json")     // 完整结构化分析 JSON
+  promptTokens     Int?     @map("prompt_tokens")
+  completionTokens Int?     @map("completion_tokens")
+  durationMs       Int?     @map("duration_ms")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([candidateId])
+  @@map("funnel_event_analysis")
+}
+
+// 流程追踪 · 岗位漏斗 AI 诊断缓存。对一个岗位的整条漏斗（预筛通过/拦截 +
+// 拦截原因）做 AI 诊断：流失在哪、典型拦截原因聚类、亮点、建议。
+model FunnelJobAnalysis {
+  jobId            String   @id @map("job_id")
+  model            String
+  diagnosis        String                            // 漏斗诊断（流失/瓶颈）
+  failureClusters  String   @map("failure_clusters") // JSON [{reason, count}]
+  highlights       String                            // 亮点
+  recommendations  String                            // JSON string[]
+  rawJson          String   @map("raw_json")
+  candidateCount   Int      @map("candidate_count")
+  promptTokens     Int?     @map("prompt_tokens")
+  completionTokens Int?     @map("completion_tokens")
+  durationMs       Int?     @map("duration_ms")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("funnel_job_analysis")
+}
+
+// Agent Execution API (partner 对接 · eval-test-builder)。一次单用例评测执行。
+// 完全旁路于生产 Inngest 链路:直接调 runRuleCheck() 纯计算引擎,不发事件、
+// 不写生产审计表、无外部副作用(shadow by construction)。仅本表为新增持久化,
+// 不影响 AO 正常流程。详见 docs/agent-execution-partner-handoff.md。
+model AgentExecution {
+  id               String    @id @map("execution_id") // exec_<cuid>
+  clientRequestId  String    @unique @map("client_request_id") // 幂等键
+  status           String    @default("pending") // pending|running|succeeded|failed|timeout|cancelled
+  runId            String?   @map("run_id") // partner correlation
+  testCaseId       String?   @map("test_case_id")
+  domain           String
+  ontologyVersion  String    @map("ontology_version")
+  scenario         String
+  mode             String    @default("shadow")
+  requestJson      String    @map("request_json") // 受理时的完整请求
+  resultJson       String?   @map("result_json") // 完成后的完整 A2 响应
+  llmFullJson      String?   @map("llm_full_json") // A3 懒加载:LLM 完整 prompt/response(不进 A2 poll)
+  aoAuditId        String?   @map("ao_audit_id")
+  model            String?
+  promptTokens     Int?      @map("prompt_tokens")
+  completionTokens Int?      @map("completion_tokens")
+  errorCode        String?   @map("error_code")
+  errorMessage     String?   @map("error_message")
+  startedAt        DateTime? @map("started_at")
+  finishedAt       DateTime? @map("finished_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("agent_execution")
+}
+
+
+// ===== Agent Factory v2 ledger (recovered 2026-06-17) =====
+model FactoryBuildRun {
+  id          String   @id @default(cuid())
+  domain      String
+  status      String   @default("running") // running | comprehending | done | failed
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  tokensUsed  Int      @default(0)
+  note        String?
+  events      FactoryBuildEvent[]
+  llmCalls    FactoryLlmCall[]
+  @@index([domain, startedAt])
+}
+
+model FactoryBuildEvent {
+  id      String  @id @default(cuid())
+  runId   String
+  seq     Int
+  type    String  // build.start | facet.analyzed | understanding.ready | llm | build.done | error | ...
+  payload String  // JSON
+  ts      DateTime @default(now())
+  run     FactoryBuildRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@index([runId, seq])
+}
+
+model FactoryLlmCall {
+  id               String  @id @default(cuid())
+  runId            String
+  builder          String  // facet-analyst | integrator | ...
+  target           String? // which target agent/facet this call was for
+  purpose          String
+  systemPrompt     String  // full input
+  userPrompt       String  // full input
+  responseText     String  // full output
+  model            String?
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  latencyMs        Int      @default(0)
+  degraded         Boolean  @default(false) // true = gateway down, deterministic fallback
+  ts               DateTime @default(now())
+  run              FactoryBuildRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@index([runId, ts])
+}
