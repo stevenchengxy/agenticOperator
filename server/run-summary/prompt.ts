@@ -12,6 +12,7 @@
 import { AGENT_MAP } from "@/lib/agent-mapping";
 import { byShortFunction } from "@/lib/agent-functions";
 import { displayNameFor } from "@/lib/agent-display-names";
+import type { OutcomeSummary } from "@/lib/monitor/run-outcome";
 import { classifyStep } from "./step-classify";
 
 // Localize any agent identifier (short / inngest id / app-prefixed slug) to its
@@ -86,6 +87,8 @@ export const SYSTEM_PROMPT = `你是 Agentic Operator 的运行报告生成器�
    - **业务失败**（输入标注 \`业务失败\`，或活动里明确写出"判定=未通过 / 不符合规则"）——这才是真实的候选人结论，可以说"候选人规则校验未通过"。
    - 输入标注"重试后成功"的环节属于**已恢复**，**不算失败**。
    - 当输入未出现任何"业务失败"标注时，**不得**断言候选人规则校验未通过。
+5. 输入中的「权威双轴判定」来自结构化运行输出，优先级高于 narrative、step 文案和历史摘要。业务未通过时严禁写“匹配达标/推进面试”；业务未产出时严禁写“流程成功完成”，也不得把空结果当作业务成功。
+6. 若「技术原因 / 建议处置」要求充值、修复凭证、补齐输入、修复配置、检查响应或修复存储，必须明确写出该动作；不得笼统归因为“临时波动”或声称仅等待自动重试即可恢复。只有建议处置为 \`auto_retry\` 时，才能直接建议等待系统自动重试。
 
 格式（Markdown）：
 ## 概述
@@ -111,6 +114,8 @@ export type BuildUserPromptOpts = {
    *  lead with the failure root cause. The status string is the terminal
    *  status that triggered the eager synthesis. */
   eagerTriggerStatus?: string;
+  /** Deterministic verdict derived from the archived handler output. */
+  authoritativeOutcome?: OutcomeSummary;
 };
 
 export function buildUserPrompt(
@@ -150,6 +155,30 @@ export function buildUserPrompt(
   lines.push(`Started: ${run.startedAt.toISOString()}`);
   lines.push(`Completed: ${run.completedAt?.toISOString() ?? "(running)"}`);
   lines.push("");
+
+  if (opts?.authoritativeOutcome) {
+    const outcome = opts.authoritativeOutcome;
+    const reason = [outcome.code, outcome.reason].filter(Boolean).join(" · ");
+    lines.push("权威双轴判定（结构化结果，必须优先采用）：");
+    lines.push(`- 技术执行：${outcome.technical}`);
+    lines.push(
+      `- 业务结果：${outcome.business}${outcome.score != null ? `（分数 ${outcome.score}）` : ""}`,
+    );
+    if (outcome.emittedEvent) lines.push(`- 产出事件：${outcome.emittedEvent}`);
+    if (outcome.technicalCause) {
+      lines.push(
+        `- 技术原因：${outcome.provider ? `${outcome.provider} / ` : ""}${outcome.technicalCause}`,
+      );
+    }
+    if (outcome.recoveryAction) lines.push(`- 建议处置：${outcome.recoveryAction}`);
+    if (reason) lines.push(`- 原因：${reason}`);
+    if (outcome.business === "rejected") {
+      lines.push("- 强制表述：技术调用可以是成功的，但业务结论是未通过；不得建议自动推进面试。 ");
+    } else if (outcome.business === "blocked") {
+      lines.push("- 强制表述：技术/数据问题阻断了有效业务结论；不得把空结果、缺字段或未调通 API 写成成功。 ");
+    }
+    lines.push("");
+  }
 
   // ── Inject the REAL workflow topology (system blueprint), so the LLM knows
   //    each involved agent's downstream subscribers and can describe the path

@@ -33,6 +33,7 @@ import {
 } from "./prompt";
 import { deterministicSummary, emptyRunNotice } from "./fallback";
 import { classifyStep, isTerminalFailure } from "./step-classify";
+import { deriveRunOutcome } from "@/lib/monitor/run-outcome";
 
 export class RunNotFoundError extends Error {
   constructor(runId: string) {
@@ -64,6 +65,8 @@ export type NormalizedRun = {
   lastActivityAt: Date;
   suspendedReason: string | null;
   triggerData: string;
+  /** Final handler output is the source of truth for the business verdict. */
+  output: unknown;
   steps: Array<{
     nodeId: string;
     status: string;
@@ -95,6 +98,7 @@ export async function loadRunSnapshot(runId: string): Promise<NormalizedRun | nu
       lastActivityAt: native.lastActivityAt,
       suspendedReason: native.suspendedReason,
       triggerData: native.triggerData,
+      output: null,
       steps: native.steps.map((s) => ({
         nodeId: s.nodeId,
         status: s.status,
@@ -132,6 +136,7 @@ export async function loadRunSnapshot(runId: string): Promise<NormalizedRun | nu
     lastActivityAt: archive.lastSyncedAt,
     suspendedReason: null,
     triggerData,
+    output: parseJson(archive.output),
     steps: archive.steps.map((s) => ({
       // Inngest steps don't have an AO wsId/nodeId; use the function slug
       // so byShortFromWs has a stable key (won't match AGENT_MAP, but the
@@ -171,6 +176,11 @@ export async function synthesizeRunSummary(
     isTerminalFailure(classifyStep(s).outcome),
   ).length;
   const errorsExcerpt = buildErrorsExcerpt(run.steps);
+  const authoritativeOutcome = deriveRunOutcome({
+    status: run.status,
+    triggerEvent: run.triggerEvent,
+    output: run.output,
+  });
 
   // Base row fields shared across all three write paths. Null defaults for
   // every LLM-observability column so the partial-spread in static/fallback
@@ -205,7 +215,7 @@ export async function synthesizeRunSummary(
   if (!hasAnyAgentData) {
     return upsertSummary({
       ...baseRow,
-      summary_text: emptyRunNotice(run),
+      summary_text: emptyRunNotice(run, authoritativeOutcome),
       source: "static-fallback",
     });
   }
@@ -214,7 +224,7 @@ export async function synthesizeRunSummary(
   if (!isGatewayConfigured()) {
     return upsertSummary({
       ...baseRow,
-      summary_text: deterministicSummary(run, breakdown, run.steps, activities),
+      summary_text: deterministicSummary(run, breakdown, run.steps, activities, authoritativeOutcome),
       source: "fallback",
     });
   }
@@ -223,6 +233,7 @@ export async function synthesizeRunSummary(
   const userPrompt = buildUserPrompt(run, breakdown, run.steps, activities, {
     eagerTriggerStatus:
       args.triggerPath === "eager-on-fail" ? args.terminalStatus : undefined,
+    authoritativeOutcome,
   });
   const promptContextChars = userPrompt.length;
 
@@ -239,7 +250,7 @@ export async function synthesizeRunSummary(
       ...baseRow,
       summary_text:
         result.text ||
-        deterministicSummary(run, breakdown, run.steps, activities),
+        deterministicSummary(run, breakdown, run.steps, activities, authoritativeOutcome),
       source: result.text ? "llm" : "fallback",
       llm_model: result.modelUsed,
       llm_duration_ms: result.durationMs,
@@ -260,12 +271,22 @@ export async function synthesizeRunSummary(
           breakdown,
           run.steps,
           activities,
+          authoritativeOutcome,
         ),
         source: "fallback",
       });
     }
     // (i) Other errors → re-throw so Inngest can retry
     throw e;
+  }
+}
+
+function parseJson(value: string | null): unknown {
+  if (value == null) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
   }
 }
 

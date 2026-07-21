@@ -76,4 +76,30 @@ describe("buildUserPrompt — failure framing", () => {
     expect(out).toContain("业务失败（真实候选人结论）");
     expect(out).toContain("候选人学历不符合岗位硬性要求");
   });
+
+  it("injects the structured business verdict as an authoritative prompt constraint", () => {
+    const out = buildUserPrompt(
+      { ...RUN, status: "completed" },
+      [row({})],
+      [{ nodeId: "match-resume", status: "completed", error: null, durationMs: 60, attempts: 1 }],
+      [],
+      {
+        authoritativeOutcome: {
+          technical: "healthy",
+          business: "rejected",
+          reason: null,
+          code: null,
+          score: 25,
+          emittedEvent: "MATCH_FAILED",
+          technicalCause: null,
+          provider: null,
+          recoveryAction: null,
+        },
+      },
+    );
+
+    expect(out).toContain("权威双轴判定");
+    expect(out).toContain("业务结果：rejected（分数 25）");
+    expect(out).toContain("不得建议自动推进面试");
+  });
 });

@@ -29,6 +29,7 @@ import { deterministicSummary } from "@/server/run-summary/fallback";
 import { computeAgentBreakdown } from "@/server/run-summary/synthesize";
 import type { AgentBreakdownRow } from "@/server/run-summary/prompt";
 import type { RunAiSummary } from "@prisma/client";
+import { deriveRunOutcome } from "@/lib/monitor/run-outcome";
 
 type RouteCtx = { params: Promise<{ id: string }> };
 
@@ -191,7 +192,13 @@ export async function GET(req: Request, ctx: RouteCtx): Promise<Response> {
         run.steps,
         activities,
       );
-      fallbackText = deterministicSummary(run, breakdown, run.steps, activities);
+      fallbackText = deterministicSummary(
+        run,
+        breakdown,
+        run.steps,
+        activities,
+        deriveRunOutcome({ status: run.status, triggerEvent: run.triggerEvent, output: run.output }),
+      );
     } catch {
       // ignore — we'll just omit the fallback field
     }

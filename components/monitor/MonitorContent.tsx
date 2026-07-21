@@ -452,12 +452,12 @@ function RunsList({ runs, initialExpandedId, focusKey, onRunsMutated }: { runs: 
       />
       <div
         className="grid gap-4 text-ink-3 border-b border-line"
-        style={{ gridTemplateColumns: "24px 180px minmax(0, 1fr) 122px 150px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5, minWidth: 940 }}
+        style={{ gridTemplateColumns: "24px 180px minmax(0, 1fr) 220px 150px 90px 80px 90px 18px", padding: "8px 12px", fontSize: 11.5, minWidth: 1040 }}
       >
         <span />
         <span>{t("mox_col_agent")}</span>
         <span>{t("mox_col_trigger_event")}</span>
-        <span>{t("mox_col_status")}</span>
+        <span>{lang === "zh" ? "运行状态 / 技术" : "Run status / technical"}</span>
         <span>{lang === "zh" ? "业务结果" : "Business outcome"}</span>
         <span style={{ textAlign: "right" }}>{t("mox_col_started")}</span>
         <span style={{ textAlign: "right" }}>{t("mox_col_duration")}</span>
@@ -476,7 +476,7 @@ function RunsList({ runs, initialExpandedId, focusKey, onRunsMutated }: { runs: 
           >
             <div
               className="w-full grid items-center gap-4 hover:bg-panel transition-colors"
-              style={{ padding: "12px 12px", gridTemplateColumns: "24px 180px minmax(0, 1fr) 122px 150px 90px 80px 90px 18px", minWidth: 940 }}
+              style={{ padding: "12px 12px", gridTemplateColumns: "24px 180px minmax(0, 1fr) 220px 150px 90px 80px 90px 18px", minWidth: 1040 }}
             >
               <span className="flex items-center justify-center">
                 <input

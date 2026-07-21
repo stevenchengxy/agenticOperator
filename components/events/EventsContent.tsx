@@ -536,7 +536,7 @@ function PayloadViewer({ event, contract, setUrl, t }: { event: InngestEventRow;
                   href={`/monitor?run=${encodeURIComponent(event.processingRuns[0].runId)}&focus=${encodeURIComponent(`run:${event.processingRuns[0].runId}`)}`}
                   className="text-accent hover:underline text-[11px]"
                 >
-                  查看处理 Run →
+                  查看处理 Run · {event.processingRuns[0].status} →
                 </Link>
               )}
             </span>
@@ -674,7 +674,7 @@ function EventOutcomeCell({ event, lang }: { event: InngestEventRow; lang: "zh" 
           href={`/monitor?run=${encodeURIComponent(primary.runId)}&focus=${encodeURIComponent(`run:${primary.runId}`)}`}
           className="text-[10.5px] text-accent hover:underline whitespace-nowrap"
         >
-          Run →
+          Run · {primary.status} →
         </Link>
       )}
     </span>

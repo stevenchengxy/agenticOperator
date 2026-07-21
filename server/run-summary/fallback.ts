@@ -10,6 +10,7 @@
 
 import { byShortFunction } from "@/lib/agent-functions";
 import { displayNameFor } from "@/lib/agent-display-names";
+import type { OutcomeSummary } from "@/lib/monitor/run-outcome";
 import type { AgentBreakdownRow } from "./prompt";
 import { classifyStep } from "./step-classify";
 
@@ -27,11 +28,12 @@ export function deterministicSummary(
     attempts?: number | null;
   }>,
   activities: Array<{ agentName: string; narrative: string }>,
+  outcome?: OutcomeSummary,
 ): string {
   const lines: string[] = [];
   lines.push("## 概述");
   lines.push(
-    `由 \`${run.triggerEvent}\` 触发，当前状态 \`${run.status}\`${run.suspendedReason ? `（${run.suspendedReason}）` : ""}。共涉及 ${breakdown.length} 个 agent，记录 ${steps.length} 个 step、${activities.length} 条 narrative。`,
+    `由 \`${run.triggerEvent}\` 触发，当前状态 \`${run.status}\`${run.suspendedReason ? `（${run.suspendedReason}）` : ""}。${outcome ? `权威双轴结果为“${outcomeLabel(outcome)}”。` : ""}共涉及 ${breakdown.length} 个 agent，记录 ${steps.length} 个 step、${activities.length} 条 narrative。`,
   );
   lines.push("");
   lines.push("## 各 Agent 做了什么");
@@ -60,7 +62,11 @@ export function deterministicSummary(
   const bizFails = classified.filter(({ c }) => c.outcome === "business-failed");
   const infraFails = classified.filter(({ c }) => c.outcome === "infra-failed");
   const recovered = classified.filter(({ c }) => c.outcome === "recovered");
-  if (bizFails.length === 0 && infraFails.length === 0) {
+  if (outcome?.business === "rejected" && bizFails.length === 0) {
+    lines.push(`- **业务未通过**${outcome.score != null ? `：匹配分 ${outcome.score}` : ""}；这是业务结论，不是技术故障。`);
+  } else if (outcome?.business === "blocked" && infraFails.length === 0) {
+    lines.push(`- **业务未产出**：${outcome.reason ?? outcome.code ?? "技术或数据问题阻断了有效业务结论"}。`);
+  } else if (bizFails.length === 0 && infraFails.length === 0) {
     lines.push("- 未发现失败环节。");
   } else {
     for (const { s, c } of bizFails) {
@@ -77,7 +83,11 @@ export function deterministicSummary(
   }
   lines.push("");
   lines.push("## 下一步建议");
-  if (bizFails.length > 0) {
+  if (outcome?.business === "rejected") {
+    lines.push("- 本次业务判定未通过，不应自动推进面试；可按匹配分和原因决定是否人工复核。");
+  } else if (outcome?.business === "blocked") {
+    lines.push("- 先恢复依赖或补齐数据，再重试 / 重放；不得上传空结果或将其标记为业务成功。");
+  } else if (bizFails.length > 0) {
     lines.push("- 建议人工复核业务失败环节涉及的候选人 / 职位数据，确认是数据缺失还是匹配规则需要调整。");
   } else if (infraFails.length > 0) {
     lines.push("- 本次失败均为基础设施故障，候选人未被拒绝；请关注依赖健康，系统会在依赖恢复后自动重放，无需人工复核候选人。");
@@ -93,6 +103,26 @@ export function deterministicSummary(
   return lines.join("\n");
 }
 
+function outcomeLabel(outcome: OutcomeSummary): string {
+  const technical = {
+    healthy: "执行正常",
+    degraded: "技术异常",
+    failed: "技术失败",
+    running: "运行中",
+    cancelled: "已取消",
+  }[outcome.technical];
+  const business = {
+    passed: "业务通过",
+    rejected: "业务未通过",
+    mixed: "部分通过",
+    blocked: "业务未产出",
+    pending: "业务处理中",
+    not_applicable: "无业务判定",
+    unknown: "结果未知",
+  }[outcome.business];
+  return `${technical} / ${business}${outcome.score != null ? ` / ${outcome.score} 分` : ""}`;
+}
+
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
@@ -105,7 +135,7 @@ export function emptyRunNotice(run: {
   status: string;
   startedAt: Date;
   suspendedReason: string | null;
-}): string {
+}, outcome?: OutcomeSummary): string {
   const ageMs = Date.now() - run.startedAt.getTime();
   const ageMin = Math.round(ageMs / 60_000);
   return `## 概述
@@ -113,9 +143,15 @@ export function emptyRunNotice(run: {
     run.suspendedReason ? `（${run.suspendedReason}）` : ""
   }，开始于 **${ageMin} 分钟前**。
 
+${outcome ? `权威双轴结果：**${outcomeLabel(outcome)}**${outcome.reason ? `（${outcome.reason}）` : ""}。` : ""}
+
 ## 数据状态
 这条运行暂时没有可供分析的活动记录，因此无法生成多智能体路径与行为总结，仅有触发事件与状态等基础信息可参考。
 
 ## 下一步建议
-- 稍后刷新本页，或在该运行产生活动后点击「重新生成」查看完整分析。`;
+- ${outcome?.business === "rejected"
+    ? "业务判定未通过，不应自动推进面试；可按匹配分与原因决定是否人工复核。"
+    : outcome?.business === "blocked"
+      ? "先恢复依赖或补齐数据，再重试 / 重放；不得上传空结果或标记为业务成功。"
+      : "稍后刷新本页，或在该运行产生活动后点击「重新生成」查看完整分析。"}`;
 }

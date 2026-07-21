@@ -111,6 +111,27 @@ describe('classifyRobohire — empty-200 predicates', () => {
       }),
     ).toEqual({ ok: true });
   });
+  it('generateJd: parse="failed" but generate="success" with real content → ok (stages are NON-FATAL; content decides — Gohire contract)', () => {
+    // THE bug being fixed: a parse-stage failure still yields a usable JD — generate
+    // ran off the raw prompt and produced real body content. The old classifier gated
+    // on stage STATUS and folded this to `server` → create-jd discarded a good JD and
+    // failed the run. Per the Gohire contract ("each stage is non-fatal; check
+    // meta.stages to see which succeeded"), CONTENT decides usability, not stage status.
+    expect(
+      classifyRobohire('generateJd', {
+        data: { description: '岗位职责:负责……', qualifications: '任职要求:本科……' },
+        meta: { stages: { parse: 'failed', generate: 'success' } },
+      }),
+    ).toEqual({ ok: true });
+  });
+  it('generateJd: parse="failed" + empty content → server (recoverable; a retry may recover the degraded stage)', () => {
+    expect(
+      classifyRobohire('generateJd', {
+        data: {},
+        meta: { stages: { parse: 'failed', generate: 'skipped' } },
+      }),
+    ).toMatchObject({ ok: false, reason: 'server' });
+  });
   it('inviteCandidate: no entry fields → empty; login_url/reused present → ok', () => {
     expect(classifyRobohire('inviteCandidate', { data: {} })).toMatchObject({ ok: false, reason: 'empty' });
     expect(classifyRobohire('inviteCandidate', { data: { login_url: 'https://x' } })).toEqual({ ok: true });

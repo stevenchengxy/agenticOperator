@@ -7,8 +7,13 @@ import { describeStep, describeLogKind } from "@/lib/monitor-step-descriptor";
 import { useApp } from "@/lib/i18n";
 import { fetchJson } from "@/lib/api/client";
 import type { RunSummaryResponse } from "@/app/api/runs/[id]/summary/route";
-import type { OutcomeSummary } from "@/lib/monitor/run-outcome";
-import { OutcomeBadges } from "@/components/monitor/OutcomeBadges";
+import { summaryContradictsOutcome, type OutcomeSummary } from "@/lib/monitor/run-outcome";
+import {
+  businessOutcomeLabel,
+  OutcomeBadges,
+  recoveryActionLabel,
+  technicalOutcomeLabel,
+} from "@/components/monitor/OutcomeBadges";
 
 // Shared run-detail / trace components.
 // Used by /monitor (run inspection) and /fleet/[short] (light "today's stats"
@@ -350,6 +355,7 @@ export function summarizeRun(
   detail: RunDetail,
   agentName?: string,
   t?: (k: string) => string,
+  lang: "zh" | "en" = "zh",
 ): string {
   const status = run.status;
   const phrase = t ? t(STATUS_KEY[status] ?? "") : "";
@@ -367,10 +373,20 @@ export function summarizeRun(
   const job = pick(ctx, ["jobTitle", "position", "jdTitle", "title", "role"]);
 
   const target = [client, job].filter(Boolean).join(" · ");
-  if (candidate && target) return `${candidate} · ${target} · ${phrase}`;
-  if (target) return `${agent} · ${target} · ${phrase}`;
-  if (run.eventName) return `${agent} · ${run.eventName} · ${phrase}`;
-  return `${agent} · ${phrase}`;
+  let base: string;
+  if (candidate && target) base = `${candidate} · ${target} · ${phrase}`;
+  else if (target) base = `${agent} · ${target} · ${phrase}`;
+  else if (run.eventName) base = `${agent} · ${run.eventName} · ${phrase}`;
+  else base = `${agent} · ${phrase}`;
+
+  if (!run.outcome) return base;
+  const outcomeBits = [technicalOutcomeLabel(run.outcome.technical, lang)];
+  if (run.outcome.business !== "not_applicable") {
+    outcomeBits.push(
+      `${businessOutcomeLabel(run.outcome.business, lang)}${run.outcome.score != null ? ` · ${run.outcome.score}` : ""}`,
+    );
+  }
+  return `${base} · ${outcomeBits.join(" · ")}`;
 }
 
 type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
@@ -388,16 +404,20 @@ type RunSummarySuccess = Extract<RunSummaryResponse, { ok: true }>;
  *     one-liner as a fallback while loading / on error.
  */
 function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: RunDetail; agentName?: string }) {
-  const { t } = useApp();
-  const failed = run.status === "Failed";
+  const { t, lang } = useApp();
+  const failed = run.status === "Failed" || run.outcome?.technical === "failed";
+  const degraded = run.outcome?.technical === "degraded";
   const running = run.status === "Running";
-  const tone = failed ? "var(--c-err)" : "var(--c-accent)";
-  const heuristic = summarizeRun(run, detail, agentName, t);
+  const tone = failed ? "var(--c-err)" : degraded ? "var(--c-warn)" : "var(--c-accent)";
+  const heuristic = summarizeRun(run, detail, agentName, t, lang);
 
   const [data, setData] = React.useState<RunSummarySuccess | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [regenerating, setRegenerating] = React.useState(false);
+  const contradicted = data
+    ? summaryContradictsOutcome(data.summaryText, run.outcome)
+    : false;
 
   const load = React.useCallback(
     async (fresh: boolean) => {
@@ -477,6 +497,20 @@ function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: Run
             {t("run_ai_summary_fallback_tag")}
           </span>
         )}
+        {contradicted && (
+          <span
+            className="mono rounded-sm"
+            style={{
+              fontSize: 9.5,
+              padding: "1px 6px",
+              color: "var(--c-warn)",
+              background: "color-mix(in oklab, var(--c-warn) 12%, transparent)",
+              border: "1px solid color-mix(in oklab, var(--c-warn) 34%, var(--c-line))",
+            }}
+          >
+            {lang === "zh" ? "旧摘要冲突 · 已抑制" : "Conflicting summary suppressed"}
+          </span>
+        )}
         {(loading || regenerating) && (
           <span className="text-ink-3 mono" style={{ fontSize: 10.5 }}>
             {t("run_ai_summary_loading")}
@@ -503,6 +537,15 @@ function RunSummaryBanner({ run, detail, agentName }: { run: RunRow; detail: Run
       {running ? (
         <div className="text-ink-2" style={{ fontSize: 12.5, lineHeight: 1.55 }}>
           {t("run_ai_summary_pending")}
+        </div>
+      ) : data && contradicted ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="text-ink-1" style={{ fontSize: 12.5, lineHeight: 1.55 }}>{heuristic}</div>
+          <div className="text-warn" style={{ fontSize: 10.5, lineHeight: 1.5 }}>
+            {lang === "zh"
+              ? "缓存摘要与结构化业务结果矛盾，已隐藏旧文案；请以双轴判定为准，可点击“重新生成”。"
+              : "The cached summary conflicts with the structured outcome and was hidden. Use the two-axis result or regenerate it."}
+          </div>
         </div>
       ) : data ? (
         <div className="text-ink-1" style={{ fontSize: 12.5, lineHeight: 1.65 }}>
@@ -698,6 +741,11 @@ export function RunDetailBody({
             {(run.outcome.code || run.outcome.reason) && (
               <div className="mono text-[10.5px] text-ink-4 mt-1 break-all">
                 {[run.outcome.code, run.outcome.reason].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            {run.outcome.recoveryAction && (
+              <div className="text-[10.5px] text-accent mt-1">
+                {lang === "zh" ? "建议处置" : "Recovery"}：{recoveryActionLabel(run.outcome.recoveryAction, lang)}
               </div>
             )}
           </div>

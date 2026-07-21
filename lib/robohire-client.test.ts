@@ -195,12 +195,11 @@ describe('generateJdDirect', () => {
     await expect(generateJdDirect({ prompt: 'x' })).rejects.toMatchObject({ httpStatus: 400, code: 'CLIENT' });
   });
 
-  it('throws SERVER when meta.stages.generate="failed" (200 + success:true but generate stage failed)', async () => {
-    // Real RoboHire failure: HTTP 200, envelope success:true, parse ok, but the
-    // generate stage failed → every content field came back "" while title is the
-    // placeholder "Untitled". The envelope `success` flag and the placeholder title
-    // both lie; meta.stages.generate is the truth. Surface it as a recoverable SERVER
-    // degradation so the caller fails the run instead of persisting an empty JD.
+  it('does NOT throw when meta.stages.generate="failed" — stages are non-fatal; the transport client returns the response and the caller (classifyRobohire) judges content', async () => {
+    // Gohire contract: generate-jd always returns 200 / success:true; a failed
+    // generate stage still returns the response (with meta.stages). The transport
+    // client must NOT throw on stage status — emptiness/usability is judged downstream
+    // by classifyRobohire (single source of truth), which fails the run on empty content.
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -212,27 +211,28 @@ describe('generateJdDirect', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    await expect(generateJdDirect({ prompt: 'a valid prompt long enough to pass' })).rejects.toMatchObject({
-      code: 'SERVER',
-      requestId: 'req_jd_degraded',
-    });
+    const r = await generateJdDirect({ prompt: 'a valid prompt long enough to pass' });
+    expect(r.requestId).toBe('req_jd_degraded');
+    expect(r.meta?.stages?.generate).toBe('failed');
   });
 
-  it('throws SERVER when meta.stages.parse="failed"', async () => {
+  it('does NOT throw when meta.stages.parse="failed" but generate produced usable content — returns the salvageable JD (this used to be discarded)', async () => {
+    // The headline bug: parse-fail + generate-ok is a fully usable JD. The client
+    // must return it (raw-prompt title and all) so the agent can salvage it.
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
           success: true,
-          data: {},
-          meta: { stages: { parse: 'failed', generate: 'skipped' } },
+          data: { title: 'raw prompt echoed as title', description: 'real body from generate', qualifications: 'real quals' },
+          meta: { stages: { parse: 'failed', generate: 'success' } },
           requestId: 'req_jd_parsefail',
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    await expect(generateJdDirect({ prompt: 'a valid prompt long enough to pass' })).rejects.toMatchObject({
-      code: 'SERVER',
-    });
+    const r = await generateJdDirect({ prompt: 'a valid prompt long enough to pass' });
+    expect(r.data.description).toBe('real body from generate');
+    expect(r.meta?.stages?.parse).toBe('failed');
   });
 
   it('does NOT throw on a fully-successful generate-jd (both stages success)', async () => {

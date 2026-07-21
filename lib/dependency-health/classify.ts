@@ -101,27 +101,34 @@ export function classifyRobohire(op: string, errOrResponse: unknown): DepOutcome
     | { data?: Record<string, unknown>; meta?: { stages?: { parse?: string; generate?: string } } }
     | null
     | undefined;
-  // Authoritative per-stage signal (generate-jd): RoboHire returns `success: true`
-  // at the envelope level even when an internal stage failed — the real outcome is
-  // in meta.stages.{parse,generate}. A failed stage is a vendor-side fault; parse
-  // success means the input was readable, so a generate failure is transient →
-  // `server` (recoverable: park + retry). This is the same conclusion the client's
-  // generateJdDirect reaches by throwing; honoring it here keeps the classifier
-  // self-consistent for any caller that hands us a raw degraded response.
+  const data = resp?.data;
   const stages = resp?.meta?.stages;
-  if (stages && (stages.parse === 'failed' || stages.generate === 'failed')) {
+  const stageFailed = !!stages && (stages.parse === 'failed' || stages.generate === 'failed');
+
+  // Gohire generate-jd contract: the two internal stages (parse, generate) are
+  // NON-FATAL. A degraded stage still returns a usable response — parse-fail →
+  // generate ran off the raw prompt (real body, raw-prompt title); generate-fail →
+  // parse's structured fields are still returned. So usability is decided by
+  // CONTENT, not by stage status: a degraded stage that still carried real content
+  // is a usable (if imperfect) result we must KEEP, not discard as a fault. (Docs:
+  // "check meta.stages to see which succeeded" — read it, don't gate the call on it.)
+  if (!isEmptyRobohirePayload(op, data)) {
+    return { ok: true };
+  }
+  // Content is empty → not usable. When a stage failed, the vendor pipeline
+  // degraded and a retry may recover it (parse success means the input was
+  // readable, so a generate failure is a transient vendor-side fault) → `server`
+  // (recoverable: park + retry). Otherwise it's a plain empty 200 → `empty`
+  // (non-retriable; retrying yields the same nothing).
+  if (stageFailed) {
     return fail(
       'robohire',
       op,
       'server',
-      `${op} stage failed: parse=${stages.parse ?? '—'} generate=${stages.generate ?? '—'}`,
+      `${op} stage failed + empty content: parse=${stages?.parse ?? '—'} generate=${stages?.generate ?? '—'}`,
     );
   }
-  const data = resp?.data;
-  if (isEmptyRobohirePayload(op, data)) {
-    return fail('robohire', op, 'empty', `${op} 返回 200 但内容为空`);
-  }
-  return { ok: true };
+  return fail('robohire', op, 'empty', `${op} 返回 200 但内容为空`);
 }
 
 // ── LLM gateway ───────────────────────────────────────────────────────────────

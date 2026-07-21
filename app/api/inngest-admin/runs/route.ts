@@ -39,12 +39,14 @@ export async function GET(req: Request) {
       ...(Number.isFinite(sinceHours) && sinceHours! > 0 ? { sinceHours } : {}),
     });
     let runs = [...result.items];
+    let targetInjected = false;
     // A notification may point at a run outside the current page/window. Pull
     // that exact archived row into the response so the monitor can always
     // scroll to and expand its evidence instead of opening an empty page.
     if (requestedRunId && !runs.some((run) => run.id === requestedRunId)) {
       const target = await prisma.inngestRunArchive.findUnique({ where: { runId: requestedRunId } });
       if (target) {
+        targetInjected = true;
         runs.unshift({
           id: target.runId,
           status: target.status,
@@ -88,6 +90,8 @@ export async function GET(req: Request) {
         provider: typeof parsed?.provider === 'string' ? parsed.provider : log.source,
       });
     }
+    const responseTotal = result.total + (targetInjected ? 1 : 0);
+    const responseTotalPages = Math.max(result.totalPages, Math.ceil(responseTotal / result.pageSize));
     return NextResponse.json({
       runs: runs.map((r) => ({
         outcome: deriveRunOutcome({
@@ -111,13 +115,13 @@ export async function GET(req: Request) {
       })),
       page: result.page,
       pageSize: result.pageSize,
-      total: result.total,
-      totalPages: result.totalPages,
+      total: responseTotal,
+      totalPages: responseTotalPages,
       meta: {
-        total: result.total,
+        total: responseTotal,
         page: result.page,
         pageSize: result.pageSize,
-        totalPages: result.totalPages,
+        totalPages: responseTotalPages,
         source: result.source,
         generatedAt: new Date().toISOString(),
       },

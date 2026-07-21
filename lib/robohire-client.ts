@@ -392,37 +392,18 @@ export async function generateJdDirect(
     opts.traceId,
     opts.logger,
   );
-  assertGenerateStagesOk(resp);
+  // Contract-faithful: generate-jd's two internal stages (parse, generate) are
+  // NON-FATAL. A degraded stage still returns a usable response — parse-fail →
+  // generate ran off the raw prompt (real body, raw-prompt title); generate-fail →
+  // parse's structured fields are still returned. The docs say to read
+  // `meta.stages` to see which succeeded, NOT to treat a failed stage as a failed
+  // call. So the transport client returns the response verbatim (stages and all);
+  // whether the *content* is usable is the caller's decision, owned by
+  // classifyRobohire (the single source of truth for "is this payload usable").
+  // Throwing on stage status here would discard a parse-fail-but-generate-ok JD
+  // that is fully usable. handleJsonResponse still rejects transport faults +
+  // envelope `success: false`.
   return resp;
-}
-
-/**
- * generate-jd's envelope returns `success: true` at the transport level even when
- * an internal stage failed — the real per-stage outcome lives in
- * `meta.stages.{parse,generate}`. A failed `generate` stage comes back with
- * `success: true`, a placeholder `title: "Untitled"`, and every content field "",
- * which is indistinguishable from success unless you read meta.stages. `handleJsonResponse`
- * only rejects `success: false`, so without this guard a degraded generation sails
- * through and downstream persists an empty JD as if it succeeded.
- *
- * Surface a failed stage as a SERVER (recoverable) RobohireApiError: parse success
- * means the input was readable, so a generate failure is a transient vendor-side
- * fault worth a retry — not a permanent content problem. Absent `meta` (older
- * response shape) → nothing to assert.
- */
-function assertGenerateStagesOk(resp: RobohireGenerateJdResponse): void {
-  const stages = resp.meta?.stages;
-  if (!stages) return;
-  const failed: string[] = [];
-  if (stages.parse === 'failed') failed.push('parse');
-  if (stages.generate === 'failed') failed.push('generate');
-  if (failed.length === 0) return;
-  throw new RobohireApiError(
-    200,
-    'SERVER',
-    `jobs/generate-jd stage failed: ${failed.join(',')} (parse=${stages.parse ?? '—'} generate=${stages.generate ?? '—'})`,
-    resp.requestId,
-  );
 }
 
 // ─── invite-candidate ───────────────────────────────────────────
