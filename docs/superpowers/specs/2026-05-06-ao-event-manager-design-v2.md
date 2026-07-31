@@ -6,7 +6,7 @@
 | 状态 | Draft v2（supersedes v1） |
 | 作者 | Yuhan + Claude |
 | Scope | AO 主仓 + resume-parser-agent；所有出入站事件统一经过 Event Manager（库形态） |
-| 前置 | [v1 spec](2026-05-06-ao-event-manager-design.md), [event-flow-deep-dive.md](../../event-flow-deep-dive.md), [raas-alignment-payloads.md](../../raas-alignment-payloads.md) |
+| 前置 | [v1 spec](./2026-05-06-ao-event-manager-design.md), [event-flow-deep-dive.md](../../architecture/event-flow-deep-dive.md), [raas-alignment-payloads.md](../../raas/raas-alignment-payloads.md) |
 
 ---
 
@@ -221,7 +221,7 @@ agenticOperator/
 
 ## 5. 事件流（6 个具体流）
 
-继承 v1 §5 全部 6 个流（F1-F6）。略，参考 [v1 §5](2026-05-06-ao-event-manager-design.md#5-事件流6-个具体流)。
+继承 v1 §5 全部 6 个流（F1-F6）。略，参考 [v1 §5](./2026-05-06-ao-event-manager-design.md#5-事件流6-个具体流)。
 
 v2 增量补充：
 

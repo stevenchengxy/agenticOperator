@@ -2,7 +2,7 @@
 // (ExecutionResponse). No I/O except ruleTextSha256 (reads the pinned snapshot).
 // Kept pure + side-effect-free so it is unit-testable and the route layer stays thin.
 //
-// Mapping rules are documented in docs/agent-execution-api-partner-guide.md §4.4.
+// Mapping rules are documented in docs/api/agent-execution-api-partner-guide.md §4.4.
 
 import type { MatchResumeCheckResult, RuleResult, RuleStatus } from '@/lib/rule-check/types';
 import { ruleTextSha256 } from './version-registry';

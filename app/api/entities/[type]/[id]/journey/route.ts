@@ -9,7 +9,7 @@
 // Read-only: extractor walks JSON in-process, does NOT modify any payload.
 // Strategy: the design doc's "path A" — scan recent rows, filter in JS,
 // good enough until we cross ~50k runs. See
-// docs/workflow-inspector-enhancement-design.md §3.4.
+// docs/architecture/workflow-inspector-enhancement-design.md §3.4.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/server/db';

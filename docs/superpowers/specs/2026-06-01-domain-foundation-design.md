@@ -13,7 +13,7 @@
 
 Per the user's vision: AO should host multiple business domains side-by-side (招聘, 采购报销, …), each with its own agent fleet. The codegen flow (Phase 1) will deposit newly-generated agents into the user's currently-selected domain.
 
-This spec ships the **container layer only**: domains are data-driven and CRUD-able. Codegen-into-domain, deploy, and Manage actions remain placeholders (see [Fleet IA spec, §6](2026-05-19-fleet-ia-design.md)).
+This spec ships the **container layer only**: domains are data-driven and CRUD-able. Codegen-into-domain, deploy, and Manage actions remain placeholders (see [Fleet IA spec, §6](./2026-05-19-fleet-ia-design.md)).
 
 Per `project_three_pillars` memory, AO has three pillars (Monitor / Manage / Behavior). This spec stays inside the existing Monitor surface — it extends the chrome but doesn't add any write-ops on agents themselves. Manage/Behavior placeholders are preserved verbatim.
 
@@ -27,7 +27,7 @@ Per `project_three_pillars` memory, AO has three pillars (Monitor / Manage / Beh
 
 ## 3. Data model
 
-New Prisma table on the local Postgres data layer (see [local-postgres design](2026-05-28-local-postgres-inngest-archive-design.md)):
+New Prisma table on the local Postgres data layer (see [local-postgres design](./2026-05-28-local-postgres-inngest-archive-design.md)):
 
 ```prisma
 model Domain {
@@ -141,7 +141,7 @@ Fleet already filters by `useDomain()`. Only addition: a **new empty-state card*
 └────────────────────────────────────────────────────┘
 ```
 
-The "+ 部署智能体" button is the **same placeholder** that the [Fleet IA spec §6](2026-05-19-fleet-ia-design.md) defined — no new handler. Clicking still shows "Behavior 模块未上线 — 现阶段请联系 RAAS".
+The "+ 部署智能体" button is the **same placeholder** that the [Fleet IA spec §6](./2026-05-19-fleet-ia-design.md) defined — no new handler. Clicking still shows "Behavior 模块未上线 — 现阶段请联系 RAAS".
 
 Existing filters (group by team/status/stage/flat, status tabs, owner-team filter) all work identically — they just operate on the filtered-to-current-domain set. For the empty domain, those controls render as no-ops with the empty state card occupying the grid.
 
@@ -211,7 +211,7 @@ Tagged here so they don't sneak into Phase 0:
 
 | Item | Where it lands |
 |---|---|
-| Codegen scoped to current domain (`/behavior/codegen?domain=<id>` + new agent persists its domain) | Phase 1 spec — extends [PromptGen-CodeGen spec](2026-05-27-promptgen-codegen-design.md) |
+| Codegen scoped to current domain (`/behavior/codegen?domain=<id>` + new agent persists its domain) | Phase 1 spec — extends [PromptGen-CodeGen spec](./2026-05-27-promptgen-codegen-design.md) |
 | `DomainAgent` Prisma table — agents persist their domain (replacing hardcoded `AgentMeta.domain`) | Phase 1, when codegen needs it |
 | `+ 部署智能体` button real handler | Behavior axis spec (not yet drafted for end-user agent deployment) |
 | Per-agent `Pause / Roll back / Reassign / Deprecate` real handlers | Manage axis spec |

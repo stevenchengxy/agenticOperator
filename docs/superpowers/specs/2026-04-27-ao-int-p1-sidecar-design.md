@@ -1,6 +1,6 @@
 # AO-INT-P1 · Sidecar 接通 · 详细设计
 
-> **父 spec**：[2026-04-27-agentic-operator-integration-design.md](2026-04-27-agentic-operator-integration-design.md)
+> **父 spec**：[2026-04-27-agentic-operator-integration-design.md](./2026-04-27-agentic-operator-integration-design.md)
 > **阶段**：P1（第 1–3 周）· **代号**：AO-INT-P1
 > **作者**：Steven · **日期**：2026-04-27 · **状态**：草案
 

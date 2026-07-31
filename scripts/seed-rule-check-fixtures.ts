@@ -7,7 +7,7 @@
  *   npx tsx scripts/seed-rule-check-fixtures.ts --verbose
  *
  * Reads ONTOLOGY_API_BASE / ONTOLOGY_API_TOKEN from .env.local.
- * See docs/action_object_prompt/match-resume-data-preparation-design.md
+ * See docs/ontology/action_object_prompt/match-resume-data-preparation-design.md
  * for the full data design.
  */
 

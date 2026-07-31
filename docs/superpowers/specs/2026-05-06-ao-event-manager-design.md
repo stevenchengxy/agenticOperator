@@ -6,7 +6,7 @@
 | 状态 | Draft（待评审） |
 | 作者 | Yuhan + Claude |
 | Scope | AO 主仓库 + resume-parser-agent，所有出入站事件统一经过 Event Manager（库形态） |
-| 相关文档 | [event-flow-deep-dive.md](../../event-flow-deep-dive.md), [raas-alignment-payloads.md](../../raas-alignment-payloads.md) |
+| 相关文档 | [event-flow-deep-dive.md](../../architecture/event-flow-deep-dive.md), [raas-alignment-payloads.md](../../raas/raas-alignment-payloads.md) |
 
 ---
 

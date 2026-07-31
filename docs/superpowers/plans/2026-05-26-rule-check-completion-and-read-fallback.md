@@ -120,7 +120,7 @@ Spec: [docs/superpowers/specs/2026-05-26-rule-check-completion-and-read-fallback
 
 **Files:** Create `lib/rule-check/pg-fallback.ts` · Test `lib/rule-check/pg-fallback.test.ts`.
 
-- [ ] For each of Candidate / Resume / Job_Requisition / Application / Candidate_Match_Result: a `normalize<Entity>(pgRow) → ontologyShape` using [docs/ao-allmeta-field-alignment-table.md](../../ao-allmeta-field-alignment-table.md). Test each mapping (e.g. pg `job_requisition_id` → ontology `job_position_id`).
+- [ ] For each of Candidate / Resume / Job_Requisition / Application / Candidate_Match_Result: a `normalize<Entity>(pgRow) → ontologyShape` using [docs/ao-allmeta-field-alignment-table.md](../../ontology/ao-allmeta-field-alignment-table.md). Test each mapping (e.g. pg `job_requisition_id` → ontology `job_position_id`).
 
 ### Task 5.2: Wrap instance-client reads with fallback
 

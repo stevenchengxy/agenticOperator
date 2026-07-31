@@ -5,8 +5,8 @@
 > 状态: 待 user review(写完直接走 user gate,不派 reviewer per user preference)
 >
 > **前置 spec(已并 main)**:
-> - [2026-05-19-rule-check-independent-agent-design.md](2026-05-19-rule-check-independent-agent-design.md) — rule-check 独立化 + RoboHire 直连
-> - [2026-05-19-raas-integration-divergence-fixes-design.md](2026-05-19-raas-integration-divergence-fixes-design.md) — F1-F4 + 方案 B
+> - [2026-05-19-rule-check-independent-agent-design.md](./2026-05-19-rule-check-independent-agent-design.md) — rule-check 独立化 + RoboHire 直连
+> - [2026-05-19-raas-integration-divergence-fixes-design.md](./2026-05-19-raas-integration-divergence-fixes-design.md) — F1-F4 + 方案 B
 >
 > **本 spec 显式覆盖**:
 > - 老 spec §2.3 "方案 A — matchResumeAgent 双段订阅" → 改为 "ruleCheckAgent 吸收 matchResume 第一段"

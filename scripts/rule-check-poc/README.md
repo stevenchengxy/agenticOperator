@@ -1,6 +1,6 @@
 # Rule-Check Prompt Builder — Multi-Agent POC
 
-> 独立的后端 POC，验证 [docs/rule-check-prompt-pipeline.md](../../docs/rule-check-prompt-pipeline.md)
+> 独立的后端 POC，验证 [docs/rule-check-prompt-pipeline.md](../../docs/rule-check/rule-check-prompt-pipeline.md)
 > 中叶洋负责的 prompt 编译逻辑。**不接入 workflow agents，纯本地跑**。
 
 ## 跑起来
@@ -9,11 +9,11 @@
 npx tsx scripts/rule-check-poc/run-demo.ts
 ```
 
-输出会写到 [scripts/rule-check-poc/output/](output/)，并在控制台打印统计。
+输出会写到 [scripts/rule-check-poc/output/](./output/)，并在控制台打印统计。
 
 ## 这个 POC 在演示什么
 
-按 [docs/rule-check-prompt-pipeline.md §0.2](../../docs/rule-check-prompt-pipeline.md) 的"三层 agent
+按 [docs/rule-check-prompt-pipeline.md §0.2](../../docs/rule-check/rule-check-prompt-pipeline.md) 的"三层 agent
 体系"，本 POC 实现了 L2 sub-agent 的 prompt 编译部分（叶洋的活），由 3 个 sub-agent 串行组成：
 
 ```
@@ -69,7 +69,7 @@ scripts/rule-check-poc/
 
 ## 输出文件
 
-跑完后 [output/](output/) 下会有：
+跑完后 [output/](./output/) 下会有：
 
 - `<scenario>.user-prompt.md` — 完整 user prompt（直接喂给 LLM 的字符串）
 - `<scenario>.expected-output.json` — 期待的 LLM 返回 JSON 模板（rule_flags 数组每条对应一条激活的 rule）
@@ -92,7 +92,7 @@ POC 跑通后，升级到接入 workflow agent 只需：
 
 1. **OntologyQueryAgent** → 替换 `MOCK_RULES` in-memory 过滤为 Neo4j Cypher 查询（用项目里已有的 `neo4j-driver`）
 2. **PromptComposerAgent** → 不动，直接复用
-3. **Pipeline** → 包装成 `MatchResumeActionObject.getRuleCheckPrompt(args)` 类方法，注入到雨函的 `RuleCheckAgent`（[docs §3.5 / §3.6](../../docs/rule-check-prompt-pipeline.md)）
+3. **Pipeline** → 包装成 `MatchResumeActionObject.getRuleCheckPrompt(args)` 类方法，注入到雨函的 `RuleCheckAgent`（[docs §3.5 / §3.6](../../docs/rule-check/rule-check-prompt-pipeline.md)）
 4. **mock-rules.ts** → 删掉，rules 改由 Neo4j 拉
 
 ## 已知 POC 简化

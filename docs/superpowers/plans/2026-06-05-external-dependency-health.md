@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Next.js App Router, Prisma/Postgres, Inngest (`NonRetriableError`), vitest, Tailwind v4 (`--c-*` tokens).
 
-**Spec:** [docs/superpowers/specs/2026-06-05-external-dependency-health-design.md](2026-06-05-external-dependency-health-design.md)
+**Spec:** [docs/superpowers/specs/2026-06-05-external-dependency-health-design.md](./2026-06-05-external-dependency-health-design.md)
 
 ---
 

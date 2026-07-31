@@ -28,11 +28,11 @@
 | 一切报错(后端/LLM/agent/基础设施)都以消息发到告警页 | 错误源分散 5 处(AgentActivity / BehaviorAlert / EmSystemStatus / EventInstance / WS SLA);**抛出的异常、LLM body、API call、infra 故障今天根本不落库**(见 2026-05-22 spec §6.B) |
 | 业务消息(事件、agent 运行)也要纳入,与预警分类筛选,不堆一起 | 无统一"消息"概念;`/alerts` 是 mock 的 P1-P4 告警页 |
 | AI 管理/总结/发通知,AI 失效用算法兜底只发重要 | `/api/alerts` 无 AI;无 fallback 分级;无通知态 |
-| 完善审计日志,所有数据 log 追踪全可查 | 见 [2026-05-22 统一日志与可追踪审计设计](2026-05-22-unified-logging-audit-design.md):`LogEvent` 已设计但 **0% 实现** |
+| 完善审计日志,所有数据 log 追踪全可查 | 见 [2026-05-22 统一日志与可追踪审计设计](./2026-05-22-unified-logging-audit-design.md):`LogEvent` 已设计但 **0% 实现** |
 
 ### 1.3 与既有设计的关系
 
-- **审计全可查 = 落地已批准的 [2026-05-22 LogEvent 统一日志 spec](2026-05-22-unified-logging-audit-design.md)。** 本 spec **不重新设计 LogEvent**,只:(a) 把它列为 P1 前置并执行其写入主干 + 查询 API;(b) 在 LogEvent 写入时**内联派生** `Notification`。
+- **审计全可查 = 落地已批准的 [2026-05-22 LogEvent 统一日志 spec](./2026-05-22-unified-logging-audit-design.md)。** 本 spec **不重新设计 LogEvent**,只:(a) 把它列为 P1 前置并执行其写入主干 + 查询 API;(b) 在 LogEvent 写入时**内联派生** `Notification`。
 - **AI 管理器抄 [server/run-summary/synthesize.ts](../../../server/run-summary/synthesize.ts) + `RunAiSummary` 的模式**:plain server 模块 → `chatComplete` → Postgres 缓存 → 网关不可用走确定性 fallback。**不上 Inngest**(沿用既定:观测/合成类不进 Inngest)。
 - **自动处理动作(auto_restart/throttle/scale)属 Manage 轴**,本期只**展示** `已自动处理` 状态(读 `BehaviorAlert.managerActionTaken`),不新建自动干预。
 
@@ -375,7 +375,7 @@ X 条需要你处理 ·  Y 条已自动处理
 - audit `decision='ERROR'` 枚举 + `/api/rule-check-audits` filter。
 - 测试:`runner.test.ts` 加 "infra 错误不产生候选人 FAIL";agent 测试加 "infra 错误不写 partner、不 emit FAILED、抛错触发重试"。
 
-**LogEvent 写入主干(审计全可查)** — 执行 [2026-05-22 spec](2026-05-22-unified-logging-audit-design.md) P0+P1+P2:
+**LogEvent 写入主干(审计全可查)** — 执行 [2026-05-22 spec](./2026-05-22-unified-logging-audit-design.md) P0+P1+P2:
 - `prisma/schema.prisma` +`LogEvent`、+`Notification`。
 - `server/log/logger.ts`(3 路 sink)+ `price-table.ts` + `cost.ts`;旧 logger 改 shim。
 - `server/inngest/wrap-handler.ts`(`handler.error` 兜底捕获)+ 5 个 agent + stub-factory 各 1 行接入。

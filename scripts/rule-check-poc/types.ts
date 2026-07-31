@@ -1,6 +1,6 @@
 // Multi-agent rule-check prompt builder POC — shared types。
 //
-// 这些类型对齐 docs/workflow-agents-inngest-spec.md 中 production agent 看到的真实 schema:
+// 这些类型对齐 docs/architecture/workflow-agents-inngest-spec.md 中 production agent 看到的真实 schema:
 //   - RuntimeContext  ← RESUME_PROCESSED 事件透传的 anchor 字段
 //   - ParsedResume    ← RESUME_PROCESSED.parsed.data (RaasParseResumeData,放宽 schema)
 //   - JobRequisition  ← RAAS getRequirementDetail.requirement (RaasRequirement)
@@ -55,7 +55,7 @@ export interface Rule {
 
 // ════════════════════════════════════════════════════════════════
 //  Runtime context — 从 RESUME_PROCESSED 事件透传给 matchResumeAgent
-//  对应 docs/workflow-agents-inngest-spec.md §2.3 ResumeProcessedData
+//  对应 docs/architecture/workflow-agents-inngest-spec.md §2.3 ResumeProcessedData
 // ════════════════════════════════════════════════════════════════
 
 /**
@@ -92,7 +92,7 @@ export interface RuntimeContext {
 
 // ════════════════════════════════════════════════════════════════
 //  Resume — 对齐 RaasParseResumeData (生产 RoboHire /parse-resume 输出)
-//  对应 docs/workflow-agents-inngest-spec.md §5.1
+//  对应 docs/architecture/workflow-agents-inngest-spec.md §5.1
 // ════════════════════════════════════════════════════════════════
 
 /**
@@ -172,7 +172,7 @@ export interface ParsedResume {
 
 // ════════════════════════════════════════════════════════════════
 //  Job Requisition — 对齐 RaasRequirement
-//  对应 docs/workflow-agents-inngest-spec.md §5.3 + raas-api-client.ts:623
+//  对应 docs/architecture/workflow-agents-inngest-spec.md §5.3 + raas-api-client.ts:623
 // ════════════════════════════════════════════════════════════════
 
 /**

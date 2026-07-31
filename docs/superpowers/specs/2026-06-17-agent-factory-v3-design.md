@@ -106,7 +106,7 @@ Each candidate runs N times → mean ± variance (stochasticity guard). Acceptan
 
 ## 9. Observability + Frontend
 
-**Principle:** every internal LLM turn is a `FactoryLlmCall` ledger row → the UI is a *render of the ledger* (auditable + replayable). Built on `agent-factory-chatbot.html`'s palette + the shared atoms; de-jargonized; i18n zh+en.
+**Principle:** every internal LLM turn is a `FactoryLlmCall` ledger row → the UI is a *render of the ledger* (auditable + replayable). Built on `docs/reports/agent-factory-chatbot.html`'s palette + the shared atoms; de-jargonized; i18n zh+en.
 
 **3-column** (`app/behavior/factory-v3/page.tsx` + `components/behavior/factory-v3/`):
 - **Left:** domain switch + build runs + DRAFTS list (with score badges).
@@ -145,6 +145,6 @@ Hermetic vitest throughout (gateway mocked via `server/llm/__mocks__/gateway.ts`
 
 ---
 
-## 13. Key references (full set in `agent-factory-v3-architecture.html`)
+## 13. Key references (full set in `docs/reports/agent-factory-v3-architecture.html`)
 
 Harness-not-framework · Anthropic context engineering + multi-agent research system · ADAS / AFlow / DSPy · Reflexion / Self-Debug / AlphaCodium · SWE-bench dual-checklist · Voyager / CREATOR / CodeAct · Chroma context-rot · Temporal "fallacy of the graph" · E2B/Firecracker/gVisor (real isolation).

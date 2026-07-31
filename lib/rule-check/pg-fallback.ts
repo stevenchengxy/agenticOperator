@@ -6,7 +6,7 @@
 //
 // CORRECTNESS NOTE — why only Job_Requisition is registered:
 //   The ontology field names and partner-pg column names DIVERGE for several
-//   entities (see docs/ao-allmeta-field-alignment-table.md — ~21 naming
+//   entities (see docs/ontology/ao-allmeta-field-alignment-table.md — ~21 naming
 //   mismatches: experience_years↔work_years, skills_extracted↔skill_tags,
 //   job_position_id↔job_requisition_id, …). A fallback that returns wrongly-named
 //   fields would silently feed the LLM rule evaluator bad data. So we ONLY

@@ -1,6 +1,6 @@
 // Agent Execution API — request/response contract types (partner 对接).
 //
-// Mirrors docs/agent-execution-api-partner-guide.md §4. The execution核 is the
+// Mirrors docs/api/agent-execution-api-partner-guide.md §4. The execution核 is the
 // pure runRuleCheck() engine; nothing here touches the Inngest pipeline, emits
 // events, or writes production tables — so AO's normal flow is unaffected.
 

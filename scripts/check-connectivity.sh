@@ -111,7 +111,7 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10
 echo ""
 echo "===== 结果：通过 $PASS · 失败 $FAIL · 跳过 $SKIP ====="
 if [ "$FAIL" -gt 0 ]; then
-  echo "有依赖不可达。对照 docs/deployment.md「网络前提」一节处理后重试；"
+  echo "有依赖不可达。对照 docs/deploy/deployment.md「网络前提」一节处理后重试；"
   echo "带着不可达的依赖继续部署，对应 agent 链路会在运行时失败。"
   exit 1
 fi

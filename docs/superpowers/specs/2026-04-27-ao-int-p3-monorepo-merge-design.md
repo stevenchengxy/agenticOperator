@@ -1,6 +1,6 @@
 # AO-INT-P3 · 仓内 Next.js 合一 + SQLite 单文件 · 详细设计
 
-> **父 spec**：[2026-04-27-agentic-operator-integration-design.md](2026-04-27-agentic-operator-integration-design.md)
+> **父 spec**：[2026-04-27-agentic-operator-integration-design.md](./2026-04-27-agentic-operator-integration-design.md)
 > **前置**：P1 + P2 全部验收通过
 > **阶段**：P3（第 6–10 周）· **代号**：AO-INT-P3
 > **作者**：Steven · **日期**：2026-04-27 · **状态**：草案

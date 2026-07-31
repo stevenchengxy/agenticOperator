@@ -305,7 +305,7 @@ model AgentConfigHistory {
 }
 
 // Phase 0: Agent 版本表 — 配置快照 + 未来 codegen 落库目标。
-// 见 docs/2026-05-25-ao-behavior-codegen-research.md §8.1
+// 见 docs/research/2026-05-25-ao-behavior-codegen-research.md §8.1
 model AgentVersion {
   id           String   @id @default(cuid())
   // short = AGENT_MAP 里的 short code (e.g. "JDGenerator")
@@ -1440,7 +1440,7 @@ model FunnelJobAnalysis {
 // Agent Execution API (partner 对接 · eval-test-builder)。一次单用例评测执行。
 // 完全旁路于生产 Inngest 链路:直接调 runRuleCheck() 纯计算引擎,不发事件、
 // 不写生产审计表、无外部副作用(shadow by construction)。仅本表为新增持久化,
-// 不影响 AO 正常流程。详见 docs/agent-execution-partner-handoff.md。
+// 不影响 AO 正常流程。详见 docs/api/agent-execution-partner-handoff.md。
 model AgentExecution {
   id               String    @id @map("execution_id") // exec_<cuid>
   clientRequestId  String    @unique @map("client_request_id") // 幂等键

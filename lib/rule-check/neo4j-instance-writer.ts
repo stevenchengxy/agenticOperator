@@ -24,7 +24,7 @@
 //   - **idempotent**:audit_id 是 (run / scenario / candidate / jr) hash,
 //     MERGE 写入保证重复 emit 不会重复写
 //
-// 这条 module 跟 docs/neo4j-instance-storage-plan.md 的长期路径(走 Ontology
+// 这条 module 跟 docs/ontology/neo4j-instance-storage-plan.md 的长期路径(走 Ontology
 // API)等价 — 写的 label / property 一致,只是 transport 是 driver 直连。
 // Phase 3 切到 Ontology API 时,本 module 内部实现替换即可,接口不变。
 

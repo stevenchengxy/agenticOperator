@@ -2,7 +2,7 @@
 // Accept one single-case evaluation execution (idempotent on clientRequestId),
 // run it in the background against the PURE runRuleCheck engine, return 202.
 // Auth is scoped to this route group only (no global middleware) → existing AO
-// routes are unaffected. See docs/agent-execution-partner-handoff.md.
+// routes are unaffected. See docs/api/agent-execution-partner-handoff.md.
 
 import { NextResponse } from 'next/server';
 import { checkAuth } from '@/server/agent-execution/auth';

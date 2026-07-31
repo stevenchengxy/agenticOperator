@@ -1,7 +1,7 @@
 // 5 个 (JR + spec) 配对 — 镜像 production RAAS getRequirementDetail 返回结构。
 //
 // 字段命名严格对齐 [resume-parser-agent/lib/raas-api-client.ts:623] 的 `RaasRequirement` +
-// `RaasRequirementSpecification`(`docs/workflow-agents-inngest-spec.md` §5.3)。
+// `RaasRequirementSpecification`(`docs/architecture/workflow-agents-inngest-spec.md` §5.3)。
 //
 // 扩展字段(`client_business_group` / `client_studio` / `tags` / `age_range`)
 // 是为支持 ontology rule 的 `applicableDepartment` 维度过滤而加的,

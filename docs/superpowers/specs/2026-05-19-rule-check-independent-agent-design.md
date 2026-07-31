@@ -33,7 +33,7 @@
 
 用户原话:"我们的rule check算法就不用再用LLM去判断通用的rule是不是真正属于客户的通用的rule"。
 
-实际代码层面,客户级过滤**从来不是 LLM 做的** — 见 [lib/rule-check/ontology.ts:125-130](lib/rule-check/ontology.ts#L125-L130):
+实际代码层面,客户级过滤**从来不是 LLM 做的** — 见 [lib/rule-check/ontology.ts:125-130](./lib/rule-check/ontology.ts#L125-L130):
 
 ```ts
 function matches(r: Rule, q: OntologyDims): boolean {
@@ -491,9 +491,9 @@ type RuleCheckPassedData = {
 
 | 组件 | 改动 |
 |---|---|
-| [components/rule-check/ScenarioMatrix.tsx](components/rule-check/ScenarioMatrix.tsx) | 把 severity badge 改用 enforcementLevel + failurePolicy 显示 |
-| [components/rule-check/RuleConfusionStrip.tsx](components/rule-check/RuleConfusionStrip.tsx) | 同上(如有 severity 列) |
-| [components/rule-check/CaseDrawer.tsx](components/rule-check/CaseDrawer.tsx) | rule detail 视图展示新字段 |
+| [components/rule-check/ScenarioMatrix.tsx](./components/rule-check/ScenarioMatrix.tsx) | 把 severity badge 改用 enforcementLevel + failurePolicy 显示 |
+| [components/rule-check/RuleConfusionStrip.tsx](./components/rule-check/RuleConfusionStrip.tsx) | 同上(如有 severity 列) |
+| [components/rule-check/CaseDrawer.tsx](./components/rule-check/CaseDrawer.tsx) | rule detail 视图展示新字段 |
 | `lib/i18n.tsx` | 新增 i18n key:`rc_enforcement_mandatory` / `rc_enforcement_optional` / `rc_on_fail_block` / `rc_on_fail_warn`(中英) |
 
 ### 6.2 显示约定(草案)

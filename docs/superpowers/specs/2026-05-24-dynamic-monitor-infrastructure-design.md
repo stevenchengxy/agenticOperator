@@ -240,7 +240,7 @@ export type AgentMeta = {
 - `REAL_ID_BY_SHORT` (app/api/inngest-admin/functions/route.ts:30) — `MONITORED_FALLBACK` 整段改为基于 `fetchLiveRegistry()` 派生
 - `MonitorContent.tsx:429-432` 4 个 `if (short === ...)` — 一个 helper `await inngestSlugFromShort(short)` 替代
 
-**改 `/api/agents`** ([app/api/agents/route.ts](app/api/agents/route.ts)):
+**改 `/api/agents`** ([app/api/agents/route.ts](./app/api/agents/route.ts)):
 
 ```typescript
 // before

@@ -23,7 +23,7 @@ x-ao-service: &ao-service
     # Defaults target the bundled inngest service. For a SHARED Inngest
     # (e.g. reusing an existing raas-inngest container on the same host),
     # override both in .env.deploy and disable the bundled service by
-    # clearing COMPOSE_PROFILES. See docs/deployment.md.
+    # clearing COMPOSE_PROFILES. See docs/deploy/deployment.md.
     INNGEST_BASE_URL: ${INNGEST_BASE_URL:-http://inngest:8288}
     INNGEST_SERVE_ORIGIN: ${INNGEST_SERVE_ORIGIN:-http://app:3002}
     INNGEST_SERVE_PATH: /api/inngest

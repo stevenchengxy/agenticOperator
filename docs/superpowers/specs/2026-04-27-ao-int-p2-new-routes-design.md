@@ -1,7 +1,7 @@
 # AO-INT-P2 · 新路由（HITL Inbox + Triggers + Firehose）· 详细设计
 
-> **父 spec**：[2026-04-27-agentic-operator-integration-design.md](2026-04-27-agentic-operator-integration-design.md)
-> **前置**：P1 已交付，[2026-04-27-ao-int-p1-sidecar-design.md](2026-04-27-ao-int-p1-sidecar-design.md) §11 全部验收通过
+> **父 spec**：[2026-04-27-agentic-operator-integration-design.md](./2026-04-27-agentic-operator-integration-design.md)
+> **前置**：P1 已交付，[2026-04-27-ao-int-p1-sidecar-design.md](./2026-04-27-ao-int-p1-sidecar-design.md) §11 全部验收通过
 > **阶段**：P2（第 4–5 周）· **代号**：AO-INT-P2
 > **作者**：Steven · **日期**：2026-04-27 · **状态**：草案
 

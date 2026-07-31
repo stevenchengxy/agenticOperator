@@ -5,7 +5,7 @@
 > 范围: 按 partner `raas-integration-divergence(1).md` 的 4 项 divergence(F1-F4),修正 AO 4 agents 让其符合 RAAS 平台工作流;同时把 JD 创建切到 RoboHire 直连,并废弃 `RULE_CHECK_FAILED` 改用 `MATCH_FAILED` 三事件家族(方案 B)。
 > 状态: 待 user review(写完直接走 user gate,不派 reviewer per user preference)
 >
-> **前置 spec**: [2026-05-19-rule-check-independent-agent-design.md](2026-05-19-rule-check-independent-agent-design.md)(4-agent 架构 + RoboHire 直连 parse/match-resume 已完成)
+> **前置 spec**: [2026-05-19-rule-check-independent-agent-design.md](./2026-05-19-rule-check-independent-agent-design.md)(4-agent 架构 + RoboHire 直连 parse/match-resume 已完成)
 
 ---
 

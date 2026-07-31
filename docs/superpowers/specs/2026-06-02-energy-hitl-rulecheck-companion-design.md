@@ -3,7 +3,7 @@
 - 日期:2026-06-02
 - 状态:设计已批(经 Q&A 确认),实现中
 - 作者:Claude + Steven
-- 关联:[2026-06-02-ontology-agent-generator-runnable-design.md](2026-06-02-ontology-agent-generator-runnable-design.md)
+- 关联:[2026-06-02-ontology-agent-generator-runnable-design.md](./2026-06-02-ontology-agent-generator-runnable-design.md)
 
 ## 1. 目标
 

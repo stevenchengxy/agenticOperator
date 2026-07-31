@@ -29,7 +29,14 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # local env files
+# NOTE: `.env*.local` only matches names ENDING in .local — it does NOT catch
+# backups like `.env.local.bak` / `.env.local-old`. Three such files were
+# tracked with real credentials until 2026-07-31; the catch-all below closes
+# that hole. Only `*.example` templates may ever be committed.
 .env
+.env*
+!.env.example
+!.env.deploy.example
 .env*.local
 .env.local
 .env.development.local

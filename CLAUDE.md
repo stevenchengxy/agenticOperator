@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run db:push` — sync `prisma/schema.prisma` to Postgres. `db:reset` — `prisma db push --force-reset`. `db:studio` — Prisma Studio.
 - `npm run db:migrate-from-sqlite` — one-time copy of the legacy SQLite `data/ao.db` into Postgres (idempotent).
 - `npm run archive` — standalone Inngest archiver (mirrors Inngest events/runs/step-traces into Postgres for durability). `dev` auto-starts it; gate with `ARCHIVE_ENABLED=0`.
-- See [docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md](docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md).
+- See [docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md](./docs/superpowers/specs/2026-05-28-local-postgres-inngest-archive-design.md).
 
 ## Stack
 
@@ -32,7 +32,7 @@ The Inngest dev server (`:8288`) is the live source of truth for runs/events/tra
 
 ### Top-level shape
 
-`app/layout.tsx` wraps the entire tree in `AppProvider` from [lib/i18n.tsx](lib/i18n.tsx). Every route is a thin client component (`"use client"`) that renders `<Shell>` + a `*Content` component. **The `Shell` is the single source of chrome** (AppBar, LeftNav, CommandPalette, direction tag) — page files only pass `crumbs` and the direction tag string.
+`app/layout.tsx` wraps the entire tree in `AppProvider` from [lib/i18n.tsx](./lib/i18n.tsx). Every route is a thin client component (`"use client"`) that renders `<Shell>` + a `*Content` component. **The `Shell` is the single source of chrome** (AppBar, LeftNav, CommandPalette, direction tag) — page files only pass `crumbs` and the direction tag string.
 
 ```
 app/<route>/page.tsx   ← thin: returns <Shell crumbs={...}><FooContent /></Shell>
@@ -46,19 +46,19 @@ Routes implemented: `/fleet` (Direction A), `/workflow` (B), `/live` (C), `/even
 
 ### Design system — read this before styling anything
 
-Visual identity is defined as **OKLCH CSS variables (`--c-*`) in [app/globals.css](app/globals.css)**. There is **no `tailwind.config.ts`** — Tailwind v4's config lives in CSS, in the `@theme inline { --color-bg: var(--c-bg); ... }` block at the top of `globals.css`. The `inline` keyword is load-bearing: it makes Tailwind utilities reference the runtime CSS variables instead of inlining literal values, so flipping `data-theme="dark"` on `<html>` recolors the entire app without a rebuild. The dark block in `globals.css` redefines the same `--c-*` variable names.
+Visual identity is defined as **OKLCH CSS variables (`--c-*`) in [app/globals.css](./app/globals.css)**. There is **no `tailwind.config.ts`** — Tailwind v4's config lives in CSS, in the `@theme inline { --color-bg: var(--c-bg); ... }` block at the top of `globals.css`. The `inline` keyword is load-bearing: it makes Tailwind utilities reference the runtime CSS variables instead of inlining literal values, so flipping `data-theme="dark"` on `<html>` recolors the entire app without a rebuild. The dark block in `globals.css` redefines the same `--c-*` variable names.
 
 Practical consequence: never hardcode colors. Use Tailwind utilities (`bg-surface`, `border-line`, `text-ink-1`, `text-ok`, `bg-accent-bg`) **or** inline `style={{ background: "var(--c-ok)" }}`. Both auto-respond to theme changes. The `oklch(...)` fragments scattered through page components (e.g. `oklch(0.5 0.14 75)` for the warn ink) are intentional — they're shades that don't have token slots and were copied 1:1 from the design references.
 
 When adding a new color/font/radius token: add it once under `@theme inline` (Tailwind utility binding) and once under `:root` + `[data-theme="dark"]` (light/dark values). PostCSS plugin is `@tailwindcss/postcss` (v4 — `tailwindcss` is no longer the PostCSS entry point).
 
-The atoms in [components/shared/atoms.tsx](components/shared/atoms.tsx) (`StatusDot`, `Spark`, `Metric`, `Badge`, `Btn`, `Card`, `CardHead`) and the `.tbl` class in `globals.css` cover ~all repeated chrome. Reach for those before inventing one-off styled divs.
+The atoms in [components/shared/atoms.tsx](./components/shared/atoms.tsx) (`StatusDot`, `Spark`, `Metric`, `Badge`, `Btn`, `Card`, `CardHead`) and the `.tbl` class in `globals.css` cover ~all repeated chrome. Reach for those before inventing one-off styled divs.
 
-Icons live in [components/shared/Ic.tsx](components/shared/Ic.tsx) as a flat object (`Ic.search`, `Ic.bolt`, …). The `IcName` type is the union of keys — pages that pass icons through props (palette items, nav items) accept `IcName` strings rather than rendered nodes, then look them up.
+Icons live in [components/shared/Ic.tsx](./components/shared/Ic.tsx) as a flat object (`Ic.search`, `Ic.bolt`, …). The `IcName` type is the union of keys — pages that pass icons through props (palette items, nav items) accept `IcName` strings rather than rendered nodes, then look them up.
 
 ### i18n
 
-`useApp()` exposes `{ t, lang, setLang, theme, setTheme }`. The dictionary is two flat objects in [lib/i18n.tsx](lib/i18n.tsx) — when adding a string, add it under both `zh` and `en`. Keys are short and namespaced by area (`nav_*`, `m_*` for metrics, `wf_*` for workflow, `em_*` for events, `agent_*`, `evt_*`, etc.). `lang` and `theme` are persisted to `localStorage` under `ao:lang` / `ao:theme`.
+`useApp()` exposes `{ t, lang, setLang, theme, setTheme }`. The dictionary is two flat objects in [lib/i18n.tsx](./lib/i18n.tsx) — when adding a string, add it under both `zh` and `en`. Keys are short and namespaced by area (`nav_*`, `m_*` for metrics, `wf_*` for workflow, `em_*` for events, `agent_*`, `evt_*`, etc.). `lang` and `theme` are persisted to `localStorage` under `ao:lang` / `ao:theme`.
 
 Domain copy that's mock-data-only (e.g. agent names like "ReqSync", customer names like "字节跳动") is intentionally hardcoded in the page components — only UI chrome and labels go through `t()`.
 
@@ -75,4 +75,4 @@ Each `*Content.tsx` follows the same skeleton:
 3. 2- or 3-column CSS grid for the body (typical `gridTemplateColumns: "232px 1fr 320px"`).
 4. Local sub-components for cards, rows, etc., kept in the same file unless reused across routes.
 
-The Workflow page ([components/workflow/WorkflowContent.tsx](components/workflow/WorkflowContent.tsx)) is the one exception with non-trivial logic: nodes + edges are positioned on a `1620×560` SVG viewBox and edges are computed from node coordinates. If you reposition nodes, the edges follow automatically.
+The Workflow page ([components/workflow/WorkflowContent.tsx](./components/workflow/WorkflowContent.tsx)) is the one exception with non-trivial logic: nodes + edges are positioned on a `1620×560` SVG viewBox and edges are computed from node coordinates. If you reposition nodes, the edges follow automatically.

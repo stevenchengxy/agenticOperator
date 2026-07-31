@@ -2,7 +2,7 @@
 //
 // Production:JSON 文件 only(rules.json 与 ontology-lab/data/rules_20260330.json 1:1)。
 // Neo4j 直读模式留给 POC,生产里若要切回 Neo4j,通过 Ontology API HTTP 拉
-// (见 docs/neo4j-instance-storage-plan.md)— 那是另一个 PR。
+// (见 docs/ontology/neo4j-instance-storage-plan.md)— 那是另一个 PR。
 
 import rulesData from './rules.json';
 import type {

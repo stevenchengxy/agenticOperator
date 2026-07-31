@@ -71,7 +71,7 @@ Audit `app/rule-check/` + `components/rule-check/*` for hardcoded strings (incl.
 
 **Where:** centralize in the read layer — [lib/rule-check/instance-client.ts](../../../lib/rule-check/instance-client.ts) `getInstance` / `listInstances` (all ontology reads funnel here). On Neo4j `null`/`[]`, query the mapped partner-pg table and normalize the row to the ontology shape.
 
-**Mapping:** reuse [docs/ao-allmeta-field-alignment-table.md](../../ao-allmeta-field-alignment-table.md). Each entity gets a `pgRow → ontologyShape` normalizer (handles e.g. pg `job_requisition_id` ↔ ontology `job_position_id`, casing).
+**Mapping:** reuse [docs/ao-allmeta-field-alignment-table.md](../../ontology/ao-allmeta-field-alignment-table.md). Each entity gets a `pgRow → ontologyShape` normalizer (handles e.g. pg `job_requisition_id` ↔ ontology `job_position_id`, casing).
 
 **Scope (first cut):** the 5 entities with clean pg tables — `Candidate`, `Resume`, `Job_Requisition`, `Application`, `Candidate_Match_Result`. **Relationships** (`EMPLOYED_BY` links, `Blacklist`) have no clean pg equivalent → out of scope for v1.
 

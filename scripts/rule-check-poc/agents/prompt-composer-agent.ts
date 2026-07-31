@@ -8,7 +8,7 @@
 //   ├─ RULES 段       (动态 — 按 (client × department) 维度过滤后的规则集)
 //   └─ OUTPUT 段      (固定 — 决策逻辑 + JSON schema + 自检)
 //
-// 输出严格遵守 docs/rule-check-prompt-pipeline.md §3.5 / §4 三段式。
+// 输出严格遵守 docs/rule-check/rule-check-prompt-pipeline.md §3.5 / §4 三段式。
 //
 // 提供两套 API:
 //   - compose() 返回完整 prompt 字符串 (生产用)

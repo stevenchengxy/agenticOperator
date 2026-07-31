@@ -3,7 +3,7 @@
 > **日期**: 2026-06-04
 > **状态**: 已批准设计，待写实现计划
 > **覆盖范围**: 把招聘 agent 的业务节点（简历解析完成 / 规则校验通过·未通过 / 匹配 / JD 生成 / 面试邀约）接进消息通知中心的「消息」段，点亮 candidate / job 分类。纯加调用点，不改任何判定或业务逻辑。
-> **前置**: [2026-06-01 通知中心 + 审计完整性设计](2026-06-01-notification-center-and-audit-completeness-design.md)（地基 spec：Notification 表、derive/ingest、UI、rule-check 止血均已落地）。
+> **前置**: [2026-06-01 通知中心 + 审计完整性设计](./2026-06-01-notification-center-and-audit-completeness-design.md)（地基 spec：Notification 表、derive/ingest、UI、rule-check 止血均已落地）。
 
 ## 1. 背景与缺口
 

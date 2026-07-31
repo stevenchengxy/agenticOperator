@@ -3,7 +3,7 @@
 **Date:** 2026-06-02
 **Status:** Approved (user) — implementation in progress
 **Author:** AO / Claude
-**Related:** [2026-06-02-ontology-agent-generator-runnable-design.md](2026-06-02-ontology-agent-generator-runnable-design.md) (the energy 能源调度-v1 delivery this mirrors), [project_energy_hitl_rulecheck], [project_ontology_runnable_agents]
+**Related:** [2026-06-02-ontology-agent-generator-runnable-design.md](./2026-06-02-ontology-agent-generator-runnable-design.md) (the energy 能源调度-v1 delivery this mirrors), [project_energy_hitl_rulecheck], [project_ontology_runnable_agents]
 
 ## 1. Goal
 

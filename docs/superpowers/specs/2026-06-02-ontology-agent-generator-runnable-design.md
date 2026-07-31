@@ -3,7 +3,7 @@
 - 日期:2026-06-02
 - 状态:设计待批
 - 作者:Claude + Steven
-- 关联:[2026-06-01-ontology-generator-design.md](2026-06-01-ontology-generator-design.md)(前一版:sandboxed shell draft)
+- 关联:[2026-06-01-ontology-generator-design.md](./2026-06-01-ontology-generator-design.md)(前一版:sandboxed shell draft)
 
 ## 1. 背景与目标
 

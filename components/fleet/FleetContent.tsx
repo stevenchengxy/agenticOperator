@@ -22,7 +22,7 @@ import { useInngestLiveOverlay, WSID_TO_INNGEST_SLUG, type LiveAgentState } from
 //
 // Realness (real vs stub) is orthogonal to lifecycle. See spec §3.
 // "real" = registered as an Inngest function (4 production agents today,
-// see docs/workflow-agents-inngest-spec.md §10).
+// see docs/architecture/workflow-agents-inngest-spec.md §10).
 
 type Lifecycle = "active" | "paused" | "deprecated" | "draft";
 // Status semantics (per Kenny's "Speed/subway control board" framing):

@@ -11,7 +11,7 @@
  * a "candidate not found" pattern.
  *
  * Reads .env.local for LLM gateway + Ontology API config.
- * See docs/action_object_prompt/match-resume-data-preparation-design.md
+ * See docs/ontology/action_object_prompt/match-resume-data-preparation-design.md
  * for scenario definitions and expected outcomes.
  */
 

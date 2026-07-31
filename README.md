@@ -76,7 +76,7 @@ Visual identity is intentionally **dense, calm and instrument-like** — closer 
 - **Tabular numerals everywhere** money, latency or counts appear, so columns align without explicit widths.
 - **One accent color**. Status is communicated by `ok / warn / err / info` semantic tokens; the accent (default deep blue) is reserved for selection and key calls-to-action.
 
-Tokens live in [`app/globals.css`](app/globals.css); Tailwind utilities (`bg-surface`, `text-ink-2`, `border-line`, `bg-accent-bg`, …) are aliases that read those variables. Dark mode flips by setting `data-theme="dark"` on `<html>` — every component recolors automatically.
+Tokens live in [`app/globals.css`](./app/globals.css); Tailwind utilities (`bg-surface`, `text-ink-2`, `border-line`, `bg-accent-bg`, …) are aliases that read those variables. Dark mode flips by setting `data-theme="dark"` on `<html>` — every component recolors automatically.
 
 Typography: Inter for UI, JetBrains Mono for IDs / latency / payloads / event names.
 
@@ -142,7 +142,7 @@ prisma/
 
 Every route is `"use client"` because theme / language / command palette / SSE chat are browser state. The API routes under `app/api/*` are server-side (Prisma + Inngest + LLM calls). Inngest agent functions live in `server/inngest/agents/` and consume events emitted by `em.publish` + bridged from partner RAAS.
 
-For a more detailed working contract see [CLAUDE.md](CLAUDE.md).
+For a more detailed working contract see [CLAUDE.md](./CLAUDE.md).
 
 ---
 
@@ -215,7 +215,7 @@ Use the language toggle (中文 / EN) and theme toggle (sun / moon) top-right. P
 ### Deployment — full step-by-step
 
 For production or deployment onto another machine, use the single maintained
-[Docker Compose deployment and operations guide](docs/deployment.md). It includes
+[Docker Compose deployment and operations guide](./docs/deploy/deployment.md). It includes
 durable Postgres/Inngest/log volumes, split archiver/sweeper services, health
 checks, backup/restore and a fail-fast environment preflight.
 
@@ -395,7 +395,7 @@ The `npm run setup` script's preflight (and `server/init.ts`'s boot probe) print
 
 ## Internationalization
 
-Two locales ship today: **简体中文 (zh)** and **English (en)**. The dictionary is a flat object in [`lib/i18n.tsx`](lib/i18n.tsx); add a key under both locales and call `t("your_key")`. Nothing more.
+Two locales ship today: **简体中文 (zh)** and **English (en)**. The dictionary is a flat object in [`lib/i18n.tsx`](./lib/i18n.tsx); add a key under both locales and call `t("your_key")`. Nothing more.
 
 Domain-specific copy that's mock-data only (e.g. customer names like "字节跳动", agent names like "ReqSync") is intentionally kept in the page components — only UI chrome and labels go through `t()`. This keeps the dictionary lean and lets the recruitment domain stay verbatim.
 
@@ -429,18 +429,38 @@ The shapes you see today are deliberately implementation-ready — no feature is
 
 ---
 
+## Documentation
+
+**[`docs/README.md`](./docs/README.md) is the documentation index — start there.**
+Docs are grouped by purpose, and each topic has exactly one current document;
+superseded ones are moved to `docs/archive/` or carry a banner pointing at their
+replacement.
+
+| Topic | Entry point |
+|---|---|
+| **Deploy to another machine** | [`docs/deploy/deployment.md`](./docs/deploy/deployment.md) — the single maintained deployment guide |
+| Event & agent architecture | [`docs/architecture/`](./docs/architecture) |
+| Rule check | [`docs/rule-check/`](./docs/rule-check) |
+| RAAS / partner integration | [`docs/raas/`](./docs/raas) · [`docs/api/`](./docs/api) |
+| Allmeta / Neo4j ontology | [`docs/ontology/`](./docs/ontology) |
+| Design docs per change (dated) | [`docs/superpowers/specs/`](./docs/superpowers/specs) |
+
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| [`app/`](app) | Next.js App Router — one folder per route |
-| [`components/`](components) | UI components, grouped by route + `shared/` |
-| [`lib/`](lib) | i18n provider, event catalog |
-| [`design_handoff_agentic_operator/`](design_handoff_agentic_operator) | Original design references — **reference only, do not import** |
-| [`tailwind.config.ts`](tailwind.config.ts) | Token → utility aliases |
-| [`app/globals.css`](app/globals.css) | OKLCH design tokens (light + dark) |
-| [`CLAUDE.md`](CLAUDE.md) | Contract for AI coding agents touching this repo |
-| [`.env.example`](.env.example) | Future-backend env scaffold |
+| [`app/`](./app) | Next.js App Router — one folder per route, plus `api/` route handlers |
+| [`components/`](./components) | UI components, grouped by route + `shared/` |
+| [`lib/`](./lib) | Domain logic — i18n provider, event catalog, rule-check, partner-pg, mappers |
+| [`server/`](./server) | Agent runtime — Inngest functions, event-manager schemas |
+| [`scripts/`](./scripts) | Setup, deployment preflight, archiver, one-off operational tools |
+| [`prisma/`](./prisma) | `schema.prisma` — AO's own Postgres schema |
+| [`docs/`](./docs) | All documentation — see [`docs/README.md`](./docs/README.md) |
+| [`design_handoff_agentic_operator/`](./design_handoff_agentic_operator) | Original design references — **reference only, do not import** |
+| [`app/globals.css`](./app/globals.css) | OKLCH design tokens (light + dark) — **there is no `tailwind.config.ts`**; Tailwind v4 config lives in this file's `@theme inline` block |
+| [`CLAUDE.md`](./CLAUDE.md) | Contract for AI coding agents touching this repo |
+| [`.env.example`](./.env.example) | Local development env template (annotated, section-by-section) |
+| [`.env.deploy.example`](./.env.deploy.example) | Production/Docker deployment env template |
 
 ---
 

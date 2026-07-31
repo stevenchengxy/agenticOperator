@@ -82,7 +82,7 @@ const RESUME_DOWNLOADED_v1 = envelope(
 // parsed。ruleCheckAgent 第 94-96 行本就接受 upload_id 缺失;此处修 schema 与
 // agent 契约不一致。candidate_id / resume_id 显式 .optional() 仅为可读性,
 // .passthrough() 本就放行。
-// 见 docs/2026-05-22-ao-raas-event-architecture.md §7
+// 见 docs/raas/2026-05-22-ao-raas-event-architecture.md §7
 const RESUME_PROCESSED_v1 = envelope(
   z.object({
     upload_id: z.string().min(1).optional(),

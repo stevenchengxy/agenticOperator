@@ -9,7 +9,7 @@
 **Tech Stack:** Next.js 16 App Router · Prisma 7 + better-sqlite3 · React 19 · vitest 4 · Tailwind 4(走 `var(--c-*)` token,不引新色)
 
 **Background docs:**
-- 研究文档:[docs/2026-05-25-ao-behavior-codegen-research.md](../../2026-05-25-ao-behavior-codegen-research.md) §8.1 / §9 Phase 0
+- 研究文档:[docs/2026-05-25-ao-behavior-codegen-research.md](../../research/2026-05-25-ao-behavior-codegen-research.md) §8.1 / §9 Phase 0
 - 现有 AgentConfig 写入路径(复用其 audit 机制):[app/api/manage/agents/[name]/config/route.ts](../../../app/api/manage/agents/[name]/config/route.ts)
 - 详情页 tab 骨架:[components/fleet/AgentDetailContent.tsx](../../../components/fleet/AgentDetailContent.tsx)
 

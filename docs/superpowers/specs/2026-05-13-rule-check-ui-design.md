@@ -2,7 +2,7 @@
 
 **Status:** brainstormed, awaiting plan
 **Scope:** one self-contained feature — new `/rule-check` page that runs the existing 14-scenario test suite from the browser, persists each run to sqlite, and provides drill-down + dual-view + replay + side-by-side model compare for analyzing results.
-**Source advices doc:** [docs/action_object_prompt/rule_check_advices.md](../../action_object_prompt/rule_check_advices.md) — 8 product requirements, of which this spec implements 6 in simplified form and explicitly drops 2 (see §1.2).
+**Source advices doc:** [docs/action_object_prompt/rule_check_advices.md](../../ontology/action_object_prompt/rule_check_advices.md) — 8 product requirements, of which this spec implements 6 in simplified form and explicitly drops 2 (see §1.2).
 
 ---
 

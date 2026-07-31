@@ -1,6 +1,6 @@
 // Manual trigger for INTERVIEW_INVITATION_REQUESTED — bypasses RaaS.
 //
-// 用 case 见 docs/2026-05-25-interview-inviter-agent-use-cases.md §3.
+// 用 case 见 docs/research/2026-05-25-interview-inviter-agent-use-cases.md §3.
 //
 // Body 跟 InterviewInvitationRequestedPayload 对齐(见
 // server/inngest/client.ts);candidate_id + job_requisition_id 必填,其它

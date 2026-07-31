@@ -1,9 +1,9 @@
 # AI-Native Agent Authoring — PromptGen + CodeGen + Tool Generator (one closed loop)
 
 > 2026-05-27 · Design doc
-> Companion to [AI-native codegen feasibility](../../2026-05-25-ai-native-codegen-feasibility.md),
-> [phase 4/5 decision](../../2026-05-25-codegen-phase4-phase5-decision.md), and
-> [behavior codegen research](../../2026-05-25-ao-behavior-codegen-research.md).
+> Companion to [AI-native codegen feasibility](../../research/2026-05-25-ai-native-codegen-feasibility.md),
+> [phase 4/5 decision](../../research/2026-05-25-codegen-phase4-phase5-decision.md), and
+> [behavior codegen research](../../research/2026-05-25-ao-behavior-codegen-research.md).
 > Status: **proposed** — awaiting implementation plan.
 
 ---

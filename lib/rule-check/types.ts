@@ -44,7 +44,7 @@ export interface ClassifiedRules {
   };
 }
 
-// ─── 5-block input shape (与 docs/yeyang-prompt-adapter-onboarding.md §3.3 对齐) ───
+// ─── 5-block input shape (与 docs/raas/yeyang-prompt-adapter-onboarding.md §3.3 对齐) ───
 
 export interface RuleCheckRuntimeContext {
   upload_id: string;

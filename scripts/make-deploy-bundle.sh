@@ -64,7 +64,7 @@ docker save "$AO_IMAGE" "$POSTGRES_IMAGE" "$INNGEST_IMAGE" | gzip > "$STAGE/imag
 
 echo "==> [4/5] staging deploy kit"
 cp docker-compose.deploy.yml docker-compose.shared-inngest.yml "$STAGE/"
-cp docs/deployment.md "$STAGE/deployment-full-guide.md"
+cp docs/deploy/deployment.md "$STAGE/deployment-full-guide.md"
 cp scripts/deploy-preflight.mjs scripts/check-connectivity.sh scripts/survey-old-deployment.sh "$STAGE/scripts/"
 chmod +x "$STAGE"/scripts/*.sh
 
@@ -89,7 +89,7 @@ sed -E \
 cat > "$STAGE/README-TARGET.md" <<'EOF'
 # 目标机快速部署（离线包）
 
-完整说明见仓库 docs/deployment.md。在解压后的目录里依次执行：
+完整说明见仓库 docs/deploy/deployment.md。在解压后的目录里依次执行：
 
 ```bash
 # 1. 导入三个镜像（几分钟）
@@ -117,7 +117,7 @@ curl -fsS "http://localhost:3002/api/health?check=ready"
 ```
 
 若这台机器上还有旧版 Agentic Operator 容器占用 3002/8288 端口，先按
-docs/deployment.md「原地升级」一节停掉旧容器再执行第 5 步。
+docs/deploy/deployment.md「原地升级」一节停掉旧容器再执行第 5 步。
 EOF
 
 echo "==> [5/5] packing ${BUNDLE}"
