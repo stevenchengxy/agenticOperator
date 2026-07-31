@@ -10,6 +10,9 @@
 //   PUT <INNGEST_SERVE_ORIGIN><INNGEST_SERVE_PATH>
 //
 // Reads INNGEST_BASE_URL + INNGEST_SERVE_ORIGIN + INNGEST_SERVE_PATH from .env.local.
+// INNGEST_SERVE_CONNECT_ORIGIN optionally overrides the host-side URL used to
+// reach AO when the advertised callback uses a container-only hostname such
+// as host.docker.internal.
 // AO_LAN_IP + AO_PORT remain as local-dev fallbacks.
 // Re-run any time after the AO dev server restarts (registration is in-memory).
 
@@ -36,6 +39,7 @@ async function main(): Promise<void> {
   console.log(`Registering RAAS-v1 main app with Inngest:`);
   console.log(`  Inngest server: ${base}`);
   console.log(`  AO callback:    ${callback.url}`);
+  console.log(`  AO connect URL: ${callback.connectUrl}`);
   console.log(`  Callback source: ${callback.source}`);
   console.log(`  App ID:         ${RAAS_V1_APP_ID}`);
   console.log(`  Expected funcs: ${RAAS_V1_EXPECTED_FUNCTION_COUNT}`);
@@ -44,7 +48,7 @@ async function main(): Promise<void> {
   // Self-sync the exact callback URL that the shared Inngest server should
   // store. The SDK endpoint owns the app id + manifest, so PUT is enough.
   try {
-    const res = await fetch(callback.url, { method: "PUT" });
+    const res = await fetch(callback.connectUrl, { method: "PUT" });
     const text = await res.text();
     if (!res.ok) {
       console.error(`✗ Register failed (${res.status}): ${text}`);
@@ -67,7 +71,7 @@ async function main(): Promise<void> {
     console.log(`Next: send a RESUME_DOWNLOADED event from RAAS or trigger locally:`);
     console.log(`  curl -X POST http://localhost:${callback.localPort}/api/test/trigger-resume-uploaded`);
   } catch (e) {
-    console.error(`✗ Couldn't PUT ${callback.url}: ${(e as Error).message}`);
+    console.error(`✗ Couldn't PUT ${callback.connectUrl}: ${(e as Error).message}`);
     process.exit(1);
   }
 }
@@ -76,6 +80,7 @@ main();
 
 type ResolvedServeCallback = {
   url: string;
+  connectUrl: string;
   source: string;
   localPort: string;
 };
@@ -96,8 +101,14 @@ function resolveServeCallbackUrl(): ResolvedServeCallback {
   if (configuredOrigin) {
     const parsedOrigin = new URL(configuredOrigin);
     const origin = parsedOrigin.origin;
+    const connectOrigin =
+      process.env.INNGEST_SERVE_CONNECT_ORIGIN ??
+      (parsedOrigin.hostname === "host.docker.internal"
+        ? `http://127.0.0.1:${parsedOrigin.port || "3002"}`
+        : origin);
     return {
       url: joinUrl(origin, path),
+      connectUrl: joinUrl(connectOrigin, path),
       source: process.env.INNGEST_SERVE_ORIGIN ? "INNGEST_SERVE_ORIGIN" : "INNGEST_SERVE_HOST",
       localPort: process.env.AO_PORT ?? (parsedOrigin.port || "3002"),
     };
@@ -107,6 +118,10 @@ function resolveServeCallbackUrl(): ResolvedServeCallback {
   const port = process.env.AO_PORT ?? "3002";
   return {
     url: joinUrl(`http://${lanIp}:${port}`, path),
+    connectUrl: joinUrl(
+      process.env.INNGEST_SERVE_CONNECT_ORIGIN ?? `http://${lanIp}:${port}`,
+      path,
+    ),
     source: "AO_LAN_IP/AO_PORT fallback",
     localPort: port,
   };

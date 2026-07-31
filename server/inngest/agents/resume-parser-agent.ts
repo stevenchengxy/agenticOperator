@@ -1,14 +1,14 @@
 // Function ① — 订阅 RESUME_DOWNLOADED → download PDF → parse → 持久化 → 发 RESUME_PROCESSED
 //
 // 流程 (per agentic-operator-onboarding v7 §4.8 + ADR-0011 边界):
-//   1. RESUME_DOWNLOADED 事件 payload 只带 transport 元数据
-//      (upload_id / bucket / object_key / etag / filename / operator_*).
-//      raas **不**预先 parse — parse 是 agent 的职责.
+//   1. RESUME_DOWNLOADED 带 transport 元数据和可选 expectation_payload。
+//      raas **不**预先 parse — parse 是 agent 的职责；candidate expectation
+//      则由 RAAS 上传入口直接提供，AO 不需要另改事件名等待补齐。
 //   2. agent → GET /api/v1/resumes/uploads/<upload_id>/raw  (PDF bytes, RAAS MinIO)
 //   3. agent → POST {RoboHire}/api/v1/parse-resume   (multipart — 直连 RoboHire, 不走 RAAS proxy)
-//   4. agent → POST /api/v1/candidates     (parsed + transport context, 仍走 RAAS, 写 Postgres)
-//   5. raas 自动按规则发 RESUME_PROCESSED 给下游 matcher (我们这边
-//      也 emit 一份做 dual-track 兜底 — RAAS 那边某些路径还没接 emit).
+//   4. agent → partner Postgres (Candidate + CandidateExpectation + Resume)
+//      并同步 AllmetaOntology (Neo4j)。
+//   5. agent → RESUME_PROCESSED 给下游 rule-check / matcher。
 //
 // Backward compat: 如果事件 payload 已经带 parsed.data (legacy 内部
 // 路径或 partner 在 emit 前预 parse 过), 直接用事件里的 parsed,
@@ -29,10 +29,14 @@ import {
 import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import {
   writeCandidateInstance,
+  writeCandidateExpectationInstance,
   writeResumeInstance,
 } from '@/lib/allmeta-writers';
 import { parseResumeDirect, RobohireApiError } from '@/lib/robohire-client';
 import { extractCandidateExpectation } from '@/lib/mappers/candidate-preferences';
+import {
+  normalizeCandidateExpectationPayload,
+} from '@/lib/raas-v1/candidate-expectation';
 import { detectResumeFormat, convertDocxBufferToPdf } from '@/lib/resume-convert/docx-to-pdf';
 import { classifyRobohire } from '@/lib/dependency-health/classify';
 import { reportDependencyDegraded } from '@/lib/dependency-health/report';
@@ -76,6 +80,9 @@ export const resumeParserAgent = inngest.createFunction(
     //   B) Flat (legacy / publish-test) —
     //      { upload_id, bucket, object_key, parsed, ... }
     const raw = unwrapDownloadedEnvelope(event.data);
+    const expectationPayload = normalizeCandidateExpectationPayload(
+      raw.expectation_payload ?? raw.expectationPayload,
+    );
     const fileLogger = createAgentLogger({
       agent: 'resumeParser',
       runId: runId ?? `local-${Date.now()}`,
@@ -99,6 +106,9 @@ export const resumeParserAgent = inngest.createFunction(
       job_requisition_id: raw.job_requisition_id ?? null,
       sourcing_channel_id: raw.sourcing_channel_id ?? raw.sourcingChannelId ?? null,
       hr_folder: raw.hr_folder ?? raw.hrFolder ?? null,
+      expectation_payload_keys: expectationPayload
+        ? Object.keys(expectationPayload).sort()
+        : [],
       // Echo the raw event keys so missing fields are diagnosable from logs alone.
       _raw_keys: Object.keys(raw).sort(),
     });
@@ -398,6 +408,7 @@ export const resumeParserAgent = inngest.createFunction(
         client_id: client_id ?? undefined,
         job_requisition_id: job_requisition_id ?? undefined,
         sourcing_channel_id: sourcing_channel_id ?? undefined,
+        expectation_payload: expectationPayload,
         // 同一人 → 复用老 candidate_id(UPDATE 挂新简历到老 Candidate,1:N);null → 走兜底 dedup。
         same_as_candidate_id: sameAsCandidateId ?? undefined,
         parsed: { data: parsed as Record<string, unknown> },
@@ -408,6 +419,7 @@ export const resumeParserAgent = inngest.createFunction(
         logger.info(
           `[resume-persist] ✅ partner-pg saveCandidate OK · candidate_id=${r.candidate_id} ` +
             `resume_id=${r.resume_id} application_id=${r.application_id ?? '—'} ` +
+            `candidate_expectation_id=${r.candidate_expectation_id ?? '—'} ` +
             `candidate_created=${r.candidate_created} resume_created=${r.resume_created}`,
         );
         fileLogger.event('save-candidate.ok', {
@@ -416,6 +428,7 @@ export const resumeParserAgent = inngest.createFunction(
           upload_id,
           candidate_id: r.candidate_id,
           resume_id: r.resume_id,
+          candidate_expectation_id: r.candidate_expectation_id,
           application_id: r.application_id,
           candidate_created: r.candidate_created,
           resume_created: r.resume_created,
@@ -440,7 +453,7 @@ export const resumeParserAgent = inngest.createFunction(
       }
     });
 
-    // ── 5b. 写 Neo4j Candidate + Resume + Application instances via allmeta ──
+    // ── 5b. 写 Neo4j Candidate + Candidate_Expectation + Resume via Allmeta ──
     const stepKeyForNeo4j = sanitize(String(upload_id));
     await step.run(`write-candidate-neo4j-${stepKeyForNeo4j}`, async () => {
       const r = await writeCandidateInstance({
@@ -477,6 +490,31 @@ export const resumeParserAgent = inngest.createFunction(
       }
       return r;
     });
+    if (expectationPayload) {
+      const candidateExpectationId = saveResult.candidate_expectation_id;
+      if (!candidateExpectationId) {
+        throw new Error(
+          `[resume-persist] expectation_payload was received but partner-pg returned no candidate_expectation_id`,
+        );
+      }
+      await step.run(`write-candidate-expectation-neo4j-${stepKeyForNeo4j}`, async () => {
+        const r = await writeCandidateExpectationInstance({
+          candidate_expectation_id: candidateExpectationId,
+          candidate_id: saveResult.candidate_id,
+          expectation: expectationPayload,
+        });
+        if (r.ok) {
+          logger.info(
+            `[resume-persist] ✓ allmeta wrote Candidate_Expectation ${candidateExpectationId}`,
+          );
+        } else {
+          logger.warn(
+            `[resume-persist] allmeta Candidate_Expectation write failed: ${r.error}`,
+          );
+        }
+        return r;
+      });
+    }
     await step.run(`write-resume-neo4j-${stepKeyForNeo4j}`, async () => {
       const r = await writeResumeInstance({
         resume_id: saveResult.resume_id,
@@ -522,11 +560,24 @@ export const resumeParserAgent = inngest.createFunction(
     const lockOnly =
       process.env.LOCK_CHECK_ENFORCE === '1' && lockResult?.decision === 'lock-only';
 
-    // ── emit RESUME_PROCESSED 触发下游 matcher ──
+    // ── emit RESUME_PROCESSED 触发下游 rule-check / matcher ──
     // Note: 在 v7 §4.8 下,RAAS 自己在 saveCandidate 后也会按规则发
     // RESUME_PROCESSED 给下游 matching 流程. 我们这里 dual-track 也
     // emit 一份做兜底 — 因为 partner 那边的 auto-emit 不一定全路径覆盖.
     // 等 partner 那边稳定后可以去掉这个 emit (TODO @ partner verify).
+    const candidateExpectationForMatching = expectationPayload
+      ? extractCandidateExpectation({
+          parsed: expectationPayload as Record<string, unknown>,
+          rawText: null,
+        })
+      : extractCandidateExpectation({
+          parsed: parsed as Record<string, unknown>,
+          rawText:
+            typeof (parsed as Record<string, unknown>)?.rawText === 'string'
+              ? ((parsed as Record<string, unknown>).rawText as string)
+              : null,
+        });
+
     const processedPayload: ResumeProcessedData = {
       // 透传 transport 字段供下游使用
       bucket,
@@ -557,16 +608,9 @@ export const resumeParserAgent = inngest.createFunction(
       client_id: client_id ?? null,
       // 老的 4 对象嵌套字段保留为空 (RAAS 不再要求 agent 转结构)
       candidate: {} as ResumeProcessedData['candidate'],
-      // 候选人求职期望:从解析出的简历文本(rawText)抽结构化期望,交给下游
-      // ruleCheck 透传 → matchResume 拼 candidatePreferences 发 RoboHire。抽不到
-      // 则为空对象(与旧行为一致,匹配退回纯 {resume, jd})。
-      candidate_expectation: extractCandidateExpectation({
-        parsed: parsed as Record<string, unknown>,
-        rawText:
-          typeof (parsed as Record<string, unknown>)?.rawText === 'string'
-            ? ((parsed as Record<string, unknown>).rawText as string)
-            : null,
-      }),
+      // RAAS expectation_payload 是权威来源；转换为 matcher 的数组/数值结构。
+      // 旧事件没有该字段时，才从 RoboHire 解析结果 / rawText 尽力抽取。
+      candidate_expectation: candidateExpectationForMatching,
       resume: {} as ResumeProcessedData['resume'],
       runtime: {} as ResumeProcessedData['runtime'],
       parsedAt: new Date().toISOString(),

@@ -48,8 +48,8 @@
     "deploy:down": "docker compose --env-file .env.deploy -f docker-compose.deploy.yml down"
   },
   "dependencies": {
-    "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@monaco-editor/react": "^4.7.0",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "better-sqlite3": "^12.9.0",
@@ -57,6 +57,7 @@
     "dotenv": "^17.4.2",
     "eventsource-parser": "^3.0.8",
     "inngest": "^4.3.0",
+    "libphonenumber-js": "^1.13.9",
     "mammoth": "^1.12.0",
     "minio": "^8.0.7",
     "neo4j-driver": "^6.0.1",
@@ -65,12 +66,12 @@
     "pdf-parse": "^2.4.5",
     "pg": "^8.21.0",
     "pinyin-pro": "^3.28.1",
+    "prisma": "^7.8.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "react-markdown": "^9.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "prisma": "^7.8.0",
     "tsx": "^4.19.0",
     "unpdf": "^1.6.0",
     "zod": "^4.4.3"

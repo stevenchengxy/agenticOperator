@@ -19,6 +19,11 @@ describe('normalizePhone', () => {
     expect(normalizePhone('12')).toBe('');
     expect(normalizePhone(null)).toBe('');
   });
+  it('international number → correct national number, not last-11-of-raw (anti 假并/假拆)', () => {
+    // Old China-only heuristic returned '6591234567' (wrongly kept the +65 country
+    // code in the suffix key); the shared normalizer gives the true national number.
+    expect(normalizePhone('+65 9123 4567')).toBe('91234567');
+  });
 });
 
 describe('normalizeName', () => {

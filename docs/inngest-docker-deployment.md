@@ -1,5 +1,20 @@
 # Inngest Dockerized Deployment + Partner Connection Info
 
+> ## ⚠️ 历史快照，不是当前部署真相
+>
+> 这份文档记录的是**开发机 `172.16.1.83` 上 AO 自带一套 Docker Inngest**
+> 那个阶段的状态，与现在的生产拓扑相矛盾，**不要照着它部署或发给 partner**：
+>
+> | 本文说 | 当前真相（见 [deployment.md](deployment.md)） |
+> | --- | --- |
+> | AO 自己起一套 `ao-inngest`，partner 连过来 | 架构铁律:**AO 与 RAAS 共用同一个 Inngest 实例**（Mac Studio 上的 `inngest-server`）。AO 自带一套会让 partner 事件到不了 AO |
+> | 总线地址 `172.16.1.83:8288` | 生产在 `10.100.0.70`，共享实例只绑宿主 loopback，容器经 `host.docker.internal:8288` 访问 |
+> | 网络不通时开 `RAAS_BRIDGE_ENABLED=1` 反向拉取 | 生产安全闸门要求 `RAAS_BRIDGE_ENABLED=0`；共用实例后不需要桥 |
+> | `RESUME_DOWNLOADED` 只带 transport 元数据 | 还会带 `expectation_payload`（候选人期望），见 [specs/2026-07-21-raas-v1-old-repo-optimization-design.md](superpowers/specs/2026-07-21-raas-v1-old-repo-optimization-design.md) |
+>
+> **唯一维护的部署指南**：[docs/deployment.md](deployment.md)。
+> 以下内容仅作历史归档保留。
+
 ## TL;DR — partner 怎么连
 
 ```

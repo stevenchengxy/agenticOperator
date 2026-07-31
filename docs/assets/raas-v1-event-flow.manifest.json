@@ -1,0 +1,27 @@
+{
+  "artifact": "raas-v1-event-flow.svg",
+  "title": "Agentic Operator · RAAS-v1 事件流转图",
+  "format": "SVG 1.1-compatible XML",
+  "canvas": {
+    "width": 2200,
+    "height": 1920,
+    "viewBox": "0 0 2200 1920"
+  },
+  "generatedAt": "2026-07-28",
+  "provenance": {
+    "registry": "server/inngest/functions.ts",
+    "functions": [
+      "server/inngest/agents/create-jd-agent.ts",
+      "server/inngest/agents/resume-parser-agent.ts",
+      "server/inngest/agents/candidate-identity-agent.ts",
+      "server/inngest/agents/rule-check-agent.ts",
+      "server/inngest/agents/match-resume-agent.ts",
+      "server/inngest/agents/interview-inviter-agent.ts"
+    ]
+  },
+  "contentNotes": [
+    "Candidate identity is shown as a pre-persistence step.invoke from resume-parser-agent, with CANDIDATE_IDENTITY_REQUESTED retained as an independent review entry.",
+    "MATCH_PASSED_NO_INTERVIEW is marked inactive because the current match-resume-agent implementation emits only MATCH_FAILED or MATCH_PASSED_NEED_INTERVIEW.",
+    "RAAS/HSM approval is shown as an external handoff between MATCH_PASSED_NEED_INTERVIEW and INTERVIEW_INVITATION_REQUESTED."
+  ]
+}

@@ -1,0 +1,517 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1920" viewBox="0 0 2200 1920" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic Operator RAAS-v1 事件流转图</title>
+  <desc id="desc">展示 RAAS-v1 六个真实 Inngest functions 的触发事件、同步 invoke、外部审批回流、成功终态、失败终态和重试停驻分支。</desc>
+
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="10" flood-color="#122033" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow-event" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3478D4"/>
+    </marker>
+    <marker id="arrow-invoke" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7957C8"/>
+    </marker>
+    <marker id="arrow-external" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#C87616"/>
+    </marker>
+    <marker id="arrow-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748B"/>
+    </marker>
+    <style>
+      text {
+        font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+        fill: #182536;
+      }
+      .mono {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        letter-spacing: -0.2px;
+      }
+      .lane {
+        fill: #FFFFFF;
+        stroke: #DCE3EC;
+        stroke-width: 2;
+      }
+      .lane-title {
+        font-size: 24px;
+        font-weight: 700;
+        fill: #344256;
+      }
+      .lane-subtitle {
+        font-size: 16px;
+        fill: #7B8798;
+      }
+      .function-card {
+        fill: #F6F2FF;
+        stroke: #7957C8;
+        stroke-width: 2.5;
+      }
+      .function-title {
+        font-size: 23px;
+        font-weight: 700;
+        fill: #35235D;
+      }
+      .function-copy {
+        font-size: 17px;
+        fill: #5C5270;
+      }
+      .event-card {
+        fill: #EDF5FF;
+        stroke: #3478D4;
+        stroke-width: 2.5;
+      }
+      .event-text {
+        font-size: 20px;
+        font-weight: 700;
+        fill: #174D91;
+      }
+      .event-copy {
+        font-size: 16px;
+        fill: #4A6D9A;
+      }
+      .data-card {
+        fill: #F2F5F8;
+        stroke: #8795A8;
+        stroke-width: 2;
+      }
+      .data-title {
+        font-size: 19px;
+        font-weight: 700;
+        fill: #435267;
+      }
+      .data-copy {
+        font-size: 16px;
+        fill: #68768A;
+      }
+      .success-card {
+        fill: #EAF8F0;
+        stroke: #16945A;
+        stroke-width: 2.5;
+      }
+      .success-text {
+        font-size: 20px;
+        font-weight: 700;
+        fill: #0B6B3D;
+      }
+      .fail-card {
+        fill: #FFF0F2;
+        stroke: #D14B5A;
+        stroke-width: 2.5;
+      }
+      .fail-text {
+        font-size: 19px;
+        font-weight: 700;
+        fill: #9F2937;
+      }
+      .park-card {
+        fill: #F4F5F7;
+        stroke: #7A8797;
+        stroke-width: 2;
+      }
+      .park-text {
+        font-size: 18px;
+        font-weight: 700;
+        fill: #4F5E70;
+      }
+      .external-card {
+        fill: #FFF6E7;
+        stroke: #C87616;
+        stroke-width: 2.5;
+      }
+      .external-title {
+        font-size: 22px;
+        font-weight: 700;
+        fill: #8C4A09;
+      }
+      .external-copy {
+        font-size: 17px;
+        fill: #98602B;
+      }
+      .decision {
+        fill: #FFFFFF;
+        stroke: #64748B;
+        stroke-width: 2.5;
+      }
+      .decision-text {
+        font-size: 18px;
+        font-weight: 700;
+        fill: #334155;
+      }
+      .small-label {
+        font-size: 15px;
+        font-weight: 700;
+        fill: #5C6B7E;
+      }
+      .edge-label {
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .edge-event {
+        fill: none;
+        stroke: #3478D4;
+        stroke-width: 3;
+        marker-end: url(#arrow-event);
+      }
+      .edge-invoke {
+        fill: none;
+        stroke: #7957C8;
+        stroke-width: 3;
+        stroke-dasharray: 10 8;
+        marker-end: url(#arrow-invoke);
+      }
+      .edge-external {
+        fill: none;
+        stroke: #C87616;
+        stroke-width: 3;
+        stroke-dasharray: 5 6;
+        marker-end: url(#arrow-external);
+      }
+      .edge-neutral {
+        fill: none;
+        stroke: #64748B;
+        stroke-width: 2.5;
+        marker-end: url(#arrow-neutral);
+      }
+      .number {
+        font-size: 17px;
+        font-weight: 800;
+        fill: #FFFFFF;
+        text-anchor: middle;
+        dominant-baseline: central;
+      }
+    </style>
+  </defs>
+
+  <rect width="2200" height="1920" fill="#F5F7FA"/>
+
+  <g aria-label="标题">
+    <text x="60" y="78" font-size="42" font-weight="800" fill="#152235">Agentic Operator · RAAS-v1 事件流转图</text>
+    <text x="60" y="118" font-size="19" fill="#6E7A8C">依据当前运行时代码梳理 · 6 个真实 Inngest Functions · 2026-07-28</text>
+    <g transform="translate(1780 48)">
+      <rect width="360" height="58" rx="29" fill="#E9EEF5"/>
+      <circle cx="32" cy="29" r="9" fill="#16945A"/>
+      <text x="54" y="36" font-size="17" font-weight="700" fill="#435267">agentic-operator-main</text>
+    </g>
+  </g>
+
+  <!-- Lane 1: JD -->
+  <g aria-label="JD 生成支线">
+    <rect class="lane" x="40" y="165" width="2120" height="270" rx="24" filter="url(#shadow)"/>
+    <text class="lane-title" x="70" y="214">JD 生成</text>
+    <text class="lane-subtitle" x="70" y="241">独立入口支线</text>
+
+    <g aria-label="JD 入口事件">
+      <rect class="event-card" x="250" y="235" width="350" height="132" rx="18"/>
+      <text class="event-text mono" x="275" y="272">REQUIREMENT_LOGGED</text>
+      <text class="event-text mono" x="275" y="307">CLARIFICATION_READY</text>
+      <text class="event-text mono" x="275" y="342">JD_REJECTED</text>
+    </g>
+
+    <g aria-label="Function 1 Create JD Agent">
+      <rect class="function-card" x="690" y="215" width="440" height="172" rx="20"/>
+      <circle cx="722" cy="247" r="20" fill="#7957C8"/>
+      <text class="number" x="722" y="247">1</text>
+      <text class="function-title mono" x="756" y="254">create-jd-agent</text>
+      <text class="function-copy" x="720" y="292">读取需求、澄清、客户上下文和本体规则</text>
+      <text class="function-copy" x="720" y="322">RoboHire 生成 JD · 客户名合规脱敏</text>
+      <text class="function-copy" x="720" y="352">派生 must-have / nice-to-have 技能</text>
+    </g>
+
+    <g aria-label="JD 持久化">
+      <rect class="data-card" x="1235" y="240" width="365" height="122" rx="18"/>
+      <text class="data-title" x="1265" y="278">持久化与镜像</text>
+      <text class="data-copy" x="1265" y="310">Partner PostgreSQL · Job_Posting</text>
+      <text class="data-copy" x="1265" y="338">Neo4j · Job_Requisition / Job_Posting</text>
+    </g>
+
+    <g aria-label="JD Generated 终态事件">
+      <rect class="success-card" x="1740" y="268" width="320" height="72" rx="36"/>
+      <text class="success-text mono" x="1900" y="311" text-anchor="middle">JD_GENERATED</text>
+    </g>
+
+    <path class="edge-event" d="M 600 301 H 690"/>
+    <path class="edge-neutral" d="M 1130 301 H 1235"/>
+    <path class="edge-event" d="M 1600 301 H 1740"/>
+  </g>
+
+  <!-- Lane 2: Resume ingestion and identity -->
+  <g aria-label="简历解析与候选人查重">
+    <rect class="lane" x="40" y="460" width="2120" height="370" rx="24" filter="url(#shadow)"/>
+    <text class="lane-title" x="70" y="509">简历入库</text>
+    <text class="lane-subtitle" x="70" y="536">解析 + 查重 + 锁校验</text>
+
+    <g aria-label="Resume Downloaded 入口事件">
+      <rect class="event-card" x="250" y="535" width="315" height="76" rx="38"/>
+      <text class="event-text mono" x="407.5" y="581" text-anchor="middle">RESUME_DOWNLOADED</text>
+    </g>
+
+    <g aria-label="Function 2 Resume Parser Agent">
+      <rect class="function-card" x="650" y="500" width="430" height="160" rx="20"/>
+      <circle cx="682" cy="532" r="20" fill="#7957C8"/>
+      <text class="number" x="682" y="532">2</text>
+      <text class="function-title mono" x="716" y="539">resume-parser-agent</text>
+      <text class="function-copy" x="680" y="578">MinIO 下载 · DOCX 可转 PDF</text>
+      <text class="function-copy" x="680" y="608">RoboHire 解析结构化简历</text>
+      <text class="function-copy" x="680" y="638">查重完成后再保存 Candidate / Resume</text>
+    </g>
+
+    <g aria-label="Function 3 Candidate Identity Agent">
+      <rect class="function-card" x="1190" y="490" width="455" height="180" rx="20"/>
+      <circle cx="1222" cy="522" r="20" fill="#7957C8"/>
+      <text class="number" x="1222" y="522">3</text>
+      <text class="function-title mono" x="1256" y="529">rule-check-candidate-identity-agent</text>
+      <text class="function-copy" x="1220" y="570">候选池检索 · 三级查重 · 模糊字段语义判断</text>
+      <text class="function-copy" x="1220" y="600">强命中：auto-merged，复用已有 candidate_id</text>
+      <text class="function-copy" x="1220" y="630">弱命中：pending-review；无命中：new-candidate</text>
+      <text class="function-copy" x="1220" y="656">结论必须写审计；业务依赖失败时按新人软降级</text>
+    </g>
+
+    <g aria-label="Candidate Identity Checked 通知事件">
+      <rect class="event-card" x="1740" y="535" width="350" height="76" rx="38"/>
+      <text class="event-text mono" x="1915" y="581" text-anchor="middle">CANDIDATE_IDENTITY_CHECKED</text>
+    </g>
+
+    <g aria-label="Resume Parser 持久化续段">
+      <rect class="data-card" x="650" y="710" width="430" height="82" rx="18"/>
+      <text class="data-title" x="680" y="744">Resume Parser 继续执行</text>
+      <text class="data-copy" x="680" y="773">Partner PG 保存 · Candidate / Resume / Expectation → Neo4j 镜像</text>
+    </g>
+
+    <g aria-label="锁校验决策">
+      <polygon class="decision" points="1240,750 1325,700 1410,750 1325,800"/>
+      <text class="decision-text" x="1325" y="744" text-anchor="middle">强制锁校验</text>
+      <text class="decision-text" x="1325" y="768" text-anchor="middle">发生冲突？</text>
+    </g>
+
+    <g aria-label="Resume Processed 事件">
+      <rect class="success-card" x="1505" y="692" width="370" height="68" rx="34"/>
+      <text class="success-text mono" x="1690" y="733" text-anchor="middle">RESUME_PROCESSED</text>
+    </g>
+
+    <g aria-label="Resume Locked Conflict 终态">
+      <rect class="fail-card" x="1505" y="772" width="370" height="48" rx="24"/>
+      <text class="fail-text mono" x="1690" y="803" text-anchor="middle">RESUME_LOCKED_CONFLICT</text>
+    </g>
+
+    <g aria-label="Candidate Identity Requested 独立入口">
+      <rect class="event-card" x="1885" y="700" width="220" height="88" rx="18"/>
+      <text class="event-copy" x="1995" y="730" text-anchor="middle">独立复核入口</text>
+      <text class="event-text mono" x="1995" y="758" text-anchor="middle" font-size="16">CANDIDATE_IDENTITY_</text>
+      <text class="event-text mono" x="1995" y="780" text-anchor="middle" font-size="16">REQUESTED</text>
+    </g>
+
+    <path class="edge-event" d="M 565 573 H 650"/>
+    <path class="edge-invoke" d="M 1080 573 H 1190"/>
+    <text class="edge-label" x="1135" y="555" text-anchor="middle" fill="#7957C8">step.invoke · 落库前同步等待</text>
+
+    <path class="edge-event" d="M 1645 573 H 1740"/>
+    <text class="edge-label" x="1692" y="555" text-anchor="middle" fill="#3478D4">通知事件</text>
+
+    <path class="edge-invoke" d="M 1415 670 C 1415 690, 1080 684, 865 710"/>
+    <text class="edge-label" x="1205" y="696" text-anchor="middle" fill="#7957C8">返回 sameAsCandidateId / review / new</text>
+
+    <path class="edge-neutral" d="M 1080 751 H 1240"/>
+    <path class="edge-event" d="M 1410 750 C 1450 750, 1450 726, 1505 726"/>
+    <text class="edge-label" x="1455" y="718" text-anchor="middle" fill="#16945A">无冲突 / 未启用</text>
+    <path class="edge-neutral" d="M 1325 800 V 811 H 1505"/>
+    <text class="edge-label" x="1430" y="810" text-anchor="middle" fill="#D14B5A">锁冲突</text>
+
+    <path class="edge-event" d="M 1885 744 H 1828 V 650 H 1645"/>
+    <text class="edge-label" x="1810" y="674" text-anchor="end" fill="#3478D4">手工 / 独立触发</text>
+  </g>
+
+  <!-- Lane 3: Rule check -->
+  <g aria-label="岗位规则检查">
+    <rect class="lane" x="40" y="850" width="2120" height="260" rx="24" filter="url(#shadow)"/>
+    <text class="lane-title" x="70" y="899">规则检查</text>
+    <text class="lane-subtitle" x="70" y="926">按岗位逐一 fan-out</text>
+
+    <g aria-label="Function 4 Rule Check Agent">
+      <rect class="function-card" x="355" y="888" width="535" height="170" rx="20"/>
+      <circle cx="387" cy="920" r="20" fill="#7957C8"/>
+      <text class="number" x="387" y="920">4</text>
+      <text class="function-title mono" x="421" y="927">rule-check-agent</text>
+      <text class="function-copy" x="385" y="966">选择岗位：指定 JR / 预填列表 / 招聘员已发布岗位</text>
+      <text class="function-copy" x="385" y="996">必要时回拉解析结果 · 对每个 JR 执行规则检查</text>
+      <text class="function-copy" x="385" y="1026">强制写 RuleCheckAudit + Candidate_Match_Result</text>
+    </g>
+
+    <g aria-label="规则结论">
+      <polygon class="decision" points="1005,973 1095,910 1185,973 1095,1036"/>
+      <text class="decision-text" x="1095" y="967" text-anchor="middle">每个 JR</text>
+      <text class="decision-text" x="1095" y="991" text-anchor="middle">规则结论</text>
+    </g>
+
+    <g aria-label="Match Rule Check Passed">
+      <rect class="success-card" x="1290" y="895" width="410" height="72" rx="36"/>
+      <text class="success-text mono" x="1495" y="938" text-anchor="middle">MATCH_RULE_CHECK_PASSED</text>
+    </g>
+
+    <g aria-label="Match Rule Check Failed">
+      <rect class="fail-card" x="1290" y="990" width="410" height="72" rx="36"/>
+      <text class="fail-text mono" x="1495" y="1034" text-anchor="middle">MATCH_RULE_CHECK_FAILED</text>
+    </g>
+
+    <g aria-label="规则基础设施故障停驻">
+      <rect class="park-card" x="1790" y="990" width="300" height="72" rx="18"/>
+      <text class="park-text" x="1940" y="1020" text-anchor="middle">基础设施 / LLM 故障</text>
+      <text class="data-copy" x="1940" y="1046" text-anchor="middle">重试并 Park · 不拒绝候选人</text>
+    </g>
+
+    <path class="edge-event" d="M 1505 726 H 1465 V 842 H 622 V 888"/>
+    <text class="edge-label" x="786" y="836" fill="#3478D4">Inngest event</text>
+    <path class="edge-neutral" d="M 890 973 H 1005"/>
+    <path class="edge-event" d="M 1185 955 H 1290"/>
+    <text class="edge-label" x="1237" y="941" text-anchor="middle" fill="#16945A">PASS</text>
+    <path class="edge-neutral" d="M 1185 991 H 1290"/>
+    <text class="edge-label" x="1237" y="1018" text-anchor="middle" fill="#D14B5A">mandatory FAIL</text>
+    <path class="edge-neutral" d="M 1095 1036 V 1078 H 1740 V 1026 H 1790"/>
+    <text class="edge-label" x="1515" y="1073" text-anchor="middle" fill="#64748B">infra failure</text>
+  </g>
+
+  <!-- Lane 4: Matching -->
+  <g aria-label="简历岗位匹配">
+    <rect class="lane" x="40" y="1130" width="2120" height="270" rx="24" filter="url(#shadow)"/>
+    <text class="lane-title" x="70" y="1179">智能匹配</text>
+    <text class="lane-subtitle" x="70" y="1206">真实规则通过后执行</text>
+
+    <g aria-label="Function 5 Match Resume Agent">
+      <rect class="function-card" x="355" y="1168" width="535" height="175" rx="20"/>
+      <circle cx="387" cy="1200" r="20" fill="#7957C8"/>
+      <text class="number" x="387" y="1200">5</text>
+      <text class="function-title mono" x="421" y="1207">match-resume-agent</text>
+      <text class="function-copy" x="385" y="1246">验证真实规则审计；bypass / 缺规则结果会阻断</text>
+      <text class="function-copy" x="385" y="1276">组装结构化简历 + JD + 求职期望 + 规则结论</text>
+      <text class="function-copy" x="385" y="1306">RoboHire 匹配评分 → 写 Partner PG + Neo4j</text>
+    </g>
+
+    <g aria-label="匹配分决策">
+      <polygon class="decision" points="1005,1255 1095,1192 1185,1255 1095,1318"/>
+      <text class="decision-text" x="1095" y="1249" text-anchor="middle">matching</text>
+      <text class="decision-text" x="1095" y="1273" text-anchor="middle">score</text>
+    </g>
+
+    <g aria-label="Match Passed Need Interview">
+      <rect class="success-card" x="1290" y="1175" width="430" height="76" rx="38"/>
+      <text class="success-text mono" x="1505" y="1221" text-anchor="middle">MATCH_PASSED_NEED_INTERVIEW</text>
+    </g>
+
+    <g aria-label="Match Failed">
+      <rect class="fail-card" x="1290" y="1280" width="330" height="64" rx="32"/>
+      <text class="fail-text mono" x="1455" y="1319" text-anchor="middle">MATCH_FAILED</text>
+    </g>
+
+    <g aria-label="匹配依赖故障停驻">
+      <rect class="park-card" x="1750" y="1280" width="340" height="64" rx="18"/>
+      <text class="park-text" x="1920" y="1307" text-anchor="middle">可恢复 RoboHire 故障</text>
+      <text class="data-copy" x="1920" y="1331" text-anchor="middle">重试并 Park · 暂不发终态</text>
+    </g>
+
+    <g aria-label="免面分支下线说明">
+      <rect class="data-card" x="1760" y="1175" width="330" height="76" rx="18"/>
+      <text class="data-title mono" x="1925" y="1206" text-anchor="middle" font-size="16">MATCH_PASSED_NO_INTERVIEW</text>
+      <text class="data-copy" x="1925" y="1233" text-anchor="middle">当前实现已下线，不会发出</text>
+    </g>
+
+    <path class="edge-event" d="M 1290 931 H 1215 V 1120 H 622 V 1168"/>
+    <path class="edge-neutral" d="M 890 1255 H 1005"/>
+    <path class="edge-event" d="M 1185 1237 H 1290"/>
+    <text class="edge-label" x="1237" y="1223" text-anchor="middle" fill="#16945A">score ≥ 40 或 null</text>
+    <path class="edge-neutral" d="M 1185 1273 H 1240 V 1312 H 1290"/>
+    <text class="edge-label" x="1235" y="1298" text-anchor="middle" fill="#D14B5A">score &lt; 40</text>
+    <path class="edge-neutral" d="M 890 1325 H 965 V 1370 H 1695 V 1312 H 1750"/>
+    <text class="edge-label" x="1420" y="1365" text-anchor="middle" fill="#64748B">dependency degraded</text>
+  </g>
+
+  <!-- Lane 5: External approval and invitation -->
+  <g aria-label="RAAS 审批与面试邀约">
+    <rect class="lane" x="40" y="1420" width="2120" height="365" rx="24" filter="url(#shadow)"/>
+    <text class="lane-title" x="70" y="1469">面试邀约</text>
+    <text class="lane-subtitle" x="70" y="1496">外部审批后回流 AO</text>
+
+    <g aria-label="RAAS HSM 外部审批">
+      <rect class="external-card" x="265" y="1510" width="400" height="140" rx="20"/>
+      <text class="external-title" x="465" y="1550" text-anchor="middle">RAAS / HSM</text>
+      <text class="external-copy" x="465" y="1585" text-anchor="middle">消费匹配通过事件</text>
+      <text class="external-copy" x="465" y="1615" text-anchor="middle">人工或业务审批是否发起面试</text>
+    </g>
+
+    <g aria-label="Interview Invitation Requested">
+      <rect class="event-card" x="760" y="1542" width="410" height="78" rx="39"/>
+      <text class="event-text mono" x="965" y="1589" text-anchor="middle">INTERVIEW_INVITATION_REQUESTED</text>
+    </g>
+
+    <g aria-label="Function 6 Interview Inviter Agent">
+      <rect class="function-card" x="1260" y="1495" width="480" height="176" rx="20"/>
+      <circle cx="1292" cy="1527" r="20" fill="#7957C8"/>
+      <text class="number" x="1292" y="1527">6</text>
+      <text class="function-title mono" x="1326" y="1534">interview-inviter-agent</text>
+      <text class="function-copy" x="1290" y="1573">薄事件时从 Partner PG 回填简历 / JD</text>
+      <text class="function-copy" x="1290" y="1603">RoboHire / GoHire 发起 AI 面试邀约</text>
+      <text class="function-copy" x="1290" y="1633">写 Communication_Log / Interview_Record</text>
+      <text class="function-copy" x="1290" y="1659">按 correlation_id 回写 invitation 状态</text>
+    </g>
+
+    <g aria-label="Interview Invitation Sent">
+      <rect class="success-card" x="1810" y="1485" width="310" height="70" rx="35"/>
+      <text class="success-text mono" x="1965" y="1515" text-anchor="middle" font-size="17">
+        <tspan x="1965" dy="0">INTERVIEW_INVITATION</tspan>
+        <tspan x="1965" dy="23">_SENT</tspan>
+      </text>
+    </g>
+
+    <g aria-label="Interview Invitation Failed">
+      <rect class="fail-card" x="1810" y="1580" width="310" height="70" rx="35"/>
+      <text class="fail-text mono" x="1965" y="1610" text-anchor="middle" font-size="17">
+        <tspan x="1965" dy="0">INTERVIEW_INVITATION</tspan>
+        <tspan x="1965" dy="23">_FAILED</tspan>
+      </text>
+    </g>
+
+    <g aria-label="面试邀约故障停驻">
+      <rect class="park-card" x="1810" y="1675" width="310" height="72" rx="18"/>
+      <text class="park-text" x="1965" y="1705" text-anchor="middle">网络 / 5xx 等可恢复故障</text>
+      <text class="data-copy" x="1965" y="1732" text-anchor="middle">Inngest 重试并 Park</text>
+    </g>
+
+    <path class="edge-external" d="M 1695 1251 V 1460 H 465 V 1510"/>
+    <text class="edge-label" x="870" y="1453" text-anchor="middle" fill="#C87616">RAAS 消费 MATCH_PASSED_NEED_INTERVIEW</text>
+    <path class="edge-external" d="M 665 1580 H 760"/>
+    <path class="edge-event" d="M 1170 1581 H 1260"/>
+    <path class="edge-event" d="M 1740 1538 H 1810"/>
+    <text class="edge-label" x="1775" y="1524" text-anchor="middle" fill="#16945A">成功</text>
+    <path class="edge-neutral" d="M 1740 1585 H 1775 V 1615 H 1810"/>
+    <text class="edge-label" x="1772" y="1597" text-anchor="middle" fill="#D14B5A">终态错误</text>
+    <path class="edge-neutral" d="M 1740 1635 H 1775 V 1711 H 1810"/>
+    <text class="edge-label" x="1772" y="1662" text-anchor="middle" fill="#64748B">可恢复</text>
+
+    <text class="data-copy" x="265" y="1705">特殊旁路：RoboHire persistenceWarning 时，</text>
+    <text class="data-copy" x="265" y="1732">代码可能同时发 FAILED 警告与 SENT 事实事件。</text>
+  </g>
+
+  <!-- Legend -->
+  <g aria-label="图例">
+    <text x="70" y="1840" font-size="18" font-weight="800" fill="#344256">图例</text>
+    <line x1="145" y1="1834" x2="230" y2="1834" stroke="#3478D4" stroke-width="3" marker-end="url(#arrow-event)"/>
+    <text x="248" y="1840" font-size="16" fill="#5C6B7E">Inngest 事件</text>
+
+    <line x1="390" y1="1834" x2="475" y2="1834" stroke="#7957C8" stroke-width="3" stroke-dasharray="10 8" marker-end="url(#arrow-invoke)"/>
+    <text x="493" y="1840" font-size="16" fill="#5C6B7E">step.invoke / 返回值</text>
+
+    <line x1="715" y1="1834" x2="800" y2="1834" stroke="#C87616" stroke-width="3" stroke-dasharray="5 6" marker-end="url(#arrow-external)"/>
+    <text x="818" y="1840" font-size="16" fill="#5C6B7E">RAAS / HSM 外部流转</text>
+
+    <rect x="1070" y="1818" width="26" height="26" rx="7" fill="#F6F2FF" stroke="#7957C8" stroke-width="2"/>
+    <text x="1110" y="1840" font-size="16" fill="#5C6B7E">Function</text>
+    <rect x="1220" y="1818" width="26" height="26" rx="13" fill="#EDF5FF" stroke="#3478D4" stroke-width="2"/>
+    <text x="1260" y="1840" font-size="16" fill="#5C6B7E">事件</text>
+    <rect x="1360" y="1818" width="26" height="26" rx="13" fill="#EAF8F0" stroke="#16945A" stroke-width="2"/>
+    <text x="1400" y="1840" font-size="16" fill="#5C6B7E">成功终态</text>
+    <rect x="1540" y="1818" width="26" height="26" rx="13" fill="#FFF0F2" stroke="#D14B5A" stroke-width="2"/>
+    <text x="1580" y="1840" font-size="16" fill="#5C6B7E">失败终态</text>
+    <rect x="1720" y="1818" width="26" height="26" rx="7" fill="#F4F5F7" stroke="#7A8797" stroke-width="2"/>
+    <text x="1760" y="1840" font-size="16" fill="#5C6B7E">重试 / Park</text>
+
+    <text x="70" y="1882" font-size="15" fill="#7B8798">来源：server/inngest/functions.ts 与 6 个 agents 的当前实现；不采用已过期的注册文件顶部注释作为流程真相。</text>
+  </g>
+</svg>

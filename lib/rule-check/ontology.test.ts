@@ -44,7 +44,9 @@ describe('normalizeRawRule', () => {
     expect(r.severity).toBe('flag_only');
   });
 
-  it('derives severity=needs_human for mixed enforcement/failure combo', () => {
+  // `optional` 是绝对非阻断契约:即便 failurePolicy 自相矛盾地写成 block,也
+  // 不升级。与 runner.severityOfRule / api-rule-fetcher.toRule 口径一致。
+  it('derives severity=flag_only for optional + block (optional wins over contradictory failurePolicy)', () => {
     const r = normalizeRawRule({
       id: '10-27',
       executor: 'Agent',
@@ -53,6 +55,19 @@ describe('normalizeRawRule', () => {
       standardizedLogicRule: '',
       enforcementLevel: 'optional',
       failurePolicy: 'block',
+    } as any);
+    expect(r.severity).toBe('flag_only');
+  });
+
+  it('derives severity=needs_human for mandatory + warn', () => {
+    const r = normalizeRawRule({
+      id: '10-28',
+      executor: 'Agent',
+      applicableClient: '通用',
+      applicableDepartment: 'N/A',
+      standardizedLogicRule: '',
+      enforcementLevel: 'mandatory',
+      failurePolicy: 'warn',
     } as any);
     expect(r.severity).toBe('needs_human');
   });

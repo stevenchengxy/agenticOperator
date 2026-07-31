@@ -15,6 +15,7 @@
 export { writeJobPostingInstance } from './job-posting';
 export { writeJobRequisitionInstance } from './job-requisition';
 export { writeCandidateInstance } from './candidate';
+export { writeCandidateExpectationInstance } from './candidate-expectation';
 export { writeResumeInstance } from './resume';
 export { writeApplicationInstance } from './application';
 export { writeCandidateMatchResultInstance } from './candidate-match-result';

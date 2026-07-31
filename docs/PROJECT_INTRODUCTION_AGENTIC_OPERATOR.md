@@ -348,7 +348,8 @@ SQLite 文件位于 `data/ao.db`。**24 张表**，按域分组：
 | `event-flow-deep-dive.md` | 事件流转细节 |
 | `event-manager-and-tracking-design.md` | EM 库与事件追踪设计 |
 | `workflow-event-chain.md` / `.pdf` | 工作流事件链 |
-| `inngest-docker-deployment.md` | Inngest 部署 |
+| `deployment.md` | **唯一维护的部署指南**(Docker Compose 跨机部署与运维) |
+| `inngest-docker-deployment.md` | ⚠️ 历史快照(旧开发机自带 Inngest),已被 `deployment.md` 取代 |
 | `resume-agent-engineering-spec.md` | 简历解析 agent 设计规范 |
 | `match-resume-api-user-guide.md` | matchResume API 使用指南 |
 | `rule-check-*.md` | rule-check 全栈：用户指南 / 设计 / pipeline / 端到端 |

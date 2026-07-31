@@ -57,6 +57,21 @@ const RESUME_DOWNLOADED_v1 = envelope(
     job_requisition_id: z.string().nullable().optional(),
     // ADR-0040 — RAAS Nextcloud 路径预填的窄化客户需求 id 数组(可空/缺省)。
     job_requisition_ids: z.array(z.string()).optional(),
+    // Browser-extension upload contract. RAAS only sends non-empty fields;
+    // keep it explicit here even though passthrough already accepts it.
+    expectation_payload: z
+      .object({
+        expected_position: z.string().optional(),
+        expected_location: z.string().optional(),
+        expected_salary_range: z.string().optional(),
+        outsourcing_acceptance_level: z.string().optional(),
+        expected_industry: z.string().optional(),
+        expected_company_size: z.string().optional(),
+        constraints: z.array(z.string()).optional(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
     received_at: z.string().optional(),
   }).passthrough(),
 );
@@ -280,7 +295,7 @@ export const BUILTIN_SCHEMAS: EventSchemaRegistration[] = [
   },
   {
     name: "RESUME_PROCESSED",
-    description: "简历解析完成（RoboHire / LLM）;2026-05-19 后 ruleCheckAgent 直订",
+    description: "简历解析与候选人期望持久化完成;ruleCheckAgent 据此触发 10-1",
     versions: [{ version: "1.0", schema: RESUME_PROCESSED_v1 }],
     publishers: ["rpa.resumeParserAgent", "raas.reassign-republisher"],
     subscribers: [

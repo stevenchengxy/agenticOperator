@@ -51,6 +51,26 @@ describe('extractCandidateExpectation — 从简历文本抽候选人期望', ()
     });
   });
 
+  it('把 RAAS expectation_payload 单数字段转换成 matcher 结构', () => {
+    const exp = extractCandidateExpectation({
+      parsed: {
+        expected_position: '电气工程师',
+        expected_location: '南京',
+        expected_industry: '新能源',
+        expected_salary_range: '13000-15000',
+      },
+      rawText: null,
+    });
+    expect(exp).toEqual({
+      expected_salary_monthly_min: 13000,
+      expected_salary_monthly_max: 15000,
+      expected_cities: ['南京'],
+      expected_industries: ['新能源'],
+      expected_roles: ['电气工程师'],
+      expected_work_mode: null,
+    });
+  });
+
   it('什么都抽不到时返回空对象(下游不会发 candidatePreferences)', () => {
     expect(extractCandidateExpectation('张三 后端五年经验 精通 TS')).toEqual({});
     expect(extractCandidateExpectation(null)).toEqual({});

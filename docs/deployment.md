@@ -235,6 +235,13 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 安全闸门保持模板默认，不要动：`STUB_AGENTS=0`、`RULE_CHECK_BYPASS=false`、
 `AO_ENABLE_UNSAFE_DEV_ROUTES=0`、`RAAS_BRIDGE_ENABLED=0`。
 
+候选人身份/去重/锁定的四个行为开关**首次部署一律保持模板默认**（
+`LOCK_CHECK_ENABLED=0`、`CANDIDATE_LOCK_PG_WRITE=0`、`LOCK_CHECK_ENFORCE=0`、
+`DEDUP_PHONE_PRIMARY=0`；`CANDIDATE_IDENTITY_ENABLED=1` 是默认开）。它们决定
+"谁算同一个人"和"锁定候选人要不要被抑制"，跑通验收后再逐个灰度。其中
+`DEDUP_PHONE_PRIMARY=1` 是**单向门**——它改变落库的身份主键，开之前必须先
+在 partner 库回填 `mobile_normalized`。
+
 ### 5.4 连通自检 + 配置预检
 
 ```bash

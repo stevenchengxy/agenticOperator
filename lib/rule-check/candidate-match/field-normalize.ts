@@ -5,15 +5,18 @@
 // never silently merges two genuinely-different values.
 
 import type { MatchField } from './rules-data';
+import { ruleCheckKey } from '@/lib/phone/normalize-e164';
 
 const s = (raw: string | null | undefined): string => (raw ?? '').trim();
 
-/** Digits only; for 11+ digit numbers keep the last 11 (drop country code). Returns
- *  '' for fewer than 7 digits (not enough to identify). */
+/** Canonical mobile key for the exact/fuzzy prefilter. Delegates to the shared
+ *  phone normalizer (lib/phone/normalize-e164): libphonenumber's national number
+ *  when the input parses to a valid number (correct for international numbers),
+ *  else the legacy digit heuristic. For China numbers this is byte-identical to the
+ *  old "digits, last 11" behavior; international numbers no longer keep a wrong
+ *  country-code suffix. '' for fewer than 7 digits (not enough to identify). */
 export function normalizePhone(raw: string | null | undefined): string {
-  const digits = s(raw).replace(/\D/g, '');
-  if (digits.length < 7) return '';
-  return digits.length >= 11 ? digits.slice(-11) : digits;
+  return ruleCheckKey(raw);
 }
 
 /** Collapse internal whitespace + lowercase latin, then drop spaces adjacent to CJK

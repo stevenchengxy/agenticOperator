@@ -3,12 +3,10 @@
 // render them into the free-form `candidatePreferences` string that RoboHire's
 // POST /api/v1/match-resume accepts.
 //
-// Why this exists: RESUME_DOWNLOADED carries only transport metadata and RoboHire
-// /parse-resume returns no typed expectation fields, so the candidate's own
-// expectations were never reaching the matcher. Extraction happens once (at the
-// parser) into the structured CandidateExpectationNested; the matcher then formats
-// that into candidatePreferences. When nothing is found we return {} / '' so the
-// match call degrades to exactly today's behaviour (no candidatePreferences sent).
+// Why this exists: RAAS now carries its canonical singular-string fields under
+// RESUME_DOWNLOADED.expectation_payload, while the matcher expects typed arrays
+// plus numeric monthly salary bounds. This mapper converts that contract and
+// retains raw-resume extraction as a fallback for older/non-RAAS events.
 
 import type { CandidateExpectationNested } from '@/server/inngest/client';
 
@@ -88,6 +86,26 @@ function toAmount(numStr: string, unit: string): number {
   return Math.round(parseFloat(numStr) * unitMultiplier(unit));
 }
 
+function parseSalaryText(text: string): { min: number | null; max: number | null } {
+  const range = text.match(
+    /(\d+(?:\.\d+)?)\s*([kK千wW万]?)\s*[-~到至]\s*(\d+(?:\.\d+)?)\s*([kK千wW万]?)/,
+  );
+  if (range) {
+    const unitA = range[2] || range[4];
+    const unitB = range[4] || range[2];
+    const min = toAmount(range[1], unitA);
+    const max = toAmount(range[3], unitB);
+    if (min >= 1000 || max >= 1000) return { min, max };
+  }
+
+  const single = text.match(/(\d+(?:\.\d+)?)\s*([kK千wW万]?)/);
+  if (single) {
+    const value = toAmount(single[1], single[2]);
+    if (value >= 1000) return { min: value, max: value };
+  }
+  return { min: null, max: null };
+}
+
 function extractSalary(
   parsed: Record<string, unknown> | null,
   rawText: string | null,
@@ -100,6 +118,15 @@ function extractSalary(
       max: typeof pMax === 'number' ? pMax : null,
     };
   }
+
+  // RAAS upload contract: a free-form range such as "13000-15000",
+  // "15K-20K" or "1.5万-2万".
+  const structuredRange = asString(parsed?.expected_salary_range);
+  if (structuredRange) {
+    const salary = parseSalaryText(structuredRange);
+    if (salary.min != null || salary.max != null) return salary;
+  }
+
   if (!rawText) return { min: null, max: null };
 
   // Anchor on a salary-specific keyword so we neither grab "5-10 年经验" nor let a
@@ -107,23 +134,7 @@ function extractSalary(
   const kwMatch = rawText.match(/(薪资|月薪|薪酬|年薪|待遇|期望薪)[^\n\r]{0,24}/);
   const window = kwMatch ? kwMatch[0] : '';
   if (!window) return { min: null, max: null };
-
-  const range = window.match(
-    /(\d+(?:\.\d+)?)\s*([kK千wW万]?)\s*[-~到至]\s*(\d+(?:\.\d+)?)\s*([kK千wW万]?)/,
-  );
-  if (range) {
-    const unitA = range[2] || range[4];
-    const unitB = range[4] || range[2];
-    const min = toAmount(range[1], unitA);
-    const max = toAmount(range[3], unitB);
-    if (min >= 1000 || max >= 1000) return { min, max };
-  }
-  const single = window.match(/(\d+(?:\.\d+)?)\s*([kK千wW万])/);
-  if (single) {
-    const v = toAmount(single[1], single[2]);
-    if (v >= 1000) return { min: v, max: v };
-  }
-  return { min: null, max: null };
+  return parseSalaryText(window);
 }
 
 /**
@@ -138,15 +149,18 @@ export function extractCandidateExpectation(
   const roles = firstNonEmpty([
     asStringArray(parsed?.expected_roles),
     asStringArray(parsed?.expected_positions),
+    asStringArray(parsed?.expected_position),
     extractListFromText(rawText, ROLE_LABELS),
   ]);
   const cities = firstNonEmpty([
     asStringArray(parsed?.expected_cities),
     asStringArray(parsed?.expected_locations),
+    asStringArray(parsed?.expected_location),
     extractListFromText(rawText, CITY_LABELS),
   ]);
   const industries = firstNonEmpty([
     asStringArray(parsed?.expected_industries),
+    asStringArray(parsed?.expected_industry),
     extractListFromText(rawText, INDUSTRY_LABELS),
   ]);
   const workMode = asString(parsed?.expected_work_mode) ?? extractWorkMode(rawText);

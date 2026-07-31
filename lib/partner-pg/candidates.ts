@@ -5,17 +5,20 @@
 // Partner's processResumeIngest is a 500+ line orchestration that touches
 // many tables and services (resumePipelineService, candidateService,
 // auditLogService, outboxService, externalCandidatePoolService, etc.).
-// Per 2026-05-20 architecture decision, we replicate the **3 essential
-// writes** (candidate, resume, application) and SKIP all partner-side
+// Per 2026-05-20 architecture decision, we replicate the essential
+// writes (candidate, optional candidate_expectation, resume, upload runtime)
+// and SKIP all partner-side
 // state-management side effects (runtime_state, audit_log, outbox event,
 // blacklist re-check) — partner reconstructs those by subscribing to
 // AO's RESUME_PROCESSED event.
 //
-// Three writes per call, all in one transaction:
+// All persistence below is in one transaction:
 //   1. UPSERT candidate     — dedup by (mobile_normalized, name) when available;
 //                              otherwise use input candidate_id
-//   2. UPSERT resume        — dedup by (candidate_id, source_etag)
-//   3. INSERT application   — link candidate to JR (if job_requisition_id provided)
+//   2. UPSERT CandidateExpectation when RESUME_DOWNLOADED carries expectation_payload
+//   3. UPSERT resume        — dedup by (candidate_id, source_etag)
+//   4. SELECT application   — RAAS owns creation; AO only returns an existing id
+//   5. UPDATE resume_upload_runtime to completed
 //
 // Partner source of truth (reference, DO NOT MODIFY):
 //   raas_v4/backend/apps/api/src/modules/candidates/resume-ingest.service.ts
@@ -23,6 +26,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { withTx } from './client';
+import { dedupKey, toE164 } from '@/lib/phone/normalize-e164';
+import {
+  normalizeCandidateExpectationPayload,
+  type CandidateExpectationPatch,
+} from '@/lib/raas-v1/candidate-expectation';
 
 // ──────────────────────────────────────────────────────────────────────
 // Input mirrors lib/raas-api-client.ts SaveCandidateInput so callers
@@ -49,6 +57,8 @@ export type SaveCandidateInput = {
   job_requisition_id?: string | null;
   client_id?: string | null;
   sourcing_channel_id?: string | null;
+  /** RAAS RESUME_DOWNLOADED.payload.expectation_payload (partial, non-empty fields only). */
+  expectation_payload?: CandidateExpectationPatch | null;
   /** RoboHire parse-resume output (data field). */
   parsed?: {
     data?: {
@@ -75,6 +85,7 @@ export type SaveCandidateInput = {
 export type SaveCandidateResult = {
   candidate_id: string;
   resume_id: string;
+  candidate_expectation_id: string | null;
   application_id: string | null;
   candidate_created: boolean;
   resume_created: boolean;
@@ -97,26 +108,45 @@ const DEFAULT_SOURCING_CHANNEL_ID = '02001034';
 // ──────────────────────────────────────────────────────────────────────
 
 /**
- * Strip non-digits for the dedup key.
- * Default (flag off): >=7 digits, all digits kept (legacy behavior — unchanged).
- * DEDUP_PHONE_PRIMARY=1: align to partner / RMHR canon — require >=11 digits and
- *   return the LAST 11, so country-code / OCR variants collapse to one identity
- *   (matching how the company RMHR dedups by phone). ⚠️ Enabling changes the
- *   STORED mobile_normalized too, so existing rows need a one-off backfill before
- *   phone-only dedup matches them (see P2 in the candidate-lock plan).
+ * Dedup key for the stored `mobile_normalized` column. Delegates to the shared
+ * phone normalizer (lib/phone/normalize-e164 `dedupKey`), which is byte-identical
+ * to this function's former inline logic:
+ *   Default (flag off): >=7 digits, all digits kept (legacy behavior — unchanged).
+ *   DEDUP_PHONE_PRIMARY=1: require >=11 digits and return the LAST 11, so
+ *     country-code / OCR variants collapse to one identity (matching RMHR).
+ * ⚠️ The stored value FORMAT is deliberately unchanged: it is co-owned with the
+ * live RAAS partner DB and matched via suffix LIKE, so the E.164 upgrade of this
+ * column is deferred to a coordinated migration (see 2026-07-21 old-repo design §3).
+ * Enabling DEDUP_PHONE_PRIMARY still changes the stored key and needs a backfill.
  */
 function normalizeMobile(s: string | null | undefined): string | null {
-  if (!s) return null;
-  const digits = s.replace(/\D/g, '');
-  if (process.env.DEDUP_PHONE_PRIMARY === '1') {
-    return digits.length >= 11 ? digits.slice(-11) : null;
-  }
-  return digits.length >= 7 ? digits : null;
+  return dedupKey(s, { phonePrimary: process.env.DEDUP_PHONE_PRIMARY === '1' });
 }
 
 function nonEmpty(s: unknown): string | null {
   return typeof s === 'string' && s.trim() ? s.trim() : null;
 }
+
+function firstLinkedExpectationId(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const id = nonEmpty(item);
+      if (id) return id;
+    }
+    return null;
+  }
+  return nonEmpty(value);
+}
+
+const EXPECTATION_FIELDS = [
+  'expected_position',
+  'expected_location',
+  'expected_salary_range',
+  'outsourcing_acceptance_level',
+  'expected_industry',
+  'expected_company_size',
+  'constraints',
+] as const satisfies readonly (keyof CandidateExpectationPatch)[];
 
 
 /** Coerce unknown → string[]. Filters falsy. */
@@ -244,8 +274,12 @@ export async function saveCandidateToPartnerPg(
 
   const parsed = input.parsed?.data ?? {};
   const name = nonEmpty(parsed.name) ?? '未命名候选人';
-  const mobile = nonEmpty(parsed.mobile) ?? nonEmpty(parsed.phone);
-  const mobile_normalized = normalizeMobile(mobile);
+  // 手机号(2026-07-21 决策):存进 `mobile` 列的是 E.164 规范形(号码有效时),无效号
+  // 退回原始串(绝不丢号)。去重键 `mobile_normalized` 仍从【原始号】计算,逐字节不变
+  // —— 保证共享库去重零回归(见 lib/phone/normalize-e164 dedupKey 的逐字节复刻)。
+  const rawMobile = nonEmpty(parsed.mobile) ?? nonEmpty(parsed.phone);
+  const mobile_normalized = normalizeMobile(rawMobile);
+  const mobile = toE164(rawMobile) ?? rawMobile;
   const email = nonEmpty(parsed.email);
 
   // Structured-column derivations from the RoboHire parse-resume output.
@@ -269,6 +303,7 @@ export async function saveCandidateToPartnerPg(
   const currentCompany = nonEmpty(parsedAny.currentCompany) ?? latestExp.company;
   const currentTitle = nonEmpty(parsedAny.currentTitle) ?? latestExp.title;
   const currentLocation = nonEmpty(parsedAny.currentLocation) ?? nonEmpty(parsedAny.address);
+  const expectationPatch = normalizeCandidateExpectationPayload(input.expectation_payload);
 
   return withTx<SaveCandidateResult>(async (c) => {
     // ── Step 1: UPSERT candidate ──
@@ -401,7 +436,73 @@ export async function saveCandidateToPartnerPg(
       );
     }
 
-    // ── Step 2: UPSERT resume by (candidate_id, etag) ──
+    // ── Step 2: UPSERT candidate_expectation from RAAS upload payload ──
+    //
+    // Mirrors CandidateService.upsertCandidateExpectation:
+    //   - project onto the seven public fields;
+    //   - reuse the first linked id when one exists;
+    //   - otherwise mint an id, insert, and link candidate.candidate_expectation_id.
+    //
+    // SELECT ... FOR UPDATE serializes two concurrent uploads for the same
+    // candidate so they cannot create two "first" expectation rows.
+    let candidate_expectation_id: string | null = null;
+    if (expectationPatch) {
+      const linked = await c.query<{ candidate_expectation_id: unknown }>(
+        `SELECT candidate_expectation_id
+           FROM candidate
+          WHERE candidate_id = $1
+          FOR UPDATE`,
+        [candidate_id],
+      );
+      const existingExpectationId = firstLinkedExpectationId(
+        linked.rows[0]?.candidate_expectation_id,
+      );
+      candidate_expectation_id = existingExpectationId ?? randomUUID();
+
+      const entries = EXPECTATION_FIELDS.flatMap((field) =>
+        expectationPatch[field] === undefined
+          ? []
+          : [[field, expectationPatch[field]] as const],
+      );
+      const columns = entries.map(([field]) => field);
+      const valuePlaceholders = entries.map(
+        ([field], index) => `$${index + 3}${field === 'constraints' ? '::text[]' : ''}`,
+      );
+      const updateAssignments = entries.map(
+        ([field]) => `${field} = EXCLUDED.${field}`,
+      );
+
+      await c.query(
+        `INSERT INTO candidate_expectation (
+            candidate_expectation_id, candidate_id, ${columns.join(', ')},
+            created_at, updated_at
+          ) VALUES (
+            $1, $2, ${valuePlaceholders.join(', ')},
+            NOW(), NOW()
+          )
+          ON CONFLICT (candidate_expectation_id) DO UPDATE SET
+            candidate_id = EXCLUDED.candidate_id,
+            ${updateAssignments.join(',\n            ')},
+            updated_at = NOW()`,
+        [
+          candidate_expectation_id,
+          candidate_id,
+          ...entries.map(([, value]) => value),
+        ],
+      );
+
+      if (!existingExpectationId) {
+        await c.query(
+          `UPDATE candidate SET
+              candidate_expectation_id = ARRAY[$2]::text[],
+              updated_at = NOW()
+           WHERE candidate_id = $1`,
+          [candidate_id, candidate_expectation_id],
+        );
+      }
+    }
+
+    // ── Step 3: UPSERT resume by (candidate_id, etag) ──
     let resume_id: string;
     let resume_created = false;
     const sourceEtag = nonEmpty(input.etag);
@@ -561,7 +662,7 @@ export async function saveCandidateToPartnerPg(
       [candidate_id, resume_id],
     );
 
-    // ── Step 3: look up existing application (RAAS owns creation) ──
+    // ── Step 4: look up existing application (RAAS owns creation) ──
     // 2026-05-21: AO no longer creates Application rows — RAAS does that on
     // its own side, and our INSERT was producing duplicates in the RAAS UI.
     // We still SELECT here so downstream events (RESUME_PROCESSED) can
@@ -579,7 +680,7 @@ export async function saveCandidateToPartnerPg(
       application_id = existing.rows[0]?.application_id ?? null;
     }
 
-    // ── Step 4: advance resume_upload_runtime ──
+    // ── Step 5: advance resume_upload_runtime ──
     // This is partner's state-machine table that RAAS UI / processors watch
     // to know "upload_id X is parsed". RAAS pre-inserts the row with
     // status='pending', external_lock_state='locked' when the upload arrives,
@@ -610,6 +711,7 @@ export async function saveCandidateToPartnerPg(
     return {
       candidate_id,
       resume_id,
+      candidate_expectation_id,
       application_id,
       candidate_created,
       resume_created,

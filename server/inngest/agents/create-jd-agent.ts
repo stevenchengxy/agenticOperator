@@ -22,8 +22,16 @@ import { isPartnerPgConfigured } from '@/lib/partner-pg/client';
 import {
   getRequirementDetail,
   getClarificationRecords,
+  getClientContext,
   type RequirementClarificationRecord,
 } from '@/lib/partner-pg/requirements';
+import { fetchOntologyActionRules } from '@/lib/ontology-rules';
+import { verifyJdCompliance } from '@/lib/robohire/verify-jd-compliance';
+import {
+  buildCompanyBackgroundBlock,
+  buildGenerationConstraintsBlock,
+  budgetPrompt,
+} from '@/lib/robohire/jd-prompt-blocks';
 import {
   syncJdToPartnerPg,
   type SyncJdInput,
@@ -55,6 +63,8 @@ import { notifyRecruitmentLifecycle } from '@/server/notifications/recruitment-l
 const AGENT_ID = 'create-jd-agent';
 const AGENT_NAME = 'createJD';
 const GENERATOR_VERSION = 'workflow-a@2026-05-08';
+/** Ontology domain for the RAAS-v1 recruitment graph (createJD rule fetch). */
+const RAAS_V1_ONTOLOGY_DOMAIN = 'RAAS-v1';
 /** Placeholder JD title when we have no usable title (unnamed posting). */
 const UNTITLED_JD = '未命名岗位';
 
@@ -216,13 +226,41 @@ export const createJdAgent = inngest.createFunction(
       },
     );
 
-    // ── 3. 从详情拼 prompt 给 RAAS /generate-jd ──
-    const prompt = buildPromptFromRequirement(requirement, specification, clarifications);
+    // ── 2d. 公司上下文(best-effort)+ createJD 本体规则(fail-closed)──
+    // clientContext: LEFT JOIN client 派生匿名描述 + 技术栈/福利(修 Benefits=TBD);
+    //   缺列/宕机 → null,createJD 退化到今日行为。client 真名只用于 4-2 后校验,不进 Gohire。
+    // createJdRules: GET /ontology/actions/createJD/rules?domain=RAAS-v1;Allmeta 宕机 → 空(fail-closed)。
+    const clientContext = await step.run(
+      `fetch-client-context-${sanitize(requisitionId)}`,
+      () => getClientContext(clientId),
+    );
+    const createJdRules = await step.run(
+      `fetch-createjd-rules-${sanitize(requisitionId)}`,
+      () => fetchOntologyActionRules('createJD', RAAS_V1_ONTOLOGY_DOMAIN),
+    );
+
+    // ── 3. 从详情拼 prompt 给 RoboHire /generate-jd ──
+    // 需求正文 + 公司背景块(行业/技术栈/福利)+ 生成约束块(本体 4-2/4-3/4-4)。
+    // 分区预算:约束/背景块优先保留,需求正文按 4000 上限先截断(块永不被尾部截掉)。
+    const requirementBody = buildPromptFromRequirement(requirement, specification, clarifications);
+    const companyBlock = buildCompanyBackgroundBlock({
+      descriptor: clientContext?.company_descriptor,
+      technicalStackPreference: clientContext?.technical_stack_preference,
+      welfarePolicy: clientContext?.welfare_policy,
+    });
+    const constraintsBlock = buildGenerationConstraintsBlock(createJdRules.rules);
+    const appendedBlocks = [companyBlock, constraintsBlock].filter(Boolean).join('\n\n');
+    const prompt = budgetPrompt(requirementBody, appendedBlocks, 4000);
     if (!prompt || prompt.length < 4) {
       throw new NonRetriableError(
         `[${AGENT_NAME}] 拼不出有效 prompt — requirement ${requisitionId} 关键字段几乎全空`,
       );
     }
+    logger.info(
+      `[${AGENT_NAME}] prompt 组装 · company_block=${companyBlock ? 'y' : 'n'} ` +
+        `constraints=${createJdRules.ruleCount} client_ctx=${clientContext ? 'y' : 'n'} ` +
+        `len=${prompt.length}`,
+    );
 
     logger.info(
       `[${AGENT_NAME}] received ${event.name} · requisition=${requisitionId} ` +
@@ -250,9 +288,10 @@ export const createJdAgent = inngest.createFunction(
           {
             prompt,
             language: 'zh',
-            // 用 requirement 详情里的 sd_org_name (客户部门) 当 companyName/department 上下文。
-            // 没有就交给 RoboHire 自己解析。
-            companyName: pickStringField(requirement, ['sd_org_name', 'client_name']),
+            // 规则 4-2:客户真名不进 Gohire(会被写进 JD 正文)。传匿名描述
+            // (company_descriptor);无客户上下文则不传,交 RoboHire 自解析。
+            // ⚠️ 不再传 client_name/sd_org_name —— 那会泄漏客户身份到 JD。
+            companyName: clientContext?.company_descriptor,
             department: pickStringField(requirement, ['client_department_id', 'department']),
           },
           // 显式传 fileLogger → RoboHire generate-jd 完整 in/out 进 per-run 审计
@@ -296,6 +335,42 @@ export const createJdAgent = inngest.createFunction(
       stages,
       pickStringField(requirement, ['client_job_title', 'sd_org_name']),
     );
+
+    // ── 4a-bis. 规则 4-2 确定性后校验:清除 JD 正文里泄漏的客户真名 ──
+    // Gohire 会把 companyName 写进 JD,且需求正文也可能带客户名。生成后、落库前做
+    // 一次零-LLM 后校验:把 client 真名替换成匿名描述,记一条审计(非致命,不失败 run)。
+    // clientContext 缺失(无 client 上下文)时整段跳过 = 今日行为。
+    if (clientContext?.client_name) {
+      const scrubFields = [
+        'title', 'description', 'qualifications', 'hardRequirements',
+        'niceToHave', 'benefits', 'interviewRequirements', 'evaluationRules',
+      ] as const;
+      const jdRecord = jdData as Record<string, unknown>;
+      const complianceFixes: string[] = [];
+      for (const field of scrubFields) {
+        const value = jdRecord[field];
+        if (typeof value === 'string' && value) {
+          const r = verifyJdCompliance(value, {
+            clientName: clientContext.client_name,
+            companyDescriptor: clientContext.company_descriptor,
+          });
+          if (r.fixes.length) {
+            jdRecord[field] = r.content;
+            complianceFixes.push(...r.fixes.map((f) => `${field}: ${f}`));
+          }
+        }
+      }
+      if (complianceFixes.length) {
+        fileLogger.event('jd.compliance-fix-4-2', {
+          job_requisition_id: requisitionId,
+          fields_fixed: complianceFixes.length,
+          detail: complianceFixes,
+        });
+        logger.warn(
+          `[${AGENT_NAME}] JD 4-2 合规后校验:清除客户真名 ${complianceFixes.length} 处字段`,
+        );
+      }
+    }
 
     // 到这里说明内容可用(空内容已在 generate step 里被 classifyRobohire →
     // reportDependencyDegraded 拦截失败)。若某个 stage 退化但我们抢救出了可用 JD,
@@ -692,7 +767,9 @@ function buildPromptFromRequirement(
     lines.push(`\n任职要求(原始):\n${r.job_requirement}`);
   }
 
-  return lines.join('\n').slice(0, 4000);
+  // No length cap here — the caller applies `budgetPrompt` so the appended company /
+  // constraint blocks are reserved and never truncated away by the 4000-char limit.
+  return lines.join('\n');
 }
 
 function pickStringField(
