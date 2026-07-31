@@ -1,13 +1,10 @@
-"use client";
-import { Shell } from "@/components/shared/Shell";
-import { FactoryV2Content } from "@/components/behavior/factory-v2/FactoryV2Content";
-import { useApp } from "@/lib/i18n";
+// Server wrapper — a production deployment does not serve the agent factory.
+// See lib/factory-flag.ts. The client UI lives in ./FactoryV2Page.
+import { notFound } from "next/navigation";
+import { isFactoryEnabled } from "@/lib/factory-flag";
+import FactoryV2Page from "./FactoryV2Page";
 
-export default function FactoryV2Page() {
-  const { t } = useApp();
-  return (
-    <Shell crumbs={[t("nav_factory_v2"), "自我验证生成"]} directionTag="Behavior · Agent Factory v2">
-      <FactoryV2Content />
-    </Shell>
-  );
+export default function Page() {
+  if (!isFactoryEnabled()) notFound();
+  return <FactoryV2Page />;
 }

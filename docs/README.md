@@ -89,8 +89,12 @@ PRD、专利交底书、项目介绍。
 
 ### [`reports/`](./reports) — 一次性分析报告(HTML)
 
-18 份历史架构分析与审计报告。这些是**某个时间点的快照**,不随代码更新 ——
+6 份历史架构分析与审计报告。这些是**某个时间点的快照**,不随代码更新 ——
 以 [`superpowers/specs/`](./superpowers/specs) 和本索引指向的当前文档为准。
+
+> agent 工厂的报告与设计稿已于 2026-07-31 全部删除 —— 工厂已迁到独立
+> monorepo,那边才是它的真相源。本仓库保留工厂代码仅供参考,且**部署不包含
+> 工厂**(见 [`deploy/deployment.md`](./deploy/deployment.md) §5.3)。
 
 ### [`archive/`](./archive) — 已归档
 

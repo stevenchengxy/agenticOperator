@@ -32,9 +32,14 @@ COPY . .
 ARG NEXT_PUBLIC_BASE_URL=http://localhost:3002
 ARG NEXT_PUBLIC_INNGEST_URL=http://localhost:8288
 ARG NEXT_PUBLIC_NEO4J_BROWSER_URL=
+# The agent factory is not part of a deployment (it moved to its own monorepo).
+# 0 keeps its entry out of the left nav; the server-side FACTORY_ENABLED gate is
+# what actually makes its pages and APIs 404.
+ARG NEXT_PUBLIC_FACTORY_ENABLED=0
 ENV NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
 ENV NEXT_PUBLIC_INNGEST_URL=${NEXT_PUBLIC_INNGEST_URL}
 ENV NEXT_PUBLIC_NEO4J_BROWSER_URL=${NEXT_PUBLIC_NEO4J_BROWSER_URL}
+ENV NEXT_PUBLIC_FACTORY_ENABLED=${NEXT_PUBLIC_FACTORY_ENABLED}
 
 RUN npx prisma generate
 RUN npm run build

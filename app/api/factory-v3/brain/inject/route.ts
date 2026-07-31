@@ -7,8 +7,13 @@
 // POST /api/factory-v3/brain/inject   body: { runId: string, text: string }
 
 import { pushHumanMsg } from "@/lib/agent-factory-v3/brain/mailbox";
+import { factoryDisabledResponse } from "@/lib/factory-auth";
 
 export async function POST(req: Request): Promise<Response> {
+  // This route has no token guard of its own, so gate it explicitly.
+  const disabled = factoryDisabledResponse();
+  if (disabled) return disabled;
+
   let body: { runId?: unknown; text?: unknown };
   try {
     body = await req.json();

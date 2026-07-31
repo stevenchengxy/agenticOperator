@@ -39,11 +39,11 @@ x-ao-service: &ao-service
     # image's node-owned `logs/` child into a new volume, so the non-root app
     # user can write without an unsafe root entrypoint.
     - ao-logs:/app/persist
-    # Factory v3 writes AI-created skills/tools to these directories at
-    # runtime. Named volumes seed from the image on first use and survive
-    # container recreation.
-    - ao-skills:/app/skills-library
-    - ao-tools:/app/tools-library
+    # NOTE: no skills-library / tools-library volumes. Those held the agent
+    # factory's AI-authored artifacts, and the factory is not deployed (it
+    # moved to its own monorepo; FACTORY_ENABLED defaults off in production).
+    # The persisted-tool loader treats a missing directory as "no tools", so
+    # the generated-agent executor and the Tool Library page are unaffected.
   # Lets containers reach services published on the host (e.g. an Allmeta
   # stack on the same machine). Built into Docker Desktop; this line makes it
   # work on Linux engines too.
@@ -169,7 +169,3 @@ volumes:
     name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-inngest-data
   ao-logs:
     name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-logs
-  ao-skills:
-    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-skills
-  ao-tools:
-    name: ${COMPOSE_PROJECT_NAME:-agentic-operator}-tools

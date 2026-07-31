@@ -51,6 +51,7 @@ echo "==> [1/5] building ${AO_IMAGE} for ${PLATFORM}"
 docker build --platform "$PLATFORM" \
   --build-arg NEXT_PUBLIC_BASE_URL="$PUBLIC_ORIGIN" \
   --build-arg NEXT_PUBLIC_INNGEST_URL="$INNGEST_ORIGIN" \
+  --build-arg NEXT_PUBLIC_FACTORY_ENABLED=0 \
   -t "$AO_IMAGE" -f Dockerfile .
 
 echo "==> [2/5] pulling ${POSTGRES_IMAGE} and ${INNGEST_IMAGE} for ${PLATFORM}"

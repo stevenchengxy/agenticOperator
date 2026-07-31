@@ -81,9 +81,21 @@ for (const [name, reason] of [
   ["MINIO_ACCESS_KEY", "MinIO access key is required"],
   ["MINIO_SECRET_KEY", "MinIO secret key is required"],
   ["AGENT_EXECUTION_API_KEY", "protect the agent execution API"],
-  ["FACTORY_ADMIN_TOKEN", "protect factory administration APIs"],
 ]) {
   requireValue(name, reason);
+}
+
+// The agent factory is NOT part of a normal deployment (it lives in its own
+// monorepo now) — its pages and /api/factory-* routes 404 unless explicitly
+// switched on. Only demand an admin token when someone turns it back on.
+const factoryOn = ["1", "true"].includes(String(env.FACTORY_ENABLED ?? "").toLowerCase());
+if (factoryOn) {
+  requireValue("FACTORY_ADMIN_TOKEN", "protect factory administration APIs (FACTORY_ENABLED=1)");
+  if (String(env.NEXT_PUBLIC_FACTORY_ENABLED ?? "") !== "1") {
+    warnings.push(
+      "FACTORY_ENABLED=1 but NEXT_PUBLIC_FACTORY_ENABLED is not 1 — the factory will serve but stay hidden in the left nav (it is baked in at image build time).",
+    );
+  }
 }
 
 if (!validValue("AI_API_KEY") && !validValue("OPENAI_API_KEY")) {

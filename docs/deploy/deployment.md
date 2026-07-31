@@ -22,7 +22,7 @@
 
 | 服务 | 作用 | 持久化 volume |
 | --- | --- | --- |
-| `app` | Next.js UI、API、Agent/Inngest 回调（端口 3002） | `<项目名>-logs`（完整 JSONL agent 日志）、`<项目名>-skills`、`<项目名>-tools`（工厂运行时产物） |
+| `app` | Next.js UI、API、Agent/Inngest 回调（端口 3002） | `<项目名>-logs`（完整 JSONL agent 日志） |
 | `postgres` | AO 运营数据、LogEvent、通知、事件/run/step 归档 | `<项目名>-postgres-data` |
 | `inngest`（可选） | 事件调度与实时运行（端口 8288/8289，显式 `--persist`） | `<项目名>-inngest-data` |
 | `archiver` | Inngest events/runs/steps 补偿归档到 Postgres | 写 `postgres` |
@@ -53,7 +53,7 @@ RESUME_DOWNLOADED 等事件直接进这个实例触发 AO 函数）。因此：
 
 | 依赖 | 用途 | 不可达时的表现 |
 | --- | --- | --- |
-| LLM 网关（`AI_BASE_URL`） | rule-check 评估、JD 生成、匹配解释、工厂大脑 | 相关 agent 全部失败 |
+| LLM 网关（`AI_BASE_URL`） | rule-check 评估、JD 生成、匹配解释 | 相关 agent 全部失败 |
 | Allmeta（`ALLMETA_BASE_URL`） | Neo4j 唯一 HTTP 入口：实体写入 + 规则拉取 | 实体写入步骤报错；规则回退内置快照 |
 | RoboHire（`ROBOHIRE_API_BASE_URL`，**公网**） | 简历解析 + 匹配评分 | resumeParser/matchResume 失败，下游全停 |
 | RAAS partner Postgres（`RAAS_POSTGRES_URL`） | 候选人/岗位/匹配结果业务双写（七张表由 RAAS 方建） | 双写步骤失败 |
@@ -234,6 +234,18 @@ vi .env.deploy        # 或 open -e .env.deploy 用文本编辑打开
 
 安全闸门保持模板默认，不要动：`STUB_AGENTS=0`、`RULE_CHECK_BYPASS=false`、
 `AO_ENABLE_UNSAFE_DEV_ROUTES=0`、`RAAS_BRIDGE_ENABLED=0`。
+
+**Agent 工厂不在部署范围内。** 工厂（生成 agent 的大脑 + 它的 UI）已经迁到独立
+的 monorepo，这套部署**不提供**它：模板里 `FACTORY_ENABLED=0`、镜像用
+`NEXT_PUBLIC_FACTORY_ENABLED=0` 构建，于是工厂页面和所有 `/api/factory-*`
+路由一律 404，左侧导航也不出现入口；`skills-library` / `tools-library` 两个
+volume 一并取消。因此**不需要**准备 `FACTORY_ADMIN_TOKEN`（预检只有在
+`FACTORY_ENABLED=1` 时才要求它）。
+
+这个开关**只关工厂自己的 HTTP 界面**，不碰任何运行链路 —— agent 注册上线
+Inngest、事件触发、agent 运行、监控、告警、通知、rule-check、以及已部署 agent
+的执行器全部照常工作。真要把工厂放回来：`FACTORY_ENABLED=1` + 用
+`NEXT_PUBLIC_FACTORY_ENABLED=1` 重新构建镜像 + 配 `FACTORY_ADMIN_TOKEN`。
 
 候选人身份/去重/锁定的四个行为开关**首次部署一律保持模板默认**（
 `LOCK_CHECK_ENABLED=0`、`CANDIDATE_LOCK_PG_WRITE=0`、`LOCK_CHECK_ENFORCE=0`、

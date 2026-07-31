@@ -20,8 +20,17 @@
 
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import { isFactoryEnabled } from "@/lib/factory-flag";
 
 let warned = false;
+
+/** 404 when this instance doesn't serve the factory at all (production default).
+ *  404 rather than 403: a disabled factory should be indistinguishable from a
+ *  build that never had one. */
+export function factoryDisabledResponse(): Response | null {
+  if (isFactoryEnabled()) return null;
+  return NextResponse.json({ error: { code: "NOT_FOUND", message: "agent factory is not enabled on this instance" } }, { status: 404 });
+}
 
 function constantTimeEquals(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -49,6 +58,10 @@ function presentedToken(req: Request, allowQuery?: boolean): string | null {
  *  or null to allow. Dev no-op only when the token is genuinely unset AND we're
  *  not in production. */
 export function requireFactoryAuth(req: Request, opts: { allowQueryToken?: boolean } = {}): Response | null {
+  // Kill switch first: a disabled factory answers 404 before any auth logic.
+  const disabled = factoryDisabledResponse();
+  if (disabled) return disabled;
+
   const raw = process.env.FACTORY_ADMIN_TOKEN;
   const configured = raw?.trim();
   if (raw && !configured) {

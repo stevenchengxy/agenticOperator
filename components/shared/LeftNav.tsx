@@ -10,6 +10,16 @@ type NavItem =
   | { type: "group"; title: string }
   | { type: "item"; id: string; icon: IcName; label: string; href: string };
 
+// Build-time twin of FACTORY_ENABLED (lib/factory-flag.ts). NEXT_PUBLIC_* is
+// baked into the browser bundle, so flipping it needs a rebuild — that is fine
+// here: the server-side gate is what actually protects the routes, this only
+// decides whether the menu item is rendered. Unset → same default as the
+// server: on in dev, off in a production build.
+const FACTORY_ENABLED =
+  (process.env.NEXT_PUBLIC_FACTORY_ENABLED ?? "") !== ""
+    ? process.env.NEXT_PUBLIC_FACTORY_ENABLED === "1"
+    : process.env.NODE_ENV !== "production";
+
 export function LeftNav() {
   const { t } = useApp();
   const pathname = usePathname();
@@ -44,7 +54,12 @@ export function LeftNav() {
     { type: "group", title: t("nav_group_build") },
     { type: "item", id: "workflows",  icon: "workflow", label: t("nav_workflows"), href: "/workflow" },
     { type: "item", id: "ontology-gen", icon: "branch", label: t("nav_ontology_gen"), href: "/behavior/ontology-generator" },
-    { type: "item", id: "factory",    icon: "bolt",     label: t("nav_factory_v2"), href: "/behavior/factory-v3" },
+    // The agent factory has moved to its own monorepo and is not served on a
+    // production deployment — the page itself 404s there (lib/factory-flag.ts).
+    // This build-time twin just keeps a dead link out of the rail.
+    ...(FACTORY_ENABLED
+      ? ([{ type: "item", id: "factory", icon: "bolt", label: t("nav_factory_v2"), href: "/behavior/factory-v3" }] as NavItem[])
+      : []),
     { type: "item", id: "tools",      icon: "db",       label: t("nav_tools_library"), href: "/tools" },
     { type: "group", title: t("nav_group_govern") },
     { type: "item", id: "system-config", icon: "gear", label: t("settings_env_title"), href: "/settings/system" },
