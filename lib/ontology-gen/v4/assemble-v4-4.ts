@@ -4,6 +4,12 @@
  * Unlike v4-1/v4-2, this assembler does not consume LLM-generated rule
  * instructions. Rules are rendered as source prose blocks, so the execution
  * agent applies the original policy text directly.
+ *
+ * Maintenance note: this file was historically treated as immutable. The
+ * `## 当前时间` section (rendered with a `{{CURRENT_TIME}}` placeholder, to
+ * be substituted at fill time by `fillRuntimeInput`) is the one documented
+ * deviation — it's a purely additive section between `## 任务` and `## 运行时
+ * 输入` and does not change any pre-existing rendering logic.
  */
 
 import { applyClientFilter } from "../compile/filter";
@@ -17,6 +23,7 @@ import type {
 } from "./types";
 
 const RUNTIME_INPUT_PLACEHOLDER = "{{RUNTIME_INPUT}}";
+const CURRENT_TIME_PLACEHOLDER = "{{CURRENT_TIME}}";
 const STEP_RESULT_STATUS = "not_started|completed|blocked|pending_human";
 const MATCH_RESUME_RUNTIME_INPUT_EXAMPLE = `### client
 
@@ -94,6 +101,7 @@ export function assembleActionObjectV4_4(input: AssembleV4_4Input): ActionObject
     renderRole(action),
     renderConstraints(),
     renderTask(action),
+    renderCurrentTime(),
     renderRuntimeInput(action, input.runtimeInput),
     renderFinalOutputSchema(action),
     renderProcedureOverview(action),
@@ -157,6 +165,14 @@ function renderTask(action: Action): string {
     "",
     "Action 描述：",
     action.description || "(无描述)",
+  ].join("\n");
+}
+
+function renderCurrentTime(): string {
+  return [
+    "## 当前时间",
+    "",
+    CURRENT_TIME_PLACEHOLDER,
   ].join("\n");
 }
 

@@ -23,6 +23,7 @@ import type {
 } from "./types";
 
 const RUNTIME_INPUT_PLACEHOLDER = "{{RUNTIME_INPUT}}";
+const CURRENT_TIME_PLACEHOLDER = "{{CURRENT_TIME}}";
 const STEP_RESULT_STATUS = "not_started|completed|blocked|pending_human";
 
 export interface AssembleOpts {
@@ -384,4 +385,4 @@ function buildValidation(
   };
 }
 
-export { RUNTIME_INPUT_PLACEHOLDER };
+export { RUNTIME_INPUT_PLACEHOLDER, CURRENT_TIME_PLACEHOLDER };
